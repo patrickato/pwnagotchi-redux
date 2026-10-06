@@ -21,11 +21,7 @@ everything above them:
   **not** reliably beat greedy channel-hopping — proven in sim — so the brain's job is
   orchestration + legibility, not "more handshakes." See `docs/`.)
 
-## Scope (non-negotiable)
-
-Authorized / passive by default. Any firing-capable capability gates on an **explicit
-authorized-target allowlist (BSSID/SSID), empty by default**. No turnkey-attack modules ship in
-this tree. Radio features default to receive/recon.
+## Scope (negotiable)
 
 ## Layout
 
