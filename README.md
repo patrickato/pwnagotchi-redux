@@ -21,7 +21,15 @@ everything above them:
   **not** reliably beat greedy channel-hopping — proven in sim — so the brain's job is
   orchestration + legibility, not "more handshakes." See `docs/`.)
 
-## Scope (negotiable)
+## Scope (non-negotiable)
+
+- **Authorized / passive by default.** Any deauth/jam/targeting/firing capability gates on an
+  explicit authorized-target allowlist (BSSID/SSID), **empty by default** — never on
+  physical/signal-range assumptions. No turnkey-attack modules ship in this tree.
+- **Real data only** in anything user-facing — no decorative fake telemetry.
+- **Glass-box:** every decision carries a human-readable reason.
+
+See `AGENTS.md` for the full contract every agent (and human) follows here.
 
 ## Layout
 

@@ -17,7 +17,7 @@ Status: `open` / `claimed:<agent>` / `review` / `done`.
 |---|---|---|---|
 | 1.1 | pi-gen image stub (lean Debian/Pi-OS, bettercap + nexmon baked, redux service) | `./build.sh` produces an image that boots to a redux service on a Pi 4 | open |
 | 1.2 | Radio Orchestrator live layer: `iw phy` capability probe → `Radio` records | on a Pi, enumerates onboard + a plugged adapter with correct bands/monitor/inject | open |
-| 1.3 | Radio Orchestrator udev hotplug → `on_hotplug`/`on_unplug`, apply monitor up/down | plug/unplug an adapter mid-run; roles re-apply with no manual steps | open |
+| 1.3 | Radio Orchestrator udev hotplug → `on_hotplug`/`on_unplug`, apply monitor up/down | plug/unplug an adapter mid-run; roles re-apply with no manual steps | review (claude/phase1): manager+plan_transition+hotplug entrypoint+udev rule+hook, 17 tests green; live iw/ip apply needs on-Pi pass |
 | 1.4 | `BettercapDriver` live client (REST/ws), `set_interface`, event stream | capture one handshake on an authorized/own AP with zero pwnagotchi code in the path | open |
 | 1.5 | Supervisor loop wiring orchestrator + driver + creature screen | intent switch re-arranges radios + repoints bettercap, shown on the TFT | open |
 | 1.6 | The demo: flash, plug Alfa, auto-arrange + capture, hands-off (record a clip) | reproducible on a real Pi 4 | open |
