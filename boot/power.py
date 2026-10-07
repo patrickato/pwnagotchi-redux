@@ -66,19 +66,30 @@ def read_geekworm(bus, ac_online=None):
 
 
 class LowBattery:
-    def __init__(self, threshold=10, confirm_seconds=30):
+    def __init__(self, threshold=10, confirm_seconds=30, max_sample_gap=10):
         if not 0 < threshold < 100 or not math.isfinite(confirm_seconds) or confirm_seconds <= 0:
             raise ValueError("shutdown requires a threshold in (0,100) and a positive confirmation interval")
+        if not math.isfinite(max_sample_gap) or max_sample_gap <= 0:
+            raise ValueError("shutdown requires a finite positive maximum sample gap")
         self.threshold = threshold
         self.confirm_seconds = confirm_seconds
+        self.max_sample_gap = max_sample_gap
         self.since = None
         self.last = None
 
     def decision(self, reading, now):
         if not math.isfinite(now):
             raise ValueError("invalid monotonic timestamp")
-        if self.last is not None and now < self.last:
-            self.since = None
+        interruption = None
+        if self.last is not None:
+            gap = now - self.last
+            if gap < 0:
+                interruption = "monotonic clock moved backwards; confirmation restarted"
+            elif gap > self.max_sample_gap:
+                interruption = (f"UPS sample gap {gap:.1f}s exceeds {self.max_sample_gap:g}s; "
+                                "confirmation restarted")
+            if interruption is not None:
+                self.since = None
         self.last = now
         if reading.percent is None or reading.status != "Discharging":
             self.since = None
@@ -92,9 +103,12 @@ class LowBattery:
         if self.since is None:
             self.since = now
         elapsed = now - self.since
-        return elapsed >= self.confirm_seconds, (
+        reason = (
             f"discharging capacity {reading.percent:.1f}% at/below {self.threshold}% "
             f"for {elapsed:.0f}s; confirmation requires {self.confirm_seconds}s")
+        if interruption is not None:
+            reason = f"shutdown withheld: {interruption}; {reason}"
+        return elapsed >= self.confirm_seconds, reason
 
 
 def sample(config):
@@ -145,7 +159,9 @@ def main():
     poll = float(_opt(config, "poll_seconds"))
     if not math.isfinite(poll) or not 0.5 <= poll <= 10:
         raise ValueError("poll_seconds must be within 0.5..10")
-    policy = LowBattery(float(_opt(config, "threshold_percent")), float(_opt(config, "confirm_seconds")))
+    # Allow one delayed/missed polling cycle; longer silence is not observed discharge.
+    policy = LowBattery(float(_opt(config, "threshold_percent")),
+                        float(_opt(config, "confirm_seconds")), max_sample_gap=2 * poll)
     stop = Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())

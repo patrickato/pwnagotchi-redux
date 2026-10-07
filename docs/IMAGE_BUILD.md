@@ -219,7 +219,11 @@ during the hardware gate and keep other GPIO consumers off the selected input.
 
 Default policy requires capacity at/below 10% while discharging continuously for
 30 seconds, sampled every 5 seconds. Unknown/invalid/absent/charging state or
-capacity recovery resets confirmation. The threshold and delay are configurable;
+capacity recovery resets confirmation. A sample gap longer than twice the configured
+`poll_seconds` also restarts confirmation: time without readings does not establish
+continuous discharge. One delayed/missed polling cycle is tolerated. The decision
+reports the actual gap and its limit, and withholds shutdown until a fresh
+confirmation window completes. The threshold and delay are configurable;
 validate the real battery's margin before field deployment. On confirmation the
 service commits its measured reason on captures, syncs and requests systemd
 poweroff, allowing redux's shutdown checkpoint to complete. It does not operate
