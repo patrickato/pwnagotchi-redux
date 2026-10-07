@@ -48,6 +48,28 @@ acceptance, reconciles exports/docs, keeps the safety gates. **Merges are the ow
 Authorized/passive by default; any firing-capable capability gates on an empty-by-default
 BSSID/SSID allowlist; **no turnkey-attack modules**; Pi 4/Pi 5 arm64 only; glass-box; real data only.
 
+## Lane backlogs (workhorse queue — pull the top item not yet in a PR)
+
+Each agent works a loop: take the next open item in **your** backlog, branch `your-prefix/<topic>`,
+build it with hardware-free tests, open a PR, take the next. One item per branch. Never merge; the
+lead integrates. Mark an item `[PR #n]` when you open its PR so the next agent run skips it.
+
+**Codex backlog** (image/OS lane — `image/ pi-gen/ boot/ build.sh docs/IMAGE_BUILD.md redux/core/boot.py`):
+1. `[PR #1]` arm64 pi-gen image boots to `redux.service` on Pi 4/5 (bettercap + nexmon baked)
+2. Read-only overlay rootfs (yank-safe); only a captures partition writable
+3. Sub-15s boot — prune systemd units, trim initramfs; put `systemd-analyze blame` in the PR
+4. Hardware watchdog (BCM2835 + `RuntimeWatchdogSec`) + crash-safe resume
+5. UPS HAT read + graceful low-battery shutdown + battery state on the TFT
+6. A/B OTA image updates (RAUC) with automatic rollback on failed boot
+
+**Grok backlog** (detector lane — `redux/detect/ tests/test_detect_*.py`):
+1. `[merged #9]` detector pack base (deauth-flood, rogue-AP, beacon-spam)
+2. surveillance-sweep detector + `DetectEngine` fan-in (branch `grok/detect-extend` — open its PR)
+3. Karma / evil-twin captive-portal detector (rogue portal + duplicate-SSID signatures)
+4. WPS-attack / PIN-bruteforce detector
+5. alert dedup + severity escalation + a `redux/detect` config (module-level `DEFAULTS` + `_opt()`)
+6. `redux/detect` README + NOTES (what each detector flags, tuning, false-positive notes)
+
 ## If the guard fails your PR
 It printed exactly which file is out of lane and which paths your lane allows. Remove the stray file
 from your branch (it belongs to another lane), or ask the lead to make the shared-file change. Do
