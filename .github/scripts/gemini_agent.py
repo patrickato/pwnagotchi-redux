@@ -4,7 +4,7 @@ from google import genai
 
 # 1. Setup Gemini using the new SDK
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-MODEL_ID = 'gemini-3.1-pro-preview'
+MODEL_ID = 'gemini-3.8-flash'
 
 # 2. Read Context Files
 def read_file(path):
