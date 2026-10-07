@@ -19,6 +19,7 @@ class AlertKind(str, Enum):
     HANDSHAKE_CAPTURE = "handshake_capture"
     BLE_FLOOD = "ble_flood"
     PMF_MISSING = "pmf_missing"
+    PINEAPPLE = "pineapple"
 
 
 @dataclass(frozen=True)
