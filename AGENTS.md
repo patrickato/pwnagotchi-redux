@@ -24,14 +24,24 @@ and keep `main` always-green. Any agent working here follows this file.
 
 ## Branch spaces (never commit straight to `main`)
 
-- `claude/<topic>` — Claude Code agents
+- `claude/<topic>` — Claude Code agents (lead)
 - `codex/<topic>` — OpenAI Codex CLI
-- `gemini/<topic>` — Gemini CLI
+- `grok/<topic>` — Grok (xAI)
 - `human/<topic>` — the owner
 - one topic per branch; rebase on `main` before PR so the push is a thin pack.
 
-Never force-push a shared branch. Never edit another agent's open branch. If two tasks touch the
-same file, they serialize — the queue says which goes first.
+Never force-push a shared branch. Never edit another agent's open branch.
+
+## Lane enforcement (hard gate)
+
+Each branch prefix owns an **exclusive set of paths** — see `ASSIGNMENTS.md`. This is enforced by
+`.github/workflows/lane-guard.yml`: a PR that edits a file outside its lane **fails CI**. Shared and
+structural files (`.github/**`, `README.md`, `AGENTS.md`, `ASSIGNMENTS.md`, `TASKS.md`, `docs/*`,
+every `__init__.py`, `pyproject.toml`, CI) are **lead-only**. Non-lead branches cannot touch them,
+so no agent can drag a workflow, a shared-file edit, or another lane's module into `main`. Hand
+cross-lane changes to the lead (`claude/*`).
+
+Gemini is not part of this project. Do not add a `gemini/` lane or any Gemini CI agent.
 
 ## Non-negotiable scope (same as the rest of the project)
 

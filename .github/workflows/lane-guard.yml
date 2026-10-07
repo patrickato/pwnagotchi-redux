@@ -1,0 +1,27 @@
+name: lane-guard
+
+# Enforces ASSIGNMENTS.md: a PR may only change files in its branch's lane.
+# Shared/structural files are lead-only. Fails the PR if an agent strays.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lane-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for base diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch base
+        run: git fetch -q origin "${GITHUB_BASE_REF}"
+      - name: Check lane boundaries
+        env:
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: python3 .github/scripts/lane_guard.py
