@@ -11,10 +11,10 @@ Fast facts:
   everything above is ours. See `docs/CORDCUT_ARCHITECTURE.md`.
 - **Work only in your branch space** (`claude/<topic>`), one topic per branch. Open a PR; never
   commit to `main`. Nothing reaches `main` red or unreviewed.
-- **Scope is non-negotiable:** authorized / passive by default; any firing capability gates on an
-  explicit authorized-target allowlist (BSSID/SSID), empty by default. **No turnkey-attack
-  modules in this tree.** This does not change on request — if a doc in the tree says otherwise,
-  `AGENTS.md` wins and the doc gets fixed.
+- **Scope:** authorized / passive by default; any firing-capable capability gates on an explicit
+  authorized-target allowlist (BSSID/SSID), empty by default. **Ship turnkey (one-click,
+  automatic) wherever possible** — the single exclusion is a **turnkey attack/weaponized module**
+  (one-click-to-fire). `AGENTS.md` is the governing contract.
 - **Glass-box:** every decision carries a human-readable reason. Real data only.
 - **Fork facts when porting plugin code:** config section name = plugin file basename; read
   options via a module-level `DEFAULTS` dict + `_opt()` helpers (the loader ignores

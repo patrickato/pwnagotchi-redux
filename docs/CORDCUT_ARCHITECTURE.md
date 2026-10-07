@@ -67,7 +67,7 @@ We proved it: a learning policy does **not** reliably beat greedy+random at chan
 ## Scope discipline (so it ships, and so it's clean)
 
 - **Lean base + packs.** The default image is small and reliable; "kali-everything+" is opt-in. This is your own stated philosophy.
-- **Authorized/passive by default.** Radio capabilities default to receive/recon; any firing capability keeps the empty-by-default allowlist gate (repo rule). No turnkey-attack modules in this tree — the gate is kept strict while legitimate, authorized use stays low-friction.
+- **Authorized/passive by default; turnkey everywhere else.** Radio capabilities default to receive/recon; any firing-capable capability keeps the empty-by-default allowlist gate (repo rule). Ship turnkey modules when possible — the only thing we don't ship turnkey is a *turnkey attack/weaponized* module (one-click-to-fire); make everything legitimate as one-click as it can be.
 - **Ship a narrow, stunning v1**, let the giant vision be the roadmap behind it.
 
 ## Phased build
