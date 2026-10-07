@@ -15,6 +15,108 @@ REPO = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Linux image scripts")
 
 
+def boot_module(name):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, REPO / "boot" / (name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_power_sysfs_real_units_and_absent_supply(tmp_path):
+    power = boot_module("power")
+    for name, value in {"type": "Battery", "capacity": "12", "status": "Discharging", "voltage_now": "3650000"}.items():
+        (tmp_path / name).write_text(value)
+    reading = power.read_sysfs(tmp_path)
+    assert reading.percent == 12 and reading.voltage_v == 3.65
+    assert reading.status == "Discharging"
+    (tmp_path / "present").write_text("0")
+    assert power.sample({"supply": str(tmp_path)}).percent is None
+    (tmp_path / "present").unlink()
+    (tmp_path / "capacity").write_text("nan")
+    assert power.sample({"supply": str(tmp_path)}).status == "Unknown"
+
+
+def test_geekworm_gauge_protocol_never_infers_charging():
+    power = boot_module("power")
+    class Bus:
+        def read_word_data(self, address, register):
+            assert address == 0x36
+            # Actual gauge order: 0xbe00 = 3.8V, 0x0c80 = 12.5%.
+            return {2: 0x00be, 4: 0x800c}[register]
+    reading = power.read_geekworm(Bus())
+    assert reading.percent == 12.5
+    assert reading.voltage_v == pytest.approx(3.8)
+    assert reading.status == "Unknown"
+    assert power.read_geekworm(Bus(), False).status == "Discharging"
+    assert power.read_geekworm(Bus(), True).status == "Not charging"
+
+
+def test_low_battery_requires_uninterrupted_confirmed_discharge():
+    power = boot_module("power")
+    low = power.Reading(5, 3.3, "Discharging", "fixture", "measured fixture")
+    policy = power.LowBattery(10, 30)
+    assert not policy.decision(low, 0)[0]
+    assert not policy.decision(low, 29)[0]
+    assert policy.decision(low, 30)[0]
+    unknown = power.Reading(None, None, "Unknown", "fixture", "missing fixture")
+    assert not policy.decision(unknown, 31)[0]
+    assert not policy.decision(low, 60)[0]
+    charging = power.Reading(5, 3.3, "Charging", "fixture", "measured fixture")
+    assert not policy.decision(charging, 90)[0]
+    assert not policy.decision(low, 100)[0]
+    high = power.Reading(11, 3.6, "Discharging", "fixture", "measured fixture")
+    assert not policy.decision(high, 130)[0]
+    assert not policy.decision(low, 160)[0]
+    assert not policy.decision(low, 159)[0]  # Clock reversal resets confirmation.
+
+
+@pytest.mark.parametrize("threshold,interval", [(0,30),(100,30),(10,0),(10,float("nan"))])
+def test_low_battery_invalid_policy(threshold, interval):
+    with pytest.raises(ValueError):
+        boot_module("power").LowBattery(threshold, interval)
+
+
+def test_poweroff_commits_reason_before_sync_and_systemd(monkeypatch, tmp_path):
+    power = boot_module("power")
+    events = []
+    original = power.atomic_checkpoint
+    def checkpoint(path, record):
+        events.append("checkpoint")
+        original(tmp_path / "shutdown.json", record)
+    monkeypatch.setattr(power, "atomic_checkpoint", checkpoint)
+    def run(argv, **kwargs):
+        assert argv == ["systemctl", "poweroff", "--no-block"]
+        assert kwargs["check"] and kwargs["timeout"] == 15
+        events.append("systemd")
+    power.shutdown("measured low capacity", run=run, sync=lambda: events.append("sync"))
+    assert events == ["checkpoint", "sync", "systemd"]
+    assert "measured low capacity" in (tmp_path / "shutdown.json").read_text()
+
+
+def test_tft_real_state_and_bounds():
+    pytest.importorskip("PIL")
+    power = boot_module("power")
+    tft = boot_module("battery_tft")
+    unknown = tft.panel(power.Reading(None,None,"Unknown","fixture","unavailable"))
+    known = tft.panel(power.Reading(50,3.8,"Discharging","fixture","measured"))
+    assert unknown.tobytes() != known.tobytes()
+    variable = [480,320,480,320,0,0,16,0,11,5,0,5,6,0,0,5,0] + [0]*23
+    variable[22:24] = [49, 74]  # Physical millimetres are not nonstandard format flags.
+    fixed = tft.Fixed(line_length=960, smem_len=960*320, type=0, visual=2)
+    rows = tft.rows(known, variable, fixed)
+    assert len(rows) == 48 and all(len(data) == 320 for _, data in rows)
+    assert rows[-1][0] == 47*960
+    variable[6] = 24
+    with pytest.raises(ValueError, match="16/32"):
+        tft.rows(known, variable, fixed)
+    variable[6] = 16
+    fixed.smem_len = 40
+    with pytest.raises(ValueError, match="exceeds"):
+        tft.rows(known, variable, fixed)
+
+
 def invoke(args, **kwargs):
     return subprocess.run(args, text=True, capture_output=True, timeout=20, **kwargs)
 

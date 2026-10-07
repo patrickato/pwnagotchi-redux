@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "backend": "sysfs",
+  "supply": "",
+  "gpio_chip": "",
+  "framebuffer": "",
+  "threshold_percent": 10,
+  "confirm_seconds": 30,
+  "poll_seconds": 5
+}

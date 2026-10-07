@@ -67,6 +67,17 @@ PI_GEN_DIR="$BUILD_DIR/pi-gen"
 cp -a "$REPO_DIR/image/stage-redux" "$PI_GEN_DIR/stage-redux"
 mkdir -p "$PI_GEN_DIR/stage-redux/20-boot-budget/files"
 cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/20-boot-budget/files/boot"
+mkdir -p "$PI_GEN_DIR/stage-redux/40-power/files"
+cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/40-power/files/boot"
+if [[ -n ${REDUX_POWER_CONFIG:-} ]]; then
+    python3 -m json.tool "$REDUX_POWER_CONFIG" >/dev/null
+    install -m 0644 "$REDUX_POWER_CONFIG" "$PI_GEN_DIR/stage-redux/40-power/files/power.json"
+fi
+case ${REDUX_TFT_PROFILE:-none} in
+    none) ;;
+    mpi3501) touch "$PI_GEN_DIR/stage-redux/40-power/files/mpi3501" ;;
+    *) echo 'Unsupported TFT profile; select none or mpi3501.' >&2; exit 1 ;;
+esac
 mkdir -p "$PI_GEN_DIR/stage-redux/00-redux/files/redux"
 cp -a "$REPO_DIR/redux/." "$PI_GEN_DIR/stage-redux/00-redux/files/redux/"
 # Do not ship development bytecode or require pip/network access at boot.
@@ -99,6 +110,7 @@ python3 "$REPO_DIR/image/export_layout.py" "$PI_GEN_DIR/export-image/prerun.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/10-overlay/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/20-boot-budget/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/30-watchdog/00-run.sh"
+chmod +x "$PI_GEN_DIR/stage-redux/40-power/00-run.sh"
 echo "Prepared arm64 Pi 4/5 source tree: $PI_GEN_DIR"
 echo 'Reason: Lite stages only; nexmon built for installed Pi kernel, never the host kernel.'
 if [[ $PREPARE_ONLY == 1 ]]; then

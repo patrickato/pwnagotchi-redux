@@ -190,3 +190,53 @@ running before PID 1 could reset a board during its unmeasured first boot. Verif
 boot duration and the board-specific handover before enabling that additional
 protection. See the upstream [systemd watchdog configuration](https://github.com/systemd/systemd/blob/main/man/systemd-system.conf.xml)
 and [Raspberry Pi boot watchdog documentation](https://github.com/raspberrypi/documentation/blob/master/documentation/asciidoc/computers/config_txt/boot.adoc).
+
+## UPS and TFT battery state (Codex backlog 5)
+
+`redux-power.service` installs a monitor with hardware selection disabled by
+default. It reads Linux Battery/UPS supplies through their real `capacity`,
+`status` and optional `voltage_now` attributes. The Geekworm adapter reads the
+manufacturer's gauge at I2C address 0x36 and does not write gauge/charging
+registers. Its AC input is a configured GPIO line: high means external power,
+low means discharge. Without that input, capacity is still displayed but shutdown
+is inhibited. No voltage curve is used to invent state-of-charge or charging.
+Protocol references: [Geekworm X120x gauge](https://github.com/geekworm-com/x120x/blob/main/bat.py),
+[AC input](https://github.com/geekworm-com/x120x/blob/main/pld.py), and
+[Linux power-supply units](https://www.kernel.org/doc/html/latest/power/power_supply_class.html).
+
+Pass `REDUX_POWER_CONFIG=/absolute/private/power.json` when building. A sysfs
+profile sets `enabled: true`, `backend: "sysfs"` and `supply` to the actual
+`/sys/class/power_supply/<name>` path. A Geekworm profile sets `backend: "geekworm"`,
+`bus: 1`, the verified `gpio_chip` path and `ac_line` offset. X1200's manufacturer
+reference uses GPIO6; select the correct chip by its label on the actual Pi 5,
+never assume its numeric gpiochip index. X728 revisions need their own verified
+AC line; a guessed line can produce a false power-loss reading. Use `gpioinfo`
+during the hardware gate and keep other GPIO consumers off the selected input.
+
+Default policy requires capacity at/below 10% while discharging continuously for
+30 seconds, sampled every 5 seconds. Unknown/invalid/absent/charging state or
+capacity recovery resets confirmation. The threshold and delay are configurable;
+validate the real battery's margin before field deployment. On confirmation the
+service commits its measured reason on captures, syncs and requests systemd
+poweroff, allowing redux's shutdown checkpoint to complete. It does not operate
+the HAT's power-cut/charging pins. Such a cut needs model-specific board support;
+Linux shutdown alone may leave the HAT powered.
+
+Set `REDUX_TFT_PROFILE=mpi3501` to enable the distro's fbtft ILI9486 SPI overlay
+at 16 MHz, reset GPIO25, data/command GPIO24, rotated 90 degrees. These follow
+the [MPI3501 pinout](https://www.lcdwiki.com/3.5inch_RPi_Display). Set `framebuffer`
+in power.json only after identifying that display's actual device. The renderer
+validates 480x320/320x480 truecolor, stride, offsets and memory bounds and reserves
+the top-left 160x48 pixels for a monochrome battery icon, measured percent/voltage
+and status. Missing data displays Unknown. It leaves the remaining screen to the
+lead's UI; the lead must reserve this strip or consume
+`/run/redux-power/battery.json` (atomic, read-only to consumers) instead. Touch
+calibration and complete creature-screen integration are outside this OS item.
+
+**Hardware gates:** identify the UPS revision, bus/AC GPIO and TFT device on each
+board; compare readings to the manufacturer's tool; verify external power is
+never reported as discharge; verify the selected display initializes and shows
+real/unknown readings without conflicting GPIO ownership. With a spare card,
+observe the actual low threshold, cancellation when AC returns, graceful shutdown
+and captures/checkpoint recovery. These peripherals are unavailable in this
+session; the shipped default does not claim they are present.
