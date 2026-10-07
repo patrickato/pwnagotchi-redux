@@ -156,7 +156,10 @@ def serve(beastcore, port: int = 8080, bind_scope: str = "localhost",
             holder["d"] = status_payload(beastcore)   # store touched only in this thread
             n += 1
             if _cycles is None or n < _cycles:
-                time.sleep(interval)
+                # Governor stretches the cadence under heat/battery load (1.0 until
+                # real readings say otherwise), so hot/low-power = slower loop = fewer writes.
+                scale = beastcore.govern_scale() if hasattr(beastcore, "govern_scale") else 1.0
+                time.sleep(interval * scale)
     except KeyboardInterrupt:
         pass
     finally:

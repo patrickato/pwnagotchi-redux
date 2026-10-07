@@ -74,3 +74,49 @@ def test_ble_flood_detected_and_ble_devices_stored_through_pump():
     assert any(a.kind.value == "ble_flood" for a in alerts)       # bridge -> BLE detector fired
     assert bc.bus.history(Signal.ALERT)                            # alert reached the bus
     assert bc.store.count(kind="ble") == 21                        # every BLE device persisted
+
+
+def test_sightings_are_coalesced_into_one_batched_write_per_pump():
+    # Prove the SD-write fix: per-event inserts are replaced by one batched
+    # insert_many per pump cycle (no per-event commit/fsync).
+    from redux.geo import SightingStore
+
+    class CountingStore(SightingStore):
+        def __init__(self):
+            super().__init__(":memory:")
+            self.insert_calls = 0
+            self.insert_many_calls = 0
+        def insert(self, s):
+            self.insert_calls += 1
+            return super().insert(s)
+        def insert_many(self, items):
+            self.insert_many_calls += 1
+            return super().insert_many(items)
+
+    store = CountingStore()
+    evs = _evs([
+        {"tag": "wifi.ap.new", "time": float(i), "data": {"mac": f"aa:bb:cc:00:00:{i:02x}", "essid": "X"}}
+        for i in range(10)
+    ])
+    bc = Beastcore([ONBOARD], intent=Intent.RECON, driver=FakeDriver(evs), store=store)
+    bc.pump()
+    assert store.count() == 10               # all persisted
+    assert store.insert_calls == 0           # NOT one insert per event
+    assert store.insert_many_calls == 1      # one batched write for the cycle
+    assert bc._sighting_buffer == []         # buffer flushed
+    assert bc.flush_sightings() == 0         # idempotent when empty
+
+
+def test_governor_decision_surfaces_in_status():
+    from redux.core import Reading
+    bc = Beastcore([ONBOARD], intent=Intent.RECON)
+    # default (no readings) -> FULL, scale 1.0
+    assert bc.status()["governor"]["mode"] == "full"
+    assert bc.govern_scale() == 1.0
+    # feed a hot reading -> SURVIVAL, cadence stretched
+    d = bc.observe_resources(Reading(cpu_temp_c=82.0), now=0.0)
+    assert d.mode.value == "survival"
+    st = bc.status()
+    assert st["governor"]["mode"] == "survival"
+    assert st["governor"]["interval_scale"] == 2.5
+    assert "cpu_temp" in st["governor"]["reason"]

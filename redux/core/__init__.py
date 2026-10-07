@@ -6,6 +6,7 @@ from .brain import Brain, Decision, attach as attach_brain
 from .actions import ActionRegistry, Action, ActionSpec, ActionError, register_supervisor_actions
 from .capabilities import Cap, CapState, Provider, CapabilityGraph
 from .scope import Scope, ScopeEntry, classify_target
+from .governor import Governor, Mode, Reading, GovDecision
 from .beastcore import Beastcore
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "ActionRegistry", "Action", "ActionSpec", "ActionError", "register_supervisor_actions",
     "Cap", "CapState", "Provider", "CapabilityGraph",
     "Scope", "ScopeEntry", "classify_target",
+    "Governor", "Mode", "Reading", "GovDecision",
     "Beastcore",
 ]

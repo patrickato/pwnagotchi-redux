@@ -70,6 +70,15 @@ class SightingStore:
         self.path = str(path)
         self._conn = sqlite3.connect(self.path)
         self._conn.row_factory = sqlite3.Row
+        # SD-wear: WAL coalesces writes and survives power loss to the last
+        # checkpoint; synchronous=NORMAL cuts fsyncs vs FULL without risking the
+        # DB. (No-ops harmlessly on an in-memory store.)
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+        except sqlite3.DatabaseError:
+            pass
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
@@ -83,7 +92,15 @@ class SightingStore:
         self.close()
 
     def insert(self, sighting: Sighting) -> Sighting:
-        """Insert or merge one sighting. Returns the stored row state.
+        """Insert or merge one sighting, committing immediately. Returns the
+        stored row state. For a batch, prefer insert_many (one transaction)."""
+        self._apply(sighting)
+        self._conn.commit()
+        return self.get(sighting.kind, sighting.mac)  # type: ignore[return-value]
+
+    def _apply(self, sighting: Sighting) -> None:
+        """Insert or merge one sighting WITHOUT committing (so a batch can share
+        one transaction — the SD-friendly path).
 
         Dedup (kind, mac):
         - first_seen = min(existing, new)
@@ -122,8 +139,7 @@ class SightingStore:
                     sighting.provenance,
                 ),
             )
-            self._conn.commit()
-            return self.get(sighting.kind, sighting.mac)  # type: ignore[return-value]
+            return
 
         first_seen = min(existing.first_seen or existing.ts, sighting.ts)
         keep_new = _better_rssi(sighting.rssi, existing.rssi)
@@ -173,11 +189,15 @@ class SightingStore:
                     sighting.mac,
                 ),
             )
-        self._conn.commit()
-        return self.get(sighting.kind, sighting.mac)  # type: ignore[return-value]
 
     def insert_many(self, sightings: Iterable[Sighting]) -> List[Sighting]:
-        return [self.insert(s) for s in sightings]
+        """Insert/merge a batch in ONE transaction — one commit, one fsync, not
+        N. This is the SD-friendly write path for coalesced sighting flushes."""
+        items = list(sightings)
+        for s in items:
+            self._apply(s)
+        self._conn.commit()
+        return [self.get(s.kind, s.mac) for s in items]  # type: ignore[list-item]
 
     def get(self, kind: str, mac: str) -> Optional[Sighting]:
         row = self._conn.execute(
