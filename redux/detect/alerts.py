@@ -1,0 +1,27 @@
+"""Glass-box alerts emitted by detectors."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Optional
+
+
+class AlertKind(str, Enum):
+    DEAUTH_FLOOD = "deauth_flood"
+    ROGUE_AP = "rogue_ap"
+    BEACON_SPAM = "beacon_spam"
+
+
+@dataclass(frozen=True)
+class Alert:
+    kind: AlertKind
+    reason: str  # human-readable; always required (glass-box)
+    ts: float
+    severity: str = "warning"  # info | warning | critical
+    bssid: str = ""
+    ssid: str = ""
+    detail: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not (self.reason or "").strip():
+            raise ValueError("Alert.reason must be a non-empty human-readable string")
