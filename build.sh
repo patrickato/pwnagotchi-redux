@@ -12,13 +12,13 @@ See docs/IMAGE_BUILD.md for host dependencies and the physical boot gate.
 EOF
 }
 PREPARE_ONLY=0
+[[ $# -le 1 ]] || { usage >&2; exit 2; }
 case ${1:-} in
     --help|-h) usage; exit 0 ;;
     --prepare-only) PREPARE_ONLY=1 ;;
     '') ;;
     *) usage >&2; exit 2 ;;
 esac
-[[ $# -le 1 ]] || { usage >&2; exit 2; }
 [[ $(uname -s) == Linux ]] || { echo 'Build on Linux with an ext4 workspace; see docs/IMAGE_BUILD.md.' >&2; exit 1; }
 if [[ $PREPARE_ONLY == 0 && $EUID != 0 ]]; then
     echo 'Image creation needs root for chroot and loop mounts. Run sudo ./build.sh.' >&2

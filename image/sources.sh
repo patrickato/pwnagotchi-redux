@@ -1,3 +1,6 @@
+# shellcheck shell=bash
+# Variables are consumed by build.sh and pi-gen's chroot installer after sourcing.
+# shellcheck disable=SC2034
 # Source revisions are immutable. APT packages are recorded in the image manifest;
 # this is a source-pinned build, not a bit-for-bit reproducible APT snapshot.
 PI_GEN_URL=https://github.com/RPi-Distro/pi-gen.git

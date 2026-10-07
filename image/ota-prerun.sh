@@ -19,7 +19,7 @@ parted --script "$IMG_FILE" mklabel gpt
 start=$ALIGN
 names=(REDUXCTRL REDUXBOOTA REDUXBOOTB REDUXROOTA REDUXROOTB REDUXCAP)
 types=(fat32 fat32 fat32 ext4 ext4 ext4)
-sizes=($CONTROL_SIZE $BOOT_SIZE $BOOT_SIZE $ROOT_PART_SIZE $ROOT_PART_SIZE $CAPTURE_SIZE)
+sizes=("$CONTROL_SIZE" "$BOOT_SIZE" "$BOOT_SIZE" "$ROOT_PART_SIZE" "$ROOT_PART_SIZE" "$CAPTURE_SIZE")
 for index in {0..5}; do
     end=$((start + sizes[index] - 1))
     parted --script "$IMG_FILE" unit B mkpart "${names[index]}" "${types[index]}" "$start" "$end"

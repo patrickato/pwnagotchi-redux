@@ -369,3 +369,25 @@ Tests use explicitly synthetic image streams and block-inventory fixtures.
 **Hardware gate:** SD-card write/read-back, safe removal and subsequent physical
 Pi 4/5 boot remain unverified without the card reader and boards. A verified byte
 copy establishes storage integrity, not firmware compatibility or successful boot.
+
+
+## Hardware-free image CI
+
+Install `shellcheck` and the repository's Python test dependencies on a Linux host,
+then run `bash image/ci.sh`. This compiles image/boot Python, checks every owned
+shell script with Bash syntax and ShellCheck warning/error severity, and runs the
+image/nexmon/boot tests. Sourced pi-gen helpers are checked as Bash. The immutable
+source manifest has a documented unused-variable exception because its consumers
+read those variables after sourcing it.
+
+Argument tests exercise the real `build.sh` parser with prerequisite tripwires:
+help, unknown arguments, and excess arguments must return before source fetching,
+workspace creation or any build prerequisite. Valid `--prepare-only` remains
+covered by the pinned-source preparation fixture. These tests are part of the
+existing repository pytest CI; no workflow changes are needed. Missing ShellCheck
+fails explicitly rather than silently skipping lint. The lead may additionally
+call `bash image/ci.sh` from its workflow.
+
+This CI builds no image and requires no root, ARM emulator, card or radio. Full
+arm64 image export and physical Pi 4/5 boot/storage/watchdog/rollback checks remain
+separate build and hardware gates; a green dry run does not establish boot success.
