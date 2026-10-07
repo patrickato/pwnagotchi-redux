@@ -21,6 +21,7 @@ class AlertKind(str, Enum):
     PMF_MISSING = "pmf_missing"
     PINEAPPLE = "pineapple"
     LOUD_PROBER = "loud_prober"
+    HIDDEN_SSID_REVEAL = "hidden_ssid_reveal"
 
 
 @dataclass(frozen=True)
