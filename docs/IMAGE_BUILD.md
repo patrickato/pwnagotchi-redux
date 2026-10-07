@@ -311,3 +311,38 @@ failure with watchdog reset; interrupted install; selector commit power loss on
 a spare card; preserved captures and correct read-only mounts after rollback.
 Record firmware versions, actual RAUC status/journals and boot IDs. These checks
 remain unverified without boards, and no automatic rollback success is claimed.
+
+## Beast Packs image infrastructure (Codex backlog 7)
+
+The image installs `packs list`, `packs install kali-tools --keyring PUBLIC.gpg`
+and `packs remove kali-tools`. `--dry-run` reports the concrete arm64 suite,
+packages and reason without installing. No pack is preinstalled. The initial
+Kali-tools pack contains tcpdump/tshark for packet inspection, starts no services
+and executes no capture/transmission tool. This is OS tools infrastructure, not
+the Beast SDK's theme/plugin loader or an attack launcher.
+
+Each pack has a separate root at `/captures/packs/<name>/rootfs`, its own signed
+APT sources/database and a real installed-package version manifest. It cannot
+upgrade the base Pi OS, its kernel or nexmon. Kali rolling is kept in that root;
+never add Kali sources to the Pi OS base APT configuration. Supply the current
+verified Kali archive **public keyring** independently (no committed trust key),
+then choose the official HTTPS mirror or an explicitly trusted mirror. The helper
+requires writable ext4 captures and root, retains a failed install for inspection,
+and refuses symlink destinations or removal of mounted pack trees. Packs consume
+captures space; increase the partition size before building if needed. Installation
+is not automatic on boot and needs network plus sufficient free space.
+
+Release hosts can run `bash image/packs/repository.sh REVIEWED_DEBS NEW_REPO_DIR
+[SIGNING_KEY_ID]` after installing `apt-utils`. It creates conventional
+`pool/main`, `dists/redux/main/binary-arm64/Packages{,.gz}` and Release hash metadata
+from the actual arm64/all .debs. Optional external GPG signing produces InRelease
+and Release.gpg. Unsigned output is explicitly staging-only; no source uses
+`trusted=yes` or bypasses APT verification. Publishing an endpoint/trust key and
+adding reviewed packages are operator/lead release actions; no server is invented.
+
+**Deployment gates:** install/remove the signed Kali pack on Pi 4 and Pi 5,
+inspect its actual packages.tsv, confirm no daemon/capture starts and base
+kernel/driver checksums stay identical; reboot to confirm captures persistence.
+Test disk-full and interrupted installation and verify explicit removal refuses
+any active mounts. Repo metadata and pure helper guards are hardware-free checks;
+network installation/real Pi storage behavior are labeled deployment gates.
