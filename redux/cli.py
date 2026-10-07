@@ -194,6 +194,31 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_eap(args) -> int:
+    """WPA-Enterprise EAP harvest. `plan` builds the Scope-aimed, posture-gated
+    rogue-AP plan (refuses if the SSID isn't armed / posture passive / not
+    authorized). `parse` turns a hostapd-wpe capture into crackable hashcat lines."""
+    from .eap import EapHarvester, EapConfig, parse_hostapd_wpe
+    if args.eap_cmd == "parse":
+        creds = parse_hostapd_wpe(open(args.logfile).read())
+        print(f"parsed {len(creds)} MSCHAPv2 credential(s) — crack with hashcat -m 5500:")
+        for c in creds:
+            print("  " + c.hashcat_5500())
+        return 0
+    # plan
+    bc = _build(args)
+    if args.persona:
+        bc.apply_persona(args.persona)
+    bc.scope = Scope.load(args.scope_file)
+    plan = bc.eap_plan(args.ssid, authorized=args.authorized, iface=args.iface or "wlan1")
+    print(f"EAP harvest for SSID '{args.ssid}': runnable={plan['runnable']} "
+          f"(engine_present={plan['engine_present']}, offense={bc.offense_enabled()})")
+    print(f"  {plan['reason']}")
+    if plan["argv"]:
+        print("  argv: " + " ".join(plan["argv"]))
+    return 0
+
+
 def cmd_sentinel(args) -> int:
     """Sentinel demo: a SIMULATED stream of detector alerts + CSI motion through an
     armed guardian, showing dispatch, de-dup, and armed-vs-home suppression."""
@@ -536,6 +561,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    ep = sub.add_parser("eap", help="WPA-Enterprise EAP credential capture (scope+posture gated)")
+    add_radio_flags(ep)
+    ep.add_argument("--persona", help="apply a persona first (posture)")
+    ep.add_argument("--scope-file", default=_DEFAULT_SCOPE_PATH)
+    ep.add_argument("--iface")
+    epsub = ep.add_subparsers(dest="eap_cmd", required=True)
+    epp = epsub.add_parser("plan", help="build the gated rogue-AP plan")
+    epp.add_argument("--ssid", required=True)
+    epp.add_argument("--authorized", action="store_true", help="confirm this is an authorized test")
+    epr = epsub.add_parser("parse", help="hostapd-wpe capture → crackable hashcat lines")
+    epr.add_argument("logfile")
+    ep.set_defaults(func=cmd_eap)
 
     sn = sub.add_parser("sentinel", help="deploy-and-watch guardian (blue/purple)")
     snsub = sn.add_subparsers(dest="sentinel_cmd", required=True)

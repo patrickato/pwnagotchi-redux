@@ -288,6 +288,16 @@ class Beastcore:
             sentinel.observe_motion(eng._last)
         return out
 
+    def eap_plan(self, ssid: str, *, authorized: bool = False, iface: str = "wlan1") -> dict:
+        """Plan a Scope-aimed, posture-gated WPA-Enterprise EAP harvest. Honors
+        offense_enabled() and requires the SSID to be in Scope + authorized=True."""
+        from ..eap import EapHarvester, EapConfig
+        h = EapHarvester(config=EapConfig(iface=iface))
+        plan = h.plan(self.scope, ssid, authorized=authorized, active=self.offense_enabled())
+        out = plan.to_dict()
+        out["engine_present"] = h.available()
+        return out
+
     # --- sentinel (deploy-and-watch guardian) ------------------------------ #
 
     def enable_sentinel(self, notifier=None, *, armed: bool = False, min_severity="warn"):
