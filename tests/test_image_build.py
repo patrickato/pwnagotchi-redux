@@ -260,6 +260,60 @@ def test_ota_discovery_follows_the_root_disk_not_device_number(monkeypatch,tmp_p
     assert context["current"] == "B" and context["devices"]["5"].endswith(uuids[5])
 
 
+def test_pack_plan_is_opt_in_arm64_and_passive(tmp_path):
+    packs = boot_module("packs")
+    key = tmp_path / "public.gpg"
+    key.write_bytes(b"public test fixture")
+    plan = packs.plan("kali-tools","https://http.kali.org/kali",key)
+    assert plan["architecture"] == "arm64"
+    assert plan["packages"] == ["tcpdump","tshark"]
+    assert "no attack launcher" in plan["reason"]
+    for mirror in ("http://http.kali.org/kali","https://user:secret@example.com/kali","https://example.com/kali?override=yes"):
+        with pytest.raises(ValueError):
+            packs.plan("kali-tools",mirror,key)
+    with pytest.raises(ValueError):
+        packs.plan("../other","https://http.kali.org/kali",key)
+
+
+def test_pack_removal_refuses_symlinks_and_mounted_children(tmp_path):
+    packs = boot_module("packs")
+    base = tmp_path / "packs"
+    root = base / "kali-tools"
+    root.mkdir(parents=True)
+    payload = root / "rootfs"
+    payload.mkdir()
+    mountinfo = tmp_path / "mountinfo"
+    mountinfo.write_text(f"42 1 0:1 / {payload} rw - tmpfs tmpfs rw\n")
+    with pytest.raises(ValueError,match="mounted"):
+        packs.remove("kali-tools",base,mountinfo)
+    mountinfo.write_text("")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    payload.rmdir()
+    root.rmdir()
+    root.symlink_to(outside)
+    with pytest.raises(ValueError,match="symlink"):
+        packs.remove("kali-tools",base,mountinfo)
+    assert outside.exists()
+
+
+def test_failed_pack_install_keeps_partial_record_without_touching_base_os(monkeypatch,tmp_path):
+    packs = boot_module("packs")
+    key = tmp_path / "public.gpg"
+    key.write_bytes(b"public fixture")
+    monkeypatch.setattr(packs.subprocess,"check_output",lambda *a,**k: "ext4 rw,nodev,nosuid\n")
+    calls = []
+    def fail(argv,**kwargs):
+        calls.append(argv)
+        raise subprocess.CalledProcessError(1,argv)
+    with pytest.raises(subprocess.CalledProcessError):
+        packs.install("kali-tools","https://http.kali.org/kali",key,tmp_path / "packs",run=fail)
+    record = (tmp_path / "packs/kali-tools/pack.json").read_text()
+    assert '"status": "failed"' in record and "partial files retained" in record
+    assert calls[0][0] == "debootstrap" and "--arch=arm64" in calls[0]
+    assert not any("allow-unauthenticated" in arg for arg in calls[0])
+
+
 def invoke(args, **kwargs):
     return subprocess.run(args, text=True, capture_output=True, timeout=20, **kwargs)
 

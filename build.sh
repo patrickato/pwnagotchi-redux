@@ -71,6 +71,8 @@ mkdir -p "$PI_GEN_DIR/stage-redux/40-power/files"
 cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/40-power/files/boot"
 mkdir -p "$PI_GEN_DIR/stage-redux/50-rauc/files"
 cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/50-rauc/files/boot"
+mkdir -p "$PI_GEN_DIR/stage-redux/60-packs/files"
+cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/60-packs/files/boot"
 if [[ -n ${REDUX_OTA_CERT:-} ]]; then
     command -v openssl >/dev/null || { echo 'OTA profile needs openssl for certificate validation.' >&2; exit 1; }
     ! grep -q 'PRIVATE KEY' "$REDUX_OTA_CERT" || { echo 'Only public update certificates may be copied into images.' >&2; exit 1; }
@@ -123,6 +125,7 @@ chmod +x "$PI_GEN_DIR/stage-redux/20-boot-budget/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/30-watchdog/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/40-power/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/50-rauc/00-run.sh"
+chmod +x "$PI_GEN_DIR/stage-redux/60-packs/00-run.sh"
 echo "Prepared arm64 Pi 4/5 source tree: $PI_GEN_DIR"
 echo 'Reason: Lite stages only; nexmon built for installed Pi kernel, never the host kernel.'
 if [[ $PREPARE_ONLY == 1 ]]; then
