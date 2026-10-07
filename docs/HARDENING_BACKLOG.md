@@ -6,14 +6,15 @@ classmates to run on real sites. These are **tracked, not yet built** (except wh
 noted). Mostly hardening/productization, not missing core capability. Ordered by
 leverage.
 
-## P0 — the one architectural gap
+## P0 — the one architectural gap — PRODUCER DONE
 
-- **Raw-frame capture tap.** `deauth-flood` + `surveillance-sweep` detection AND the
-  fingerprint PNL/IE re-identification all need raw 802.11 frames (radiotap/pcap
-  monitor tap) that bettercap's REST event stream does not expose. Everything
-  needing raw frames is honestly dark today. **One tap lights up three features** —
-  highest-leverage single build left. (Lands in the detect/geo lane + a core feed;
-  coordinate the detector side with Grok.)
+- **Raw-frame capture tap.** ✅ Built (`redux/captap/`, docs/CAPTAP.md): a pure
+  802.11 parser (deauth/disassoc + probe-request IE fingerprint) + a tap that feeds
+  the fingerprint Dex real PNL/IE (cross-MAC re-id now works, sandbox-verified) and
+  stages normalized deauth events. **Remaining:** (a) the detector-side consumption
+  of those deauth events (deauth-flood / surveillance-sweep) lives in the detector
+  lane — coordinate with Grok; (b) live monitor capture on the Pi (needs-hardware,
+  runbook §2b.1/2b.6).
 
 ## P1 — field-device safety (a dropbox can be found/seized)
 

@@ -418,6 +418,23 @@ class Beastcore:
         e = self._explog.end()
         return wrapped(self.store, e) if e is not None else None
 
+    def ingest_frames(self, frames) -> dict:
+        """Feed raw 802.11 frames (an iterable of (bytes, ts) or (bytes, ts, radiotap))
+        through the capture tap: probe-requests re-identify devices across MAC
+        randomization in the Dex, deauth/disassoc become events for the flood
+        detectors. Returns a glass-box summary. (Live monitor capture is
+        needs-hardware; this takes frames from any source.)"""
+        from ..captap import CaptureTap
+        tap = CaptureTap()
+        for item in frames:
+            buf, ts = item[0], item[1]
+            rt = item[2] if len(item) > 2 else False
+            tap.feed(buf, radiotap=rt, ts=ts)
+        linker = tap.link()
+        self._captap = tap
+        return {"frames": tap.frames_seen, "deauth_events": len(tap.deauths),
+                "device_identities": linker.summary(), "linker": linker}
+
     def tft_frame(self, face="status", width: int = 46, ascii: bool = False):
         """Render the on-device TFT frame (list of rows) from live status. Lean,
         static (no animation), monochrome-safe — see redux.tft."""

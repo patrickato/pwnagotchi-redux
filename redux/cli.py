@@ -231,6 +231,34 @@ def cmd_campaign(args) -> int:
     return 0
 
 
+def cmd_captap(args) -> int:
+    """Raw-frame tap demo: SYNTHETIC probe requests from a phone that rotated its
+    MAC (same PNL + IE fingerprint) plus a deauth burst, parsed and routed — shows
+    cross-MAC re-identification and the staged deauth events. No radio."""
+    from .captap import CaptureTap, build_probe_req, build_deauth
+    print("redux captap demo — SYNTHETIC 802.11 frames (no radio)")
+    tap = CaptureTap()
+    # one phone, two randomized MACs, same PNL + same capability IEs
+    ies = [(1, b"\x82\x84\x0b\x16"), (45, b"\x2d\x40\x00"), (127, b"\x00\x00\x00\x00\x00\x00\x40")]
+    pnl = ["HomeLab-5G", "CoffeeShop", "PDX_Free_WiFi"]
+    for mac in ("a2:11:11:11:11:11", "de:22:22:22:22:22"):
+        for ssid in pnl:
+            tap.feed(build_probe_req(mac, ssid, ies=ies), ts=100.0)
+    # an unrelated device
+    tap.feed(build_probe_req("b6:99:99:99:99:99", "Guest", ies=[(1, b"\x82\x84")]), ts=101.0)
+    # a deauth burst against an AP
+    for _ in range(5):
+        tap.feed(build_deauth("aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66", "11:22:33:44:55:66"), ts=102.0)
+    linker = tap.link()
+    s = linker.summary()
+    print(f"  frames parsed: {tap.frames_seen}  |  deauth events staged: {len(tap.deauths)}")
+    print(f"  device identities: {s['identities']} total, {s['reidentified']} re-identified across MAC")
+    for i in linker.identities():
+        if i.reidentified:
+            print(f"    DEVICE (str {i.strength:.2f}): {i.mac_count} MACs -> one device, PNL={sorted(i.ssids)[:3]}")
+    return 0
+
+
 def cmd_tft(args) -> int:
     """Render the on-device TFT frame to the terminal (see it without hardware).
     --face plain|status, --ascii for a plain-terminal fallback."""
@@ -684,6 +712,11 @@ def build_parser() -> argparse.ArgumentParser:
     cad_ = casub.add_parser("demo", help="run the chain with fake executors + render the report")
     cad_.add_argument("--targets", nargs="*", help="targets to run the chain against")
     ca.set_defaults(func=cmd_campaign)
+
+    ct = sub.add_parser("captap", help="raw 802.11 tap — probe/deauth parsing + cross-MAC re-id")
+    ctsub = ct.add_subparsers(dest="captap_cmd", required=True)
+    ctsub.add_parser("demo", help="synthetic frames: re-identify a phone across MAC rotation")
+    ct.set_defaults(func=cmd_captap)
 
     tf = sub.add_parser("tft", help="render the on-device TFT frame to the terminal")
     add_radio_flags(tf)
