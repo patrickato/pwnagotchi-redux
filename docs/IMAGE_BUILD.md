@@ -364,9 +364,14 @@ sudo bash image/flash.sh release.img.xz --sha256 TRUSTED_SHA256 --device /dev/sd
 The second command erases the selected card. The helper checks the compressed
 release hash and decompresses the entire image before writing, requires a writable
 removable whole disk with enough space and no mounted descendants, and prints its
-actual model/capacity and reason. It rechecks disk identity, handles short writes,
-flushes and invalidates the block cache, then verifies every image byte by SHA256
-read-back. Fixed disks and partition targets are refused. Some readers report
+actual model/capacity and reason. It rechecks disk identity and opens the target
+without creating or truncating files, refuses a final symlink, and verifies the
+opened descriptor is still the selected block device before writing. Linux
+[`O_EXCL` block-device semantics](https://man7.org/linux/man-pages/man2/open.2.html)
+refuse an in-use disk. The helper holds that exclusive descriptor through writing,
+cache invalidation and SHA256 read-back, so verification does not reopen a possibly
+replaced device path. It handles short writes and closes the descriptor on failure.
+Fixed disks and partition targets are refused. Some readers report
 themselves as fixed disks; use a reader that exposes removable media.
 
 Tests use explicitly synthetic image streams and block-inventory fixtures.

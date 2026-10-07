@@ -612,6 +612,110 @@ def test_flash_refuses_unsafe_disks(change):
         flash.select_disk({'blockdevices': [disk]}, '/dev/sdb', 4096)
 
 
+def flash_cli_fixture(monkeypatch, tmp_path):
+    import hashlib
+    flash = flash_module()
+    raw = bytearray(4096)
+    raw[510:512] = b'\x55\xaa'
+    image = tmp_path / 'synthetic.img'
+    image.write_bytes(raw)
+    target = tmp_path / 'target'
+    # Simulate successful pre-open block-device snapshots. No real disk is used.
+    monkeypatch.setattr(flash, 'disk_snapshot', lambda *_: (1, {'path': str(target)}))
+    monkeypatch.setattr(flash.os, 'geteuid', lambda: 0)
+    monkeypatch.setattr(sys, 'argv', ['flash', str(image), '--sha256', hashlib.sha256(raw).hexdigest(),
+                                    '--device', str(target), '--confirm-device', str(target)])
+    return flash, target, bytes(raw)
+
+
+@pytest.mark.parametrize('replacement', ['regular', 'missing', 'symlink'])
+def test_flash_target_replacement_never_truncates_or_creates_files(monkeypatch, tmp_path, replacement):
+    flash, target, _ = flash_cli_fixture(monkeypatch, tmp_path)
+    keep = tmp_path / 'keep'
+    keep.write_bytes(b'preserve unrelated regular-file contents')
+    if replacement == 'regular':
+        target.write_bytes(keep.read_bytes())
+    elif replacement == 'symlink':
+        target.symlink_to(keep)
+    with pytest.raises(SystemExit) as error:
+        flash.main()
+    assert error.value.code == 1
+    assert keep.read_bytes() == b'preserve unrelated regular-file contents'
+    if replacement == 'regular':
+        assert target.read_bytes() == keep.read_bytes()
+    elif replacement == 'missing':
+        assert not target.exists()
+
+
+@pytest.mark.parametrize('corrupt', [False, True])
+def test_flash_holds_one_exclusive_descriptor_through_readback(monkeypatch, tmp_path, capsys, corrupt):
+    import stat
+    from types import SimpleNamespace
+    flash, target, raw = flash_cli_fixture(monkeypatch, tmp_path)
+    target.write_bytes(b'old synthetic disk bytes' * 512)
+    real_open = os.open
+    opened = []
+    flushed = []
+
+    def open_fixture(path, flags):
+        assert str(path) == str(target)
+        assert flags & os.O_RDWR and flags & os.O_EXCL and flags & os.O_NOFOLLOW
+        assert not flags & (os.O_CREAT | os.O_TRUNC)
+        descriptor = real_open(path, flags)
+        opened.append(descriptor)
+        return descriptor
+
+    # Only the temporary fixture's fstat is made to look like a block device.
+    monkeypatch.setattr(flash.os, 'open', open_fixture)
+    monkeypatch.setattr(flash.os, 'fstat', lambda fd: SimpleNamespace(st_mode=stat.S_IFBLK, st_rdev=1))
+
+    def flush_fixture(fd, operation):
+        assert fd == opened[0] and operation == 0x1261
+        flushed.append(fd)
+        if corrupt:
+            os.pwrite(fd, b'x', 0)  # Inject read-back corruption into the synthetic fixture.
+
+    monkeypatch.setattr(flash.fcntl, 'ioctl', flush_fixture)
+    if corrupt:
+        with pytest.raises(SystemExit) as error:
+            flash.main()
+        assert error.value.code == 1
+        captured = capsys.readouterr()
+        assert 'read-back checksum mismatch' in captured.err
+        assert 'verified_bytes' not in captured.out
+    else:
+        flash.main()
+        assert target.read_bytes()[:len(raw)] == raw
+        assert 'verified_bytes' in capsys.readouterr().out
+    assert len(opened) == 1 and flushed == opened
+    with pytest.raises(OSError):
+        os.pwrite(opened[0], b'x', 0)  # Descriptor was closed on success or failure.
+
+
+def test_flash_busy_or_changed_device_is_rejected_before_write(monkeypatch, tmp_path):
+    import errno
+    import stat
+    from types import SimpleNamespace
+    flash = flash_module()
+    target = tmp_path / 'synthetic-target'
+    target.write_bytes(b'keep fixture contents')
+    monkeypatch.setattr(flash.os, 'fstat', lambda fd: SimpleNamespace(st_mode=stat.S_IFBLK, st_rdev=2))
+    with pytest.raises(ValueError, match='selected block device'):
+        with flash.exclusive_disk(str(target), 1):
+            pytest.fail('Changed identity must never reach the writer.')
+    assert target.read_bytes() == b'keep fixture contents'
+
+    def busy(*_):
+        raise OSError(errno.EBUSY, 'synthetic busy block device')
+
+    monkeypatch.setattr(flash.os, 'open', busy)
+    with pytest.raises(OSError) as error:
+        with flash.exclusive_disk(str(target), 1):
+            pytest.fail('Busy disk must never reach the writer.')
+    assert error.value.errno == errno.EBUSY
+    assert target.read_bytes() == b'keep fixture contents'
+
+
 def test_image_scripts_pass_shellcheck_and_syntax():
     import shutil
     if shutil.which('shellcheck') is None:

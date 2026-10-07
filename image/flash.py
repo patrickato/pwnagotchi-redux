@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Write a checksum-verified release to an unmounted removable Linux disk."""
 import argparse
+from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
@@ -98,6 +99,25 @@ def disk_snapshot(device, size):
     return info.st_rdev, select_disk(inventory, device, size)
 
 
+@contextmanager
+def exclusive_disk(device, identity):
+    # Linux O_EXCL claims a block device against mounts and other exclusive opens. Never
+    # create/truncate a replaced path or follow a replacement's final symlink.
+    descriptor = os.open(device, os.O_RDWR | os.O_EXCL | os.O_NOFOLLOW)
+    stream = None
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISBLK(info.st_mode) or info.st_rdev != identity:
+            raise ValueError('Opened target is not the selected block device; refusing to write.')
+        stream = os.fdopen(descriptor, 'r+b', buffering=0)
+        yield stream
+    finally:
+        if stream is None:
+            os.close(descriptor)
+        else:
+            stream.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('image', type=Path)
@@ -117,16 +137,14 @@ def main():
             raise ValueError('Writing requires root and --confirm-device matching --device exactly; this erases the disk.')
         if disk_snapshot(args.device, size) != (identity, disk):
             raise ValueError('Target identity or mount state changed; refusing to write.')
-        with source(args.image) as reader, open(args.device, 'wb', buffering=0) as writer:
-            if os.fstat(writer.fileno()).st_rdev != identity:
-                raise ValueError('Opened disk identity changed; refusing to write.')
-            copy_stream(reader, writer, size, digest)
-            os.fsync(writer.fileno())
-            fcntl.ioctl(writer.fileno(), 0x1261)  # BLKFLSBUF: force subsequent verification off the block cache.
-        with open(args.device, 'rb', buffering=0) as reader:
-            verify_stream(reader, size, digest)
+        with source(args.image) as reader, exclusive_disk(args.device, identity) as disk:
+            copy_stream(reader, disk, size, digest)
+            os.fsync(disk.fileno())
+            fcntl.ioctl(disk.fileno(), 0x1261)  # BLKFLSBUF: force subsequent verification off the block cache.
+            disk.seek(0)
+            verify_stream(disk, size, digest)
         print(json.dumps({'verified_bytes': size, 'sha256': digest, 'device': args.device,
-                          'reason': 'Flushed disk and verified every image byte by read-back.'}))
+                          'reason': 'Flushed and verified every image byte through the same exclusively opened disk.'}))
     except (ValueError, OSError, lzma.LZMAError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f'Flash failed: {exc}\n')
 
