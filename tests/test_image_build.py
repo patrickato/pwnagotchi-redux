@@ -42,6 +42,12 @@ case $1 in
   checkout)
     if [[ $dir == */pi-gen ]]; then
       mkdir -p "$dir/stage0/02-firmware" "$dir/stage2"
+      mkdir -p "$dir/export-image"
+      cat > "$dir/export-image/prerun.sh" <<'LAYOUT'
+IMG_SIZE=$((BOOT_PART_START + BOOT_PART_SIZE + ROOT_PART_SIZE))
+echo "Creating loop device..."
+ROOT_DEV="${LOOP_DEV}p2"
+LAYOUT
       echo 'exit 91' > "$dir/build.sh"
     fi ;;
   rev-parse) if [[ -f $dir/revision ]]; then cat "$dir/revision"; else echo test-redux-revision; fi ;;
@@ -170,3 +176,47 @@ printf '%s\t%s\n' linux-image-rpi-v7l installed \
 ''', "bash", str(selector)])
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["linux-image-rpi-v7l", "linux-image-target"]
+
+
+def layout_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("layout", REPO / "image/export_layout.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_captures_layout_adds_separate_partition_before_loop_attachment():
+    source = 'IMG_SIZE=$((BOOT_PART_START + BOOT_PART_SIZE + ROOT_PART_SIZE))\necho "Creating loop device..."\nROOT_DEV="${LOOP_DEV}p2"\n'
+    result = layout_module().captures_layout(source)
+    assert result.index('mkpart primary ext4') < result.index('Creating loop device')
+    assert 'CAPTURE_DEV="${LOOP_DEV}p3"' in result
+    assert 'mkfs.ext4 -L REDUXCAP' in result
+    assert 'chmod 0700' in result
+    assert '512 * 1024 * 1024' in result
+    with pytest.raises(ValueError, match="unsupported"):
+        layout_module().captures_layout(result)
+
+
+@pytest.mark.parametrize("size", [0, 63, 32769, "512"])
+def test_capture_size_rejects_unbounded_or_invalid_inputs(size):
+    with pytest.raises(ValueError, match="partition"):
+        layout_module().captures_layout("", size)
+
+
+def test_overlay_stage_preserves_capture_writes_and_hardens_service(tmp_path):
+    root = tmp_path / "root"
+    (root / "etc/systemd/system").mkdir(parents=True)
+    (root / "etc/fstab").write_text('ROOTDEV / ext4 defaults 0 1\nBOOTDEV /boot/firmware vfat defaults 0 2\n')
+    (root / "etc/systemd/system/redux.service").write_text('[Unit]\n[Service]\nStateDirectory=redux\n')
+    stage = REPO / "image/stage-redux/10-overlay"
+    result = invoke(["bash", "-c", 'on_chroot() { cat >/dev/null; }; export -f on_chroot; bash 00-run.sh'], cwd=stage, env=dict(os.environ, ROOTFS_DIR=str(root)))
+    assert result.returncode == 0, result.stderr
+    fstab = (root / "etc/fstab").read_text()
+    assert 'LABEL=REDUXCAP /captures ext4 rw,' in fstab
+    assert '/boot/firmware vfat ro,' in fstab
+    assert 'recurse=0' in (root / "etc/overlayroot.conf").read_text()
+    unit = (root / "etc/systemd/system/redux.service").read_text()
+    assert 'RequiresMountsFor=/captures' in unit
+    assert 'StateDirectory=' not in unit
+    assert 'ReadWritePaths=/captures/redux' in unit

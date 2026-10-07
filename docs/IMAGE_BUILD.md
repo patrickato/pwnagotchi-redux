@@ -107,3 +107,33 @@ systemctl is-enabled bettercap.service  # masked, expected nonzero exit
 Confirm arm64 userspace, the board's matching kernel and `updates/brcmfmac.ko`.
 No physical success or sub-15-second boot claim is inferred from QEMU tests.
 
+
+## Overlay root and captures (Codex backlog 2)
+
+`overlayroot` from Debian is configured as `tmpfs:recurse=0`: the lower root is
+read-only and the upper root is RAM. Recursion is disabled so `/captures` remains
+writable. The export patch adds a third, 512 MiB ext4 partition labeled REDUXCAP
+before loop attachment, formats it, and creates `/captures/redux` owned by the
+service account with mode 0700. Unsupported upstream layout changes fail closed.
+The root and captures sizes are separate; captures can be recovered independently.
+
+Boot firmware mounts read-only. Swap is masked, the journal is volatile and capped
+at 16 MiB, and redux requires the captures mount before starting. Service state
+belongs in `/captures/redux`, never the ephemeral root. Captures uses ext4's journal;
+yanking power may still lose unsynced captures or damage an SD controller. This
+protects root writes, not every possible storage failure.
+
+Provision operator credentials in a private image config before building overlay
+images (`FIRST_USER_PASS` and `DISABLE_FIRST_BOOT_USER_RENAME=1`). First-boot changes
+made only in the RAM overlay disappear; an unprovisioned image is a service-only
+bootstrap, not a persistent interactive enrollment. For explicit maintenance,
+boot with `overlayroot=disabled` on the command line and remount boot writable;
+restore the overlay and read-only boot settings before field use. Never put an OTA
+signing private key or shared login password in the image source.
+
+**Hardware gates on both boards:** confirm `findmnt / /captures /boot/firmware`,
+`findmnt /media/root-ro`, and `lsblk -f`; root must be an overlay with a read-only
+lower, boot must be ro, and REDUXCAP must be rw. Write a temporary root file and a
+capture file, sync, reboot: only the capture survives. Exercise power-loss recovery
+on a spare card and confirm redux fails to start if the captures filesystem cannot
+mount. These results are pending, not inferred from the layout tests.
