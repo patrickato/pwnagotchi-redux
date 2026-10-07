@@ -69,6 +69,14 @@ mkdir -p "$PI_GEN_DIR/stage-redux/20-boot-budget/files"
 cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/20-boot-budget/files/boot"
 mkdir -p "$PI_GEN_DIR/stage-redux/40-power/files"
 cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/40-power/files/boot"
+mkdir -p "$PI_GEN_DIR/stage-redux/50-rauc/files"
+cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/50-rauc/files/boot"
+if [[ -n ${REDUX_OTA_CERT:-} ]]; then
+    command -v openssl >/dev/null || { echo 'OTA profile needs openssl for certificate validation.' >&2; exit 1; }
+    ! grep -q 'PRIVATE KEY' "$REDUX_OTA_CERT" || { echo 'Only public update certificates may be copied into images.' >&2; exit 1; }
+    openssl x509 -in "$REDUX_OTA_CERT" -noout
+    install -m 0644 "$REDUX_OTA_CERT" "$PI_GEN_DIR/stage-redux/50-rauc/files/keyring.pem"
+fi
 if [[ -n ${REDUX_POWER_CONFIG:-} ]]; then
     python3 -m json.tool "$REDUX_POWER_CONFIG" >/dev/null
     install -m 0644 "$REDUX_POWER_CONFIG" "$PI_GEN_DIR/stage-redux/40-power/files/power.json"
@@ -107,10 +115,14 @@ linux-headers-rpi-2712
 EOF
 chmod +x "$PI_GEN_DIR/stage-redux/prerun.sh" "$PI_GEN_DIR/stage-redux/00-redux/00-run.sh"
 python3 "$REPO_DIR/image/export_layout.py" "$PI_GEN_DIR/export-image/prerun.sh"
+if [[ -n ${REDUX_OTA_CERT:-} ]]; then
+    python3 "$REPO_DIR/image/prepare_ota.py" "$REPO_DIR/image" "$PI_GEN_DIR"
+fi
 chmod +x "$PI_GEN_DIR/stage-redux/10-overlay/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/20-boot-budget/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/30-watchdog/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/40-power/00-run.sh"
+chmod +x "$PI_GEN_DIR/stage-redux/50-rauc/00-run.sh"
 echo "Prepared arm64 Pi 4/5 source tree: $PI_GEN_DIR"
 echo 'Reason: Lite stages only; nexmon built for installed Pi kernel, never the host kernel.'
 if [[ $PREPARE_ONLY == 1 ]]; then

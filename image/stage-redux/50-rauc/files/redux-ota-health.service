@@ -1,0 +1,15 @@
+[Unit]
+Description=Validate candidate before committing Raspberry Pi tryboot
+After=redux.service
+Requires=redux.service
+RequiresMountsFor=/captures /boot/firmware /boot/redux-control
+Before=rauc.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/redux-rauc-health
+TimeoutStartSec=90
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
