@@ -16,6 +16,7 @@ EXPECTED = {
     "pmf_missing",
     "pineapple",
     "pnl",
+    "hidden_ssid",
 }
 
 
@@ -56,3 +57,14 @@ def test_pmf_runs_via_engine():
     )
     alerts = eng.feed(f)
     assert any(a.kind.value == "pmf_missing" for a in alerts)
+
+
+def test_hidden_ssid_runs_via_engine():
+    eng = DetectEngine(names=["hidden_ssid"])
+    bssid = "aa:bb:cc:dd:ee:ff"
+    # cloaked beacon first (empty SSID), then a probe response discloses the name
+    eng.feed(Frame(type=FrameType.BEACON, ts=1.0, bssid=bssid, ssid="", security="wpa2-psk"))
+    alerts = eng.feed(
+        Frame(type=FrameType.PROBE_RESP, ts=2.0, bssid=bssid, ssid="SecretNet", security="wpa2-psk")
+    )
+    assert any(a.kind.value == "hidden_ssid_reveal" for a in alerts)

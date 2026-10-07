@@ -16,6 +16,7 @@ from redux.detect.deauth_flood import DeauthFloodDetector
 from redux.detect.engine import DetectEngine
 from redux.detect.frames import Frame, FrameType
 from redux.detect.handshake import HandshakeCaptureDetector
+from redux.detect.hidden_ssid import HiddenSSIDRevealDetector
 from redux.detect.karma import KarmaCaptiveDetector
 from redux.detect.pineapple import PineappleDetector
 from redux.detect.pmf import PMFMissingDetector
@@ -39,6 +40,7 @@ __all__ = [
     "Frame",
     "FrameType",
     "HandshakeCaptureDetector",
+    "HiddenSSIDRevealDetector",
     "KarmaCaptiveDetector",
     "PNLHarvester",
     "PMFMissingDetector",

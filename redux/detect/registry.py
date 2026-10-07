@@ -16,6 +16,7 @@ from redux.detect.config import DEFAULTS, _opt, merge_options
 from redux.detect.deauth_flood import DeauthFloodDetector
 from redux.detect.frames import Frame
 from redux.detect.handshake import HandshakeCaptureDetector
+from redux.detect.hidden_ssid import HiddenSSIDRevealDetector
 from redux.detect.karma import KarmaCaptiveDetector
 from redux.detect.pineapple import PineappleDetector
 from redux.detect.pmf import PMFMissingDetector
@@ -89,6 +90,10 @@ def _ble_tracker(o: Optional[Dict[str, Any]] = None) -> BLETrackerDetector:
     return BLETrackerDetector()
 
 
+def _hidden_ssid(o: Optional[Dict[str, Any]] = None) -> HiddenSSIDRevealDetector:
+    return HiddenSSIDRevealDetector()
+
+
 def _handshake(o: Optional[Dict[str, Any]] = None) -> HandshakeCaptureDetector:
     x = merge_options(o)
     return HandshakeCaptureDetector(
@@ -136,6 +141,7 @@ REGISTRY: List[DetectorSpec] = [
     DetectorSpec("wps_attack", _wps, ("wps_window_s", "wps_attempt_threshold", "wps_nack_threshold"), "WPS attempt/NACK rate"),
     DetectorSpec("ble_tracker", _ble_tracker, (), "Apple Find My / HC-0x skimmer BLE"),
     DetectorSpec("handshake", _handshake, ("handshake_window_s",), "PMKID / EAPOL M1–M4 capture"),
+    DetectorSpec("hidden_ssid", _hidden_ssid, (), "Hidden-SSID reveal (cloaked name disclosed)"),
     DetectorSpec("ble_flood", _ble_flood, ("ble_flood_window_s", "ble_flood_unique_addr_threshold"), "BLE advertisement spam"),
     DetectorSpec("pmf_missing", _pmf, (), "WPA2 without 802.11w advisory"),
     DetectorSpec(
