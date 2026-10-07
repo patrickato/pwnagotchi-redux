@@ -29,6 +29,9 @@ from .supervisor import Supervisor
 from .narrator import Narrator
 from .brain import Brain
 from .governor import Governor, Reading, GovDecision
+from .capabilities import Cap, Provider, CapabilityGraph
+from .scope import Scope
+from .doctor import Doctor, DoctorInputs
 from .signals import SignalBus, Signal, connect_narrator
 
 
@@ -52,6 +55,7 @@ class Beastcore:
         bus: Optional[SignalBus] = None,
         position_provider: Optional[Callable[[], Optional[tuple]]] = None,
         governor: Optional[Governor] = None,
+        scope: Optional[Scope] = None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
@@ -61,6 +65,7 @@ class Beastcore:
         self._position = position_provider
         self.governor = governor or Governor()
         self._gov: Optional[GovDecision] = None
+        self.scope = scope if scope is not None else Scope()
         # SD-wear: buffer geo-tags and flush once per pump cycle (one batched
         # commit) instead of an fsync per RF event. _flush_cap bounds memory if a
         # single cycle sees a flood.
@@ -151,6 +156,45 @@ class Beastcore:
         return self._gov.interval_scale if self._gov else 1.0
 
     # --- observe ----------------------------------------------------------- #
+
+    def capability_graph(self) -> CapabilityGraph:
+        """Build a capability graph from the device's actual live state, so the
+        Doctor (and the dashboard) can reason/explain over it. Honest: a radio
+        role is 'present' only if a radio actually supports it."""
+        g = CapabilityGraph()
+        radios = list(getattr(self.supervisor, "radios", []) or [])
+        mon = next((r for r in radios if getattr(r, "monitor", False)), None)
+        inj = next((r for r in radios if getattr(r, "inject", False)), None)
+        g.register(Provider.of(
+            "wifi-monitor", provides=[Cap.RADIO_WIFI_MONITOR],
+            present=mon is not None,
+            reason=(f"{mon.iface} supports monitor" if mon else "no monitor-capable radio present")))
+        g.register(Provider.of(
+            "wifi-inject", provides=[Cap.RADIO_WIFI_INJECT],
+            present=inj is not None,
+            reason=(f"{inj.iface} supports injection" if inj else "no injection-capable radio present")))
+        # location: the position provider, if it yields a fix
+        fix = self._position() if self._position is not None else None
+        g.register(Provider.of(
+            "position", provides=[Cap.LOCATION_POSITION],
+            present=fix is not None,
+            reason=("a live position fix is available" if fix is not None
+                    else "no position provider / no fix")))
+        # consumers that depend on those capabilities (so blast-radius is real)
+        g.register(Provider.of("capture", requires=[Cap.RADIO_WIFI_MONITOR], reason="handshake capture"))
+        g.register(Provider.of("coverage-map", requires=[Cap.LOCATION_POSITION], reason="sighting map"))
+        g.register(Provider.of("deauth-gate", requires=[Cap.RADIO_WIFI_MONITOR], reason="firing gate"))
+        return g
+
+    def doctor_report(self) -> dict:
+        """A headless, glass-box self-diagnosis built from live state."""
+        return Doctor().report(DoctorInputs(
+            graph=self.capability_graph(),
+            governor=self._gov,
+            scope=self.scope,
+            detector_count=getattr(self.engine, "detector_count", None),
+            sightings=self.store.count() if hasattr(self.store, "count") else None,
+        ))
 
     def located_sightings(self, limit: int = 500) -> list:
         """Recent sightings that carry a real GPS fix, newest first.

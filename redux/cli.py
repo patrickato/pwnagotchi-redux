@@ -107,6 +107,21 @@ def cmd_packs(args) -> int:
     return 0
 
 
+def cmd_doctor(args) -> int:
+    """Print the headless, glass-box self-diagnosis from live state."""
+    bc = _build(args)
+    rep = bc.doctor_report()
+    print(f"redux doctor: {rep['label']}")
+    for f in rep["findings"]:
+        print(f"  [{f['status'].upper():8}] {f['area']}: {f['summary']}")
+        if f["reason"]:
+            print(f"             why: {f['reason']}")
+        if f["remediation"]:
+            print(f"             do:  {f['remediation']}")
+    print(f"coverage: {rep['coverage']['reason']}")
+    return 0
+
+
 def cmd_scope(args) -> int:
     """Manage the central authorized-target Scope — the one list every firing
     function consults. Edits are saved atomically back to the scope file."""
@@ -184,6 +199,9 @@ def build_parser() -> argparse.ArgumentParser:
     en = psub.add_parser("enable"); en.add_argument("name")
     di = psub.add_parser("disable"); di.add_argument("name")
     pk.set_defaults(func=cmd_packs)
+
+    dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
+    add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")

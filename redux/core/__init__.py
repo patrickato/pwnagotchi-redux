@@ -7,6 +7,7 @@ from .actions import ActionRegistry, Action, ActionSpec, ActionError, register_s
 from .capabilities import Cap, CapState, Provider, CapabilityGraph
 from .scope import Scope, ScopeEntry, classify_target
 from .governor import Governor, Mode, Reading, GovDecision
+from .doctor import Doctor, DoctorInputs, Finding, Status
 from .beastcore import Beastcore
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "Cap", "CapState", "Provider", "CapabilityGraph",
     "Scope", "ScopeEntry", "classify_target",
     "Governor", "Mode", "Reading", "GovDecision",
+    "Doctor", "DoctorInputs", "Finding", "Status",
     "Beastcore",
 ]

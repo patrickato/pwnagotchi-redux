@@ -107,6 +107,11 @@ class Supervisor:
         self._say(f"intent -> {self._intent.value}")
         self._reassign()
 
+    @property
+    def radios(self) -> list:
+        """The radios currently managed (for the Doctor / capability graph)."""
+        return list(self._radios.values())
+
     def set_radios(self, radios) -> None:
         self._radios = {r.iface: r for r in radios}
         self._emit(Signal.RADIOS_CHANGED, ifaces=list(self._radios))
