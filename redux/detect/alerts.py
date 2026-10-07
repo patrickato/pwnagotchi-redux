@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
 
 
 class AlertKind(str, Enum):
     DEAUTH_FLOOD = "deauth_flood"
     ROGUE_AP = "rogue_ap"
     BEACON_SPAM = "beacon_spam"
+    KARMA = "karma"
+    CAPTIVE_TWIN = "captive_twin"
 
 
 @dataclass(frozen=True)

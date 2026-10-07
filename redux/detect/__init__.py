@@ -12,6 +12,7 @@ from redux.detect.alerts import Alert, AlertKind
 from redux.detect.beacon_spam import BeaconSpamDetector
 from redux.detect.deauth_flood import DeauthFloodDetector
 from redux.detect.frames import Frame, FrameType
+from redux.detect.karma import KarmaCaptiveDetector
 from redux.detect.rogue_ap import RogueAPDetector, TrustedNetwork
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "DeauthFloodDetector",
     "Frame",
     "FrameType",
+    "KarmaCaptiveDetector",
     "RogueAPDetector",
     "TrustedNetwork",
 ]
