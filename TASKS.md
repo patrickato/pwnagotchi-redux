@@ -15,6 +15,10 @@ Pi hardware**; `done` = also passed a real-hardware pass. (See README *Verificat
 
 ## Phase 1 — cord-cut MVP (flashable v0.1)
 
+> These are the real-hardware gates. Operator checklist: `docs/HARDWARE_VALIDATION.md`
+> (image-level gate in `docs/IMAGE_BUILD.md`). They stay `open` until they pass on a physical
+> Pi 4 **and** Pi 5.
+
 | # | Task | Acceptance | Status |
 |---|---|---|---|
 | 1.1 | pi-gen image stub (lean Debian/Pi-OS, arm64, bettercap + nexmon baked, redux service) | `./build.sh` produces an arm64 image that boots to a redux service on a Pi 4 / Pi 5 | open (codex #1) |

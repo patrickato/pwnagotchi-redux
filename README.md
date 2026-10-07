@@ -71,7 +71,8 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
   handshake with zero pwnagotchi in the path; the orchestrator driving actual monitor-mode and
   hotplug on physical adapters; TFT rendering; UPS/OTA on-device. Nothing graduates until it passes
-  a real-hardware pass on an actual Pi 4 / Pi 5.
+  a real-hardware pass on an actual Pi 4 / Pi 5. The step-by-step on-device checklist is
+  `docs/HARDWARE_VALIDATION.md`.
 
 ## Layout
 
