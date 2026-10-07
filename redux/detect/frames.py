@@ -17,6 +17,8 @@ class FrameType(str, Enum):
     DISASSOC = "disassoc"
     WPS = "wps"  # WPS EAP / registrar exchange sighting
     BLE_ADV = "ble_adv"  # BLE advertisement / scan response
+    PMKID = "pmkid"  # RSN IE PMKID observed (clientless)
+    EAPOL = "eapol"  # 802.1X EAPOL-Key message
     OTHER = "other"
 
 
@@ -43,6 +45,8 @@ class Frame:
     ble_name: str = ""  # complete/short local name
     ble_company_id: str = ""  # e.g. "0x004c" Apple
     ble_service_uuid: str = ""  # 16/128-bit UUID string if known
+    # EAPOL message number when type is EAPOL: 1..4 (0 = unknown)
+    eapol_msg: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bssid", (self.bssid or "").lower())
@@ -54,3 +58,4 @@ class Frame:
         object.__setattr__(self, "ble_name", self.ble_name or "")
         object.__setattr__(self, "ble_company_id", (self.ble_company_id or "").lower())
         object.__setattr__(self, "ble_service_uuid", (self.ble_service_uuid or "").lower())
+        object.__setattr__(self, "eapol_msg", int(self.eapol_msg or 0))
