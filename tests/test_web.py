@@ -52,3 +52,31 @@ def test_serve_loop_bounded_updates_snapshot():
     bc = Beastcore([ONBOARD, ALFA], intent=Intent.HUNT)
     # bounded loop (no driver -> pump is a no-op), just proves serve() runs + binds
     serve(bc, port=0, bind_scope="localhost", interval=0, pump=True, _cycles=2)
+
+
+def test_located_sightings_returns_only_real_fixes():
+    from redux.geo.db import Sighting
+    bc = Beastcore([ONBOARD], intent=Intent.RECON)
+    bc.store.insert(Sighting(kind="wifi", mac="aa:aa:aa:aa:aa:aa", ssid="A", lat=40.1, lon=-80.2, ts=1.0, provenance="test"))
+    bc.store.insert(Sighting(kind="wifi", mac="bb:bb:bb:bb:bb:bb", ssid="B", ts=2.0, provenance="test"))  # no fix
+    located = bc.located_sightings()
+    macs = {p["mac"] for p in located}
+    assert "aa:aa:aa:aa:aa:aa" in macs            # has lat/lon -> included
+    assert "bb:bb:bb:bb:bb:bb" not in macs        # no fix -> never fabricated
+    assert all(p["lat"] is not None and p["lon"] is not None for p in located)
+
+
+def test_status_payload_includes_located_points():
+    from redux.geo.db import Sighting
+    bc = Beastcore([ONBOARD], intent=Intent.RECON)
+    bc.store.insert(Sighting(kind="wifi", mac="aa:aa:aa:aa:aa:aa", ssid="A", lat=40.1, lon=-80.2, ts=1.0, provenance="test"))
+    p = status_payload(bc)
+    assert "located" in p and len(p["located"]) == 1
+    assert p["located"][0]["lat"] == 40.1 and p["located"][0]["lon"] == -80.2
+
+
+def test_page_has_map_panel():
+    html = render_page()
+    assert 'id="map"' in html and "renderMap" in html
+    # honest empty state wording present
+    assert "needs a GPS fix" in html

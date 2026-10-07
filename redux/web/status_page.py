@@ -32,6 +32,9 @@ def status_payload(beastcore) -> Dict:
     """The snapshot the dashboard renders: Beastcore.status() + recent narration."""
     data = dict(beastcore.status())
     data["narration"] = [l.text for l in beastcore.narrator.lines(12)]
+    data["located"] = (
+        beastcore.located_sightings() if hasattr(beastcore, "located_sightings") else []
+    )
     return data
 
 
@@ -49,6 +52,8 @@ main{max-width:820px;margin:0 auto;padding:18px;display:grid;gap:14px}
 .reason{color:var(--mut);font-size:13px;margin-top:4px}
 ul{margin:6px 0 0;padding-left:18px}li{color:var(--mut);font-size:13px}
 .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#1d2630;font-size:12px}
+#map{width:100%;height:auto;display:block;background:#0e141b;border:1px solid #222b36;border-radius:8px}
+#map circle{fill:var(--acc);fill-opacity:.75;stroke:#0e141b;stroke-width:.6}
 </style></head><body>
 <header><h1>redux</h1><span class="mut" id="sub">glass-box status</span></header>
 <main>
@@ -61,6 +66,9 @@ ul{margin:6px 0 0;padding-left:18px}li{color:var(--mut);font-size:13px}
  </div></div>
  <div class="card"><div class="k">brain recommends</div>
    <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div></div>
+ <div class="card"><div class="k">located sightings · real GPS fixes only</div>
+   <svg id="map" viewBox="0 0 400 220" preserveAspectRatio="xMidYMid meet" aria-label="sighting coordinate plot"></svg>
+   <div class="reason" id="maprange">—</div></div>
  <div class="card"><div class="k">recent narration</div><ul id="narr"></ul></div>
 </main>
 <script>
@@ -75,7 +83,23 @@ async function tick(){try{const r=await fetch('/api/status');const d=await r.jso
  document.getElementById('recwhy').textContent=rc.reason||'';
  const ul=document.getElementById('narr');ul.innerHTML='';
  (d.narration||[]).slice().reverse().forEach(t=>{const li=document.createElement('li');li.textContent=t;ul.appendChild(li)});
+ renderMap(d.located||[]);
 }catch(e){document.getElementById('sub').textContent='disconnected'}}
+function renderMap(pts){const svg=document.getElementById('map'),rng=document.getElementById('maprange');
+ while(svg.firstChild)svg.removeChild(svg.firstChild);
+ if(!pts.length){rng.textContent='no located sightings yet — needs a GPS fix';return}
+ const W=400,H=220,P=14,NS='http://www.w3.org/2000/svg';
+ let la=pts.map(p=>p.lat),lo=pts.map(p=>p.lon);
+ let laMin=Math.min(...la),laMax=Math.max(...la),loMin=Math.min(...lo),loMax=Math.max(...lo);
+ const laSpan=(laMax-laMin)||1e-4,loSpan=(loMax-loMin)||1e-4;
+ pts.forEach(p=>{const x=P+((p.lon-loMin)/loSpan)*(W-2*P);
+  const y=P+(1-(p.lat-laMin)/laSpan)*(H-2*P); // north up
+  const c=document.createElementNS(NS,'circle');c.setAttribute('cx',x.toFixed(1));c.setAttribute('cy',y.toFixed(1));
+  c.setAttribute('r','3.2');const t=document.createElementNS(NS,'title');
+  t.textContent=(p.kind||'?')+' '+(p.ssid||p.mac||'')+' @ '+p.lat.toFixed(5)+','+p.lon.toFixed(5);
+  c.appendChild(t);svg.appendChild(c)});
+ rng.textContent=pts.length+' located · lat '+laMin.toFixed(4)+'…'+laMax.toFixed(4)+' · lon '+loMin.toFixed(4)+'…'+loMax.toFixed(4);
+}
 tick();setInterval(tick,2000);
 </script></body></html>"""
 

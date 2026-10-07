@@ -117,6 +117,25 @@ class Beastcore:
 
     # --- observe ----------------------------------------------------------- #
 
+    def located_sightings(self, limit: int = 500) -> list:
+        """Recent sightings that carry a real GPS fix, newest first.
+
+        Only sightings with both lat and lon are returned — never a fabricated
+        coordinate. Touches the store, so (like status) it must be called from
+        the thread that owns it. Empty when nothing has a fix yet.
+        """
+        if not hasattr(self.store, "query"):
+            return []
+        out = []
+        for s in self.store.query(limit=limit):
+            if s.lat is None or s.lon is None:
+                continue
+            out.append({
+                "lat": s.lat, "lon": s.lon, "kind": s.kind,
+                "ssid": s.ssid, "mac": s.mac, "ts": s.ts,
+            })
+        return out
+
     def status(self) -> dict:
         """A glass-box snapshot for a TFT / web view / log."""
         rec = self.recommend()
