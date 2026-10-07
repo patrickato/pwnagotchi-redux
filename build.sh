@@ -98,6 +98,7 @@ chmod +x "$PI_GEN_DIR/stage-redux/prerun.sh" "$PI_GEN_DIR/stage-redux/00-redux/0
 python3 "$REPO_DIR/image/export_layout.py" "$PI_GEN_DIR/export-image/prerun.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/10-overlay/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/20-boot-budget/00-run.sh"
+chmod +x "$PI_GEN_DIR/stage-redux/30-watchdog/00-run.sh"
 echo "Prepared arm64 Pi 4/5 source tree: $PI_GEN_DIR"
 echo 'Reason: Lite stages only; nexmon built for installed Pi kernel, never the host kernel.'
 if [[ $PREPARE_ONLY == 1 ]]; then

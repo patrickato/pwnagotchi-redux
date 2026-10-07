@@ -17,7 +17,7 @@ MASK_UNITS = {
 INITRD_CANDIDATES = (
     "ext4", "overlay", "mmc_block", "sdhci", "sdhci_pltfm", "sdhci_brcmstb",
     "sdhci_iproc", "bcm2835_sdhost", "usb_storage", "uas", "xhci_hcd",
-    "xhci_pci", "xhci_plat_hcd", "pcie_brcmstb", "nvme", "nvme_core",
+    "xhci_pci", "xhci_plat_hcd", "pcie_brcmstb", "nvme", "nvme_core", "bcm2835_wdt",
 )
 
 
