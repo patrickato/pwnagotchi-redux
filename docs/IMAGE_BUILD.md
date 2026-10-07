@@ -16,7 +16,7 @@ Linux filesystem, not NTFS or `/tmp`. Host prerequisites:
 ```sh
 sudo apt-get update
 sudo apt-get install git quilt parted coreutils qemu-user-static debootstrap \
-  zerofree zip dosfstools e2fsprogs libcap2-bin grep rsync xz-utils curl xxd \
+  libarchive-tools zerofree zip dosfstools e2fsprogs libcap2-bin grep rsync xz-utils curl xxd \
   file kmod bc gpg pigz arch-test binfmt-support ca-certificates
 sudo update-binfmts --enable qemu-aarch64
 arch-test arm64
@@ -106,3 +106,4 @@ systemctl is-enabled bettercap.service  # masked, expected nonzero exit
 
 Confirm arm64 userspace, the board's matching kernel and `updates/brcmfmac.ko`.
 No physical success or sub-15-second boot claim is inferred from QEMU tests.
+
