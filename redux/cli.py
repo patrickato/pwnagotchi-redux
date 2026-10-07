@@ -107,6 +107,37 @@ def cmd_packs(args) -> int:
     return 0
 
 
+_DEFAULT_EXPEDITIONS_PATH = os.environ.get("REDUX_EXPEDITIONS", "/etc/pwnagotchi/expeditions.json")
+
+
+def cmd_expedition(args) -> int:
+    """Start/end a field session and print its Wrapped recap."""
+    from .expedition import ExpeditionLog, wrapped
+    from .geo import SightingStore
+    log = ExpeditionLog.load(args.file)
+    store = SightingStore(args.store) if args.store else SightingStore()
+    if args.exp_cmd == "start":
+        e = log.start(args.name); log.save(args.file)
+        print(f"started expedition '{e.name}'")
+    elif args.exp_cmd == "end":
+        e = log.end()
+        if e is None:
+            print("no active expedition")
+            return 0
+        log.save(args.file)
+        print(wrapped(store, e)["headline"])
+    elif args.exp_cmd == "wrapped":
+        e = log.current() or (log.expeditions[-1] if log.expeditions else None)
+        if e is None:
+            print("no expeditions yet")
+            return 0
+        w = wrapped(store, e)
+        print(w["headline"])
+        if w["by_kind"]:
+            print("  by kind: " + ", ".join(f"{k}={v}" for k, v in sorted(w["by_kind"].items())))
+    return 0
+
+
 def cmd_dex(args) -> int:
     """Print the Field Dex — the recon ledger over recorded sightings."""
     from .dex import build_dex
@@ -227,6 +258,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    ex = sub.add_parser("expedition", help="start/end a field session + Wrapped recap")
+    ex.add_argument("--file", default=_DEFAULT_EXPEDITIONS_PATH, help="expeditions store path")
+    ex.add_argument("--store", help="path to a sightings store (for the recap)")
+    exsub = ex.add_subparsers(dest="exp_cmd", required=True)
+    exstart = exsub.add_parser("start"); exstart.add_argument("name")
+    exsub.add_parser("end")
+    exsub.add_parser("wrapped")
+    ex.set_defaults(func=cmd_expedition)
 
     dx = sub.add_parser("dex", help="the Field Dex — recon ledger over sightings")
     dx.add_argument("--store", help="path to a sightings store (SQLite)")

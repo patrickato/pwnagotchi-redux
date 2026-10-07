@@ -201,6 +201,20 @@ class Beastcore:
         from ..dex import build_dex
         return build_dex(self.store)
 
+    def start_expedition(self, name: str):
+        """Begin a named field session (in-memory log; pass a path to persist)."""
+        from ..expedition import ExpeditionLog
+        if not hasattr(self, "_explog"):
+            self._explog = ExpeditionLog()
+        return self._explog.start(name)
+
+    def end_expedition(self):
+        from ..expedition import ExpeditionLog, wrapped
+        if not hasattr(self, "_explog"):
+            self._explog = ExpeditionLog()
+        e = self._explog.end()
+        return wrapped(self.store, e) if e is not None else None
+
     def located_sightings(self, limit: int = 500) -> list:
         """Recent sightings that carry a real GPS fix, newest first.
 
