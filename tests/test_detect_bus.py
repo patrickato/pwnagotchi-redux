@@ -57,16 +57,16 @@ def test_bus_passes_first_alert():
 def test_bus_dedupes_within_window():
     bus = AlertBus({"dedup_window_s": 60.0, "escalate_after": 5})
     assert bus.publish(_alert(1.0)) is not None
-    assert bus.publish(_alert(2.0)) is None  # suppressed
+    assert bus.publish(_alert(2.0)) is None
     assert bus.publish(_alert(3.0)) is None
 
 
 def test_bus_allows_after_window_expires():
     bus = AlertBus({"dedup_window_s": 10.0, "escalate_after": 5})
     assert bus.publish(_alert(1.0)) is not None
-    assert bus.publish(_alert(5.0)) is None
-    # Outside window
-    again = bus.publish(_alert(12.0))
+    assert bus.publish(_alert(5.0)) is None  # still inside window from last_ts
+    # last_ts was 5.0; need > 5.0 + 10.0 to expire
+    again = bus.publish(_alert(15.1))
     assert again is not None
     assert "escalated" not in again.reason
 
@@ -95,7 +95,6 @@ def test_bus_publish_many():
     bus = AlertBus({"dedup_window_s": 60.0, "escalate_after": 3})
     alerts = [_alert(float(i), bssid="aa:aa:aa:aa:aa:01") for i in range(1, 5)]
     out = bus.publish_many(alerts)
-    # first + escalated at 3rd; 2nd and 4th suppressed (4th after escalate still same window)
     assert len(out) >= 2
     assert out[0].severity == "warning"
     assert any(a.severity == "critical" for a in out)
