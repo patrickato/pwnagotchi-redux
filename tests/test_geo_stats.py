@@ -14,3 +14,10 @@ def test_top_ssids_and_summary():
         assert densest_cells(db)
         s = summary(db)
         assert s["total"] == 3
+
+
+def test_cell_key_floors_across_zero():
+    # regression: int() truncates toward zero, merging the two hemispheres in the
+    # zero-straddling cell. floor keeps them in distinct cells.
+    from redux.geo.stats import _cell_key
+    assert _cell_key(0.009, 0.0, 0.01) != _cell_key(-0.009, 0.0, 0.01)

@@ -62,6 +62,13 @@ class CoverageGrid:
         # Floor relative to origin so edges stay stable
         lat_i = math.floor((lat - self.lat_min) / self.cell_deg)
         lon_i = math.floor((lon - self.lon_min) / self.cell_deg)
+        # A point exactly on the max edge floors to one cell past the grid that
+        # all_cells() enumerates; clamp it into the last cell so covered counts
+        # can never exceed total (no ratio>1 / negative-gap bookkeeping).
+        n_lat = max(1, math.ceil((self.lat_max - self.lat_min) / self.cell_deg))
+        n_lon = max(1, math.ceil((self.lon_max - self.lon_min) / self.cell_deg))
+        lat_i = min(max(lat_i, 0), n_lat - 1)
+        lon_i = min(max(lon_i, 0), n_lon - 1)
         return (lat_i, lon_i)
 
     def _bounds(self, key: CellKey) -> Tuple[float, float, float, float]:

@@ -1,6 +1,7 @@
 """Sighting-store stats: top SSIDs, new-since, densest cells, counts by kind."""
 from __future__ import annotations
 
+import math
 from collections import Counter
 from typing import Dict, List, Tuple
 
@@ -8,8 +9,10 @@ from redux.geo.db import SightingStore
 
 
 def _cell_key(lat: float, lon: float, cell_deg: float = 0.01) -> str:
-    la = int(lat / cell_deg) if cell_deg else 0
-    lo = int(lon / cell_deg) if cell_deg else 0
+    # floor, not int(): int() truncates toward zero, so the cell straddling
+    # lat/lon 0 would be double-width and merge the two hemispheres.
+    la = math.floor(lat / cell_deg) if cell_deg else 0
+    lo = math.floor(lon / cell_deg) if cell_deg else 0
     return f"{la}:{lo}"
 
 

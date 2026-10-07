@@ -77,3 +77,16 @@ def test_invalid_cell_deg():
 def test_empty_track_raises():
     with pytest.raises(ValueError):
         coverage_from_track([])
+
+
+def test_coverage_edge_point_does_not_overcount():
+    # regression: a point exactly on the max edge floored one cell past the grid,
+    # pushing covered>total (ratio>1, negative gaps).
+    g = CoverageGrid(lat_min=0.0, lat_max=0.001, lon_min=0.0, lon_max=0.001, cell_deg=0.001)
+    g.mark(0.0, 0.0)
+    g.mark(0.001, 0.001)
+    s = g.summary()
+    assert s["covered_cells"] <= s["total_cells"]
+    assert s["gap_cells"] >= 0
+    assert s["coverage_ratio"] <= 1.0
+    assert len(g.gap_cells()) == s["gap_cells"]

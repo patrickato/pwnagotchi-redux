@@ -151,14 +151,22 @@ class SightingStore:
                 ),
             )
         else:
-            # Weaker/equal sample: only extend first_seen / last ts bookkeeping
+            # Weaker/equal RSSI: keep the stronger sample's values, but still
+            # BACKFILL fields the stored row is missing (NULL coords/channel,
+            # empty ssid) from this sample — never discard a real GPS fix just
+            # because this sample's RSSI was weaker. Never overwrites a value
+            # the stronger sample already set.
             self._conn.execute(
                 """
                 UPDATE sightings SET
-                    ts = ?, first_seen = ?
+                    ssid = ?, lat = ?, lon = ?, channel = ?, ts = ?, first_seen = ?
                 WHERE kind = ? AND mac = ?
                 """,
                 (
+                    existing.ssid or sighting.ssid,
+                    existing.lat if existing.lat is not None else sighting.lat,
+                    existing.lon if existing.lon is not None else sighting.lon,
+                    existing.channel if existing.channel is not None else sighting.channel,
                     max(existing.ts, sighting.ts),
                     first_seen,
                     sighting.kind,

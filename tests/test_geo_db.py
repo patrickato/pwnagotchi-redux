@@ -112,3 +112,17 @@ def test_kinds_are_independent_keys():
         assert db.count() == 2
         assert db.get("wifi", "aa:aa:aa:aa:aa:aa").provenance == "wifi row"
         assert db.get("ble", "aa:aa:aa:aa:aa:aa").provenance == "ble row"
+
+
+def test_weaker_rssi_backfills_missing_location():
+    # regression: the weaker-RSSI merge branch discarded a real GPS fix when the
+    # stored row had NULL coords. It must backfill gaps without clobbering a
+    # stronger sample's existing values.
+    store = SightingStore(":memory:")
+    store.insert(Sighting(kind="wifi", mac="aa:bb:cc:dd:ee:ff", rssi=-40, lat=None, lon=None, provenance="t"))
+    store.insert(Sighting(kind="wifi", mac="aa:bb:cc:dd:ee:ff", rssi=-70, lat=51.5, lon=-0.1, provenance="t"))
+    row = store.get("wifi", "aa:bb:cc:dd:ee:ff")
+    assert row.lat == 51.5 and row.lon == -0.1
+    store.insert(Sighting(kind="wifi", mac="aa:bb:cc:dd:ee:ff", rssi=-90, lat=10.0, lon=10.0, provenance="t"))
+    row2 = store.get("wifi", "aa:bb:cc:dd:ee:ff")
+    assert row2.lat == 51.5 and row2.lon == -0.1
