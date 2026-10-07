@@ -137,3 +137,22 @@ lower, boot must be ro, and REDUXCAP must be rw. Write a temporary root file and
 capture file, sync, reboot: only the capture survives. Exercise power-loss recovery
 on a spare card and confirm redux fails to start if the captures filesystem cannot
 mount. These results are pending, not inferred from the layout tests.
+
+## Boot budget (Codex backlog 3)
+
+The boot policy masks network wait units, unattended APT jobs, EEPROM auto-update,
+cellular probing, mDNS activation and man-db timers. NetworkManager itself stays
+available for the orchestrator. Every mask has a reason in
+`/usr/share/redux/boot-policy.txt`.
+
+Initramfs uses `MODULES=list` and the union of actual modules/builtins from both
+installed kernels. It retains ext4, overlay and SD support plus available USB and
+NVMe storage drivers; dependencies are added by initramfs-tools. It never derives
+storage drivers from the build host's devices. Missing fundamental support aborts
+trimming. This is a disk-boot image; network-root boot is not a supported profile.
+
+Run `sudo redux-boot-report` after a cold boot on each model and paste its complete
+output in the PR. It records the real model, boot ID, `systemd-analyze time`,
+`systemd-analyze blame`, redux's critical chain and its start timestamp. No Pi is
+available here, so no blame output or sub-15s result is claimed. The sub-15s target,
+SD/USB/NVMe boot coverage and measured regression comparison remain hardware gates.
