@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from redux.detect.alerts import Alert, AlertKind
 from redux.detect.beacon_spam import BeaconSpamDetector
+from redux.detect.bus import AlertBus
+from redux.detect.config import DEFAULTS, SECTION, _opt, merge_options
 from redux.detect.deauth_flood import DeauthFloodDetector
 from redux.detect.engine import DetectEngine
 from redux.detect.frames import Frame, FrameType
@@ -20,15 +22,20 @@ from redux.detect.wps_attack import WPSAttackDetector
 
 __all__ = [
     "Alert",
+    "AlertBus",
     "AlertKind",
     "BeaconSpamDetector",
+    "DEFAULTS",
     "DeauthFloodDetector",
     "DetectEngine",
     "Frame",
     "FrameType",
     "KarmaCaptiveDetector",
     "RogueAPDetector",
+    "SECTION",
     "SurveillanceSweepDetector",
     "TrustedNetwork",
     "WPSAttackDetector",
+    "_opt",
+    "merge_options",
 ]
