@@ -17,14 +17,15 @@ class AlertKind(str, Enum):
     BLE_SKIMMER = "ble_skimmer"
     PMKID_CAPTURE = "pmkid_capture"
     HANDSHAKE_CAPTURE = "handshake_capture"
+    PMF_MISSING = "pmf_missing"
 
 
 @dataclass(frozen=True)
 class Alert:
     kind: AlertKind
-    reason: str  # human-readable; always required (glass-box)
+    reason: str
     ts: float
-    severity: str = "warning"  # info | warning | critical
+    severity: str = "warning"
     bssid: str = ""
     ssid: str = ""
     detail: dict = field(default_factory=dict)
