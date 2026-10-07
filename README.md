@@ -21,7 +21,23 @@ everything above them:
   **not** reliably beat greedy channel-hopping — proven in sim — so the brain's job is
   orchestration + legibility, not "more handshakes." See `docs/`.)
 
-## Scope (negotiable)
+## Scope
+
+Make it **turnkey.** The whole pitch is polished, one-click, automatic wherever we can get it —
+the Radio Orchestrator (you never touch monitor mode again) is the flagship. Ship turnkey modules
+when possible.
+
+What doesn't move:
+
+- **Authorized / passive by default.** Any deauth/jam/targeting/firing-capable capability gates on
+  an explicit authorized-target allowlist (BSSID/SSID), **empty by default** — never on
+  physical/signal-range assumptions.
+- The one kind of module we don't ship turnkey is a **turnkey attack/weaponized module**
+  (one-click-to-fire). Everything legitimate, make as one-click as you can.
+- **Glass-box + real data only** — every decision carries a human-readable reason; no decorative
+  fake telemetry.
+
+See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced build lanes.
 
 ## Layout
 
