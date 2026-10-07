@@ -1,0 +1,22 @@
+[Unit]
+Description=Measured UPS state and graceful low-battery shutdown
+After=local-fs.target
+RequiresMountsFor=/captures/redux
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=/opt/redux
+ExecStart=/usr/bin/python3 /opt/redux/boot/power.py
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=redux-power
+RuntimeDirectoryMode=0755
+UMask=0022
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/redux-power /captures/redux
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
