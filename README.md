@@ -45,19 +45,27 @@ everything above them:
 
 Everything assembles on one bus through `Beastcore` and runs as a single system.
 
-## Scope
+## Scope — a full toolkit, not a cage
 
 Make it **turnkey.** The whole pitch is polished, one-click, automatic wherever we can get it —
-the Radio Orchestrator (you never touch monitor mode again) is the flagship. Ship turnkey modules
-when possible.
+the Radio Orchestrator (you never touch monitor mode again) is the flagship.
 
-What doesn't move:
+redux ships the **full offensive toolkit at full power** — capture→crack, PMKID/assoc, deauth, the
+network-layer kill-chain, evil-portal — none of it watered down. The one thing that's centralized
+is *aiming*:
 
-- **Authorized / passive by default.** Any deauth/jam/targeting/firing-capable capability gates on
-  an explicit authorized-target allowlist (BSSID/SSID), **empty by default** — never on
-  physical/signal-range assumptions.
-- The one kind of module we don't ship turnkey is a **turnkey attack/weaponized module**
-  (one-click-to-fire). Everything legitimate, make as one-click as you can.
+- **One central Scope** (`redux/core/scope.py`). Every firing-capable function consults the same
+  authorized-target list — the targets you **own or are authorized to assess**: your own networks
+  and devices, your whole lab, gear you bought to test, engagements you're contracted for, ranges,
+  CTFs, and consenting peers. Broad by design.
+- **Arming is one gesture.** It starts empty only so the device never fires at something you didn't
+  choose. `redux scope add` / `import` (bulk-load a pasted list) / `arm-lab` (pre-authorize your own
+  kit) — with per-job groups and optional expiry so lapsed permission stops authorizing itself.
+- **Scope decides WHERE it's aimed, never WHAT it can do.** Inside scope, nothing is held back and
+  it's as one-click as we can make it.
+- **Detection-only exceptions** (the whole list): functions that can't be aimed and hit bystanders —
+  indiscriminate BLE/beacon spam and RF jamming (also illegal to transmit). We detect them, never
+  emit them.
 - **Glass-box + real data only** — every decision carries a human-readable reason; no decorative
   fake telemetry.
 

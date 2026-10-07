@@ -11,10 +11,17 @@ Fast facts:
   everything above is ours. See `docs/CORDCUT_ARCHITECTURE.md`.
 - **Work only in your branch space** (`claude/<topic>`), one topic per branch. Open a PR; never
   commit to `main`. Nothing reaches `main` red or unreviewed.
-- **Scope:** authorized / passive by default; any firing-capable capability gates on an explicit
-  authorized-target allowlist (BSSID/SSID), empty by default. **Ship turnkey (one-click,
-  automatic) wherever possible** — the single exclusion is a **turnkey attack/weaponized module**
-  (one-click-to-fire). `AGENTS.md` is the governing contract.
+- **Scope, not a cage.** redux ships the full offensive toolkit at full power (capture→crack,
+  PMKID/assoc, deauth, the network-layer kill-chain, evil-portal). Firing-capable functions
+  operate within the **central Scope** (`redux/core/scope.py`) — the one list of targets you own
+  or are authorized to assess: your own networks and devices, your whole lab, gear you bought to
+  test, engagements you're contracted for, ranges, CTFs, and consenting peers. It starts empty
+  only so the device never fires at something you didn't choose; arming is one gesture (`redux
+  scope add` / `import` / `arm-lab`, with per-job groups and optional expiry). **Scope decides
+  WHERE it's aimed, never WHAT it can do — inside scope, nothing is held back, and ship it as
+  turnkey/one-click as you can.** The only things that stay detection-only are the handful that
+  can't be aimed and hit bystanders: indiscriminate BLE/beacon spam and RF jamming (also illegal
+  to transmit). `AGENTS.md` is the governing contract.
 - **Glass-box:** every decision carries a human-readable reason. Real data only.
 - **Fork facts when porting plugin code:** config section name = plugin file basename; read
   options via a module-level `DEFAULTS` dict + `_opt()` helpers (the loader ignores

@@ -43,14 +43,29 @@ cross-lane changes to the lead (`claude/*`).
 
 Gemini is not part of this project. Do not add a `gemini/` lane or any Gemini CI agent.
 
-## Non-negotiable scope (same as the rest of the project)
+## Scope, not a cage
 
-- **Authorized / passive by default.** Any deauth/jam/targeting/firing-capable capability gates on
-  an **explicit authorized-target allowlist (BSSID/SSID), empty by default** — never physical/range
-  assumptions. Ship modules as turnkey (polished, one-click, automatic) as possible — the single
-  exclusion is a **turnkey attack/weaponized module** (one-click-to-fire).
+redux ships the **full offensive toolkit at full power** — capture→crack, PMKID/assoc, deauth,
+the network-layer kill-chain (scan → enumerate → authorized credential testing → loot),
+evil-portal, the active side of karma/rogue-AP. None of it is watered down.
+
+- **One central Scope.** Every firing-capable function consults the *same* authorized-target list
+  (`redux/core/scope.py`): targets you **own or are authorized to assess** — your own networks and
+  devices, your whole lab, gear you bought to test, engagements you're contracted for, ranges,
+  CTFs, and consenting peers. That space is broad by design; the wording is not a bench
+  restriction.
+- **Arming is one gesture, not friction.** The Scope starts empty only so the device never fires
+  at something the operator didn't choose. Arm it with `redux scope add/import/arm-lab` —
+  per-job groups, bulk-load a pasted list, optional expiry so lapsed permission stops authorizing
+  itself, and `arm-lab` to pre-authorize your own kit at once. Inside scope it's turnkey; ship it
+  as one-click as you can.
+- **Scope decides WHERE it's aimed, never WHAT it can do.** Capability is never reduced by the gate.
+- **The only detection-only exceptions** are functions that physically can't be aimed and hit
+  non-consenting bystanders: indiscriminate BLE-advertisement spam, mass beacon-flooding, and RF
+  jamming (the last is also illegal to transmit). We detect these; we don't emit them. That is the
+  whole exclusion list.
 - **Real data only** in anything user-facing (no decorative fake telemetry).
-- **Glass-box:** decisions carry a human-readable reason.
+- **Glass-box:** decisions carry a human-readable reason (Scope's `authorize()` returns one).
 
 ## Engineering rules
 
