@@ -6,6 +6,10 @@ from .brain import Brain, Decision, attach as attach_brain
 from .actions import ActionRegistry, Action, ActionSpec, ActionError, register_supervisor_actions
 from .capabilities import Cap, CapState, Provider, CapabilityGraph
 from .scope import Scope, ScopeEntry, classify_target
+from .labscope import (
+    LabFacts, LabProposal, propose_lab_scope, collect_lab_facts,
+    parse_ip_json, parse_iw_dev,
+)
 from .governor import Governor, Mode, Reading, GovDecision
 from .doctor import Doctor, DoctorInputs, Finding, Status
 from .post import PowerOnSelfTest, PostCheck, PostResult, PostStatus, Verdict
@@ -20,6 +24,8 @@ __all__ = [
     "ActionRegistry", "Action", "ActionSpec", "ActionError", "register_supervisor_actions",
     "Cap", "CapState", "Provider", "CapabilityGraph",
     "Scope", "ScopeEntry", "classify_target",
+    "LabFacts", "LabProposal", "propose_lab_scope", "collect_lab_facts",
+    "parse_ip_json", "parse_iw_dev",
     "Governor", "Mode", "Reading", "GovDecision",
     "Doctor", "DoctorInputs", "Finding", "Status",
     "PowerOnSelfTest", "PostCheck", "PostResult", "PostStatus", "Verdict",

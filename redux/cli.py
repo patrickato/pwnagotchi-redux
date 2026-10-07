@@ -233,9 +233,20 @@ def cmd_scope(args) -> int:
         scope.save(path)
         print(f"imported {n} target(s)" + (f" into job '{args.job}'" if args.job else "") + f"; scope now has {len(scope.active_entries())} active")
     elif args.scope_cmd == "arm-lab":
-        n = scope.arm_lab(bssids=args.bssid or [], ssids=args.ssid or [], cidrs=args.cidr or [])
-        scope.save(path)
-        print(f"lab armed: {n} target(s) pre-authorized (no expiry); scope now has {len(scope.active_entries())} active")
+        if args.auto:
+            n, proposals = scope.arm_lab_auto()
+            for p in proposals:
+                mark = "armed " if p.accept else "skip  "
+                print(f"  {mark} {p.kind:5} {p.value} — {p.reason}")
+            if not proposals:
+                print("  (nothing detected — are `ip`/`iw` available on this host?)")
+            scope.save(path)
+            print(f"lab armed (auto): {n} of your own target(s) pre-authorized; "
+                  f"scope now has {len(scope.active_entries())} active")
+        else:
+            n = scope.arm_lab(bssids=args.bssid or [], ssids=args.ssid or [], cidrs=args.cidr or [])
+            scope.save(path)
+            print(f"lab armed: {n} target(s) pre-authorized (no expiry); scope now has {len(scope.active_entries())} active")
     return 0
 
 
@@ -310,6 +321,8 @@ def build_parser() -> argparse.ArgumentParser:
     si = scsub.add_parser("import", help="bulk-load targets from a list file (one per line)")
     si.add_argument("listfile"); si.add_argument("--job")
     al = scsub.add_parser("arm-lab", help="pre-authorize your own gear (no expiry)")
+    al.add_argument("--auto", action="store_true",
+                    help="auto-detect your own kit (own private subnet/radios/AP) and arm it, zero typing")
     al.add_argument("--bssid", action="append"); al.add_argument("--ssid", action="append"); al.add_argument("--cidr", action="append")
     sc.set_defaults(func=cmd_scope)
     return p

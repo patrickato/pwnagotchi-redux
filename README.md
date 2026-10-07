@@ -38,7 +38,7 @@ everything above them:
 | Engine | `redux/engine/` | bettercap driver (REST/ws client surface) |
 | Supervisor spine | `redux/core/` | `SignalBus` pub/sub, `Supervisor`, `Narrator` (creature voice), glass-box `Brain`, `ActionRegistry` + transactions, `Beastcore` capstone |
 | Capability graph | `redux/core/capabilities.py` | shared capability vocabulary; packs/radios/GPS/SDR/firing gate as providers; `explain()` / `active_provider()` / `blast_radius()` |
-| Central Scope | `redux/core/scope.py` | the one authorized-target list every firing function consults (BSSID/SSID/CIDR, per-job, expiry, bulk-load, arm-lab) |
+| Central Scope | `redux/core/scope.py`, `redux/core/labscope.py` | the one authorized-target list every firing function consults (BSSID/SSID/CIDR, per-job, expiry, bulk-load, arm-lab, **auto-arm your own kit**) |
 | Governor | `redux/core/governor.py` | heat/power/load/RAM shedding (FULL→SURVIVAL), immediate-escalate + held recovery; drives write/loop cadence |
 | Doctor | `redux/core/doctor.py` | headless glass-box self-diagnosis over the graph (OK/ATTENTION/DEGRADED/ACTION + coverage honesty) |
 | Boot-POST | `redux/core/post.py` | power-on self-test: a streaming boot checklist that can't show READY unless the critical probe actually passed (the Doctor, gated) |
@@ -71,7 +71,9 @@ is *aiming*:
   CTFs, and consenting peers. Broad by design.
 - **Arming is one gesture.** It starts empty only so the device never fires at something you didn't
   choose. `redux scope add` / `import` (bulk-load a pasted list) / `arm-lab` (pre-authorize your own
-  kit) — with per-job groups and optional expiry so lapsed permission stops authorizing itself.
+  kit) / `arm-lab --auto` (detect your own private subnet, radios, and broadcast AP and arm them with
+  zero typing — a public uplink is shown but never auto-armed) — with per-job groups and optional
+  expiry so lapsed permission stops authorizing itself.
 - **Scope decides WHERE it's aimed, never WHAT it can do.** Inside scope, nothing is held back and
   it's as one-click as we can make it.
 - **Detection-only exceptions** (the whole list): functions that can't be aimed and hit bystanders —
@@ -84,7 +86,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 429 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 440 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
@@ -123,7 +125,7 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 429 tests, no hardware needed
+pytest                 # 440 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)

@@ -176,6 +176,24 @@ class Scope:
             self.add(c, "cidr", label=label, job="lab", now=now); n += 1
         return n
 
+    def arm_lab_auto(self, facts=None, *, label: str = "lab", job: str = "lab",
+                     now: Optional[float] = None):
+        """Zero-typing lab mode: read the device's OWN kit and arm what is provably
+        yours (your private subnet, your own radios, an AP you broadcast). Returns
+        ``(armed_count, proposals)`` — proposals include the skipped ones with a
+        reason (e.g. a public uplink range), so the caller can show the full,
+        glass-box picture. Collection is honest about absent tools."""
+        from .labscope import collect_lab_facts, propose_lab_scope
+        if facts is None:
+            facts = collect_lab_facts()
+        proposals = propose_lab_scope(facts)
+        armed = 0
+        for p in proposals:
+            if p.accept:
+                self.add(p.value, p.kind, label=label, job=job, now=now)
+                armed += 1
+        return armed, proposals
+
     # --- persistence (atomic, infrequent — SD-friendly) -------------------- #
 
     def to_dict(self) -> dict:
