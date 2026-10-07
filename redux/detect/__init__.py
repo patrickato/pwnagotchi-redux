@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from redux.detect.alerts import Alert, AlertKind
 from redux.detect.beacon_spam import BeaconSpamDetector
+from redux.detect.ble_tracker import BLETrackerDetector
 from redux.detect.bus import AlertBus
 from redux.detect.config import DEFAULTS, SECTION, _opt, merge_options
 from redux.detect.deauth_flood import DeauthFloodDetector
@@ -24,6 +25,7 @@ __all__ = [
     "Alert",
     "AlertBus",
     "AlertKind",
+    "BLETrackerDetector",
     "BeaconSpamDetector",
     "DEFAULTS",
     "DeauthFloodDetector",
