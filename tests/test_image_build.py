@@ -23,7 +23,7 @@ def invoke(args, **kwargs):
 def prepared(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    for name in ("build.sh", "image", "redux"):
+    for name in ("build.sh", "image", "redux", "boot"):
         source = REPO / name
         if source.is_dir():
             shutil.copytree(source, repo / name)
@@ -220,3 +220,38 @@ def test_overlay_stage_preserves_capture_writes_and_hardens_service(tmp_path):
     assert 'RequiresMountsFor=/captures' in unit
     assert 'StateDirectory=' not in unit
     assert 'ReadWritePaths=/captures/redux' in unit
+
+
+def boot_policy_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("boot_policy", REPO / "boot/boot_policy.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_trim_selects_real_storage_modules_and_builtin_support():
+    policy = boot_policy_module()
+    selected = policy.select_modules(['kernel/fs/ext4/ext4.ko', 'kernel/fs/overlayfs/overlay.ko', 'kernel/drivers/mmc/core/mmc_block.ko', 'kernel/drivers/nvme/host/nvme.ko.xz', 'kernel/drivers/net/ethernet/other.ko'])
+    assert selected == ['ext4', 'overlay', 'mmc_block', 'nvme']
+    with pytest.raises(ValueError, match="cannot trim"):
+        policy.select_modules(['ext4.ko'])
+    assert 'NetworkManager.service' not in policy.MASK_UNITS
+    assert 'redux.service' not in policy.MASK_UNITS
+    assert all(policy.MASK_UNITS.values())
+
+
+def test_boot_budget_stage_uses_target_inventory_and_installs_actual_timing_tool(tmp_path):
+    policy = boot_policy_module()
+    root = tmp_path / 'root'
+    for name in ('6.12.109+rpt-rpi-v8', '6.12.109+rpt-rpi-2712'):
+        modules = root / 'lib/modules' / name
+        modules.mkdir(parents=True)
+        (modules / 'modules.builtin').write_text('kernel/fs/ext4/ext4.ko\nkernel/fs/overlayfs/overlay.ko\nkernel/drivers/mmc/core/mmc_block.ko\n')
+        (modules / 'nvme.ko').touch()
+    policy.write_policy(root)
+    assert (root / 'etc/initramfs-tools/conf.d/redux-modules').read_text() == 'MODULES=list\n'
+    assert 'nvme' in (root / 'etc/initramfs-tools/modules').read_text()
+    manifest = (root / 'usr/share/redux/boot-policy.txt').read_text()
+    assert 'rpt-rpi-2712' in manifest and 'rpt-rpi-v8' in manifest
+    assert 'redux boot needs local storage, not an uplink' in manifest

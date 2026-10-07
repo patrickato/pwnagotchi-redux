@@ -24,7 +24,7 @@ if [[ $PREPARE_ONLY == 0 && $EUID != 0 ]]; then
     echo 'Image creation needs root for chroot and loop mounts. Run sudo ./build.sh.' >&2
     exit 1
 fi
-for tool in git realpath install tar; do
+for tool in git realpath install tar python3; do
     command -v "$tool" >/dev/null || { echo "Missing build prerequisite: $tool" >&2; exit 1; }
 done
 if [[ $PREPARE_ONLY == 0 ]]; then
@@ -65,6 +65,8 @@ git -C "$NEXMON_DIR" checkout -q --detach FETCH_HEAD
 
 PI_GEN_DIR="$BUILD_DIR/pi-gen"
 cp -a "$REPO_DIR/image/stage-redux" "$PI_GEN_DIR/stage-redux"
+mkdir -p "$PI_GEN_DIR/stage-redux/20-boot-budget/files"
+cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/20-boot-budget/files/boot"
 mkdir -p "$PI_GEN_DIR/stage-redux/00-redux/files/redux"
 cp -a "$REPO_DIR/redux/." "$PI_GEN_DIR/stage-redux/00-redux/files/redux/"
 # Do not ship development bytecode or require pip/network access at boot.
@@ -95,6 +97,7 @@ EOF
 chmod +x "$PI_GEN_DIR/stage-redux/prerun.sh" "$PI_GEN_DIR/stage-redux/00-redux/00-run.sh"
 python3 "$REPO_DIR/image/export_layout.py" "$PI_GEN_DIR/export-image/prerun.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/10-overlay/00-run.sh"
+chmod +x "$PI_GEN_DIR/stage-redux/20-boot-budget/00-run.sh"
 echo "Prepared arm64 Pi 4/5 source tree: $PI_GEN_DIR"
 echo 'Reason: Lite stages only; nexmon built for installed Pi kernel, never the host kernel.'
 if [[ $PREPARE_ONLY == 1 ]]; then
