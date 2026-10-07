@@ -1,11 +1,16 @@
-"""Sighting-store stats: top SSIDs, new-since, densest cells, counts by security."""
+"""Sighting-store stats: top SSIDs, new-since, densest cells, counts by kind."""
 from __future__ import annotations
 
 from collections import Counter
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from redux.geo.db import SightingStore
-from redux.geo.geohash import encode
+
+
+def _cell_key(lat: float, lon: float, cell_deg: float = 0.01) -> str:
+    la = int(lat / cell_deg) if cell_deg else 0
+    lo = int(lon / cell_deg) if cell_deg else 0
+    return f"{la}:{lo}"
 
 
 def top_ssids(store: SightingStore, *, limit: int = 10) -> List[Tuple[str, int]]:
@@ -23,14 +28,14 @@ def new_since(store: SightingStore, ts: float) -> int:
 def densest_cells(
     store: SightingStore,
     *,
-    precision: int = 6,
+    cell_deg: float = 0.01,
     limit: int = 10,
 ) -> List[Tuple[str, int]]:
     c: Counter[str] = Counter()
     for s in store.query():
         if s.lat is None or s.lon is None:
             continue
-        c[encode(s.lat, s.lon, precision)] += 1
+        c[_cell_key(s.lat, s.lon, cell_deg)] += 1
     return c.most_common(limit)
 
 
