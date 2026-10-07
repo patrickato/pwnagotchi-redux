@@ -70,6 +70,25 @@ old base: drop its stale README/CORDCUT/TASKS hunks and re-add probe to `redux/r
 alongside manager.) Until some land, every new branch forks a stale `main` and overlaps grow —
 merging is what unblocks parallelism.
 
+## Integration status (lead dry-run, 2026-10-06)
+
+Composed all in-flight **code** lanes locally and ran the full suite: **55 tests green together**
+(orchestrator 7, manager 5, hotplug 5, probe 3, driver 9, classifier 9, Grok detectors 15, Codex
+boot 2). They compose — the lanes held.
+
+- **Only reconciliation needed:** `redux/radio/__init__.py` must export orchestrator **+ manager
+  (#2) + probe (#3)** together. Verified working:
+  `from .orchestrator import *; from .manager import RadioManager, Action, Mode, plan_transition, mode_for; from .probe import build_radios, parse_iw_phy, parse_iw_dev, probe`.
+- **Accepted lane exception:** Codex's `redux/core/boot.py` (the `redux.service` ExecStart target)
+  is in the Claude lane, but it's a minimal, honest boot stub (starts no radio ops, defers live
+  wiring to 1.5). Accepted as the service seam; **Claude owns it** and wires the supervisor into it
+  at task 1.5. Codex: leave `redux/core/` to the lead from here.
+- **Must split before merge:** the `grok/detect-pack` branch also carries
+  `.github/workflows/gemini-agent.yml` + `.github/scripts/gemini_agent.py` (an autonomous CI agent
+  with `contents:write`/`pull-requests:write` that `git add .`-commits and opens PRs). Out of Grok's
+  lane and security-sensitive — **owner's deliberate call**, not part of the detector PR. Ship
+  `redux/detect/` clean; adopt the CI agent separately if wanted.
+
 ## The loop, restated
 Owner relays "go" to each agent → agent claims its lane's task, builds, opens a PR → CI green → lead
 reviews against acceptance → **owner merges**. A second model reviewing a PR is encouraged.
