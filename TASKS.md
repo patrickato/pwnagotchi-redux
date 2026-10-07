@@ -35,7 +35,7 @@ Pi hardware**; `done` = also passed a real-hardware pass. (See README *Verificat
 | 2.1 | Port Beastcore spine (signals/actions/transactions/spec_registry) into `redux/core` | ported modules pass their carried-over tests | done (sandbox) — spine assembles on one bus; spec-registry role covered by `ActionRegistry`+`ActionSpec`+`specs()` |
 | 2.2 | BeastSpatialDB + multi-radio ingest (recon suite) on the bus | sightings persist; map view renders real data | done (sandbox) for DB + ingest + spatial suite (`redux/geo`); **dedicated geographic map panel still TBD** (web dashboard renders status, not a map) |
 | 2.3 | Glass-box brain v1 (orchestration + explainability; NOT channel-yield RL) | brain explains each decision; no regression vs greedy on capture | done (sandbox) — every recommendation carries a human-readable reason; capture A/B is a real-hardware claim, unverified |
-| 2.4 | Beast Packs incl. opt-in Kali-tools repo; pwnagotchi-plugin compat shim | a pwnagotchi plugin loads via the shim; a pack installs/removes cleanly | done (sandbox) for pack manager + pwn-shim; **opt-in Kali-tools pack repo itself still TBD** |
+| 2.4 | Beast Packs incl. opt-in Kali-tools repo; pwnagotchi-plugin compat shim | a pwnagotchi plugin loads via the shim; a pack installs/removes cleanly | done (sandbox) — pack manager + pwn-shim, plus image-side opt-in Kali pack (`tcpdump`/`tshark`, passive) + signed-APT repo layout (#46). On-device install/remove is a Phase-1 hardware gate |
 
 > Scope reminder (AGENTS.md): authorized/passive by default; firing-capable work needs the
 > empty-by-default allowlist gate and only lands with the lead's explicit sign-off.
