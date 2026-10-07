@@ -18,6 +18,7 @@ class AlertKind(str, Enum):
     PMKID_CAPTURE = "pmkid_capture"
     HANDSHAKE_CAPTURE = "handshake_capture"
     BLE_FLOOD = "ble_flood"
+    PMF_MISSING = "pmf_missing"
 
 
 @dataclass(frozen=True)
