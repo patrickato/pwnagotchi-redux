@@ -54,6 +54,8 @@ Gemini is not part of this project. Do not add a `gemini/` lane or any Gemini CI
 
 ## Engineering rules
 
+- **Target platform: Raspberry Pi 4 / Pi 5 (arm64) only.** Build for these; don't carry the
+  "lesser" boards (Zero/3 and earlier). See `docs/PLATFORM_TARGET.md`.
 - Every new module ships with tests in `tests/` that run with no hardware (pure logic) where
   possible; mark anything that needs a real Pi/radio as a separate, clearly-labeled gate.
 - Keep the fork facts that still apply when porting Beast/pwnagotchi plugin code (config section =

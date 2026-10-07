@@ -1,6 +1,7 @@
 # pwnagotchi-redux
 
-A standalone field-OS platform for Raspberry Pi — a **successor** to pwnagotchi, not a fork.
+A standalone field-OS platform for **Raspberry Pi 4 and Pi 5 (arm64)** — a **successor** to
+pwnagotchi, not a fork. (We deliberately drop the "lesser" boards; see `docs/PLATFORM_TARGET.md`.)
 
 > **Status: pre-alpha scaffold (v0.0.1).** Architecture + the first real module (the
 > Radio Orchestrator decision engine, unit-tested) are in. Nothing is flashable yet.
@@ -11,7 +12,7 @@ pwnagotchi is a thin Python wrapper over **bettercap** (engine) + **nexmon** (mo
 firmware) on a Raspberry Pi OS image. redux keeps those two open foundations and replaces
 everything above them:
 
-- **Own lean image** (pi-gen, Debian/Pi-OS stable) — Kali's tools available as opt-in packs, never preinstalled.
+- **Own lean image** (pi-gen, Debian/Pi-OS stable, **arm64, Pi 4 / Pi 5 only**) — Kali's tools available as opt-in packs, never preinstalled.
 - **bettercap driven directly** — no pwnagotchi in the path.
 - **Beastcore as supervisor** (ported from `patrickato/beastagotchi`) — signals/actions/transactions, packs, doctor, the creature UX.
 - **Radio Orchestrator** — declare an intent (online / hunt / recon / survey); it auto-assigns
