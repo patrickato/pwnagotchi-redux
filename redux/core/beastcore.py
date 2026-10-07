@@ -209,6 +209,50 @@ class Beastcore:
         from .post import PowerOnSelfTest
         return PowerOnSelfTest.standard(self._doctor_inputs(), extra=extra).report()
 
+    # --- personas (one box, pick your hat) --------------------------------- #
+
+    def apply_persona(self, name: str) -> dict:
+        """Reconfigure the box for a persona in one gesture. Sets the radio intent
+        and records posture + exposure. Returns a glass-box record of what changed.
+
+        Posture is an EXTRA gate, never a looser one: a detection-only persona
+        turns offense off regardless of Scope; it can only tighten, never widen,
+        what can fire. Scope still decides WHERE anything is aimed."""
+        from . import persona as _persona
+        from ..radio import Intent
+        p = _persona.get(name)
+        before = {
+            "intent": self.supervisor.intent.value,
+            "offense_enabled": self.offense_enabled(),
+            "bind_scope": getattr(self, "_bind_scope", "localhost"),
+        }
+        self.supervisor.set_intent(Intent(p.intent))
+        self._persona = p
+        self._bind_scope = p.bind_scope
+        return {
+            "persona": p.name,
+            "summary": p.summary,
+            "reason": p.reason,
+            "changed": {
+                "intent": {"from": before["intent"], "to": p.intent},
+                "offense_enabled": {"from": before["offense_enabled"], "to": self.offense_enabled()},
+                "bind_scope": {"from": before["bind_scope"], "to": p.bind_scope},
+                "detectors": p.detectors,
+            },
+        }
+
+    def persona(self):
+        """The applied persona, or None if the box is running unshaped (Scope-only
+        governance, offense available)."""
+        return getattr(self, "_persona", None)
+
+    def offense_enabled(self) -> bool:
+        """Whether firing-capable offense is on the table at all. With no persona
+        applied, there is no extra gate (Scope alone governs). With one applied,
+        its posture is honored — a detection-only persona hard-disables firing."""
+        p = getattr(self, "_persona", None)
+        return True if p is None else p.offense_available
+
     def dex(self):
         """The Field Dex: the recon ledger built from this device's sightings."""
         from ..dex import build_dex
@@ -250,8 +294,12 @@ class Beastcore:
     def status(self) -> dict:
         """A glass-box snapshot for a TFT / web view / log."""
         rec = self.recommend()
+        p = self.persona()
         return {
             "intent": self.supervisor.intent.value,
+            "persona": p.name if p else None,
+            "posture": p.posture.value if p else None,
+            "offense_enabled": self.offense_enabled(),
             "capture_iface": self.supervisor.capture_iface,
             "creature": self.narrator.tft(),
             "mood": self.narrator.mood.value,

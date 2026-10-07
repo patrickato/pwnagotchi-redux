@@ -13,6 +13,7 @@ from .labscope import (
 from .governor import Governor, Mode, Reading, GovDecision
 from .doctor import Doctor, DoctorInputs, Finding, Status
 from .post import PowerOnSelfTest, PostCheck, PostResult, PostStatus, Verdict
+from .persona import Persona, Posture, BUILTIN as PERSONAS, DEFAULT_PERSONA
 from .beastcore import Beastcore
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "Governor", "Mode", "Reading", "GovDecision",
     "Doctor", "DoctorInputs", "Finding", "Status",
     "PowerOnSelfTest", "PostCheck", "PostResult", "PostStatus", "Verdict",
+    "Persona", "Posture", "PERSONAS", "DEFAULT_PERSONA",
     "Beastcore",
 ]

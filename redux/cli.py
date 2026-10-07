@@ -178,6 +178,37 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_persona(args) -> int:
+    """List personas, show one, or apply one to a freshly-built box (glass-box:
+    prints exactly what the persona changes). 'one box, pick your hat.'"""
+    from .core import persona as _persona
+    if args.persona_cmd == "list":
+        for p in _persona.summarize():
+            off = "offense" if p["offense_available"] else "no-offense"
+            print(f"  {p['name']:7} [{p['posture']:14} · {off:10}] {p['summary']}")
+        return 0
+    if args.persona_cmd == "show":
+        p = _persona.get(args.name)
+        print(f"{p.name}: {p.summary}")
+        print(f"  intent={p.intent}  posture={p.posture.value}  offense_available={p.offense_available}")
+        print(f"  detectors={p.detectors}  bind_scope={p.bind_scope}")
+        if p.frameworks:
+            print(f"  frameworks: {', '.join(p.frameworks)}")
+        print(f"  why: {p.reason}")
+        return 0
+    # apply
+    bc = _build(args)
+    rec = bc.apply_persona(args.name)
+    print(f"applied persona '{rec['persona']}' — {rec['summary']}")
+    for k, v in rec["changed"].items():
+        if isinstance(v, dict):
+            print(f"  {k}: {v['from']} -> {v['to']}")
+        else:
+            print(f"  {k}: {v}")
+    print(f"  why: {rec['reason']}")
+    return 0
+
+
 def cmd_ghost(args) -> int:
     """Produce a sanitized 'ghost' of a recorded session — real MACs/SSIDs
     pseudonymized and location dropped, timing/structure preserved — so it can be
@@ -298,6 +329,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    pe = sub.add_parser("persona", help="one box, pick your hat (red/blue/purple/recon/mesh/sigint)")
+    pesub = pe.add_subparsers(dest="persona_cmd", required=True)
+    pesub.add_parser("list", help="list the built-in personas")
+    pesh = pesub.add_parser("show", help="show one persona's config"); pesh.add_argument("name")
+    pea = pesub.add_parser("apply", help="apply a persona and print what it changes")
+    pea.add_argument("name"); add_radio_flags(pea)
+    pe.set_defaults(func=cmd_persona)
 
     gh = sub.add_parser("ghost", help="sanitize a recorded session for safe replay/sharing")
     gh.add_argument("infile", help="a recorded bettercap events JSON")
