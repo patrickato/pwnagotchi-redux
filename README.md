@@ -3,11 +3,13 @@
 A standalone field-OS platform for **Raspberry Pi 4 and Pi 5 (arm64)** — a **successor** to
 pwnagotchi, not a fork. (We deliberately drop the "lesser" boards; see `docs/PLATFORM_TARGET.md`.)
 
-> **Status: Phase-2 feature-complete in the sandbox; not yet hardware-validated.**
-> The full platform — image stack, supervisor spine, radio orchestrator, detector suite,
-> spatial database, packs, plugin-compat shim, CLI, and web dashboard — is built and green
-> under the test suite (287 tests, no hardware required). **No part has had a real-hardware
-> pass on a physical Pi yet** (see *Verification status* below). Sandbox-green ≠ done.
+> **Status: feature-complete in the sandbox; not yet hardware-validated.**
+> The full platform — image stack, supervisor spine (signals/brain/actions), capability graph,
+> central Scope, resource Governor, Doctor, radio orchestrator, bettercap driver, 13-detector
+> suite, spatial DB + Field Dex, scope-gated offense (capture→crack, network kill-chain, captive
+> portal), SDR passive-sensing, Expeditions, packs, plugin-compat shim, CLI, and web dashboard —
+> is built and green under the test suite (400+ tests, no hardware required). **No part has had a
+> real-hardware pass on a physical Pi yet** (see *Verification status*). Sandbox-green ≠ done.
 
 ## What it is
 
@@ -35,15 +37,23 @@ everything above them:
 | Radio | `redux/radio/` | orchestrator (intent→roles), `iw phy` capability probe, udev hotplug, manager |
 | Engine | `redux/engine/` | bettercap driver (REST/ws client surface) |
 | Supervisor spine | `redux/core/` | `SignalBus` pub/sub, `Supervisor`, `Narrator` (creature voice), glass-box `Brain`, `ActionRegistry` + transactions, `Beastcore` capstone |
-| Detection | `redux/detect/` | `DetectEngine` + registry; a suite of **passive** detectors (deauth-flood, rogue-AP, beacon-spam, surveillance-sweep, karma, WPS, BLE-tracker/flood, handshake, PMF, pineapple, PNL), confidence scoring, alert bus, replay |
-| Spatial | `redux/geo/` | SQLite sighting store, WiGLE lookup + queue, position estimate, coverage, self-locate, geofence, GPX/KML export, dead-reckoning, geohash, Kismet import, stats, migrations |
+| Capability graph | `redux/core/capabilities.py` | shared capability vocabulary; packs/radios/GPS/SDR/firing gate as providers; `explain()` / `active_provider()` / `blast_radius()` |
+| Central Scope | `redux/core/scope.py` | the one authorized-target list every firing function consults (BSSID/SSID/CIDR, per-job, expiry, bulk-load, arm-lab) |
+| Governor | `redux/core/governor.py` | heat/power/load/RAM shedding (FULL→SURVIVAL), immediate-escalate + held recovery; drives write/loop cadence |
+| Doctor | `redux/core/doctor.py` | headless glass-box self-diagnosis over the graph (OK/ATTENTION/DEGRADED/ACTION + coverage honesty) |
+| Detection | `redux/detect/` | `DetectEngine` + registry; 13 **passive** detectors (deauth-flood, rogue-AP, beacon-spam, surveillance-sweep, karma, WPS, BLE-tracker/flood, handshake, PMF, pineapple, PNL, hidden-SSID), confidence, alert bus, replay |
+| Spatial | `redux/geo/` | SQLite sighting store (WAL, coalesced writes), WiGLE, coverage, self-locate, geofence, GPX/KML export, dead-reckoning, geohash, Kismet import, stats |
+| Field Dex | `redux/dex/` | recon ledger over sightings — first/last-seen, rarity, "departed" |
 | Classify | `redux/classify/` | handshake crackability scoring |
-| Packs | `redux/packs/` | pack manifest + dependency-resolving manager |
-| Compat | `redux/compat/` | pwnagotchi-plugin compat shim |
-| Web | `redux/web/` | glass-box status dashboard (self-contained, no external assets) |
-| CLI | `redux/cli.py` | `redux status / run / web / packs` |
+| Offense (scope-gated) | `redux/crack/`, `redux/netrecon/`, `redux/portal/` | capture→crack pipeline, network kill-chain (scan/enumerate/cred-test/loot), captive portal for authorized testing |
+| SDR | `redux/sdr/` | passive-sensing ingest (rtl_433 ISM + ADS-B) into the same sightings store/Dex |
+| Expeditions | `redux/expedition/` | named field sessions + "Wrapped" recap |
+| Packs / Compat | `redux/packs/`, `redux/compat/` | pack manifest + dependency resolver; pwnagotchi-plugin compat shim |
+| Web | `redux/web/` | glass-box status dashboard + sightings map (self-contained, no external assets) |
+| CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / scope / dex / expedition` |
 
-Everything assembles on one bus through `Beastcore` and runs as a single system.
+Everything assembles on one bus through `Beastcore` and runs as a single system. Offensive
+capabilities are full-power but consult the central Scope for aiming (see below).
 
 ## Scope — a full toolkit, not a cage
 
@@ -87,14 +97,21 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 ```
 redux/radio/      Radio Orchestrator (decision engine + probe + hotplug)
 redux/engine/     bettercap driver
-redux/core/       Supervisor spine: signals, narrator, brain, actions, Beastcore
+redux/core/       Supervisor spine: signals, narrator, brain, actions, capability graph,
+                  Scope, Governor, Doctor, Beastcore
 redux/detect/     passive detector suite + engine/registry
 redux/geo/        spatial database + WiGLE/GPS/coverage/export
+redux/dex/        Field Dex (recon ledger over sightings)
 redux/classify/   handshake crackability scoring
+redux/crack/      capture→crack pipeline (scope-gated)
+redux/netrecon/   network kill-chain: scan/enumerate/cred-test/loot (scope-gated)
+redux/portal/     captive portal for authorized client testing
+redux/sdr/        passive SDR ingest (rtl_433 ISM + ADS-B)
+redux/expedition/ named field sessions + Wrapped recap
 redux/packs/      Beast Packs (manifest + manager)
 redux/compat/     pwnagotchi-plugin compat shim
-redux/web/        glass-box status dashboard
-redux/cli.py      operator entrypoint (status / run / web / packs)
+redux/web/        glass-box status dashboard + sightings map
+redux/cli.py      operator entrypoint (status/run/web/packs/doctor/scope/dex/expedition)
 image/            pi-gen image stack (boot, overlay, watchdog, UPS, OTA)
 tests/            unit/integration tests (real logic, no hardware needed)
 docs/             architecture, vision, proposals
@@ -110,6 +127,10 @@ pytest                 # 287 tests, no hardware needed
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)
 redux web              # serve the glass-box dashboard (least-exposed bind scope by default)
+redux doctor           # headless self-diagnosis (OK / ATTENTION / DEGRADED / ACTION)
+redux scope            # manage the central authorized-target list (add/import/arm-lab)
+redux dex              # the Field Dex — recon ledger over sightings
+redux expedition       # start/end a field session + Wrapped recap
 redux packs            # manage Beast Packs
 ```
 
