@@ -12,7 +12,7 @@ _Gemini has been removed from this project. Do not re-add a `gemini/` lane or an
 | Agent | Branch | May edit ONLY | Everything else |
 |---|---|---|---|
 | **Codex** (GPT) | `codex/<topic>` | `image/**`, `pi-gen/**`, `boot/**`, `build.sh`, `docs/IMAGE_BUILD.md`, `redux/core/boot.py`, `tests/test_{image_build,nexmon_build,boot}.py` | blocked by CI |
-| **Grok** (xAI) | `grok/<topic>` | `redux/detect/**`, `tests/test_detect_*.py` | blocked by CI |
+| **Grok** (xAI) | `grok/<topic>` | `redux/detect/**`, `tests/test_detect_*.py`, `redux/geo/**`, `tests/test_geo_*.py` | blocked by CI |
 | **Claude** (lead) | `claude/<topic>` | everything (owns `redux/radio`, `redux/engine`, `redux/core` except `boot.py`, `redux/classify`, `etc/`, `scripts/`, all docs, all shared files, `.github/`) | — |
 
 **Shared / structural files are LEAD-ONLY** and the guard blocks every non-lead branch from them:
@@ -62,13 +62,29 @@ lead integrates. Mark an item `[PR #n]` when you open its PR so the next agent r
 5. UPS HAT read + graceful low-battery shutdown + battery state on the TFT
 6. A/B OTA image updates (RAUC) with automatic rollback on failed boot
 
-**Grok backlog** (detector lane — `redux/detect/ tests/test_detect_*.py`):
-1. `[merged #9]` detector pack base (deauth-flood, rogue-AP, beacon-spam)
-2. surveillance-sweep detector + `DetectEngine` fan-in (branch `grok/detect-extend` — open its PR)
-3. Karma / evil-twin captive-portal detector (rogue portal + duplicate-SSID signatures)
-4. WPS-attack / PIN-bruteforce detector
-5. alert dedup + severity escalation + a `redux/detect` config (module-level `DEFAULTS` + `_opt()`)
-6. `redux/detect` README + NOTES (what each detector flags, tuning, false-positive notes)
+**Grok detector backlog** (`redux/detect/ tests/test_detect_*.py`) — items 1–6 all DONE/merged:
+1–6. `[done]` detector pack, surveillance, Karma, WPS, alert bus/config, README+NOTES.
+
+**Grok NEW backlog — BeastSpatialDB (geo lane, `redux/geo/ tests/test_geo_*.py`)** — Phase 2.2, the
+spatial keystone. Pull in order; new module, all hardware-free tests. (This is the lane Gemini left.)
+1. `redux/geo/db.py` — a unified **sighting store** (SQLite, stdlib `sqlite3`): one schema for every
+   sighting (WiFi/BLE/SDR) — `bssid/mac, ssid, kind, lat, lon, rssi, channel, source_radio, ts,
+   provenance`. Insert + query API; dedup by key keeping best-RSSI/first-seen. Glass-box provenance
+   on every row. Tests: insert/query/dedup round-trip.
+2. `redux/geo/wigle.py` — export the store to **WiGLE `WigleWifi-1.6` CSV** (correct header + field
+   order) and a `kismetdb_to_wiglecsv`-compatible dump. Tests: round-trip a few rows → valid CSV.
+3. `redux/geo/estimate.py` — **RSSI weighted-centroid** AP location from accumulated sightings, with
+   an observation count + a rough confidence/error radius. Pure math; tests on synthetic sightings.
+4. `redux/geo/coverage.py` — survey **coverage/gap grid** (geohash or simple lat/lon buckets): which
+   cells are covered vs unvisited, to guide driving. Tests on synthetic tracks.
+5. `redux/geo/README.md` + `NOTES.md` — schema, the bus default path
+   (`/etc/pwnagotchi/…` per CONVENTIONS), query examples, what's sandbox-tested vs needs real GPS.
+
+Then, back in the detector lane if you want more: a **BLE tracker/AirTag detector** and a
+**PMKID/handshake-capture detector** — both `redux/detect/`, same rules.
+
+Rule reminder: do NOT import `redux.engine` or touch any other lane; the lead wires geo to the live
+GPS/event sources at integration. Everything stays under `redux/detect/` **or** `redux/geo/`.
 
 ## If the guard fails your PR
 It printed exactly which file is out of lane and which paths your lane allows. Remove the stray file

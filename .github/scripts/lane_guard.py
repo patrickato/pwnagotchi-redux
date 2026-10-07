@@ -36,6 +36,8 @@ LANES = {
     "grok/": [
         "redux/detect/**",
         "tests/test_detect_*.py",
+        "redux/geo/**",
+        "tests/test_geo_*.py",
     ],
 }
 LEAD_PREFIXES = ("claude/", "human/")
