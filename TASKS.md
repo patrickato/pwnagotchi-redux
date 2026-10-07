@@ -2,7 +2,9 @@
 
 One row per scoped unit of work. An agent claims an **open** task, works in its branch space, and
 opens a PR that satisfies the acceptance criteria. Lead moves it to **review** then **done**.
-Status: `open` / `claimed:<agent>` / `review` / `done`.
+Status: `open` / `claimed:<agent>` / `review` / `done (sandbox)` / `done`.
+`done (sandbox)` = merged to `main` and green under `pytest`, but **not yet validated on real
+Pi hardware**; `done` = also passed a real-hardware pass. (See README *Verification status*.)
 
 ## Phase 0 — scaffold (this commit)
 
@@ -26,10 +28,10 @@ Status: `open` / `claimed:<agent>` / `review` / `done`.
 
 | # | Task | Acceptance | Status |
 |---|---|---|---|
-| 2.1 | Port Beastcore spine (signals/actions/transactions/spec_registry) into `redux/core` | ported modules pass their carried-over tests | open |
-| 2.2 | BeastSpatialDB + multi-radio ingest (recon suite) on the bus | sightings persist; map view renders real data | open |
-| 2.3 | Glass-box brain v1 (orchestration + explainability; NOT channel-yield RL) | brain explains each decision; no regression vs greedy on capture | open |
-| 2.4 | Beast Packs incl. opt-in Kali-tools repo; pwnagotchi-plugin compat shim | a pwnagotchi plugin loads via the shim; a pack installs/removes cleanly | open |
+| 2.1 | Port Beastcore spine (signals/actions/transactions/spec_registry) into `redux/core` | ported modules pass their carried-over tests | done (sandbox) — spine assembles on one bus; spec-registry role covered by `ActionRegistry`+`ActionSpec`+`specs()` |
+| 2.2 | BeastSpatialDB + multi-radio ingest (recon suite) on the bus | sightings persist; map view renders real data | done (sandbox) for DB + ingest + spatial suite (`redux/geo`); **dedicated geographic map panel still TBD** (web dashboard renders status, not a map) |
+| 2.3 | Glass-box brain v1 (orchestration + explainability; NOT channel-yield RL) | brain explains each decision; no regression vs greedy on capture | done (sandbox) — every recommendation carries a human-readable reason; capture A/B is a real-hardware claim, unverified |
+| 2.4 | Beast Packs incl. opt-in Kali-tools repo; pwnagotchi-plugin compat shim | a pwnagotchi plugin loads via the shim; a pack installs/removes cleanly | done (sandbox) for pack manager + pwn-shim; **opt-in Kali-tools pack repo itself still TBD** |
 
 > Scope reminder (AGENTS.md): authorized/passive by default; firing-capable work needs the
 > empty-by-default allowlist gate and only lands with the lead's explicit sign-off.
