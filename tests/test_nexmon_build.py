@@ -4,6 +4,39 @@ from pathlib import Path
 
 import pytest
 
+
+def test_multi_kernel_build_cleans_stale_objects_and_checks_vermagic(tmp_path):
+    import os
+    import subprocess
+    import sys
+    if sys.platform == "win32":
+        pytest.skip("Linux build scripts")
+    helper = path.with_name("target-kernel.sh")
+    driver = tmp_path / "driver"
+    driver.mkdir()
+    # Fixture models the observed Kbuild cache: without clean, the next kernel
+    # inherits the first kernel's module metadata.
+    script = '''
+set -eu
+source "$1"
+driver=$2
+make() {
+    case ${@: -1} in
+        clean) rm -f "$driver/kernel" ;;
+        modules) test -f "$driver/kernel" || basename "${2%/build}" > "$driver/kernel" ;;
+    esac
+}
+modinfo() { printf '%s SMP aarch64\n' "$(cat "$driver/kernel")"; }
+nexmon_build_module 6.12.109+rpt-rpi-2712 /modules/6.12.109+rpt-rpi-2712 "$driver"
+nexmon_build_module 6.12.109+rpt-rpi-v8 /modules/6.12.109+rpt-rpi-v8 "$driver"
+test "$(cat "$driver/kernel")" = 6.12.109+rpt-rpi-v8
+modinfo() { echo '6.12.109+rpt-rpi-2712 SMP aarch64'; }
+if nexmon_build_module 6.12.109+rpt-rpi-v8 /modules/6.12.109+rpt-rpi-v8 "$driver"; then exit 9; fi
+'''
+    result = subprocess.run(["bash","-c",script,"bash",str(helper),str(driver)],text=True,capture_output=True,timeout=20,env=os.environ)
+    assert result.returncode == 0, result.stderr
+    assert "Driver kernel mismatch" in result.stderr
+
 path = Path(__file__).resolve().parents[1] / "image/stage-redux/00-redux/files/patch-nexmon-driver.py"
 spec = importlib.util.spec_from_file_location("nexmon_compat", path)
 compat = importlib.util.module_from_spec(spec)

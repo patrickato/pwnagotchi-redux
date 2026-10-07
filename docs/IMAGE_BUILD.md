@@ -85,6 +85,10 @@ service shutdown, target selection for both v8/2712, rejection of armhf/unknown
 kernels, installed-package filtering and compatibility adapters.
 The earlier armhf image is historical evidence only and does not validate this
 arm64 build. Each PR records the current build result and physical gates honestly.
+External nexmon objects are cleaned between the v8 and 2712 builds, and the
+resulting module's actual vermagic must match that target before installation.
+An initial arm64 export exposed stale 2712 objects in the v8 path; that artifact
+is rejected, even though its archive and checksum manifests were internally valid.
 
 **Hardware gate — Pi 4 AND Pi 5 (no boards available in this session):**
 Flash the arm64 artifact, provision locally, then record the image SHA256, model
