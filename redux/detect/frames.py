@@ -37,6 +37,8 @@ class Frame:
     ble_service_uuid: str = ""
     eapol_msg: int = 0
     pmf: str = ""  # required | optional | none |
+    # 802.11w / PMF advertised: "required" | "optional" | "none" | ""
+    pmf: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bssid", (self.bssid or "").lower())

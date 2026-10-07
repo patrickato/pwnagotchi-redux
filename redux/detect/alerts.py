@@ -20,6 +20,10 @@ class AlertKind(str, Enum):
     BLE_FLOOD = "ble_flood"
     PMF_MISSING = "pmf_missing"
     PINEAPPLE = "pineapple"
+    LOUD_PROBER = "loud_prober"
+    PINEAPPLE = "pineapple"
+    PMF_MISSING = "pmf_missing"
+    BLE_FLOOD = "ble_flood"
 
 
 @dataclass(frozen=True)
