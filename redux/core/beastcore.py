@@ -339,6 +339,25 @@ class Beastcore:
     def scope_sync(self):
         return getattr(self, "_scope_sync", None)
 
+    # --- autonomous kill-chain operator ------------------------------------ #
+
+    def operator(self):
+        """An Operator bound to this box's live Scope, posture, and capabilities —
+        so its gates reflect the real device (capture engine present or not, etc.)."""
+        from ..operator import Operator
+        g = self.capability_graph()
+        caps = {Cap.CAPTURE_HANDSHAKE.value: g.explain(Cap.CAPTURE_HANDSHAKE)["available"]}
+        return Operator(self.scope, offense_enabled=self.offense_enabled(), caps=caps)
+
+    def campaign_plan(self, targets) -> list:
+        """Dry-run plan of the kill-chain for `targets` — glass-box, nothing runs."""
+        return [s.to_dict() for s in self.operator().plan(targets)]
+
+    def run_campaign(self, targets, executors, *, recon=None) -> dict:
+        """Execute the kill-chain via injected executors; the action log feeds the
+        engagement report (out-of-scope steps are gated out, never run)."""
+        return self.operator().run(targets, executors, recon=recon)
+
     def sense_status(self) -> dict:
         eng = self.sense()
         return eng.status() if eng is not None else {

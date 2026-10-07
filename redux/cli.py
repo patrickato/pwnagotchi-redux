@@ -194,6 +194,68 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_campaign(args) -> int:
+    """Autonomous kill-chain operator. `plan` shows the gated chain (glass-box, no
+    exec); `demo` runs it with fake executors under a persona, then renders the
+    engagement report so you see the chain-of-authorization it produced."""
+    from .operator import Operator, Phase
+    from .core import persona as _persona
+    scope = Scope.load(args.scope_file)
+    offense = _persona.get(args.persona).offense_available if args.persona else True
+    targets = args.targets or ["00:11:22:33:44:55", "aa:bb:cc:dd:ee:ff"]
+
+    if args.campaign_cmd == "plan":
+        op = Operator(scope, offense_enabled=offense, caps={"capture.handshake": not args.no_engine})
+        print(f"kill-chain plan (persona={args.persona or 'none'}, offense={offense}, "
+              f"capture_engine={not args.no_engine}):")
+        for s in op.plan(targets):
+            print(f"  [{'ok   ' if s.allowed else 'BLOCK'}] {s.target:20} {s.phase.value:11} "
+                  f"{s.action:18} — {s.reason}")
+        return 0
+
+    # demo: fake executors that succeed; capture engine assumed present
+    op = Operator(scope, offense_enabled=offense, caps={"capture.handshake": True})
+    def _ok(name):
+        return lambda t: (True, f"{name} ok on {t}")
+    execs = {Phase.CAPTURE: _ok("capture"), Phase.CRACK: _ok("crack"),
+             Phase.PIVOT_SCAN: _ok("scan"), Phase.PIVOT_CRED: _ok("cred-test"),
+             Phase.LOOT: _ok("loot")}
+    out = op.run(targets, execs, recon=lambda: (True, "12 APs seen"))
+    for s in out["steps"]:
+        tag = "exec " if s["executed"] else ("BLOCK" if not s["allowed"] else "stop ")
+        print(f"  [{tag}] {s['target']:20} {s['phase']:11} — {s.get('result') or s['reason']}")
+    print(f"summary: {out['summary']['reason']}")
+    from .report import build_report
+    rep = build_report("autonomous campaign", "operator", scope, out["log"])
+    print(f"report integrity: {rep['integrity']} ({rep['unauthorized_count']} out-of-scope)")
+    return 0
+
+
+def cmd_hunt(args) -> int:
+    """Fox-hunt demo: a SIMULATED approach then retreat, showing warmer/colder, the
+    proximity band, and (with GPS-tagged samples) a position estimate + bearing."""
+    from .hunt import FoxHunt, HuntObservation
+    print("redux hunt demo — SIMULATED RSSI gradient to a target (no radio)")
+    fh = FoxHunt(target=args.target or "00:11:22:33:44:55")
+    # approach (rising RSSI), with a couple of GPS fixes, then retreat
+    seq = [(-88, None), (-82, (45.00, -93.00)), (-74, (45.001, -93.001)),
+           (-66, (45.0015, -93.0012)), (-58, (45.002, -93.0015)),
+           (-70, None), (-80, None), (-88, None)]
+    st = None
+    for rssi, pos in seq:
+        obs = HuntObservation(rssi=rssi, lat=(pos[0] if pos else None),
+                              lon=(pos[1] if pos else None))
+        st = fh.observe(obs)
+        line = f"  rssi {rssi:>4}  → {st.trend:7} [{st.band}]"
+        if st.bearing_compass:
+            line += f"  bearing {st.bearing_deg:.0f}deg {st.bearing_compass}"
+        print(line)
+    if st and st.estimate:
+        e = st.estimate
+        print(f"  estimate: {e['lat']:.5f},{e['lon']:.5f} +/-{e['error_radius_m']:.0f} m")
+    return 0
+
+
 def cmd_mesh(args) -> int:
     """Mesh demo: a 3-node swarm sharing one authorized Scope over the (simulated)
     LoRa lane — arm on one node, it converges everywhere; a forged delta (wrong
@@ -589,6 +651,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    ca = sub.add_parser("campaign", help="autonomous glass-box kill-chain operator")
+    ca.add_argument("--persona", help="posture (red/purple = offense; blue/recon = detection-only)")
+    ca.add_argument("--scope-file", default=_DEFAULT_SCOPE_PATH)
+    casub = ca.add_subparsers(dest="campaign_cmd", required=True)
+    cap_ = casub.add_parser("plan", help="dry-run the gated chain (nothing executes)")
+    cap_.add_argument("--targets", nargs="*", help="targets to run the chain against")
+    cap_.add_argument("--no-engine", action="store_true", help="plan as if no capture engine present")
+    cad_ = casub.add_parser("demo", help="run the chain with fake executors + render the report")
+    cad_.add_argument("--targets", nargs="*", help="targets to run the chain against")
+    ca.set_defaults(func=cmd_campaign)
+
+    hu = sub.add_parser("hunt", help="RSSI-gradient fox-hunt (warmer/colder + bearing)")
+    husub = hu.add_subparsers(dest="hunt_cmd", required=True)
+    hud = husub.add_parser("demo", help="simulated approach/retreat to a target")
+    hud.add_argument("--target", help="target BSSID/SSID to hunt")
+    hu.set_defaults(func=cmd_hunt)
 
     me = sub.add_parser("mesh", help="off-grid swarm — authenticated distributed Scope sync")
     mesub = me.add_subparsers(dest="mesh_cmd", required=True)
