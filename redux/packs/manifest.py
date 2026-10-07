@@ -1,4 +1,4 @@
-"""Beast Pack manifest — the unit of opt-in capability (task 2.4).
+"""Pack manifest — the unit of opt-in capability (task 2.4).
 
 A pack is how redux stays lean: the base image ships small, and everything else —
 a plugin, a tool bundle (e.g. the opt-in Kali-tools pack), a detector/geo suite —

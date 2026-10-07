@@ -1,4 +1,4 @@
-from redux.core import Beastcore, Signal
+from redux.core import Augur, Signal
 from redux.radio import Radio, Intent
 from redux.detect import DetectEngine, RogueAPDetector, TrustedNetwork
 from redux.engine import normalize_event
@@ -19,7 +19,7 @@ def _evs(specs):
 
 
 def test_assembles_and_reports_status():
-    bc = Beastcore([ONBOARD, ALFA], intent=Intent.HUNT)
+    bc = Augur([ONBOARD, ALFA], intent=Intent.HUNT)
     st = bc.status()
     assert st["intent"] == "hunt"
     assert st["capture_iface"] == "wlan1"
@@ -33,7 +33,7 @@ def test_pump_geotags_events_into_store():
         {"tag": "wifi.ap.new", "time": 2.0, "data": {"mac": "aa:bb:cc:dd:ee:02", "essid": "Cafe", "channel": 11, "rssi": -70}},
         {"tag": "wifi.client.handshake", "time": 3.0, "data": {"ap": "aa:bb:cc:dd:ee:01"}},
     ])
-    bc = Beastcore([ONBOARD, ALFA], intent=Intent.HUNT, driver=FakeDriver(evs),
+    bc = Augur([ONBOARD, ALFA], intent=Intent.HUNT, driver=FakeDriver(evs),
                    position_provider=lambda: (40.1, -82.9))
     bc.pump()
     assert bc.store.count() == 2                 # two APs stored; handshake isn't a sighting
@@ -47,7 +47,7 @@ def test_detects_rogue_ap_through_the_pipeline_and_narrates():
         {"tag": "wifi.ap.new", "time": 1.0, "data": {"mac": "11:11:11:11:11:11", "essid": "Home", "channel": 6}},
         {"tag": "wifi.ap.new", "time": 2.0, "data": {"mac": "99:99:99:99:99:99", "essid": "Home", "channel": 6}},
     ])
-    bc = Beastcore([ONBOARD, ALFA], intent=Intent.HUNT, driver=FakeDriver(evs), detect_engine=engine)
+    bc = Augur([ONBOARD, ALFA], intent=Intent.HUNT, driver=FakeDriver(evs), detect_engine=engine)
     alerts = bc.pump()
     assert any("rogue" in a.kind.value for a in alerts)
     assert bc.bus.history(Signal.ALERT)                 # alert flowed on the bus
@@ -56,7 +56,7 @@ def test_detects_rogue_ap_through_the_pipeline_and_narrates():
 
 def test_no_gps_still_records_sighting_without_position():
     evs = _evs([{"tag": "wifi.ap.new", "time": 1.0, "data": {"mac": "de:ad:be:ef:00:01", "essid": "X"}}])
-    bc = Beastcore([ONBOARD], intent=Intent.RECON, driver=FakeDriver(evs))  # no position_provider
+    bc = Augur([ONBOARD], intent=Intent.RECON, driver=FakeDriver(evs))  # no position_provider
     bc.pump()
     row = bc.store.query()[0]
     assert row.lat is None and row.lon is None          # honest: recorded, no invented fix
@@ -69,7 +69,7 @@ def test_ble_flood_detected_and_ble_devices_stored_through_pump():
         {"tag": "ble.device.new", "time": 2000.0 + i * 0.01, "data": {"mac": f"aa:bb:cc:00:00:{i:02x}"}}
         for i in range(21)  # > ble_flood threshold (20) inside the 5s window
     ])
-    bc = Beastcore([ONBOARD], intent=Intent.RECON, driver=FakeDriver(evs))
+    bc = Augur([ONBOARD], intent=Intent.RECON, driver=FakeDriver(evs))
     alerts = bc.pump()
     assert any(a.kind.value == "ble_flood" for a in alerts)       # bridge -> BLE detector fired
     assert bc.bus.history(Signal.ALERT)                            # alert reached the bus
@@ -98,7 +98,7 @@ def test_sightings_are_coalesced_into_one_batched_write_per_pump():
         {"tag": "wifi.ap.new", "time": float(i), "data": {"mac": f"aa:bb:cc:00:00:{i:02x}", "essid": "X"}}
         for i in range(10)
     ])
-    bc = Beastcore([ONBOARD], intent=Intent.RECON, driver=FakeDriver(evs), store=store)
+    bc = Augur([ONBOARD], intent=Intent.RECON, driver=FakeDriver(evs), store=store)
     bc.pump()
     assert store.count() == 10               # all persisted
     assert store.insert_calls == 0           # NOT one insert per event
@@ -109,7 +109,7 @@ def test_sightings_are_coalesced_into_one_batched_write_per_pump():
 
 def test_governor_decision_surfaces_in_status():
     from redux.core import Reading
-    bc = Beastcore([ONBOARD], intent=Intent.RECON)
+    bc = Augur([ONBOARD], intent=Intent.RECON)
     # default (no readings) -> FULL, scale 1.0
     assert bc.status()["governor"]["mode"] == "full"
     assert bc.govern_scale() == 1.0

@@ -80,5 +80,5 @@ evil-portal, the active side of karma/rogue-AP. None of it is watered down.
 
 ## Data bus (carried over from plugins-wip)
 
-Suites/consumers converge on fixed default paths so integration "just works." Beastcore joins as a
+Suites/consumers converge on fixed default paths so integration "just works." Augur joins as a
 read-only consumer. Keep that contract when porting.

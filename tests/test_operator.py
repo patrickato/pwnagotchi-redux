@@ -5,7 +5,7 @@ run path that advances only while steps succeed and feeds a CLEAN report when al
 executed actions were in scope.
 """
 from redux.operator import Operator, Phase
-from redux.core import Scope, Beastcore
+from redux.core import Scope, Augur
 from redux.radio import Radio, Intent
 from redux.report import build_report
 
@@ -108,11 +108,11 @@ def test_run_log_excludes_passive_recon():
     assert all(a.action != "wifi_recon" for a in out["log"])
 
 
-# --- Beastcore integration --------------------------------------------------- #
+# --- Augur integration --------------------------------------------------- #
 
-def test_beastcore_campaign_plan_reflects_posture_and_engine():
+def test_augur_campaign_plan_reflects_posture_and_engine():
     r = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=True, driver="mt76")
-    bc = Beastcore(radios=[r], intent=Intent.RECON)       # no driver → no capture engine
+    bc = Augur(radios=[r], intent=Intent.RECON)       # no driver → no capture engine
     bc.scope = _scope()
     bc.apply_persona("red")
     plan = bc.campaign_plan([ARMED])

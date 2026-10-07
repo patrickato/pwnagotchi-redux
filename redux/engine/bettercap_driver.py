@@ -3,7 +3,7 @@
 This is the engine that replaces pwnagotchi's supervisor role: drive bettercap
 (the capture engine) with no pwnagotchi in the path. pwnagotchi drove bettercap
 for only wifi.recon/deauth/assoc + handshake pcap; this driver is built to expose
-the whole surface (atlas B-1: the event stream as Beastcore's nervous system).
+the whole surface (atlas B-1: the event stream as Augur's nervous system).
 
 Design for testability: all I/O goes through a `Transport` (a tiny protocol:
 `run(cmd)`, `session()`, `events()`). The live transport (`HttpTransport`) is

@@ -18,7 +18,7 @@ defense platform.
 - `CollectingNotifier` (log/test) and `CallableNotifier(fn)` — wrap any sender,
   e.g. a LoRa mesh `send`, as the notifier. Honest absence: no notifier → it still
   records to history.
-- Beastcore: `enable_sentinel(notifier, armed, min_severity)`; `pump()` routes
+- Augur: `enable_sentinel(notifier, armed, min_severity)`; `pump()` routes
   detector alerts to it and `observe_csi()` routes CSI motion; `sentinel_status()`.
 - CLI: `redux sentinel demo` (a simulated armed stream showing dispatch, de-dup,
   and armed-vs-home suppression). Pairs with `redux persona apply blue`.

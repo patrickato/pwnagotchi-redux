@@ -30,7 +30,7 @@ with the reason, when any gate fails).
   conversion doesn't depend on it — it takes fields directly).
 - `EapHarvester` — honest tool-absence for the AP binary; `plan()` is fully gated.
 - `authorize_eap(scope, ssid, authorized, active)` — the reusable gate.
-- Beastcore `eap_plan()`; CLI `redux eap plan|parse`.
+- Augur `eap_plan()`; CLI `redux eap plan|parse`.
 
 ## Needs-hardware
 

@@ -2,7 +2,7 @@
 
 **Status: implemented.** The decision below is wired — `redux/crack/capture.py`
 registers both engines as `CAPTURE_HANDSHAKE` providers (AngryOxide preferred when
-present, honest tool-absence fallback to bettercap), `Beastcore.capture_plan()`
+present, honest tool-absence fallback to bettercap), `Augur.capture_plan()`
 builds a Scope-aimed, posture-correct plan, and `redux capture plan` shows it
 (incl. the exact AngryOxide command it would run).
 

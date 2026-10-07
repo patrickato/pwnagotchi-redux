@@ -141,7 +141,7 @@ def sanitize_file(in_path: str, out_path: str, *, seed: str = "redux-ghost",
 class GhostRecorder:
     """Capture the live event stream to the replay JSON schema, for later re-run.
 
-    Attach to a Beastcore's bus; it records each normalized event as
+    Attach to a Augur's bus; it records each normalized event as
     `{"tag", "time", "data"}`. `dump()` writes them (optionally ghosted first, so
     a shared recording never leaks real identities)."""
     _events: List[dict] = field(default_factory=list)

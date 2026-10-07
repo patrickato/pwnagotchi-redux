@@ -12,8 +12,8 @@ _Proposed 2026-10-06. Status: notes only, nothing built yet. For patrickato/test
 
 Instead of six plugins each reinventing storage and plotting, build **two shared pieces once**, then everything is a thin view on top:
 
-- **BeastSpatialDB** — one SQLite store of "sightings": `(kind, id, ssid/name, channel/freq, rssi, lat, lon, bearing, first_seen, last_seen, meta_json)`. `kind` = ap | client | capture | attack_event | tracker. Everything below writes rows here.
-- **BeastPlot** — the offline plot/map engine from the wardrive map (true-distance projection, color/size encoding, live redraw, filters). Every "map" below is just BeastPlot pointed at a filtered query of BeastSpatialDB.
+- **SpatialDB** — one SQLite store of "sightings": `(kind, id, ssid/name, channel/freq, rssi, lat, lon, bearing, first_seen, last_seen, meta_json)`. `kind` = ap | client | capture | attack_event | tracker. Everything below writes rows here.
+- **BeastPlot** — the offline plot/map engine from the wardrive map (true-distance projection, color/size encoding, live redraw, filters). Every "map" below is just BeastPlot pointed at a filtered query of SpatialDB.
 
 Why this matters: Capture Map, RSSI/DF Map, Attacker Locator and Tracker Locator stop being four map projects and become four queries against one engine. Half the code, one consistent UI, and they cross-reference each other for free.
 
@@ -21,7 +21,7 @@ Why this matters: Capture Map, RSSI/DF Map, Attacker Locator and Tracker Locator
 
 ## 1. Capture → Crack pipeline (3 tools, one flow)
 
-Flow: **pwnagotchi captures** → **Triage scores it** → **Crack Pipeline offloads it** → **results land on the Map + CrackHouse**. Each stage writes to BeastSpatialDB so the map always reflects truth.
+Flow: **pwnagotchi captures** → **Triage scores it** → **Crack Pipeline offloads it** → **results land on the Map + CrackHouse**. Each stage writes to SpatialDB so the map always reflects truth.
 
 ### 1a. CaptureTriageNG
 | | |
@@ -89,6 +89,6 @@ This is the blue-team piece reshaped the way you actually want it: not "a deauth
 
 ## Repo placement & how to add
 
-- **Where:** this is an idea-backlog/proposal doc, same shape as `OFFENSIVE_BLUETOOTH_IDEAS_2026-09-29.md`. Drop it at the top level of **patrickato/test-plugins** and link it from `README.md`. When you approve a piece, it graduates to **plugins-wip** as its own suite (BeastSpatialDB + BeastPlot land first as shared deps).
-- **Build order that respects the spine:** BeastSpatialDB + BeastPlot → CaptureTriageNG → CrackPipelineNG → CaptureMapNG → DFMapNG → AttackSourceLocatorNG → TrackerLocatorNG.
+- **Where:** this is an idea-backlog/proposal doc, same shape as `OFFENSIVE_BLUETOOTH_IDEAS_2026-09-29.md`. Drop it at the top level of **patrickato/test-plugins** and link it from `README.md`. When you approve a piece, it graduates to **plugins-wip** as its own suite (SpatialDB + BeastPlot land first as shared deps).
+- **Build order that respects the spine:** SpatialDB + BeastPlot → CaptureTriageNG → CrackPipelineNG → CaptureMapNG → DFMapNG → AttackSourceLocatorNG → TrackerLocatorNG.
 - **Pushing:** direct git push from this session is blocked by the egress proxy — per our setup it goes as a git bundle run by a `.bat` from Explorer on your laptop. I can prep that bundle, or you can drop this file into the repo and commit it yourself with the usual attribution trailer. Say which and I'll set it up.

@@ -38,11 +38,11 @@ that straight to `redux.report.build_report`: an autonomous campaign produces a
 chain-of-authorization report, and because the operator gates out-of-scope targets,
 that report comes back **CLEAN**.
 
-## CLI / Beastcore
+## CLI / Augur
 
 - `redux campaign plan --persona red --scope-file … plan --targets …` — the gated plan.
 - `redux campaign … demo --targets …` — runs with fake executors and renders the report.
-- `Beastcore.operator()` binds the operator to the live Scope + posture +
+- `Augur.operator()` binds the operator to the live Scope + posture +
   capability graph (so the capture-engine gate reflects the real device);
   `campaign_plan()` / `run_campaign()` wrap it.
 

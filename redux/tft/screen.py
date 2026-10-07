@@ -7,7 +7,7 @@ gauges, composed as a static text frame that the display layer pushes only when
 something changes (no animation loop). Monochrome-safe: it relies on glyphs, never
 colour, so it reads the same on a mono panel.
 
-Pure and testable: `render(status, face=…)` turns a `Beastcore.status()` snapshot
+Pure and testable: `render(status, face=…)` turns a `Augur.status()` snapshot
 into a list of fixed-width lines. The actual pixels→SPI push is the thin on-device
 adapter (needs-hardware); everything here is testable with no panel.
 """
@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Dict, List, Optional
+
+from redux.face import face_for
 
 
 class Face(str, Enum):
@@ -83,7 +85,7 @@ def render(status: Dict, *, face: Face = Face.STATUS, width: int = 46,
             body = body + " " * (space - len(body))
         return g["v"] + " " + body + " " + g["v"]
 
-    creature = status.get("creature") or "redux"
+    creature = status.get("creature") or "augur"
     mood = (status.get("mood") or "").upper()
     intent = status.get("intent") or "—"
     persona = status.get("persona")
@@ -91,8 +93,15 @@ def render(status: Dict, *, face: Face = Face.STATUS, width: int = 46,
     narr = status.get("narration") or []
     last = narr[-1] if narr else ""
 
+    # Augur's face — the same deterministic engine the web face uses, so the
+    # creature has one identity whichever way you look at it.
+    fobj = face_for(status)
+    eyes = fobj.eyes(ascii=ascii)
+    fstate = fobj.state.value.upper()
+
     if face is Face.PLAIN:
-        lines = [top(), row(creature, mood), row("")]
+        sub = status.get("creature") or fobj.reason
+        lines = [top(), row(f"{eyes}  augur", fstate), row(sub, mood)]
         tag = f"{intent}" + (f" · {persona}" if persona else "")
         lines.append(row(tag))
         lines.append(mid())
@@ -111,7 +120,7 @@ def render(status: Dict, *, face: Face = Face.STATUS, width: int = 46,
     sent = status.get("sentinel")
 
     lines = [top()]
-    lines.append(row(creature, mood or "·"))
+    lines.append(row(f"{eyes}  augur", fstate or mood or "·"))
     lines.append(mid())
     hat = (persona or "none") + (f"/{posture}" if posture else "")
     lines.append(row(f"intent {intent}", hat))

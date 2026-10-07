@@ -1,13 +1,13 @@
 """Sentinel mode — deploy-and-watch guardian.
 
 Pins dispatch/threshold, windowed de-dup, and the armed-vs-home rule for CSI
-motion (home motion is suppressed, not fired), plus the Beastcore wiring.
+motion (home motion is suppressed, not fired), plus the Augur wiring.
 """
 import math
 
 from redux.sentinel import Sentinel, Severity, CollectingNotifier, CallableNotifier
 from redux.sense.csi import SenseReading, Sense, CsiFrame
-from redux.core import Beastcore
+from redux.core import Augur
 from redux.radio import Intent
 
 
@@ -98,7 +98,7 @@ def test_status_counts_by_severity():
     assert st["dispatched"] == 2 and st["by_severity"]["critical"] == 1 and st["by_severity"]["warn"] == 1
 
 
-# --- Beastcore wiring -------------------------------------------------------- #
+# --- Augur wiring -------------------------------------------------------- #
 
 def _frames(kind, n, t0=0):
     def jit(t, j): return 0.08 * (((t * 2654435761 + j * 40503) % 1000) / 1000.0 - 0.5)
@@ -123,15 +123,15 @@ def test_motion_refires_after_window_using_reading_ts():
     assert s.observe_motion(r3) is not None     # re-fires, not silent forever
 
 
-def test_beastcore_status_includes_sentinel_when_enabled():
-    bc = Beastcore(radios=None, intent=Intent.RECON)
+def test_augur_status_includes_sentinel_when_enabled():
+    bc = Augur(radios=None, intent=Intent.RECON)
     assert "sentinel" not in bc.status()
     bc.enable_sentinel(armed=True)
     assert bc.status().get("sentinel", {}).get("armed") is True
 
 
-def test_beastcore_observe_csi_routes_motion_to_armed_sentinel():
-    bc = Beastcore(radios=None, intent=Intent.RECON)
+def test_augur_observe_csi_routes_motion_to_armed_sentinel():
+    bc = Augur(radios=None, intent=Intent.RECON)
     eng = bc.enable_sense(window=16, sensitivity=5.0)
     eng.calibrate(_frames("quiet", 80))
     bc.enable_sentinel(armed=True)

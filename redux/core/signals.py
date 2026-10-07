@@ -1,8 +1,8 @@
-"""Signal spine — the Beastcore event bus (task 2.1, native).
+"""Signal spine — the Augur event bus (task 2.1, native).
 
 Everything in redux converges here: the Supervisor emits what it decided and saw,
 and consumers (the creature Narrator, the detectors, a web UI, a future brain,
-Beast Core itself) subscribe. One hub, glass-box by construction — every emission
+Augur itself) subscribe. One hub, glass-box by construction — every emission
 is recorded with its payload and time, so you can always see what flowed and why.
 
 Built fresh rather than ported: synchronous, dependency-free, exception-isolated

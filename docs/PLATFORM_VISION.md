@@ -61,7 +61,7 @@ The old A2C is the wrong tool anyway: tiny action space, sparse/noisy reward, sh
 
 1. `epoch.py` already hands you the observation (per-channel AP/STA/peer histograms) and the reward (handshakes/assocs this epoch). Nothing to build there.
 2. `strategy/channels.py` already keeps per-channel outcome stats — it just doesn't *weight* selection by them. Replace "active + random" with "sample channels in proportion to expected capture value, with an exploration term."
-3. Condition the value estimate on **context** from BeastSpatialDB: time-of-day, GPS cell, historical density per channel here. It learns "ch 11 pays off at this spot in the evening" instead of starting cold every boot.
+3. Condition the value estimate on **context** from SpatialDB: time-of-day, GPS cell, historical density per channel here. It learns "ch 11 pays off at this spot in the evening" instead of starting cold every boot.
 4. Keep it **glass-box**: the device surfaces its current belief ("dwelling ch6: 0.8 expected, exploring ch44") on the TFT and in the web UI.
 
 Minimal surgery, no heavy ML stack, explainable, and measurably better than greedy+random — which is a low bar the old AI never actually cleared in practice.
@@ -89,7 +89,7 @@ That combination — solves-the-pain + legible + category-jump + shareable + cha
 
 ## Phased roadmap
 
-1. **Spine** — BeastSpatialDB + BeastPlot + alert bus + capability contract (the Beast Recon Suite spine; everything rides it).
+1. **Spine** — SpatialDB + BeastPlot + alert bus + capability contract (the Beast Recon Suite spine; everything rides it).
 2. **Glass-box brain** — the contextual bandit in the existing observe→strategy→reward loop. The headline differentiator, cheap to prototype.
 3. **Multi-radio ingest** — SDR/BT feeders onto the spine (RF Fusion, rtl_433).
 4. **Compat shim + plugin store** — load existing pwnagotchi plugins; curate/test a trusted set (your audit work *is* the seed).

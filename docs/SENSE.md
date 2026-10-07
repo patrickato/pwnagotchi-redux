@@ -35,7 +35,7 @@ Pure sensing math, fully tested without a radio:
   (autocorrelation). Real in the literature; treated as experimental here.
 - CLI: `redux sense demo` (synthetic quiet→motion→quiet, proves the pipeline) and
   `redux sense replay <frames.json> [--calibrate N]`.
-- Beastcore: `enable_sense()`, `observe_csi(frame)`, `sense_status()`, and a
+- Augur: `enable_sense()`, `observe_csi(frame)`, `sense_status()`, and a
   `sense` block in `status()` when enabled.
 
 ## The honesty contract (same as the rest of redux)

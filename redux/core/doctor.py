@@ -131,7 +131,7 @@ def probe_capture_engine(inp: DoctorInputs) -> Finding:
     """Which capture engine is actually providing CAPTURE_HANDSHAKE — so a box with
     no engine present (no AngryOxide binary, no bettercap driver) can't read clean.
     Not in the built-in set (needs a graph that registers capture providers); the
-    Beastcore doctor path and boot-POST add it, where that graph exists."""
+    Augur doctor path and boot-POST add it, where that graph exists."""
     if inp.graph is None:
         return Finding("capture engine", Status.UNKNOWN, "Can't assess the capture engine.",
                        "no capability graph provided")

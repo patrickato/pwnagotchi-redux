@@ -1,4 +1,4 @@
-"""Pack manager — discover, resolve, enable/disable Beast Packs (task 2.4).
+"""Pack manager — discover, resolve, enable/disable Packs (task 2.4).
 
 Pure logic over a packs directory: it finds pack manifests, resolves a safe
 install/load order from their `requires` (topological, with cycle + missing-dep

@@ -2,7 +2,7 @@
 
     redux status   [--intent I] [--onboard] [--adapter]        one-shot glass-box snapshot
     redux run      --replay events.json [--cycles N] ...        run pump cycles over a recorded session
-    redux packs    --dir D list | enable NAME | disable NAME    manage Beast Packs
+    redux packs    --dir D list | enable NAME | disable NAME    manage Packs
 
 The hardware paths (live probe, a real BettercapDriver) are used when asked; the
 default/testable paths (stub radios, a replay driver) need no Pi. Everything it
@@ -19,7 +19,7 @@ import os
 import time
 
 from .radio import Radio, Intent
-from .core import Beastcore, Scope
+from .core import Augur, Scope
 from .engine import BettercapDriver, ReplayTransport, BettercapConfig
 from .packs import PackManager, DependencyError
 
@@ -49,8 +49,8 @@ def _radios(args) -> List[Radio]:
     return rs
 
 
-def _build(args, driver=None) -> Beastcore:
-    return Beastcore(radios=_radios(args), intent=Intent(args.intent), driver=driver)
+def _build(args, driver=None) -> Augur:
+    return Augur(radios=_radios(args), intent=Intent(args.intent), driver=driver)
 
 
 # --- subcommands ------------------------------------------------------------- #
@@ -691,7 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
     wb.add_argument("--replay", help="path to a recorded bettercap events JSON")
     wb.set_defaults(func=cmd_web)
 
-    pk = sub.add_parser("packs", help="manage Beast Packs")
+    pk = sub.add_parser("packs", help="manage Packs")
     pk.add_argument("--dir", required=True, help="packs directory")
     psub = pk.add_subparsers(dest="pack_cmd", required=True)
     psub.add_parser("list")

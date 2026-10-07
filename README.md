@@ -1,7 +1,13 @@
-# pwnagotchi-redux
+# Augur
+
+*(platform codename `pwnagotchi-redux`)*
 
 A standalone field-OS platform for **Raspberry Pi 4 and Pi 5 (arm64)** — a **successor** to
 pwnagotchi, not a fork. (We deliberately drop the "lesser" boards; see `docs/PLATFORM_TARGET.md`.)
+
+**Augur** is a patient, glass-box familiar that reads the invisible RF world and tells you
+*true* — every decision carries a real, human-readable reason, and it never claims a sense it
+doesn't have. Identity, voice, and the creature face: `docs/AUGUR.md`.
 
 > **Status: feature-complete in the sandbox; not yet hardware-validated.**
 > The full platform — image stack, supervisor spine (signals/brain/actions), capability graph,
@@ -9,7 +15,7 @@ pwnagotchi, not a fork. (We deliberately drop the "lesser" boards; see `docs/PLA
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
 > record/ghost, packs, plugin-compat shim, CLI, and web dashboard —
-> is built and green under the test suite (570+ tests, no hardware required). **No part has had a
+> is built and green under the test suite (602 tests, no hardware required). **No part has had a
 > real-hardware pass on a physical Pi yet** (see *Verification status*). Sandbox-green ≠ done.
 
 ## What it is
@@ -21,7 +27,7 @@ everything above them:
 - **Own lean image** (pi-gen, Debian/Pi-OS stable, **arm64, Pi 4 / Pi 5 only**) — Kali's tools
   available as opt-in packs, never preinstalled.
 - **bettercap driven directly** — no pwnagotchi in the path.
-- **Beastcore as supervisor** (built here, modeled on the `patrickato/beastagotchi` concepts) —
+- **Augur as supervisor** (built here, modeled on the `patrickato/beastagotchi` concepts) —
   a signal bus, actions + transactions, a glass-box brain, packs, and the creature UX.
 - **Radio Orchestrator** — declare an intent (online / hunt / recon / survey); it auto-assigns
   radios to roles, promotes a better adapter on hotplug, falls back on unplug. No more manual
@@ -37,7 +43,7 @@ everything above them:
 | Image | `image/`, `build.sh`, `redux/core/boot.py`, `docs/IMAGE_BUILD.md` | pi-gen base, overlay-rootfs, boot-budget, watchdog, UPS/battery, RAUC A/B OTA |
 | Radio | `redux/radio/` | orchestrator (intent→roles), `iw phy` capability probe, udev hotplug, manager |
 | Engine | `redux/engine/` | bettercap driver (REST/ws client surface) |
-| Supervisor spine | `redux/core/` | `SignalBus` pub/sub, `Supervisor`, `Narrator` (creature voice), glass-box `Brain`, `ActionRegistry` + transactions, `Beastcore` capstone |
+| Supervisor spine | `redux/core/` | `SignalBus` pub/sub, `Supervisor`, `Narrator` (creature voice), glass-box `Brain`, `ActionRegistry` + transactions, `Augur` capstone |
 | Capability graph | `redux/core/capabilities.py` | shared capability vocabulary; packs/radios/GPS/SDR/firing gate as providers; `explain()` / `active_provider()` / `blast_radius()` |
 | Central Scope | `redux/core/scope.py`, `redux/core/labscope.py` | the one authorized-target list every firing function consults (BSSID/SSID/CIDR, per-job, expiry, bulk-load, arm-lab, **auto-arm your own kit**) |
 | Governor | `redux/core/governor.py` | heat/power/load/RAM shedding (FULL→SURVIVAL), immediate-escalate + held recovery; drives write/loop cadence |
@@ -64,7 +70,7 @@ everything above them:
 | Capture tap | `redux/captap/` | raw 802.11 parser (deauth/disassoc + probe-request **IE fingerprint**) feeding the Dex (real cross-MAC re-id) + flood detectors — the P0 gap, producer side done |
 | CLI | `redux/cli.py` | `redux status / run / web / tft / captap / packs / doctor / post / persona / sense / sentinel / mesh / campaign / hunt / capture / eap / range / report / scope / dex / expedition / ghost` |
 
-Everything assembles on one bus through `Beastcore` and runs as a single system. Offensive
+Everything assembles on one bus through `Augur` and runs as a single system. Offensive
 capabilities are full-power but consult the central Scope for aiming (see below).
 
 ## Scope — a full toolkit, not a cage
@@ -112,7 +118,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 redux/radio/      Radio Orchestrator (decision engine + probe + hotplug)
 redux/engine/     bettercap driver
 redux/core/       Supervisor spine: signals, narrator, brain, actions, capability graph,
-                  Scope, Governor, Doctor, boot-POST, Beastcore
+                  Scope, Governor, Doctor, boot-POST, Augur
 redux/detect/     passive detector suite + engine/registry
 redux/geo/        spatial database + WiGLE/GPS/coverage/export
 redux/dex/        Field Dex (recon ledger) + device fingerprint identity (cross-MAC re-id)
@@ -131,10 +137,11 @@ redux/operator/   autonomous glass-box kill-chain (recon→capture→crack→piv
 redux/hunt/       RSSI-gradient fox-hunt (warmer/colder + bearing)
 redux/expedition/ named field sessions + Wrapped recap
 redux/replay/     record a session + sanitized "ghost" for safe replay/sharing
-redux/packs/      Beast Packs (manifest + manager)
+redux/packs/      Packs (manifest + manager)
 redux/compat/     pwnagotchi-plugin compat shim
+redux/face/       Augur's face — one deterministic expression engine (TFT + web share it)
 redux/web/        glass-box dashboard + live moving map (client-rendered)
-redux/tft/        lean on-device TFT faces (plain/status, box-drawing, no animation)
+redux/tft/        lean on-device TFT faces (plain/status, box-drawing, event-driven redraw)
 redux/captap/     raw 802.11 tap (deauth + probe-request IE fingerprint → Dex/detectors)
 redux/cli.py      operator entrypoint (status/run/web/tft/captap/packs/doctor/post/persona/sense/sentinel/mesh/campaign/hunt/capture/eap/range/report/scope/dex/expedition/ghost)
 image/            pi-gen image stack (boot, overlay, watchdog, UPS, OTA)
@@ -171,7 +178,7 @@ redux tft --demo       # preview the on-device TFT face (--face plain|status, --
 redux captap demo      # raw-frame tap: re-identify a phone across MAC rotation (PNL/IE)
 redux expedition       # start/end a field session + Wrapped recap
 redux ghost in.json out.json   # sanitize a recording for safe replay/sharing
-redux packs            # manage Beast Packs
+redux packs            # manage Packs
 ```
 
 Requires Python 3.11+.

@@ -18,7 +18,7 @@ re-identification. One tap feeds all three.
 - **CaptureTap** (`tap.py`): routes probe-requests into the fingerprint Dex (real
   PNL + IE → cross-MAC re-identification) and deauth/disassoc into normalized
   `DeauthEvent`s.
-- **Beastcore.ingest_frames(frames)** + `redux captap demo`: synthetic frames show a
+- **Augur.ingest_frames(frames)** + `redux captap demo`: synthetic frames show a
   phone re-identified across two randomized MACs (shared PNL + IE → one device,
   strength 1.00) alongside a staged deauth burst.
 

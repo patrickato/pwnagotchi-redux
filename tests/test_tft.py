@@ -1,6 +1,6 @@
 """TFT screen renderer — lean, fixed-width, monochrome-safe faces."""
 from redux.tft import Face, render, render_text
-from redux.core import Beastcore
+from redux.core import Augur
 from redux.radio import Radio, Intent
 
 
@@ -68,10 +68,10 @@ def test_long_narration_is_clipped():
     assert any("…" in l for l in lines)               # the long line got an ellipsis
 
 
-# --- Beastcore hook ---------------------------------------------------------- #
+# --- Augur hook ---------------------------------------------------------- #
 
-def test_beastcore_tft_frame():
+def test_augur_tft_frame():
     r = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=False, driver="brcmfmac", onboard=True)
-    bc = Beastcore(radios=[r], intent=Intent.RECON)
+    bc = Augur(radios=[r], intent=Intent.RECON)
     frame = bc.tft_frame(face="status")
     assert isinstance(frame, list) and frame and all(len(l) == len(frame[0]) for l in frame)

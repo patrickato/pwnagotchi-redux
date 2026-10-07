@@ -12,7 +12,7 @@ purple Range coverage score — collapses into one report a pro can hand a clien
 - `EngagementAction` — one recorded action (ts, action, target, reason, result).
 - `build_report(...)` — aggregates actions + the live Scope into a structured
   report dict; `render_markdown(report)` renders the deliverable.
-- `Beastcore.engagement_report(...)` — builds it from the box's live Scope and
+- `Augur.engagement_report(...)` — builds it from the box's live Scope and
   folds in the Dex summary as findings.
 - CLI: `redux report demo` (a sample, including one deliberately out-of-scope
   action so you can see the flag), `redux report build --actions acts.json`

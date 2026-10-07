@@ -1,6 +1,6 @@
 """Web status dashboard — the glass-box view in a browser (atlas P-11).
 
-Serves two things from a running Beastcore: `GET /api/status` (the JSON snapshot)
+Serves two things from a running Augur: `GET /api/status` (the JSON snapshot)
 and `GET /` (a self-contained page that polls it and shows what the device is doing
 and *why*). No external assets, no fake data — it renders exactly what the system
 reports.
@@ -32,23 +32,23 @@ _SCOPE_HOST = {
 }
 
 
-def status_payload(beastcore) -> Dict:
-    """The snapshot the dashboard renders: Beastcore.status() + recent narration +
+def status_payload(augur) -> Dict:
+    """The snapshot the dashboard renders: Augur.status() + recent narration +
     located sightings + this device's own position (for the moving map)."""
-    data = dict(beastcore.status())
-    data["narration"] = [l.text for l in beastcore.narrator.lines(12)]
+    data = dict(augur.status())
+    data["narration"] = [l.text for l in augur.narrator.lines(12)]
     data["located"] = (
-        beastcore.located_sightings() if hasattr(beastcore, "located_sightings") else []
+        augur.located_sightings() if hasattr(augur, "located_sightings") else []
     )
     data["position"] = (
-        beastcore.current_position() if hasattr(beastcore, "current_position") else None
+        augur.current_position() if hasattr(augur, "current_position") else None
     )
     return data
 
 
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>redux</title><style>
+<title>Augur</title><style>
 :root{--bg:#0a0e13;--fg:#e6edf3;--mut:#8b98a5;--dim:#5a7187;--acc:#4ec9b0;--warn:#e3b341;
 --crit:#f85149;--card:#121922;--line:#1f2a35;--wifi:#5aa0ff;--ble:#9a7bff;--me:#4ec9b0;
 --mono:ui-monospace,Menlo,Consolas,monospace}
@@ -63,6 +63,10 @@ main{max-width:900px;margin:0 auto;padding:16px;display:grid;gap:13px}
 .row{display:flex;flex-wrap:wrap;gap:12px}.kv{flex:1 1 120px}
 .k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
 .v{font-size:17px;margin-top:2px}.creature{font-size:19px;color:var(--acc)}
+.face{font-size:34px;line-height:1;letter-spacing:2px;color:var(--acc);transition:color .25s}
+.face.crit{color:var(--crit)}.face.blinded{color:var(--dim)}
+@keyframes fpop{0%{transform:translateY(-3px) scale(1.07)}60%{transform:none}100%{transform:none}}
+.face.pop{animation:fpop .5s ease}
 .reason{color:var(--mut);font-size:12px;margin-top:4px}
 ul{margin:6px 0 0;padding-left:16px}li{color:var(--mut);font-size:12px}
 .badge{display:inline-block;padding:1px 8px;border-radius:999px;background:#1d2630;font-size:12px}
@@ -79,10 +83,10 @@ body[data-skin="plain"] .rich{display:none}
 body[data-skin="plain"]{--card:#0d1319}
 body[data-skin="plain"] .card{border-color:#16202a}
 </style></head><body data-skin="rich">
-<header><h1>redux</h1><span class="mut" id="sub">glass-box</span><span class="sp"></span>
+<header><h1>Augur</h1><span class="mut" id="sub">glass-box</span><span class="sp"></span>
  <button id="skinbtn" title="toggle skin">rich</button></header>
 <main>
- <div class="card"><div class="creature" id="creature">…</div><div class="reason" id="mood"></div></div>
+ <div class="card"><div class="face" id="face">‹·_·›</div><div class="creature" id="creature">…</div><div class="reason" id="mood"></div></div>
  <div class="card rich"><div class="k">airspace · real GPS fixes only · moves as you move</div>
    <div id="wrap"><svg id="map" viewBox="0 0 400 340" preserveAspectRatio="xMidYMid meet"
      aria-label="live sighting map"></svg></div>
@@ -110,19 +114,23 @@ body[data-skin="plain"] .card{border-color:#16202a}
 </main>
 <script>
 var TRACK=[],SPARK=[],lastSight=null;
-var skin=(function(){try{return localStorage.getItem('redux.skin')||'rich'}catch(e){return 'rich'}})();
+var skin=(function(){try{return localStorage.getItem('augur.skin')||'rich'}catch(e){return 'rich'}})();
 function applySkin(){document.body.setAttribute('data-skin',skin);
  var b=document.getElementById('skinbtn');b.textContent=skin;b.className=skin==='rich'?'on':''}
 document.getElementById('skinbtn').onclick=function(){skin=(skin==='rich')?'plain':'rich';
- try{localStorage.setItem('redux.skin',skin)}catch(e){}applySkin()};
+ try{localStorage.setItem('augur.skin',skin)}catch(e){}applySkin()};
 applySkin();
 function setb(id,txt,cls){var e=document.getElementById(id);e.textContent=txt;e.className='badge'+(cls?' '+cls:'')}
 async function tick(){try{const r=await fetch('/api/status');const d=await r.json();
  document.getElementById('sub').textContent='glass-box';paint(d);
 }catch(e){document.getElementById('sub').textContent='disconnected'}}
 function paint(d){
+ var fe=document.getElementById('face'),nf=d.face||'‹·_·›';
+ var base='face'+(d.face_state==='ruffle'?' crit':'')+(d.face_state==='blind'?' blinded':'');
+ if(fe.textContent!==nf){fe.textContent=nf;fe.className=base;void fe.offsetWidth;fe.className=base+' pop';}
+ else if(fe.className.replace(' pop','')!==base){fe.className=base;}
  document.getElementById('creature').textContent=d.creature||'…';
- document.getElementById('mood').textContent='mood: '+(d.mood||'');
+ document.getElementById('mood').textContent=d.face_reason||('mood: '+(d.mood||''));
  document.getElementById('persona').textContent=(d.persona||'(none)')+(d.posture?(' · '+d.posture):'');
  document.getElementById('intent').textContent=d.intent||'—';
  document.getElementById('cap').textContent=d.capture_iface||'none';
@@ -208,30 +216,30 @@ def resolve_host(bind_scope: str) -> str:
     return _SCOPE_HOST.get(bind_scope, "127.0.0.1")
 
 
-def serve(beastcore, port: int = 8080, bind_scope: str = "localhost",
+def serve(augur, port: int = 8080, bind_scope: str = "localhost",
           interval: float = 2.0, pump: bool = True, _cycles=None):
     """Run the dashboard (foreground loop). The HTTP server runs in a daemon thread
     and serves a cached snapshot; this thread owns the SightingStore, so it is the
     only one that pumps and recomputes the snapshot (SQLite is single-thread). Logs
     the exact URL. `_cycles` bounds the loop for tests; otherwise runs until Ctrl-C."""
     host = resolve_host(bind_scope)
-    holder = {"d": status_payload(beastcore)}
+    holder = {"d": status_payload(augur)}
     httpd = ThreadingHTTPServer((host, port), make_handler(lambda: holder["d"]))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     url = f"http://{host}:{port}/"
-    _log.info("redux web dashboard on %s (bind_scope=%s)", url, bind_scope)
-    print(f"redux web dashboard: {url}  (bind_scope={bind_scope})")
+    _log.info("Augur web dashboard on %s (bind_scope=%s)", url, bind_scope)
+    print(f"Augur web dashboard: {url}  (bind_scope={bind_scope})")
     n = 0
     try:
         while _cycles is None or n < _cycles:
             if pump:
-                beastcore.pump()
-            holder["d"] = status_payload(beastcore)   # store touched only in this thread
+                augur.pump()
+            holder["d"] = status_payload(augur)   # store touched only in this thread
             n += 1
             if _cycles is None or n < _cycles:
                 # Governor stretches the cadence under heat/battery load (1.0 until
                 # real readings say otherwise), so hot/low-power = slower loop = fewer writes.
-                scale = beastcore.govern_scale() if hasattr(beastcore, "govern_scale") else 1.0
+                scale = augur.govern_scale() if hasattr(augur, "govern_scale") else 1.0
                 time.sleep(interval * scale)
     except KeyboardInterrupt:
         pass

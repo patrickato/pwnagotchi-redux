@@ -8,7 +8,7 @@ import json
 
 from redux.replay import GhostMapper, GhostRecorder, sanitize_events, sanitize_file
 from redux.replay.ghost import _looks_like_mac
-from redux.core import Beastcore
+from redux.core import Augur
 from redux.radio import Intent
 from redux.engine import BettercapDriver, BettercapConfig, ReplayTransport
 
@@ -97,7 +97,7 @@ def test_sanitize_file_roundtrip(tmp_path):
 
 def _run(events):
     driver = BettercapDriver(config=BettercapConfig(), transport=ReplayTransport(events=events))
-    bc = Beastcore(radios=None, intent=Intent.RECON, driver=driver)
+    bc = Augur(radios=None, intent=Intent.RECON, driver=driver)
     bc.pump()
     return bc
 
@@ -117,7 +117,7 @@ def test_ghost_replays_with_same_shape_and_no_real_identities():
 
 def test_recorder_captures_stream_and_dumps_sanitized(tmp_path):
     driver = BettercapDriver(config=BettercapConfig(), transport=ReplayTransport(events=_REAL))
-    bc = Beastcore(radios=None, intent=Intent.RECON, driver=driver)
+    bc = Augur(radios=None, intent=Intent.RECON, driver=driver)
     rec = GhostRecorder().attach(bc.bus)
     bc.pump()
     assert len(rec.events()) == len(_REAL)          # captured the live stream

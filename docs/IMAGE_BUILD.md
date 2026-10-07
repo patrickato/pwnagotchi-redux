@@ -316,7 +316,7 @@ a spare card; preserved captures and correct read-only mounts after rollback.
 Record firmware versions, actual RAUC status/journals and boot IDs. These checks
 remain unverified without boards, and no automatic rollback success is claimed.
 
-## Beast Packs image infrastructure (Codex backlog 7)
+## Packs image infrastructure (Codex backlog 7)
 
 The image installs `packs list`, `packs install kali-tools --keyring PUBLIC.gpg`
 and `packs remove kali-tools`. `--dry-run` reports the concrete arm64 suite,

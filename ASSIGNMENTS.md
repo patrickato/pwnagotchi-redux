@@ -73,7 +73,7 @@ lead integrates. Mark an item `[PR #n]` when you open its PR so the next agent r
 **Grok detector backlog** (`redux/detect/ tests/test_detect_*.py`) — items 1–6 all DONE/merged:
 1–6. `[done]` detector pack, surveillance, Karma, WPS, alert bus/config, README+NOTES.
 
-**Grok NEW backlog — BeastSpatialDB (geo lane, `redux/geo/ tests/test_geo_*.py`)** — Phase 2.2, the
+**Grok NEW backlog — SpatialDB (geo lane, `redux/geo/ tests/test_geo_*.py`)** — Phase 2.2, the
 spatial keystone. Pull in order; new module, all hardware-free tests. (This is the lane Gemini left.)
 1. `redux/geo/db.py` — a unified **sighting store** (SQLite, stdlib `sqlite3`): one schema for every
    sighting (WiFi/BLE/SDR) — `bssid/mac, ssid, kind, lat, lon, rssi, channel, source_radio, ts,
@@ -98,7 +98,7 @@ GPS/event sources at integration. Everything stays under `redux/detect/` **or** 
 ## Next-batch backlogs (both lanes cleared their first queues — pull from here next)
 
 **Codex next** (image/infra lane): 
-7. Beast Packs infra — an apt repo layout + a `packs` install/remove helper (opt-in Kali-tools pack), image-side only.
+7. Packs infra — an apt repo layout + a `packs` install/remove helper (opt-in Kali-tools pack), image-side only.
 8. A `flash.sh` / release helper that writes the built image to an SD card and verifies it.
 9. CI for the image build (lint the stage scripts; dry-run `./build.sh` arg parsing).
 

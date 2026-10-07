@@ -1,4 +1,4 @@
-"""Hardware-free tests for BeastSpatialDB sighting store (Grok geo #1)."""
+"""Hardware-free tests for SpatialDB sighting store (Grok geo #1)."""
 from __future__ import annotations
 
 import pytest

@@ -7,7 +7,7 @@ from redux.eap import (
     MschapV2Credential, GtcCredential, parse_hostapd_wpe,
     EapHarvester, EapConfig, authorize_eap,
 )
-from redux.core import Scope, Beastcore
+from redux.core import Scope, Augur
 from redux.radio import Intent
 
 
@@ -73,21 +73,21 @@ def test_available_is_honest():
     assert EapHarvester(which=lambda b: "/usr/bin/hostapd-mana").available() is True
 
 
-# --- Beastcore posture flow -------------------------------------------------- #
+# --- Augur posture flow -------------------------------------------------- #
 
 def _bc():
-    bc = Beastcore(radios=None, intent=Intent.RECON)
+    bc = Augur(radios=None, intent=Intent.RECON)
     bc.scope = _scope()
     return bc
 
 
-def test_beastcore_eap_plan_blue_persona_refuses():
+def test_augur_eap_plan_blue_persona_refuses():
     bc = _bc(); bc.apply_persona("blue")
     plan = bc.eap_plan("CorpWiFi", authorized=True)
     assert plan["runnable"] is False and "passive" in plan["reason"]
 
 
-def test_beastcore_eap_plan_red_persona_runs_when_armed_and_authorized():
+def test_augur_eap_plan_red_persona_runs_when_armed_and_authorized():
     bc = _bc(); bc.apply_persona("red")
     plan = bc.eap_plan("CorpWiFi", authorized=True)
     assert plan["runnable"] is True and "hashcat -m 5500" in plan["reason"]

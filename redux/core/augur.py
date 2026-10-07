@@ -1,4 +1,4 @@
-"""Beastcore — the whole platform assembled on one signal bus.
+"""Augur — the whole platform assembled on one signal bus.
 
 This is the capstone: it wires every subsystem together through the `SignalBus`
 so they work as one legible system. One object to construct, drive, and query.
@@ -8,7 +8,7 @@ so they work as one legible system. One object to construct, drive, and query.
     Narrator  (bus)        voices reasons/alerts as the creature
     Brain     (bus)        advises intent from rolling activity + power
     DetectEngine           fed from driver events (via Supervisor.pump)
-    SightingStore          geo-tags each event into BeastSpatialDB
+    SightingStore          geo-tags each event into SpatialDB
 
 Geo-tagging is honest: a sighting is stored with a real fix only when a
 `position_provider` supplies one (live GPS at integration); otherwise the sighting
@@ -24,6 +24,7 @@ from typing import Callable, List, Optional
 
 from ..radio import Intent
 from ..detect import DetectEngine
+from ..face import face_for
 from ..geo import SightingStore, Sighting
 from .supervisor import Supervisor
 from .narrator import Narrator
@@ -40,7 +41,7 @@ _KIND = {"ap.new": "wifi", "ap.lost": "wifi", "client.new": "wifi",
          "ble.new": "ble", "ble.lost": "ble"}
 
 
-class Beastcore:
+class Augur:
     """Assembles and runs the full stack on one bus."""
 
     def __init__(
@@ -499,4 +500,12 @@ class Beastcore:
         if self.sentinel() is not None:
             status["sentinel"] = self.sentinel_status()
         status["capture_engine"] = self.capture_plan().get("selected_engine")
+        # Augur's face: derived from the snapshot above, so the expression always
+        # traces to real state (glass-box). Both glyph sets travel so the TFT can
+        # pick ascii and the web can show the nice one.
+        f = face_for(status)
+        status["face"] = f.eyes()
+        status["face_ascii"] = f.eyes(ascii=True)
+        status["face_state"] = f.state.value
+        status["face_reason"] = f.reason
         return status

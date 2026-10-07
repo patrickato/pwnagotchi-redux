@@ -10,7 +10,7 @@ from redux.core.post import (
     PowerOnSelfTest, PostCheck, PostStatus, Verdict,
 )
 from redux.core.doctor import DoctorInputs, Status, Finding
-from redux.core import Beastcore, Scope
+from redux.core import Augur, Scope
 from redux.radio import Radio, Intent
 
 
@@ -144,7 +144,7 @@ def test_standard_appends_extra_hardware_probes():
     assert any(c.key == "tft" for c in pst.checks)
 
 
-# --- integration through Beastcore ------------------------------------------- #
+# --- integration through Augur ------------------------------------------- #
 
 class _FakeDriver:
     """No-op bettercap driver so the CAPTURE_HANDSHAKE engine is present."""
@@ -153,10 +153,10 @@ class _FakeDriver:
 
 
 def _bc(radios, driver=None):
-    return Beastcore(radios=radios, intent=Intent.RECON, driver=driver)
+    return Augur(radios=radios, intent=Intent.RECON, driver=driver)
 
 
-def test_beastcore_boot_post_ready_with_a_monitor_radio_and_engine():
+def test_augur_boot_post_ready_with_a_monitor_radio_and_engine():
     mon = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=False,
                 driver="brcmfmac", onboard=True)
     rep = _bc([mon], driver=_FakeDriver()).boot_post()   # driver up → capture engine present
@@ -166,7 +166,7 @@ def test_beastcore_boot_post_ready_with_a_monitor_radio_and_engine():
     assert rep["verdict"] == "ready" and rep["ready"] is True
 
 
-def test_beastcore_boot_post_degraded_when_engine_absent():
+def test_augur_boot_post_degraded_when_engine_absent():
     # a monitor radio but NO capture engine (no driver / no AngryOxide) → honest
     # DEGRADED, not READY: you can't capture without an engine.
     mon = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=False,
@@ -177,7 +177,7 @@ def test_beastcore_boot_post_degraded_when_engine_absent():
     assert rep["verdict"] == "degraded" and rep["ready"] is False
 
 
-def test_beastcore_boot_post_halts_without_a_capture_radio():
+def test_augur_boot_post_halts_without_a_capture_radio():
     # a radio that can't do monitor mode → the critical capture check FAILS → HALT
     blind = Radio("wlan9", bands=frozenset({"2.4"}), monitor=False, inject=False,
                   driver="rtl8188", onboard=False)

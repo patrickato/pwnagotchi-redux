@@ -1,4 +1,4 @@
-"""BeastSpatialDB — unified sighting store (stdlib sqlite3).
+"""SpatialDB — unified sighting store (stdlib sqlite3).
 
 One schema for WiFi / BLE / SDR sightings with glass-box provenance on
 every row. Dedup key is (kind, mac): keeps the strongest RSSI sample and

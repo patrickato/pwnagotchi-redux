@@ -17,7 +17,7 @@ Dropping the low end isn't about exclusion — it's what unlocks the product:
 - **arm64 everywhere.** One architecture, 64-bit. No armhf build matrix, no "works on Pi 4 but not
   Zero" driver/firmware splits, simpler nexmon + kernel story.
 - **RAM headroom.** 2–8 GB (Pi 4) / 4–16 GB (Pi 5) vs the Zero's 512 MB. The on-device pieces the
-  atlas wants — BeastSpatialDB, a live offline PMTiles map on the TFT, the glass-box brain, event
+  atlas wants — SpatialDB, a live offline PMTiles map on the TFT, the glass-box brain, event
   correlation, a local wordlist tier — need real memory. They're impossible on the low end.
 - **USB 3 (Pi 4/5).** The Alfa / MT7612U-class adapters and an RTL-SDR want USB 3 bandwidth and
   clean power; this is exactly the brownout failure mode the Radio Orchestrator already warns about.

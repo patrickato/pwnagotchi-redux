@@ -4,7 +4,7 @@ import struct
 from redux.captap import (
     parse_dot11, parse_radiotap_len, build_probe_req, build_deauth, CaptureTap,
 )
-from redux.core import Beastcore
+from redux.core import Augur
 from redux.radio import Intent
 
 
@@ -84,14 +84,14 @@ def test_observations_carry_real_pnl_and_ie():
     assert len(obs) == 1 and "HomeNet" in obs[0].ssids and obs[0].ie_hash
 
 
-# --- Beastcore hook ---------------------------------------------------------- #
+# --- Augur hook ---------------------------------------------------------- #
 
-def test_beastcore_ingest_frames():
+def test_augur_ingest_frames():
     frames = []
     for mac in ("a2:11:11:11:11:11", "de:22:22:22:22:22"):
         frames.append((build_probe_req(mac, "HomeLab-5G", ies=IES), 100.0))
     frames.append((build_deauth("aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66", "11:22:33:44:55:66"), 101.0))
-    bc = Beastcore(radios=None, intent=Intent.RECON)
+    bc = Augur(radios=None, intent=Intent.RECON)
     out = bc.ingest_frames(frames)
     assert out["frames"] == 3 and out["deauth_events"] == 1
     assert out["device_identities"]["reidentified"] == 1

@@ -1,4 +1,4 @@
-# redux.geo — BeastSpatialDB
+# redux.geo — SpatialDB
 
 Unified RF **sighting store** and geospatial helpers for wardrive / recon
 maps. Pure data + math in this package; the lead wires live GPS and radio

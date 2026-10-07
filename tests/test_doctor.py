@@ -65,11 +65,11 @@ def test_location_unavailable_is_attention_not_action():
     assert f["status"] == "attention"    # useful but not required -> not action
 
 
-def test_beastcore_doctor_report_from_live_state():
-    from redux.core import Beastcore
+def test_augur_doctor_report_from_live_state():
+    from redux.core import Augur
     from redux.radio import Radio, Intent
     alfa = Radio("wlan1", bands=frozenset({"2.4", "5"}), monitor=True, inject=True, driver="mt76x2u")
-    bc = Beastcore([alfa], intent=Intent.HUNT)
+    bc = Augur([alfa], intent=Intent.HUNT)
     rep = bc.doctor_report()
     areas = {f["area"]: f["status"] for f in rep["findings"]}
     assert areas["capture radio"] == "ok"       # the Alfa supports monitor

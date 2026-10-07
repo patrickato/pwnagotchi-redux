@@ -3,7 +3,7 @@ import threading
 import urllib.request
 
 from redux.web import status_payload, render_page, resolve_host, serve, make_handler
-from redux.core import Beastcore
+from redux.core import Augur
 from redux.radio import Radio, Intent
 
 ONBOARD = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=False, driver="brcmfmac", onboard=True)
@@ -11,7 +11,7 @@ ALFA = Radio("wlan1", bands=frozenset({"2.4", "5"}), monitor=True, inject=True, 
 
 
 def test_status_payload_has_fields():
-    bc = Beastcore([ONBOARD, ALFA], intent=Intent.HUNT)
+    bc = Augur([ONBOARD, ALFA], intent=Intent.HUNT)
     p = status_payload(bc)
     assert p["intent"] == "hunt" and p["capture_iface"] == "wlan1"
     assert "narration" in p and "recommendation" in p
@@ -19,9 +19,9 @@ def test_status_payload_has_fields():
 
 def test_status_payload_includes_own_position_honestly():
     # no position provider → position is None, never a fabricated coordinate
-    bc = Beastcore([ONBOARD], intent=Intent.RECON)
+    bc = Augur([ONBOARD], intent=Intent.RECON)
     assert status_payload(bc)["position"] is None
-    bc2 = Beastcore([ONBOARD], intent=Intent.RECON, position_provider=lambda: (45.0, -93.0))
+    bc2 = Augur([ONBOARD], intent=Intent.RECON, position_provider=lambda: (45.0, -93.0))
     assert status_payload(bc2)["position"] == {"lat": 45.0, "lon": -93.0}
 
 
@@ -47,7 +47,7 @@ def test_bind_scope_defaults_to_localhost():
 
 
 def test_handler_serves_status_and_page():
-    bc = Beastcore([ONBOARD, ALFA], intent=Intent.HUNT)
+    bc = Augur([ONBOARD, ALFA], intent=Intent.HUNT)
     snap = status_payload(bc)                 # computed in THIS (store-owning) thread
     from http.server import ThreadingHTTPServer
     srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: snap))
@@ -64,14 +64,14 @@ def test_handler_serves_status_and_page():
 
 
 def test_serve_loop_bounded_updates_snapshot():
-    bc = Beastcore([ONBOARD, ALFA], intent=Intent.HUNT)
+    bc = Augur([ONBOARD, ALFA], intent=Intent.HUNT)
     # bounded loop (no driver -> pump is a no-op), just proves serve() runs + binds
     serve(bc, port=0, bind_scope="localhost", interval=0, pump=True, _cycles=2)
 
 
 def test_located_sightings_returns_only_real_fixes():
     from redux.geo.db import Sighting
-    bc = Beastcore([ONBOARD], intent=Intent.RECON)
+    bc = Augur([ONBOARD], intent=Intent.RECON)
     bc.store.insert(Sighting(kind="wifi", mac="aa:aa:aa:aa:aa:aa", ssid="A", lat=40.1, lon=-80.2, ts=1.0, provenance="test"))
     bc.store.insert(Sighting(kind="wifi", mac="bb:bb:bb:bb:bb:bb", ssid="B", ts=2.0, provenance="test"))  # no fix
     located = bc.located_sightings()
@@ -83,7 +83,7 @@ def test_located_sightings_returns_only_real_fixes():
 
 def test_status_payload_includes_located_points():
     from redux.geo.db import Sighting
-    bc = Beastcore([ONBOARD], intent=Intent.RECON)
+    bc = Augur([ONBOARD], intent=Intent.RECON)
     bc.store.insert(Sighting(kind="wifi", mac="aa:aa:aa:aa:aa:aa", ssid="A", lat=40.1, lon=-80.2, ts=1.0, provenance="test"))
     p = status_payload(bc)
     assert "located" in p and len(p["located"]) == 1

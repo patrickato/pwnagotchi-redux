@@ -1,7 +1,7 @@
 """Offline self-geolocation from known APs in the sighting store.
 
 When GPS is unavailable, match currently visible BSSIDs against rows that
-already have lat/lon in BeastSpatialDB and estimate own position as an
+already have lat/lon in SpatialDB and estimate own position as an
 RSSI-weighted centroid of those AP locations (inverse of AP-location
 estimate: observers move, APs are anchors).
 

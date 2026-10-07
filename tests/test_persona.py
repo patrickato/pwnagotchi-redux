@@ -7,7 +7,7 @@ what can fire; Scope always decides WHERE.
 import pytest
 
 from redux.core import persona as P
-from redux.core import Beastcore, Posture, Scope
+from redux.core import Augur, Posture, Scope
 from redux.radio import Radio, Intent
 
 
@@ -36,7 +36,7 @@ def test_posture_drives_offense_availability():
 def _bc():
     r = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=False,
               driver="brcmfmac", onboard=True)
-    return Beastcore(radios=[r], intent=Intent.RECON)
+    return Augur(radios=[r], intent=Intent.RECON)
 
 
 def test_no_persona_means_scope_only_governance_offense_available():

@@ -4,7 +4,7 @@ Pins the integrity behaviour: in-scope actions are authorized, out-of-scope ones
 are surfaced as UNAUTHORIZED (never hidden), and the header verdict reflects it.
 """
 from redux.report import EngagementAction, build_report, render_markdown
-from redux.core import Scope, Beastcore
+from redux.core import Scope, Augur
 from redux.radio import Intent
 
 
@@ -85,10 +85,10 @@ def test_markdown_has_sections_and_flag_marker():
     assert "Integrity:** FLAGGED" in md
 
 
-# --- Beastcore integration --------------------------------------------------- #
+# --- Augur integration --------------------------------------------------- #
 
-def test_beastcore_engagement_report_uses_live_scope():
-    bc = Beastcore(radios=None, intent=Intent.RECON)
+def test_augur_engagement_report_uses_live_scope():
+    bc = Augur(radios=None, intent=Intent.RECON)
     bc.scope = _scope()
     rep = bc.engagement_report("eng", "patrick", _acts())
     assert rep["integrity"] == "FLAGGED"

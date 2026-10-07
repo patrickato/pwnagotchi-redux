@@ -35,7 +35,7 @@ points to its full entry below.
 1. **Glass-box capture → crack pipeline** (W-1 / X-1 / B-10) — the end-to-end loop pwnagotchi never
    closed: recon → (gated) capture → auto-handoff → crack → potfile, each step showing its reason.
    Kills the #1 community pain. **[authorized-gated]**
-2. **bettercap events-stream as Beastcore's nervous system** (B-1) — consume the _whole_ `/api/events`
+2. **bettercap events-stream as Augur's nervous system** (B-1) — consume the _whole_ `/api/events`
    feed, not just handshakes; one normalized glass-box bus every suite reads. The architectural
    keystone most other ideas ride on. **[infra]**
 3. **The on-screen "why" log + creature mood driven by real telemetry** (P-4 / H-1) — the literal
@@ -47,7 +47,7 @@ points to its full entry below.
 5. **NAS/desktop offload cracker with brain-dedup** (X-3) — Pi stays a pure sensor; the QNAP/GPU box
    cracks via `hashcat --brain-server`; results flow back to the bus potfile over Tailscale.
    **[authorized-gated]**
-6. **BeastSpatialDB: one sighting store + live offline moving-map on the TFT** (G-1 / G-2) — every
+6. **SpatialDB: one sighting store + live offline moving-map on the TFT** (G-1 / G-2) — every
    WiFi/BLE/SDR sighting in one geo schema with provenance; a PMTiles offline basemap with an RSSI
    heat layer redrawn as you drive. No existing tool does live + offline + multi-radio on-device.
    **[passive]**
@@ -70,7 +70,7 @@ points to its full entry below.
 
 - **P-1. Glass-box capture→crack pipeline** — close the loop pwnagotchi leaves open (caps a
   handshake, never cracks it). Prior art: `rekonnected/pwnagotchi-tools` bolts on offline hashcat.
-  Edge: Beastcore runs it end-to-end on-device or offloaded, every target logged with a reason.
+  Edge: Augur runs it end-to-end on-device or offloaded, every target logged with a reason.
   _[authorized-gated] · M · bus: produces `crack_house_ng.potfile`, consumes timer CSV + captures._
   (See also X-1 for the 22000 ingest detail.)
 - **P-2. Allowlist-gated autonomous network module (the Bjorn answer)** — once on a cracked net, scan
@@ -80,12 +80,12 @@ points to its full entry below.
   module. _[authorized-gated] · L · bus: produces a host/service table._
 - **P-3. Multi-radio / multi-device role orchestrator** — one node deauths (gated) while another
   captures. Prior art: `pwngrid` (dot11 peer novelty), `meshpwnstic` (Meshtastic LoRa remote).
-  Edge: Beastcore as a real supervisor, not a mesh gimmick. _[authorized-gated] · L · bus: shared
+  Edge: Augur as a real supervisor, not a mesh gimmick. _[authorized-gated] · L · bus: shared
   capture + status._ (Trilateration half → M-2/G-3.)
 - **P-4. On-screen "why" decision log** — every channel hop / target pick shows a one-line reason.
   Prior art: none (pwnagotchi's removed RL was always opaque). The signature differentiator, cheap.
   _[passive] · S · bus: none._
-- **P-5. Self-healing firmware watchdog** — Beastcore watchdogs bettercap/nexmon, restarts on a
+- **P-5. Self-healing firmware watchdog** — Augur watchdogs bettercap/nexmon, restarts on a
   brcmf wedge, logs the cause. Prior art: the `fix_brcmf` plugin exists _solely_ to stop reboots.
   Edge: supervisor-native resilience, not a band-aid. _[infra] · S/M · bus: none._
 - **P-6. GPS wardriving + WiGLE auto-upload + per-capture geotags** — Prior art: `gps_more`,
@@ -104,7 +104,7 @@ points to its full entry below.
 - **P-11. Good remote web UI (config + live map + gated toggles)** — Prior art: pwnagotchi "config
   hell"/webcfg, Bjorn's web UI. Edge: one pane, `bind_scope`-aware, always prints its exact URL.
   _[infra] · M · bus: reads all._ (The config-hell cure; see also H-13 catalog.)
-- **P-12. Off-grid LoRa command + status** — Prior art: `meshpwnstic`. Edge: Beastcore command bus
+- **P-12. Off-grid LoRa command + status** — Prior art: `meshpwnstic`. Edge: Augur command bus
   over LoRa with reasons — fits the owner's half-mile-neighbor rural setting. _[authorized-gated] · M
   · bus: command/status._ (→ M-3/M-4.)
 
@@ -137,11 +137,11 @@ a real module/API (bettercap 2.4.0–2.41.5) it never touched.
   mDNS/Bonjour service impersonation. One orchestrated "service-lure", allowlisted SSIDs, bind_scope
   + logged URL. _[authorized-gated] · L · bus: consumes allowlist._ (→ H-10.)
 - **B-9. WPA3/cipher-aware classification** — 2.4.0 added WPA3/RSN cipher parsing; tag
-  WPA2/WPA3-SAE/OWE/WPS so Beastcore skips futile deauth. _[passive] · S · bus: enriches the feed._
+  WPA2/WPA3-SAE/OWE/WPS so Augur skips futile deauth. _[passive] · S · bus: enriches the feed._
   (→ X-8.)
 - **B-10. On-device bruteforce pipeline** — `wifi.bruteforce` (Linux, 2.4.0; workers/timeout). Pi4-
   resource-capped, allowlist-gated. _[authorized-gated] · M · bus: produces potfile entries._
-- **B-11. Beastcore policy engine replacing Otto caplets** — bettercap scripting is Otto (ES5-only,
+- **B-11. Augur policy engine replacing Otto caplets** — bettercap scripting is Otto (ES5-only,
   no classes/typed arrays). Native declarative event→action rules instead: unit-testable, glass-box.
   _[infra] · M · bus: orchestrates all._
 - **B-12. Session record/replay for hardware-free tests** — `api.rest.record/replay` snapshots a real
@@ -156,7 +156,7 @@ a real module/API (bettercap 2.4.0–2.41.5) it never touched.
 
 ## G — wardriving / geospatial / RF mapping
 
-- **G-1. BeastSpatialDB unified sighting store + WiGLE/kismetdb export** — one geo table for every
+- **G-1. SpatialDB unified sighting store + WiGLE/kismetdb export** — one geo table for every
   sighting (WiFi/BT/cell/SDR) with timestamp/GPS/RSSI/source/provenance. Prior art: Kismet
   `kismetdb` + `kismetdb_to_wiglecsv`, WiGLE CSV — each siloed/single-phy. Edge: one schema across
   all radios; emit `WigleWifi-1.6` CSV so it drops into WiGLE/Kismet pipelines. _[passive] · M · bus:
@@ -181,7 +181,7 @@ a real module/API (bettercap 2.4.0–2.41.5) it never touched.
   driving. _[passive] · S · bus: consumes GPS + sighting DB._
 - **G-8. Offline self-geolocation from the known-AP DB** — fix own position from visible APs when GPS
   is lost. Prior art: Mozilla Location Service **shut down 2024** (so pwnagotchi `net-pos` is now
-  broken); Google Geolocation is online/paid. Edge: match live BSSIDs against BeastSpatialDB locally.
+  broken); Google Geolocation is online/paid. Edge: match live BSSIDs against SpatialDB locally.
   _[passive] · M · bus: consumes sighting DB._
 - **G-9. WiGLE dedup + incremental upload queue** — merge repeat BSSIDs (best-RSSI/first-seen),
   package only new rows, upload when online. _[passive] · S · bus: consumes sighting DB → produces
@@ -288,7 +288,7 @@ this as the ceiling and _tell the user the truth per network_.
   `pwnagotchi_fast_dictionary`, probable-wordlists, best64. _[authorized-gated] · S/M · bus: potfile-
   aware (skip already-cracked)._
 - **X-11. Hardware-watchdog crash-safe resume** — BCM2835 watchdog + systemd `RuntimeWatchdogSec`;
-  Beastcore resumes the capture session on reboot and replays unflushed captures to the bus. _[infra]
+  Augur resumes the capture session on reboot and replays unflushed captures to the bus. _[infra]
   · S · bus: none._
 - **X-12. Opt-in online-crack offload** — wpa-sec / onlinehashcrack, strictly opt-in, glass-box
   "uploading N 22000 lines to X"; results merge into the same bus potfile. _[authorized-gated] · S ·
@@ -299,7 +299,7 @@ this as the ceiling and _tell the user the truth per network_.
 The owner's stated core fascination. Dependency spine: **time-sync (M-5) → trilateration/windows
 (M-2, M-13); transport (M-7/M-8) → backhaul/merge (M-1, M-9); fusion DB (M-10) is the sink.**
 
-- **M-1. Beastcore collector grid (Kismet-remotecap model)** — field Pis stream live frames to a
+- **M-1. Augur collector grid (Kismet-remotecap model)** — field Pis stream live frames to a
   central aggregator instead of hoarding. Prior art: Kismet remote capture (`kismet_cap_linux_wifi
   --connect`). Edge: glass-box — every frame tagged with node ID + synced time + GPS; writes the open
   bus, not an opaque DB. _[passive] · M · bus: produces merged timer CSV + sidecars keyed by node._
@@ -314,11 +314,11 @@ The owner's stated core fascination. Dependency spine: **time-sync (M-5) → tri
   small alerts._
 - **M-4. Two-tier comms: Meshtastic LoRa alert lane + WiFi bulk lane** — LoRa for heartbeats/alerts,
   WiFi/IP for bulk. Prior art: Meshtastic (Python API, MQTT module). Edge: LoRa carries "node X caught
-  SSID Y" into Beastcore via MQTT→Mosquitto; files move over IP in range. _[passive] · S · bus:
+  SSID Y" into Augur via MQTT→Mosquitto; files move over IP in range. _[passive] · S · bus:
   produces alert events referencing the potfile/BT entries._
 - **M-5. Fleet time sync (chrony + GPS/PPS stratum-1)** — one GPS-disciplined Pi = offline stratum-1
   NTP; precondition for M-2 and M-13. _[infra] · S · bus: none (enables comparable timestamps)._
-- **M-6. Coordinated channel-coverage orchestration** — Beastcore assigns disjoint channel sets per
+- **M-6. Coordinated channel-coverage orchestration** — Augur assigns disjoint channel sets per
   node so the fleet covers all channels without each hopping everything; rebalances on join/leave.
   _[passive] · M · bus: consumes roster → produces a per-node channel plan._
 - **M-7. Secure capture backhaul to QNAP (Syncthing untrusted folders)** — captures sync home when
@@ -334,7 +334,7 @@ The owner's stated core fascination. Dependency spine: **time-sync (M-5) → tri
   cross-device queries + heatmaps; feeds M-2. _[infra] · M · bus: consumes gps + merged artifacts →
   the queryable store._ (base-side big sibling of G-1.)
 - **M-11. Live fleet + detection map via CoT/TAK** — node positions + detections on an ATAK/WinTAK
-  map. Prior art: TAK + Meshtastic CoT forwarding. Edge: Beastcore emits Cursor-on-Target; a FreeTAK
+  map. Prior art: TAK + Meshtastic CoT forwarding. Edge: Augur emits Cursor-on-Target; a FreeTAK
   server at base renders the fleet. _[passive] · M · bus: consumes roster + detections → CoT stream._
 - **M-12. Store-and-forward data mule (DTN)** — a roaming node physically carries captures from
   isolated nodes to base, syncs on contact, with a glass-box chain-of-custody per file. _[infra] · M

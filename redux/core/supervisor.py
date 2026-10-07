@@ -1,4 +1,4 @@
-"""Supervisor — Beastcore's promoted role (task 1.5, logic layer).
+"""Supervisor — Augur's promoted role (task 1.5, logic layer).
 
 Where pwnagotchi's agent/epoch loop used to sit. The Supervisor owns the control
 flow: an **intent** comes in, the Radio Orchestrator decides radio→role

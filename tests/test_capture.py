@@ -8,7 +8,7 @@ from redux.crack import (
     AngryOxideProvider, AngryOxideConfig, BettercapProvider,
     select_capture_provider, register_capture_providers,
 )
-from redux.core import Scope, CapabilityGraph, Cap, Beastcore
+from redux.core import Scope, CapabilityGraph, Cap, Augur
 from redux.radio import Radio, Intent
 
 
@@ -107,7 +107,7 @@ def test_register_capture_providers_sets_active_provider():
     assert g2.active_provider(Cap.CAPTURE_HANDSHAKE).name == "bettercap-capture"
 
 
-# --- Beastcore integration: persona posture flows through -------------------- #
+# --- Augur integration: persona posture flows through -------------------- #
 
 class _FakeDriver:
     """No-op bettercap driver so the capture path has an available fallback engine
@@ -119,19 +119,19 @@ class _FakeDriver:
 def _bc():
     r = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=True,
               driver="mt76", onboard=False)
-    bc = Beastcore(radios=[r], intent=Intent.RECON, driver=_FakeDriver())
+    bc = Augur(radios=[r], intent=Intent.RECON, driver=_FakeDriver())
     bc.scope = _armed_scope()
     return bc
 
 
-def test_beastcore_capture_plan_blue_persona_is_passive():
+def test_augur_capture_plan_blue_persona_is_passive():
     bc = _bc()
     bc.apply_persona("blue")        # detection-only → offense off
     plan = bc.capture_plan()
     assert plan["offense_enabled"] is False and plan["passive"] is True
 
 
-def test_beastcore_capture_plan_active_with_armed_scope():
+def test_augur_capture_plan_active_with_armed_scope():
     bc = _bc()
     bc.apply_persona("red")         # active posture
     plan = bc.capture_plan()
@@ -139,13 +139,13 @@ def test_beastcore_capture_plan_active_with_armed_scope():
     assert plan["selected_engine"] in ("angryoxide", "bettercap")
 
 
-def test_beastcore_doctor_reports_capture_engine_health():
+def test_augur_doctor_reports_capture_engine_health():
     r = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=True, driver="mt76")
     # no driver / no AngryOxide binary → capture engine is ACTION (honest, not clean)
-    bare = Beastcore(radios=[r], intent=Intent.RECON)
+    bare = Augur(radios=[r], intent=Intent.RECON)
     areas = {f["area"]: f["status"] for f in bare.doctor_report()["findings"]}
     assert areas.get("capture engine") == "action"
     # with the bettercap driver up → capture engine OK
-    up = Beastcore(radios=[r], intent=Intent.RECON, driver=_FakeDriver())
+    up = Augur(radios=[r], intent=Intent.RECON, driver=_FakeDriver())
     areas2 = {f["area"]: f["status"] for f in up.doctor_report()["findings"]}
     assert areas2.get("capture engine") == "ok"

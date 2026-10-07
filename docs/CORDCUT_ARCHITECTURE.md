@@ -4,19 +4,19 @@ _2026-10-06. Grounded in reads of jayofelony/pwnagotchi 2.9.5.8 and patrickato/b
 
 ## The decision, locked
 
-Stop building on the jayofelony image. Build **our own image** on the same open foundations pwnagotchi itself stands on, delete pwnagotchi's Python wrapper, and put **Beastcore in its place as the supervisor**. Same capabilities or better, because the capabilities were never pwnagotchi's — they were bettercap's and nexmon's all along.
+Stop building on the jayofelony image. Build **our own image** on the same open foundations pwnagotchi itself stands on, delete pwnagotchi's Python wrapper, and put **Augur in its place as the supervisor**. Same capabilities or better, because the capabilities were never pwnagotchi's — they were bettercap's and nexmon's all along.
 
 ## The stack (what replaces what)
 
 | Layer | pwnagotchi today | Cord-cut platform |
 | --- | --- | --- |
-| Base image | Raspberry Pi OS + their pi-gen | **Our pi-gen**: lean Debian/Pi-OS stable, **arm64, Pi 4 / Pi 5 only** (no Zero/3 or earlier), fast boot, SD-friendly. Kali's tools available as opt-in **Beast Packs / apt repo**, never preinstalled. |
+| Base image | Raspberry Pi OS + their pi-gen | **Our pi-gen**: lean Debian/Pi-OS stable, **arm64, Pi 4 / Pi 5 only** (no Zero/3 or earlier), fast boot, SD-friendly. Kali's tools available as opt-in **Packs / apt repo**, never preinstalled. |
 | Radio | manual iface juggling | **Radio Orchestrator** (the headline — below) |
-| Capture engine | bettercap (via their supervisor) | **bettercap, driven directly** by Beastcore over its REST/websocket API |
-| Supervisor | pwnagotchi Python (agent/automata/epoch) | **Beastcore** (promoted from consumer to supervisor) |
-| Brain | removed A2C / greedy strategy | **Glass-box brain** seated in Beastcore (honest scope — below) |
+| Capture engine | bettercap (via their supervisor) | **bettercap, driven directly** by Augur over its REST/websocket API |
+| Supervisor | pwnagotchi Python (agent/automata/epoch) | **Augur** (promoted from consumer to supervisor) |
+| Brain | removed A2C / greedy strategy | **Glass-box brain** seated in Augur (honest scope — below) |
 | UX | fixed faces + plugins | **Beast creature + Studio + Packs** (already built) |
-| Extend | pwnagotchi plugins | **Beast Packs + pwnagotchi-plugin compat shim** |
+| Extend | pwnagotchi plugins | **Packs + pwnagotchi-plugin compat shim** |
 
 The only two pieces we deliberately reuse rather than rewrite are **bettercap** (the capture engine) and **nexmon** (onboard-chip monitor/injection firmware). Rewriting either is years of work with zero differentiation. Everything above them is ours.
 
@@ -45,14 +45,14 @@ The pitch: **you never touch monitor mode again.** You tell it what you're doing
 
 This is a real `beastcore/radio_orchestrator.py` service + a `collectors/radio.py` upgrade + `actions` for mode changes + a Studio panel showing the live radio map. It's maybe the single most demoable thing in the project.
 
-## Beastcore, promoted
+## Augur, promoted
 
 Keep everything it already is (signals, actions, transactions, spec_registry, dependency_resolver, packs, doctor, experience_dna, platform_profile, collectors). Add the supervisor role it didn't need when pwnagotchi was underneath:
 
 - **`bettercap_driver`** — owns the bettercap process + its API; the capture/recon/handshake surface. Replaces the pwnagotchi agent/epoch loop.
 - **`radio_orchestrator`** — above.
 - **Brain seat** — a policy module that makes the decisions pwnagotchi's automata faked: intent inference, sleep-vs-hunt, when to suggest moving, multi-radio prioritization. (See honest scope below.)
-- **Beast spine hooks** — BeastSpatialDB + the recon suite ride the same data bus; Beastcore is the read/write hub.
+- **Beast spine hooks** — SpatialDB + the recon suite ride the same data bus; Augur is the read/write hub.
 
 Your README's "protected engine" principle survives intact — it just protects **bettercap** directly instead of pwnagotchi.
 
@@ -72,11 +72,16 @@ We proved it: a learning policy does **not** reliably beat greedy+random at chan
 
 ## Phased build
 
-1. **v0.1 cord-cut MVP** — our pi-gen image; Beastcore drives bettercap directly (capture a handshake with zero pwnagotchi code in the path); Radio Orchestrator doing auto monitor/role on onboard + one adapter; the creature + a live radio-map panel. **The demo:** flash it, plug in the Alfa, watch it auto-arrange and start capturing — hands-off.
+1. **v0.1 cord-cut MVP** — our pi-gen image; Augur drives bettercap directly (capture a handshake with zero pwnagotchi code in the path); Radio Orchestrator doing auto monitor/role on onboard + one adapter; the creature + a live radio-map panel. **The demo:** flash it, plug in the Alfa, watch it auto-arrange and start capturing — hands-off.
 2. **v0.2** — multi-radio fusion onto the Beast spine; GPS/survey; glass-box brain v1 (orchestration + explainability).
-3. **v0.3** — Beast Packs incl. the Kali-tools repo; pwnagotchi-plugin compat shim; depletion-aware scheduler A/B.
+3. **v0.3** — Packs incl. the Kali-tools repo; pwnagotchi-plugin compat shim; depletion-aware scheduler A/B.
 4. **v0.4** — fleet, shareable reports, identity/packs polish.
 
-## Name (your call — a few directions, not "-gotchi")
+## Name — decided: **Augur**
 
-Something that says multi-radio field-awareness + living instrument. E.g. **Beacon**, **Lumen**, **Fathom**, **Oracle**, **Quill**, **Sentience**/**Sentry**-root plays, or keep the **Beast** lineage as the creature inside a new product name. Final call is yours.
+The platform is **Augur**: a small, patient, glass-box familiar that reads the invisible
+RF world and tells you true. An augur is a diviner who reads signs from birds — here the
+"birds" are the frames and signals in the air, and the whole product bet (legibility —
+*every decision carries a real reason*) is the brand. The creature identity, voice, face,
+and the full naming lexicon (the Roost, the Murder, the Cache, the Auspex, the Hunt) live
+in `docs/AUGUR.md`. "Beastcore" is retired → the core is just **Augur**.
