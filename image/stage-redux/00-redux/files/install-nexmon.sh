@@ -41,7 +41,7 @@ for module_dir in /lib/modules/*; do
     python3 /usr/local/src/patch-nexmon-driver.py "$header" "$driver/cfg80211.c" \
         --sdio-header "${header%/net/cfg80211.h}/linux/mmc/sdio_ids.h" \
         >> /usr/share/redux/nexmon-driver-compat.txt
-    make -C "$module_dir/build" M="$driver" ARCH=arm64 -j2 modules
+    nexmon_build_module "$kernel" "$module_dir" "$driver"
     install -d "$module_dir/updates"
     install -m 0644 "$driver/brcmfmac.ko" "$module_dir/updates/brcmfmac.ko"
     sha256sum "$module_dir/updates/brcmfmac.ko" >> /usr/share/redux/nexmon-driver.sha256
