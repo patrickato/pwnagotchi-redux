@@ -29,6 +29,8 @@ class Signal(str, Enum):
     WARNING = "warning"                  # payload: reason (str)
     ALERT = "alert"                      # payload: alert (detector Alert)
     EVENT = "event"                      # payload: event (driver Event)
+    BATTERY = "battery"                  # payload: percent (0..100), charging (bool)
+    SUGGESTION = "suggestion"            # payload: decision (brain Decision)
 
 
 #: subscribe to this to receive every signal
