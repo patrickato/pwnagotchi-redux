@@ -24,6 +24,14 @@ workflows from ever reaching `main`.
 
 ## Current assignments
 
+### Status — 2026-10-07
+- **Grok (xAI) is offline until ~2026-10-08** (hit a ~13-hour usage limit around 07:28 ET). For
+  the day the **lead absorbs the `redux/detect/**` + `redux/geo/**` lane**: the lead may land
+  detect/geo work on `claude/*` branches (the guard grants lead full access). Lead changes inside
+  Grok's lane are marked in their commit messages as "(Grok absorbed, out for the day)". When Grok
+  returns it **pulls latest `main` first** and resumes from there — no stale-base branches.
+- **Codex (GPT)** active and streaming in the image lane.
+
 ### Codex → `codex/*` — the image/OS build
 Lean **arm64** pi-gen image for **Pi 4 / Pi 5**, bettercap + nexmon baked, `redux.service` →
 `python -m redux.core.boot`. Read-only overlay rootfs (yank-safe), sub-15s boot, hardware watchdog.
