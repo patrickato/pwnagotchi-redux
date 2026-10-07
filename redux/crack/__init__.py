@@ -14,6 +14,10 @@ from .pipeline import (
     CrackRefused,
     crack,
 )
+from .capture import (
+    CapturePlan, CaptureProvider, AngryOxideConfig, AngryOxideProvider,
+    BettercapProvider, select_capture_provider, register_capture_providers,
+)
 
 __all__ = [
     "CrackResult",
@@ -22,4 +26,6 @@ __all__ = [
     "AircrackCracker",
     "CrackRefused",
     "crack",
+    "CapturePlan", "CaptureProvider", "AngryOxideConfig", "AngryOxideProvider",
+    "BettercapProvider", "select_capture_provider", "register_capture_providers",
 ]

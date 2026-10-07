@@ -9,7 +9,7 @@ pwnagotchi, not a fork. (We deliberately drop the "lesser" boards; see `docs/PLA
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
 > record/ghost, packs, plugin-compat shim, CLI, and web dashboard —
-> is built and green under the test suite (480+ tests, no hardware required). **No part has had a
+> is built and green under the test suite (490+ tests, no hardware required). **No part has had a
 > real-hardware pass on a physical Pi yet** (see *Verification status*). Sandbox-green ≠ done.
 
 ## What it is
@@ -48,14 +48,14 @@ everything above them:
 | Field Dex | `redux/dex/` | recon ledger over sightings — first/last-seen, rarity, "departed", **+ device identity that survives MAC randomization** (PNL/IE fingerprint linking; OUI never links) |
 | CSI sensing | `redux/sense/` | the radio as a motion/presence sensor (nexmon_csi): motion + occupancy, UNKNOWN until calibrated — sandbox math done, wire-parser needs-hardware |
 | Classify | `redux/classify/` | handshake crackability scoring |
-| Offense (scope-gated) | `redux/crack/`, `redux/netrecon/`, `redux/portal/` | capture→crack pipeline, network kill-chain (scan/enumerate/cred-test/loot), captive portal for authorized testing |
+| Offense (scope-gated) | `redux/crack/`, `redux/netrecon/`, `redux/portal/` | dual-engine capture (bettercap + **AngryOxide** scalpel behind the capability graph), capture→crack pipeline, network kill-chain (scan/enumerate/cred-test/loot), captive portal for authorized testing |
 | SDR | `redux/sdr/` | passive-sensing ingest (rtl_433 ISM + ADS-B) into the same sightings store/Dex |
 | Expeditions | `redux/expedition/` | named field sessions + "Wrapped" recap |
 | Replay / Ghost | `redux/replay/` | record a session; produce a **sanitized ghost** (identities pseudonymized, location dropped, timing preserved) to replay or share without leaking real recon data |
 | Packs / Compat | `redux/packs/`, `redux/compat/` | pack manifest + dependency resolver; pwnagotchi-plugin compat shim |
 | Web | `redux/web/` | glass-box status dashboard + sightings map (self-contained, no external assets) |
 | Personas | `redux/core/persona.py` | one box, pick your hat (red/blue/purple/recon/mesh/sigint) — a declarative capability+posture set; posture is an *extra* gate that can only tighten firing, never widen it |
-| CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / post / persona / sense / scope / dex / expedition / ghost` |
+| CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / post / persona / sense / capture / scope / dex / expedition / ghost` |
 
 Everything assembles on one bus through `Beastcore` and runs as a single system. Offensive
 capabilities are full-power but consult the central Scope for aiming (see below).
@@ -90,7 +90,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 482 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 493 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
@@ -111,7 +111,7 @@ redux/geo/        spatial database + WiGLE/GPS/coverage/export
 redux/dex/        Field Dex (recon ledger) + device fingerprint identity (cross-MAC re-id)
 redux/sense/      CSI sensing — the radio as a motion/presence sensor (nexmon_csi)
 redux/classify/   handshake crackability scoring
-redux/crack/      capture→crack pipeline (scope-gated)
+redux/crack/      capture→crack pipeline + dual-engine capture providers (bettercap + AngryOxide)
 redux/netrecon/   network kill-chain: scan/enumerate/cred-test/loot (scope-gated)
 redux/portal/     captive portal for authorized client testing
 redux/sdr/        passive SDR ingest (rtl_433 ISM + ADS-B)
@@ -120,7 +120,7 @@ redux/replay/     record a session + sanitized "ghost" for safe replay/sharing
 redux/packs/      Beast Packs (manifest + manager)
 redux/compat/     pwnagotchi-plugin compat shim
 redux/web/        glass-box status dashboard + sightings map
-redux/cli.py      operator entrypoint (status/run/web/packs/doctor/post/persona/sense/scope/dex/expedition/ghost)
+redux/cli.py      operator entrypoint (status/run/web/packs/doctor/post/persona/sense/capture/scope/dex/expedition/ghost)
 image/            pi-gen image stack (boot, overlay, watchdog, UPS, OTA)
 tests/            unit/integration tests (real logic, no hardware needed)
 docs/             architecture, vision, proposals
@@ -131,7 +131,7 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 482 tests, no hardware needed
+pytest                 # 493 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)
@@ -143,6 +143,7 @@ redux sense demo       # CSI motion/occupancy pipeline on synthetic data (no rad
 redux scope            # manage the central authorized-target list (add/import/arm-lab)
 redux dex              # the Field Dex — recon ledger over sightings
 redux dex --identities # devices re-identified across MAC randomization (PNL/IE)
+redux capture plan     # which capture engine is selected + the exact Scope-aimed command
 redux expedition       # start/end a field session + Wrapped recap
 redux ghost in.json out.json   # sanitize a recording for safe replay/sharing
 redux packs            # manage Beast Packs

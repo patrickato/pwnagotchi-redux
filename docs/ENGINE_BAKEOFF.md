@@ -1,5 +1,11 @@
 # Engine bake-off — bettercap vs AngryOxide
 
+**Status: implemented.** The decision below is wired — `redux/crack/capture.py`
+registers both engines as `CAPTURE_HANDSHAKE` providers (AngryOxide preferred when
+present, honest tool-absence fallback to bettercap), `Beastcore.capture_plan()`
+builds a Scope-aimed, posture-correct plan, and `redux capture plan` shows it
+(incl. the exact AngryOxide command it would run).
+
 **Decision record.** Which 802.11 engine drives redux's capture path, and how.
 Grounded in the two projects' own docs (bettercap `wifi` module; AngryOxide
 README), reasoned against our architecture. **No on-hardware A/B yet** — the

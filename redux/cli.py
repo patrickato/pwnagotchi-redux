@@ -194,6 +194,34 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_capture(args) -> int:
+    """Show the capture plan: which engine is selected (AngryOxide scalpel when
+    present, else bettercap), aimed only at the armed Scope, posture-correct."""
+    bc = _build(args)
+    if args.persona:
+        bc.apply_persona(args.persona)
+    # load the scope file so the plan reflects what's actually armed
+    bc.scope = Scope.load(args.scope_file)
+    plan = bc.capture_plan(iface=args.iface or "")
+    print(f"capture engine (selected, by availability): {plan.get('selected_engine')}  "
+          f"(offense_enabled={plan.get('offense_enabled')}, passive={plan.get('passive')})")
+    print(f"  {plan.get('reason')}")
+    if plan.get("targets"):
+        print(f"  armed targets: {', '.join(plan['targets'])}")
+    for k, v in (plan.get("outputs") or {}).items():
+        print(f"  out[{k}]: {v}")
+    # Always show the AngryOxide command it WOULD run (preview; no binary needed to print it)
+    from .crack import AngryOxideProvider, AngryOxideConfig
+    ao = AngryOxideProvider(config=AngryOxideConfig(iface=args.iface or "wlan1"))
+    prev = ao.plan(bc.scope, active=bc.offense_enabled())
+    print(f"\nAngryOxide preview (installed={ao.available()}):")
+    if prev.runnable:
+        print("  " + " ".join(prev.argv))
+    else:
+        print("  " + prev.reason)
+    return 0
+
+
 def cmd_sense(args) -> int:
     """CSI sensing: `demo` runs the pipeline on a SYNTHETIC quiet→motion→quiet
     sequence (no radio, clearly labelled), `replay` runs it over recorded frames.
@@ -401,6 +429,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    cap = sub.add_parser("capture", help="show the capture plan (engine selection, Scope-aimed)")
+    add_radio_flags(cap)
+    cap.add_argument("--iface", help="capture interface (default wlan1)")
+    cap.add_argument("--persona", help="apply a persona first (affects passive/active posture)")
+    cap.add_argument("--scope-file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
+    capsub = cap.add_subparsers(dest="capture_cmd", required=True)
+    capsub.add_parser("plan", help="print the selected engine + argv, glass-box")
+    cap.set_defaults(func=cmd_capture)
 
     se = sub.add_parser("sense", help="CSI sensing — the radio as a motion/presence sensor")
     se.add_argument("--window", type=int, default=16, help="sliding window size (frames)")

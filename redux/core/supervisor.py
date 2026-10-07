@@ -112,6 +112,11 @@ class Supervisor:
         """The radios currently managed (for the Doctor / capability graph)."""
         return list(self._radios.values())
 
+    @property
+    def driver(self):
+        """The bettercap driver, if one is wired (for capture-engine selection)."""
+        return self._driver
+
     def set_radios(self, radios) -> None:
         self._radios = {r.iface: r for r in radios}
         self._emit(Signal.RADIOS_CHANGED, ifaces=list(self._radios))

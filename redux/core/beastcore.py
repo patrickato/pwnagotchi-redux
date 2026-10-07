@@ -184,6 +184,13 @@ class Beastcore:
         g.register(Provider.of("capture", requires=[Cap.RADIO_WIFI_MONITOR], reason="handshake capture"))
         g.register(Provider.of("coverage-map", requires=[Cap.LOCATION_POSITION], reason="sighting map"))
         g.register(Provider.of("deauth-gate", requires=[Cap.RADIO_WIFI_MONITOR], reason="firing gate"))
+        # capture engines as CAPTURE_HANDSHAKE providers (AngryOxide preferred when present)
+        from ..crack.capture import AngryOxideProvider, register_capture_providers
+        register_capture_providers(
+            g,
+            angryoxide_present=AngryOxideProvider().available(),
+            bettercap_present=getattr(self.supervisor, "driver", None) is not None,
+        )
         return g
 
     def _doctor_inputs(self) -> DoctorInputs:
@@ -276,6 +283,27 @@ class Beastcore:
         eng = self.sense()
         return eng.status() if eng is not None else {
             "available": False, "reason": "CSI sensing not enabled"}
+
+    # --- capture engine selection (bettercap + AngryOxide) ----------------- #
+
+    def capture_plan(self, *, iface: str = "", prefer: str = "auto") -> dict:
+        """Pick the capture engine and build a Scope-aimed, posture-correct plan,
+        glass-box. Honors offense_enabled() (a detection-only persona → passive
+        --notransmit) and refuses an empty scope rather than sweeping broadly."""
+        from ..crack.capture import AngryOxideProvider, BettercapProvider, AngryOxideConfig
+        active = self.offense_enabled()
+        ao = AngryOxideProvider(config=AngryOxideConfig(iface=iface or "wlan1"))
+        bc = BettercapProvider(driver=getattr(self.supervisor, "driver", None))
+        order = [ao, bc] if prefer in ("auto", "angryoxide") else [bc, ao]
+        for prov in order:
+            if prov.available():
+                plan = prov.plan(self.scope, active=active, iface=iface)
+                out = plan.to_dict()
+                out["selected_engine"] = prov.name
+                out["offense_enabled"] = active
+                return out
+        return {"selected_engine": None, "runnable": False, "offense_enabled": active,
+                "reason": "no capture engine available (no AngryOxide binary, no bettercap driver)"}
 
     def dex(self):
         """The Field Dex: the recon ledger built from this device's sightings."""
