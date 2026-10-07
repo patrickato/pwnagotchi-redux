@@ -140,9 +140,25 @@ def cmd_expedition(args) -> int:
 
 def cmd_dex(args) -> int:
     """Print the Field Dex — the recon ledger over recorded sightings."""
-    from .dex import build_dex
+    from .dex import build_dex, link_store
     from .geo import SightingStore
     store = SightingStore(args.store) if args.store else SightingStore()
+    if getattr(args, "identities", False):
+        linker = link_store(store)
+        s = linker.summary()
+        print(f"Device identities: {s['identities']} total · {s['linkable']} linkable · "
+              f"{s['reidentified']} re-identified across MAC randomization")
+        if s["reidentified"]:
+            print(f"  (re-id folded {s['macs_collapsed']} MACs into {s['reidentified']} devices)")
+        for ident in linker.identities()[:args.top]:
+            if ident.reidentified:
+                print(f"  [DEVICE  str={ident.strength:.2f}] {ident.mac_count} MACs → one device: "
+                      f"{', '.join(sorted(ident.macs)[:4])}"
+                      + (" …" if ident.mac_count > 4 else "")
+                      + (f"  PNL={sorted(ident.ssids)[:3]}" if ident.ssids else ""))
+        if not s["reidentified"]:
+            print("  (no cross-MAC links yet — needs PNL/IE capture; see docs/FINGERPRINT.md)")
+        return 0
     dex = build_dex(store)
     s = dex.summary
     if not args.store:
@@ -430,6 +446,8 @@ def build_parser() -> argparse.ArgumentParser:
     dx = sub.add_parser("dex", help="the Field Dex — recon ledger over sightings")
     dx.add_argument("--store", help="path to a sightings store (SQLite)")
     dx.add_argument("--top", type=int, default=10, help="how many rarest/departed to show")
+    dx.add_argument("--identities", action="store_true",
+                    help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")

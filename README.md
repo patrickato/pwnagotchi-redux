@@ -9,7 +9,7 @@ pwnagotchi, not a fork. (We deliberately drop the "lesser" boards; see `docs/PLA
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
 > record/ghost, packs, plugin-compat shim, CLI, and web dashboard —
-> is built and green under the test suite (470+ tests, no hardware required). **No part has had a
+> is built and green under the test suite (480+ tests, no hardware required). **No part has had a
 > real-hardware pass on a physical Pi yet** (see *Verification status*). Sandbox-green ≠ done.
 
 ## What it is
@@ -45,7 +45,7 @@ everything above them:
 | Boot-POST | `redux/core/post.py` | power-on self-test: a streaming boot checklist that can't show READY unless the critical probe actually passed (the Doctor, gated) |
 | Detection | `redux/detect/` | `DetectEngine` + registry; 13 **passive** detectors (deauth-flood, rogue-AP, beacon-spam, surveillance-sweep, karma, WPS, BLE-tracker/flood, handshake, PMF, pineapple, PNL, hidden-SSID), confidence, alert bus, replay |
 | Spatial | `redux/geo/` | SQLite sighting store (WAL, coalesced writes), WiGLE, coverage, self-locate, geofence, GPX/KML export, dead-reckoning, geohash, Kismet import, stats |
-| Field Dex | `redux/dex/` | recon ledger over sightings — first/last-seen, rarity, "departed" |
+| Field Dex | `redux/dex/` | recon ledger over sightings — first/last-seen, rarity, "departed", **+ device identity that survives MAC randomization** (PNL/IE fingerprint linking; OUI never links) |
 | CSI sensing | `redux/sense/` | the radio as a motion/presence sensor (nexmon_csi): motion + occupancy, UNKNOWN until calibrated — sandbox math done, wire-parser needs-hardware |
 | Classify | `redux/classify/` | handshake crackability scoring |
 | Offense (scope-gated) | `redux/crack/`, `redux/netrecon/`, `redux/portal/` | capture→crack pipeline, network kill-chain (scan/enumerate/cred-test/loot), captive portal for authorized testing |
@@ -90,7 +90,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 472 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 482 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
@@ -108,7 +108,7 @@ redux/core/       Supervisor spine: signals, narrator, brain, actions, capabilit
                   Scope, Governor, Doctor, boot-POST, Beastcore
 redux/detect/     passive detector suite + engine/registry
 redux/geo/        spatial database + WiGLE/GPS/coverage/export
-redux/dex/        Field Dex (recon ledger over sightings)
+redux/dex/        Field Dex (recon ledger) + device fingerprint identity (cross-MAC re-id)
 redux/sense/      CSI sensing — the radio as a motion/presence sensor (nexmon_csi)
 redux/classify/   handshake crackability scoring
 redux/crack/      capture→crack pipeline (scope-gated)
@@ -131,7 +131,7 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 472 tests, no hardware needed
+pytest                 # 482 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)
@@ -142,6 +142,7 @@ redux persona list     # one box, pick your hat (apply red/blue/purple/recon/mes
 redux sense demo       # CSI motion/occupancy pipeline on synthetic data (no radio)
 redux scope            # manage the central authorized-target list (add/import/arm-lab)
 redux dex              # the Field Dex — recon ledger over sightings
+redux dex --identities # devices re-identified across MAC randomization (PNL/IE)
 redux expedition       # start/end a field session + Wrapped recap
 redux ghost in.json out.json   # sanitize a recording for safe replay/sharing
 redux packs            # manage Beast Packs
