@@ -194,6 +194,48 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_report(args) -> int:
+    """Engagement report. `demo` builds a sample (incl. one out-of-scope action to
+    show the integrity flag); `build` reads a scope file + actions JSON
+    ([{ts,action,target,reason,result}]) and renders Markdown."""
+    from .report import EngagementAction, build_report, render_markdown
+    from .frameworks import run_exercise, range_report
+    if args.report_cmd == "demo":
+        scope = Scope()
+        scope.add("00:11:22:33:44:55", "bssid", job="acme-2026", label="client AP")
+        scope.add("10.10.0.0/24", "cidr", job="acme-2026")
+        acts = [
+            EngagementAction(1_793_000_000.0, "wifi_recon", "00:11:22:33:44:55",
+                             "survey the client's RF", "12 APs seen"),
+            EngagementAction(1_793_000_100.0, "handshake_capture", "00:11:22:33:44:55",
+                             "capture WPA2 handshake", "handshake captured"),
+            EngagementAction(1_793_000_200.0, "net_scan", "10.10.0.0/24",
+                             "enumerate the authorized subnet", "6 hosts up"),
+            EngagementAction(1_793_000_300.0, "deauth", "aa:bb:cc:dd:ee:ff",
+                             "stray test against an unarmed AP", "(should be flagged)"),
+        ]
+        cov = range_report([run_exercise("deauth", ["deauth-flood", "surveillance-sweep"]),
+                            run_exercise("evil_twin", [])])
+        rep = build_report("ACME Q2 wireless assessment", args.operator, scope, acts,
+                           range_report=cov, sanitize=args.sanitize)
+    else:
+        scope = Scope.load(args.scope_file)
+        raw = json.loads(open(args.actions).read())
+        acts = [EngagementAction(float(e.get("ts", 0.0)), e.get("action", ""),
+                                 e.get("target", ""), e.get("reason", ""), e.get("result", ""))
+                for e in raw]
+        rep = build_report(args.engagement, args.operator, scope, acts, sanitize=args.sanitize)
+    md = render_markdown(rep)
+    if getattr(args, "out", None):
+        with open(args.out, "w") as f:
+            f.write(md)
+        print(f"wrote {args.out}  (integrity: {rep['integrity']}, "
+              f"{rep['unauthorized_count']} out-of-scope)")
+    else:
+        print(md)
+    return 0
+
+
 def cmd_range(args) -> int:
     """Purple Range mode: `techniques` lists the ATT&CK→D3FEND map; `demo` runs a
     SIMULATED attack set and grades your detectors, naming the coverage gaps."""
@@ -463,6 +505,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    rp = sub.add_parser("report", help="engagement report — chain of authorization, out-of-scope flagged")
+    rp.add_argument("--operator", default="operator", help="who ran the engagement")
+    rp.add_argument("--sanitize", action="store_true", help="pseudonymize identifiers for sharing")
+    rp.add_argument("--out", help="write Markdown to this path instead of stdout")
+    rpsub = rp.add_subparsers(dest="report_cmd", required=True)
+    rpsub.add_parser("demo", help="build a sample report (includes an out-of-scope action)")
+    rpb = rpsub.add_parser("build", help="build from a scope file + actions JSON")
+    rpb.add_argument("--engagement", default="engagement")
+    rpb.add_argument("--scope-file", default=_DEFAULT_SCOPE_PATH)
+    rpb.add_argument("--actions", required=True, help="actions JSON: [{ts,action,target,reason,result}]")
+    rp.set_defaults(func=cmd_report)
 
     rg = sub.add_parser("range", help="purple Range mode — grade your detectors vs ATT&CK (and D3FEND)")
     rgsub = rg.add_subparsers(dest="range_cmd", required=True)

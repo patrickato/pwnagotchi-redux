@@ -284,6 +284,20 @@ class Beastcore:
         return eng.status() if eng is not None else {
             "available": False, "reason": "CSI sensing not enabled"}
 
+    def engagement_report(self, engagement: str, operator: str, actions, *,
+                          range_report=None, sanitize: bool = False) -> dict:
+        """Build a chain-of-authorization report from this box's live Scope + the
+        recorded actions (+ the Dex summary as findings). Out-of-scope actions are
+        flagged, not hidden — see redux.report."""
+        from ..report import build_report
+        try:
+            dex_summary = self.dex().summary
+        except Exception:
+            dex_summary = None
+        return build_report(engagement, operator, self.scope, actions,
+                            dex_summary=dex_summary, range_report=range_report,
+                            sanitize=sanitize)
+
     # --- capture engine selection (bettercap + AngryOxide) ----------------- #
 
     def capture_plan(self, *, iface: str = "", prefer: str = "auto") -> dict:
