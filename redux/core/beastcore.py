@@ -253,6 +253,30 @@ class Beastcore:
         p = getattr(self, "_persona", None)
         return True if p is None else p.offense_available
 
+    # --- CSI sensing (the radio as a motion sensor) ------------------------ #
+
+    def enable_sense(self, *, window: int = 16, sensitivity: float = 5.0,
+                     vacant_after: int = 30):
+        """Turn on CSI sensing. Returns the SenseEngine so a collector can feed it
+        frames (and calibrate it against a quiet room first)."""
+        from ..sense import SenseEngine
+        self._sense = SenseEngine.create(window=window, sensitivity=sensitivity,
+                                         vacant_after=vacant_after)
+        return self._sense
+
+    def sense(self):
+        return getattr(self, "_sense", None)
+
+    def observe_csi(self, frame) -> Optional[dict]:
+        """Feed one CSI frame to the sense engine (enabling it on first use)."""
+        eng = self.sense() or self.enable_sense()
+        return eng.observe(frame)
+
+    def sense_status(self) -> dict:
+        eng = self.sense()
+        return eng.status() if eng is not None else {
+            "available": False, "reason": "CSI sensing not enabled"}
+
     def dex(self):
         """The Field Dex: the recon ledger built from this device's sightings."""
         from ..dex import build_dex
@@ -295,7 +319,7 @@ class Beastcore:
         """A glass-box snapshot for a TFT / web view / log."""
         rec = self.recommend()
         p = self.persona()
-        return {
+        status = {
             "intent": self.supervisor.intent.value,
             "persona": p.name if p else None,
             "posture": p.posture.value if p else None,
@@ -313,3 +337,6 @@ class Beastcore:
                 "reason": self._gov.reason if self._gov else "FULL — no readings yet",
             },
         }
+        if self.sense() is not None:
+            status["sense"] = self.sense_status()
+        return status

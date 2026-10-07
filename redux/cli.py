@@ -178,6 +178,62 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_sense(args) -> int:
+    """CSI sensing: `demo` runs the pipeline on a SYNTHETIC quiet→motion→quiet
+    sequence (no radio, clearly labelled), `replay` runs it over recorded frames.
+    Honest: reports UNKNOWN until calibrated, never a default 'still'."""
+    import math as _m
+    from .sense import SenseEngine, CsiFrame
+
+    def _jit(t: int, j: int) -> float:
+        # deterministic, non-periodic small noise so a quiet room has real (tiny) std
+        return 0.08 * (((t * 2654435761 + j * 40503) % 1000) / 1000.0 - 0.5)
+
+    def _synth(kind: str, t: int, width: int = 32) -> CsiFrame:
+        if kind == "quiet":
+            amp = tuple(10.0 + _jit(t, j) for j in range(width))
+        else:  # motion: large frame-to-frame swings across subcarriers
+            amp = tuple(10.0 + 3.0 * _m.sin(0.80 * t + 0.50 * j) + _jit(t, j) for j in range(width))
+        return CsiFrame(ts=float(t), amp=amp)
+
+    eng = SenseEngine.create(window=args.window, sensitivity=args.sensitivity)
+
+    if args.sense_cmd == "demo":
+        print("redux sense demo — SYNTHETIC data (no radio); proves the pipeline, not the hardware")
+        cal = [_synth("quiet", t) for t in range(args.window * 3)]
+        info = eng.calibrate(cal)
+        print(f"calibrated on quiet synthetic room: baseline={info['baseline_mean']:.4f} "
+              f"(±{info['baseline_std']:.4f}, {info['samples']} samples)")
+        timeline = [("quiet", 20), ("MOTION injected", 20), ("quiet", 20)]
+        t = 0
+        last = None
+        for label, n in timeline:
+            kind = "motion" if "MOTION" in label else "quiet"
+            for _ in range(n):
+                out = eng.observe(_synth(kind, t)); t += 1
+                tag = f"{out['sense']}/{out['occupancy']}"
+                if tag != last:
+                    print(f"  t={t:3} [{label:16}] -> {out['sense']:7} occ={out['occupancy']:8} ({out['reason']})")
+                    last = tag
+        print("final:", eng.status()["occupancy"])
+        return 0
+
+    # replay
+    events = json.loads(open(args.replay).read())
+    frames = [CsiFrame(ts=float(e.get("ts", i)), amp=tuple(e["amp"]))
+              for i, e in enumerate(events)]
+    if args.calibrate > 0:
+        eng.calibrate(frames[:args.calibrate])
+        frames = frames[args.calibrate:]
+    counts = {"motion": 0, "still": 0, "unknown": 0}
+    for f in frames:
+        out = eng.observe(f)
+        counts[out["sense"]] = counts.get(out["sense"], 0) + 1
+    print(f"replayed {len(frames)} frame(s): " + ", ".join(f"{k}={v}" for k, v in counts.items()))
+    print("final occupancy:", eng.status()["occupancy"])
+    return 0
+
+
 def cmd_persona(args) -> int:
     """List personas, show one, or apply one to a freshly-built box (glass-box:
     prints exactly what the persona changes). 'one box, pick your hat.'"""
@@ -329,6 +385,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    se = sub.add_parser("sense", help="CSI sensing — the radio as a motion/presence sensor")
+    se.add_argument("--window", type=int, default=16, help="sliding window size (frames)")
+    se.add_argument("--sensitivity", type=float, default=5.0, help="z-score motion threshold")
+    sesub = se.add_subparsers(dest="sense_cmd", required=True)
+    sesub.add_parser("demo", help="run the pipeline on synthetic quiet→motion→quiet data")
+    ser = sesub.add_parser("replay", help="run over recorded CSI frames (JSON: [{ts,amp[]}])")
+    ser.add_argument("replay"); ser.add_argument("--calibrate", type=int, default=0,
+                     help="use the first N frames as the quiet baseline")
+    se.set_defaults(func=cmd_sense)
 
     pe = sub.add_parser("persona", help="one box, pick your hat (red/blue/purple/recon/mesh/sigint)")
     pesub = pe.add_subparsers(dest="persona_cmd", required=True)
