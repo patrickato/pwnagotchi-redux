@@ -72,6 +72,18 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_web(args) -> int:
+    from .web import serve
+    driver = None
+    if args.replay:
+        events = json.loads(open(args.replay).read())
+        driver = BettercapDriver(config=BettercapConfig(),
+                                 transport=ReplayTransport(events=events))
+    bc = _build(args, driver=driver)
+    serve(bc, port=args.port, bind_scope=args.bind_scope)   # blocks until Ctrl-C
+    return 0
+
+
 def cmd_packs(args) -> int:
     mgr = PackManager(args.dir)
     try:
@@ -106,6 +118,13 @@ def build_parser() -> argparse.ArgumentParser:
     rn.add_argument("--replay", help="path to a recorded bettercap events JSON")
     rn.add_argument("--cycles", type=int, default=1)
     rn.set_defaults(func=cmd_run)
+
+    wb = sub.add_parser("web", help="serve the glass-box web dashboard")
+    add_radio_flags(wb)
+    wb.add_argument("--port", type=int, default=8080)
+    wb.add_argument("--bind-scope", default="localhost", choices=["localhost", "lan", "tailscale", "auto"])
+    wb.add_argument("--replay", help="path to a recorded bettercap events JSON")
+    wb.set_defaults(func=cmd_web)
 
     pk = sub.add_parser("packs", help="manage Beast Packs")
     pk.add_argument("--dir", required=True, help="packs directory")
