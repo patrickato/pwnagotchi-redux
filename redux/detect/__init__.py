@@ -13,6 +13,7 @@ from redux.detect.beacon_spam import BeaconSpamDetector
 from redux.detect.deauth_flood import DeauthFloodDetector
 from redux.detect.frames import Frame, FrameType
 from redux.detect.rogue_ap import RogueAPDetector, TrustedNetwork
+from redux.detect.wps_attack import WPSAttackDetector
 
 __all__ = [
     "Alert",
@@ -23,4 +24,5 @@ __all__ = [
     "FrameType",
     "RogueAPDetector",
     "TrustedNetwork",
+    "WPSAttackDetector",
 ]
