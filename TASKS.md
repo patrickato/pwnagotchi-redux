@@ -33,7 +33,7 @@ Pi hardware**; `done` = also passed a real-hardware pass. (See README *Verificat
 | # | Task | Acceptance | Status |
 |---|---|---|---|
 | 2.1 | Port Beastcore spine (signals/actions/transactions/spec_registry) into `redux/core` | ported modules pass their carried-over tests | done (sandbox) — spine assembles on one bus; spec-registry role covered by `ActionRegistry`+`ActionSpec`+`specs()` |
-| 2.2 | BeastSpatialDB + multi-radio ingest (recon suite) on the bus | sightings persist; map view renders real data | done (sandbox) for DB + ingest + spatial suite (`redux/geo`); **dedicated geographic map panel still TBD** (web dashboard renders status, not a map) |
+| 2.2 | BeastSpatialDB + multi-radio ingest (recon suite) on the bus | sightings persist; map view renders real data | done (sandbox) — DB + ingest + spatial suite (`redux/geo`), and the web dashboard now renders a sightings map (inline-SVG coordinate plot of real GPS-fixed sightings, honest empty state). Populated map data needs a real GPS fix on-device (Phase-1 gate) |
 | 2.3 | Glass-box brain v1 (orchestration + explainability; NOT channel-yield RL) | brain explains each decision; no regression vs greedy on capture | done (sandbox) — every recommendation carries a human-readable reason; capture A/B is a real-hardware claim, unverified |
 | 2.4 | Beast Packs incl. opt-in Kali-tools repo; pwnagotchi-plugin compat shim | a pwnagotchi plugin loads via the shim; a pack installs/removes cleanly | done (sandbox) — pack manager + pwn-shim, plus image-side opt-in Kali pack (`tcpdump`/`tshark`, passive) + signed-APT repo layout (#46). On-device install/remove is a Phase-1 hardware gate |
 
