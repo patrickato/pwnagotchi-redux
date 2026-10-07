@@ -103,6 +103,7 @@ def test_tft_real_state_and_bounds():
     known = tft.panel(power.Reading(50,3.8,"Discharging","fixture","measured"))
     assert unknown.tobytes() != known.tobytes()
     variable = [480,320,480,320,0,0,16,0,11,5,0,5,6,0,0,5,0] + [0]*23
+    variable[22:24] = [49, 74]  # Physical millimetres are not nonstandard format flags.
     fixed = tft.Fixed(line_length=960, smem_len=960*320, type=0, visual=2)
     rows = tft.rows(known, variable, fixed)
     assert len(rows) == 48 and all(len(data) == 320 for _, data in rows)

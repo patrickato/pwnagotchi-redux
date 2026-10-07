@@ -41,7 +41,7 @@ def rows(canvas, variable, fixed):
     xres, yres, xv, yv, xo, yo, bits = variable[:7]
     if (xres, yres) not in {(480, 320), (320, 480)} or bits not in {16, 32}:
         raise ValueError("TFT must expose 480x320/320x480, 16/32-bit truecolor")
-    if variable[7] or variable[23] or fixed.type != 0 or fixed.visual != 2:
+    if variable[7] or variable[20] or fixed.type != 0 or fixed.visual != 2:
         raise ValueError("unsupported grayscale, nonstandard or non-truecolor framebuffer")
     white = 0
     occupied = 0
