@@ -194,6 +194,37 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_sentinel(args) -> int:
+    """Sentinel demo: a SIMULATED stream of detector alerts + CSI motion through an
+    armed guardian, showing dispatch, de-dup, and armed-vs-home suppression."""
+    from .sentinel import Sentinel, CollectingNotifier
+    from .sense.csi import SenseReading, Sense
+    try:
+        from .detect import Alert, AlertKind
+    except Exception:
+        Alert = AlertKind = None
+    print("redux sentinel demo — SIMULATED alert stream through an ARMED guardian")
+    note = CollectingNotifier()
+    s = Sentinel(notifier=note, armed=True)
+    now = 1_793_000_000.0
+    if Alert is not None:
+        s.observe_alert(Alert(AlertKind.ROGUE_AP, "look-alike AP beaconing", now, "warning", bssid="aa:bb:cc:00:00:01"), now=now)
+        s.observe_alert(Alert(AlertKind.DEAUTH_FLOOD, "deauth burst", now + 1, "warning", bssid="de:ad:00:00:00:01"), now=now + 1)
+        s.observe_alert(Alert(AlertKind.DEAUTH_FLOOD, "deauth burst", now + 5, "warning", bssid="de:ad:00:00:00:01"), now=now + 5)  # deduped
+        s.observe_alert(Alert(AlertKind.BLE_SKIMMER, "known skimmer markers", now + 8, "critical", bssid="11:22:33:44:55:66"), now=now + 8)
+    # CSI motion while armed → critical; then a 'home' (disarmed) motion → suppressed
+    s.observe_motion(SenseReading(Sense.MOTION, 9.9, 0.001, 42.0, "42sigma above quiet baseline"), now=now + 12)
+    s.disarm()
+    s.observe_motion(SenseReading(Sense.MOTION, 9.9, 0.001, 42.0, "motion (but you're home)"), now=now + 20)
+    for e in note.sent:
+        rep = f" x{e.repeat}" if e.repeat > 1 else ""
+        print(f"  [{e.severity.value.upper():8}] {e.source:18} {e.summary}{rep} — {e.reason}")
+    st = s.status()
+    print(f"dispatched={st['dispatched']} suppressed={st['suppressed']} "
+          f"(deduped repeats + the at-home motion) by_severity={st['by_severity']}")
+    return 0
+
+
 def cmd_report(args) -> int:
     """Engagement report. `demo` builds a sample (incl. one out-of-scope action to
     show the integrity flag); `build` reads a scope file + actions JSON
@@ -505,6 +536,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    sn = sub.add_parser("sentinel", help="deploy-and-watch guardian (blue/purple)")
+    snsub = sn.add_subparsers(dest="sentinel_cmd", required=True)
+    snsub.add_parser("demo", help="simulated alert stream through an armed guardian")
+    sn.set_defaults(func=cmd_sentinel)
 
     rp = sub.add_parser("report", help="engagement report — chain of authorization, out-of-scope flagged")
     rp.add_argument("--operator", default="operator", help="who ran the engagement")

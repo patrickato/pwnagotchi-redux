@@ -138,6 +138,10 @@ class Beastcore:
         then flush the cycle's sightings to the store in one batched write."""
         alerts = self.supervisor.pump()
         self.flush_sightings()
+        sentinel = getattr(self, "_sentinel", None)
+        if sentinel is not None:
+            for a in alerts:
+                sentinel.observe_alert(a)
         return alerts
 
     def recommend(self):
@@ -275,9 +279,32 @@ class Beastcore:
         return getattr(self, "_sense", None)
 
     def observe_csi(self, frame) -> Optional[dict]:
-        """Feed one CSI frame to the sense engine (enabling it on first use)."""
+        """Feed one CSI frame to the sense engine (enabling it on first use). If a
+        Sentinel is armed, a motion reading is routed to it as an alert."""
         eng = self.sense() or self.enable_sense()
-        return eng.observe(frame)
+        out = eng.observe(frame)
+        sentinel = getattr(self, "_sentinel", None)
+        if sentinel is not None and eng._last is not None:
+            sentinel.observe_motion(eng._last)
+        return out
+
+    # --- sentinel (deploy-and-watch guardian) ------------------------------ #
+
+    def enable_sentinel(self, notifier=None, *, armed: bool = False, min_severity="warn"):
+        """Turn on Sentinel mode. Detector alerts from pump() and CSI motion are
+        routed to it; it dispatches glass-box alerts via `notifier` (LoRa/log)."""
+        from ..sentinel import Sentinel, Severity, CollectingNotifier
+        sev = Severity(min_severity) if not isinstance(min_severity, Severity) else min_severity
+        self._sentinel = Sentinel(notifier=notifier or CollectingNotifier(),
+                                  min_severity=sev, armed=armed)
+        return self._sentinel
+
+    def sentinel(self):
+        return getattr(self, "_sentinel", None)
+
+    def sentinel_status(self) -> dict:
+        s = self.sentinel()
+        return s.status() if s is not None else {"enabled": False}
 
     def sense_status(self) -> dict:
         eng = self.sense()
