@@ -156,3 +156,37 @@ output in the PR. It records the real model, boot ID, `systemd-analyze time`,
 `systemd-analyze blame`, redux's critical chain and its start timestamp. No Pi is
 available here, so no blame output or sub-15s result is claimed. The sub-15s target,
 SD/USB/NVMe boot coverage and measured regression comparison remain hardware gates.
+
+## Watchdog and restart records (Codex backlog 4)
+
+The image enables `dtparam=watchdog=on` and retains the actual kernel's
+`bcm2835_wdt` support in the initramfs. PID 1 owns `/dev/watchdog0` through
+`RuntimeWatchdogSec=15s` and `RebootWatchdogSec=15s`; redux stays unprivileged.
+The bootstrap uses `Type=notify` and `WatchdogSec=15s`, sends readiness only after
+its startup checkpoint is durable, and sends heartbeats from its supervised loop.
+A stalled loop therefore cannot keep itself alive through a separate timer thread.
+This checks the bootstrap loop; it does not claim health coverage for RF workers
+that the lead has not connected to this entrypoint.
+
+`/captures/redux/boot.json` records real UTC startup/shutdown times and whether the
+previous shutdown was committed. Replacement syncs the temporary file and parent
+directory. Missing or corrupt records have explicit reasons; unclean restart
+resumes the passive bootstrap and never replays radio actions. Storage failure
+prevents readiness, allowing systemd to restart the process rather than report a
+healthy service with lost state.
+
+**Hardware gates on Pi 4 and Pi 5:** record `cat /sys/class/watchdog/watchdog0/identity`,
+`systemctl show --property=RuntimeWatchdogUSec --property=RebootWatchdogUSec`,
+`systemctl show redux.service --property=WatchdogUSec --property=MainPID`, and the
+bootstrap journal. Verify watchdog0 is the board's hardware watchdog, not a
+software watchdog or a different attached device. On a spare card, stop the
+bootstrap process with SIGSTOP and confirm systemd times it out and restarts it;
+the next checkpoint must describe an unclean shutdown. Test a complete system
+hang/reset with an operator present and confirm root/captures recovery. A normal
+shutdown must commit a clean checkpoint. No reset results are inferred from tests.
+
+EEPROM/kernel handover watchdog settings are not enabled automatically: a timer
+running before PID 1 could reset a board during its unmeasured first boot. Verify
+boot duration and the board-specific handover before enabling that additional
+protection. See the upstream [systemd watchdog configuration](https://github.com/systemd/systemd/blob/main/man/systemd-system.conf.xml)
+and [Raspberry Pi boot watchdog documentation](https://github.com/raspberrypi/documentation/blob/master/documentation/asciidoc/computers/config_txt/boot.adoc).
