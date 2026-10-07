@@ -1,14 +1,26 @@
 """redux.geo — BeastSpatialDB and geospatial helpers.
 
-Sighting store first; WiGLE export / centroid / coverage land as follow-ups.
+Sighting store + WiGLE export. Centroid / coverage land as follow-ups.
 No redux.engine import — lead wires live GPS at integration.
 """
 from __future__ import annotations
 
 from redux.geo.db import DEFAULT_DB_PATH, Sighting, SightingStore
+from redux.geo.wigle import (
+    WIGLE_COLUMNS,
+    channel_to_frequency_mhz,
+    export_store,
+    kismetdb_to_wiglecsv_dump,
+    write_wigle_csv,
+)
 
 __all__ = [
     "DEFAULT_DB_PATH",
     "Sighting",
     "SightingStore",
+    "WIGLE_COLUMNS",
+    "channel_to_frequency_mhz",
+    "export_store",
+    "kismetdb_to_wiglecsv_dump",
+    "write_wigle_csv",
 ]
