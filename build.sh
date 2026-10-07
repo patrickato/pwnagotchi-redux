@@ -5,7 +5,7 @@ REPO_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 usage() {
     cat <<'EOF'
 Usage: ./build.sh [--prepare-only]
-Build a Raspberry Pi 4 image on a Debian/Ubuntu Linux host as root.
+Build an arm64 Raspberry Pi 4/5 image on a Debian/Ubuntu Linux host as root.
 --prepare-only stages pinned sources and configuration without building an image.
 Optional: REDUX_BUILD_DIR (default build/image), REDUX_IMAGE_CONFIG (local config).
 See docs/IMAGE_BUILD.md for host dependencies and the physical boot gate.
@@ -29,7 +29,7 @@ for tool in git realpath install tar; do
 done
 if [[ $PREPARE_ONLY == 0 ]]; then
     command -v arch-test >/dev/null || { echo 'Missing arch-test; install the host prerequisites in docs/IMAGE_BUILD.md.' >&2; exit 1; }
-    arch-test armhf >/dev/null || { echo 'Host cannot execute ARM binaries. Enable qemu-arm binfmt_misc; see docs/IMAGE_BUILD.md.' >&2; exit 1; }
+    arch-test arm64 >/dev/null || { echo 'Host cannot execute arm64 binaries. Enable qemu-aarch64 binfmt_misc; see docs/IMAGE_BUILD.md.' >&2; exit 1; }
 fi
 BUILD_DIR=$(realpath -m -- "${REDUX_BUILD_DIR:-$REPO_DIR/build/image}")
 [[ $BUILD_DIR != *' '* ]] || { echo 'pi-gen requires a build path without spaces.' >&2; exit 1; }
@@ -83,15 +83,17 @@ RELEASE=bookworm
 STAGE_LIST="stage0 stage1 stage2 stage-redux"
 EOF
 touch "$PI_GEN_DIR/stage2/SKIP_IMAGES"
-# Pi 4 only, a single 32-bit kernel/userspace pair to validate first.
+# Both supported boards use arm64, with their respective kernel packages.
 cat > "$PI_GEN_DIR/stage0/02-firmware/01-packages" <<'EOF'
 initramfs-tools
 raspi-firmware
-linux-image-rpi-v7l
-linux-headers-rpi-v7l
+linux-image-rpi-v8
+linux-image-rpi-2712
+linux-headers-rpi-v8
+linux-headers-rpi-2712
 EOF
 chmod +x "$PI_GEN_DIR/stage-redux/prerun.sh" "$PI_GEN_DIR/stage-redux/00-redux/00-run.sh"
-echo "Prepared Pi 4 source tree: $PI_GEN_DIR"
+echo "Prepared arm64 Pi 4/5 source tree: $PI_GEN_DIR"
 echo 'Reason: Lite stages only; nexmon built for installed Pi kernel, never the host kernel.'
 if [[ $PREPARE_ONLY == 1 ]]; then
     echo 'Preparation only: no image has been built.'

@@ -1,159 +1,108 @@
-# Task 1.1 — Pi 4 image stub
+# Image build — arm64 Pi 4 / Pi 5
 
-This builds a **new Raspberry Pi OS Lite Bookworm image** with pi-gen stages
-0–2 plus our `stage-redux`. It includes bettercap, the BCM43455c0 nexmon
-7.45.206 firmware, a driver compiled for the installed Pi 4 kernel, nexutil,
-and an enabled `redux.service`. It contains no pwnagotchi runtime.
+`./build.sh` creates a new Pi OS Lite Bookworm arm64 image using pinned official
+pi-gen stages 0–2 and `stage-redux`. It includes bettercap, patched BCM43455c0
+nexmon firmware, nexutil, and `redux.service` (`python -m redux.core.boot`).
+No pwnagotchi image or Python runtime is reused. The service currently logs its
+bootstrap state and waits for shutdown; live integration belongs to the lead.
+The stock bettercap unit is masked so installation cannot start an engine session.
 
-The service is an image bootstrap, not the live supervisor: it waits for
-shutdown and states in the journal that tasks 1.2–1.5 are pending. It performs
-no radio operations, starts no bettercap process, and reports no invented
-telemetry. The stock bettercap unit is masked so installation cannot start
-an unscoped engine session. Radio intent, target authorization and engine
-lifecycle belong to later queue items.
+## Linux host
 
-## Build on Linux
-
-Use a Debian/Ubuntu Linux host with root access, an ext4 workspace without
-spaces, network access and at least 20 GB free. Windows/Git Bash and an NTFS
-workspace are unsupported. On WSL2, clone into its Linux filesystem and make
-sure loop devices and binfmt_misc are usable; a native Linux host is preferred.
-Use a persistent Linux directory for the clone (for example, `/var/tmp/`
-in WSL), since `/tmp/` can be cleared when the distribution restarts.
-
-Install the host prerequisites (derived from pinned pi-gen's `depends`):
+Use root on Debian/Ubuntu with network access, at least 30 GB free, and an ext4
+workspace without spaces. WSL2 can build under ARM emulation; use its persistent
+Linux filesystem, not NTFS or `/tmp`. Host prerequisites:
 
 ```sh
 sudo apt-get update
 sudo apt-get install git quilt parted coreutils qemu-user-static debootstrap \
   zerofree zip dosfstools e2fsprogs libcap2-bin grep rsync xz-utils curl xxd \
   file kmod bc gpg pigz arch-test binfmt-support ca-certificates
-```
-
-On a non-ARM host, verify QEMU's ARM interpreter is registered:
-
-```sh
-sudo modprobe binfmt_misc
-sudo update-binfmts --enable qemu-arm
-cat /proc/sys/fs/binfmt_misc/qemu-arm
-```
-
-Then, from the repo root:
-
-```sh
+sudo update-binfmts --enable qemu-aarch64
+arch-test arm64
 sudo ./build.sh
 ```
 
-The compressed image and build logs are in `build/image/pi-gen/deploy/`.
-Only the final redux stage exports an image (`*-pwnagotchi-redux-pi4.img.xz`);
-there is no desktop stage. pi-gen also emits its package/image metadata.
+The wrapper refuses existing build directories. Choose a fresh path for another
+run with `sudo REDUX_BUILD_DIR="$PWD/build/image-next" ./build.sh`. Filesystem
+mounts from a failed pi-gen run must be unmounted before removing any build tree.
+`--prepare-only` stages sources without root or image creation; it is not a build.
 
-`./build.sh --prepare-only` fetches sources and stages the build without root,
-APT, chroot, mounts or image creation. It is **not** a successful image build.
-Build directories are never deleted or reused by this wrapper. For another
-build, select a fresh path:
+Output: `build/image/pi-gen/deploy/image_*-pwnagotchi-redux-pi4-pi5-arm64.img.xz`.
+Only the redux stage exports an image; there is no desktop stage.
 
-```sh
-sudo REDUX_BUILD_DIR="$PWD/build/image-next" ./build.sh
-```
-
-For locale, timezone, regulatory country or local provisioning, create a
-private shell config and pass its absolute path through `REDUX_IMAGE_CONFIG`.
-For example:
-
-```sh
-sudo REDUX_IMAGE_CONFIG="$PWD/image.local.conf" ./build.sh
-```
-
-The temporary build login is `field` (Debian already owns the `operator`
-group). Upstream pi-gen's first-boot user provisioning remains enabled: use a local
-console or Raspberry Pi Imager to configure your own operator credentials.
-SSH is disabled by default and no password is shipped. A private config can
-use pi-gen's `FIRST_USER_PASS`, `DISABLE_FIRST_BOOT_USER_RENAME` and SSH options
-for a lab build; never commit credentials. The image's service starts at
-multi-user boot independently of interactive login.
+For local login, country, locale or timezone provisioning, pass a private shell
+config using `REDUX_IMAGE_CONFIG=/absolute/path/image.local.conf`. Keep it outside
+the repository, because shared ignore rules are lead-owned. First-boot user
+provisioning remains enabled, SSH is off, and no shared password ships. The
+placeholder account is `field`; use Pi Imager or a local console to provision it.
+Blank-but-set `WPA_COUNTRY` makes upstream configuration fail, so it is unset by
+default. The wrapper fixes the release and stage list; arm64 is fixed by pi-gen.
 
 ## Decisions and provenance
 
-- **Bookworm armhf, Pi 4 only:** a conservative supported base with distro
-  `gcc-arm-none-eabi` for the maintained nexmon build. `arm_64bit=0` and the v7l kernel keep the
-  driver/userspace/kernel combination consistent. This is not a Pi 5 or
-  64-bit image. Moving to Trixie/arm64 needs a separate validated build.
-- **Pinned sources:** [`image/sources.sh`](../image/sources.sh) identifies
-  exact revisions. pi-gen is from Raspberry Pi's official distribution
-  builder. The nexmon revision is from jayofelony's maintained nexmon branch
-  because it includes drivers for 6.12/6.18 absent in seemoo-lab master.
-  This reuses only nexmon firmware/driver/tools, never a pwnagotchi image or
-  supervisor. Original repositories retain their respective licenses;
-  this repo does not vendor their source or rewrite their licensing.
-- **Real target headers:** the image compiles a driver for every installed
-  Pi 4 v7l kernel and fails if matching headers/driver source are absent.
-  The build host's `uname -r` is never used to select target drivers. The
-  firmware is placed under `/lib/firmware/updates/brcm/` with the Pi 4
-  board alias; packaged stock firmware is preserved. Initramfs is refreshed
-  after installation. Monitor/injection capability remains a hardware gate.
-  A small build-time adapter checks the **actual** `set_monitor_channel`
-  declaration in the target cfg80211 header. Newer 6.12 point releases add a
-  `net_device` argument; the adapter accepts it while preserving nexmon's
-  existing PHY-wide channel control. Unknown signatures fail the build.
-  This local adjustment is tracked in redux source and recorded, with the
-  installed driver's checksum, under `/usr/share/redux/nexmon-driver-*`.
-  It also reuses the maintained nexmon 6.18 driver's compatibility alias
-  when the target header renames `SDIO_DEVICE_ID_BROADCOM_CYPRESS_43752`;
-  the device ID value always comes from the actual kernel header.
-- **Kernel held:** image kernel packages are held to avoid an APT update
-  replacing the kernel without rebuilding its nexmon module. Rebuild the
-  image to upgrade the pair; do not assume firmware alone is sufficient.
-- **Lean runtime:** temporary compiler tools, headers and nexmon build
-  sources are removed. bettercap is installed from Pi OS/Debian APT, with
-  no Kali repository or tool pack. redux is copied as a stdlib-only package
-  to `/opt/redux`, so boot needs no pip, virtualenv or network download.
-- **Auditability, not bit-for-bit reproduction:** sources are pinned but
-  APT repositories are live. Actual package versions, target kernels,
-  source revisions and firmware SHA256 are recorded in `/usr/share/redux/`.
-  Build logs are the evidence of compilation; no hardware success is inferred.
+- **arm64 on both boards:** the pinned arm64 pi-gen Bookworm revision selects
+  Debian arm64 userspace and Pi OS kernel/firmware packages. Pi 4 uses the v8
+  kernel; Pi 5 uses 2712. Both kernel images and headers are installed, and the
+  build compiles nexmon for each installed target. `arm_64bit=1` preserves the
+  kernel/userspace pair. No armhf/Pi Zero target is supported.
+- **Sources pinned:** `image/sources.sh` records exact pi-gen and maintained
+  jayofelony/nexmon revisions. The maintained nexmon tree includes 6.12/6.18
+  drivers and supports the distro compiler on aarch64. Only its firmware,
+  driver and tools are reused. Its license is retained with the image.
+- **Real target headers:** host `uname -r` is never used to choose modules.
+  Missing headers/source or an unsupported kernel aborts the build. A tested
+  adapter reads actual cfg80211/SDIO headers, accepts the known added net_device
+  argument and renamed SDIO identifier, and fails on unknown APIs. Compatibility
+  reasons and final module checksums are recorded in `/usr/share/redux/`.
+- **Firmware priority:** patched firmware is in `/lib/firmware/updates/brcm/`
+  with Pi 4 and Pi 5 board aliases. Packaged stock firmware is retained. pi-gen
+  generates the final boot initramfs during export, after modules are installed.
+  The actual firmware/chip/driver combination on each board is a hardware gate;
+  compilation alone does not establish monitor/injection support.
+- **Kernel held:** installed image packages are held so APT cannot replace a
+  kernel without its nexmon module. Rebuild the pair to upgrade it.
+- **Lean runtime:** compilers, headers and build sources are removed. The boot
+  package uses the standard library and needs no pip/network download. Package
+  versions, source revisions, kernels and firmware/module hashes are recorded.
+  Live APT repositories and filesystem timestamps mean this is source-pinned,
+  not a bit-for-bit reproducible image.
 
-Sources: [pi-gen Bookworm](https://github.com/RPi-Distro/pi-gen/tree/1c2abf50924d5bfee3527657af74ddfb1da52904),
-[maintained nexmon source](https://github.com/jayofelony/nexmon/tree/1654e1857766df92086dbfbed5ffd288efc9bd8c),
-[original nexmon project](https://github.com/seemoo-lab/nexmon).
+Pinned upstream references: [pi-gen arm64 Bookworm](https://github.com/RPi-Distro/pi-gen/tree/816f458a9931e216ecf8969e13b4d0ca39947d1f),
+[maintained nexmon](https://github.com/jayofelony/nexmon/tree/1654e1857766df92086dbfbed5ffd288efc9bd8c).
 
 ## Verification
 
-No-hardware gate:
-
 ```sh
-pip install -e '.[dev]'
 python -m compileall redux
 pytest
 for f in $(git ls-files '*.sh'); do bash -n "$f"; done
+GITHUB_HEAD_REF=codex/image GITHUB_BASE_REF=main python .github/scripts/lane_guard.py
 ```
 
-Tests execute the real preparation and stage scripts against local source
-fixtures, check service/source placement and single-image export, ensure
-existing build directories are refused, and check bootstrap SIGTERM shutdown.
-They do **not** claim to compile the ARM image or exercise real firmware.
+Hardware-free tests exercise real preparation/staging with local source fixtures,
+service shutdown, target selection for both v8/2712, rejection of armhf/unknown
+kernels, installed-package filtering and compatibility adapters.
+The earlier armhf image is historical evidence only and does not validate this
+arm64 build. Each PR records the current build result and physical gates honestly.
 
-**Physical acceptance gate (not yet recorded):**
+**Hardware gate — Pi 4 AND Pi 5 (no boards available in this session):**
+Flash the arm64 artifact, provision locally, then record the image SHA256, model
+and these actual outputs on each board, including after a second boot:
 
-1. Run `sudo ./build.sh` to completion and save the deploy logs/checksums.
-2. Flash that `.img.xz` using Raspberry Pi Imager onto a spare SD card.
-3. Boot a Pi 4 with local console access. Provision an operator if needed.
-4. Record the actual output of:
+```sh
+cat /proc/device-tree/model; echo
+uname -a; getconf LONG_BIT
+systemctl is-enabled redux.service
+systemctl is-active redux.service
+journalctl -b -u redux.service --no-pager
+command -v bettercap nexutil
+modinfo -n brcmfmac
+cat /usr/share/redux/nexmon-kernels.txt
+sha256sum -c /usr/share/redux/nexmon-firmware.sha256
+sha256sum -c /usr/share/redux/nexmon-driver.sha256
+systemctl is-enabled bettercap.service  # masked, expected nonzero exit
+```
 
-   ```sh
-   uname -a
-   systemctl is-enabled redux.service
-   systemctl is-active redux.service
-   journalctl -b -u redux.service --no-pager
-   command -v bettercap nexutil
-   modinfo -n brcmfmac
-   cat /usr/share/redux/nexmon-kernels.txt
-   sha256sum -c /usr/share/redux/nexmon-firmware.sha256
-   sha256sum -c /usr/share/redux/nexmon-driver.sha256
-   systemctl is-enabled bettercap.service   # expected: masked (exit nonzero)
-   ```
-
-5. Verify `brcmfmac` resolves to the installed kernel's `updates/brcmfmac.ko`.
-   Record Pi model, image SHA256 and service output in the PR. `redux.service`
-   must be enabled and active after a second boot. Task 1.1 stays claimed
-   until a reviewer records that gate; CI green alone does not satisfy it.
+Confirm arm64 userspace, the board's matching kernel and `updates/brcmfmac.ko`.
+No physical success or sub-15-second boot claim is inferred from QEMU tests.

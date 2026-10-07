@@ -4,8 +4,8 @@ set -eo pipefail
 cd /usr/local/src/nexmon
 source setup_env.sh
 source /usr/local/src/target-kernel.sh
-[[ $PLATFORMUNAME == armv7l || $PLATFORMUNAME == armv6l ]] || {
-    echo "Expected ARMv7 userspace under native execution or qemu-arm, got $PLATFORMUNAME" >&2
+[[ $PLATFORMUNAME == aarch64 ]] || {
+    echo "Expected arm64 userspace under native execution or qemu-aarch64, got $PLATFORMUNAME" >&2
     exit 1
 }
 # The pinned maintained nexmon source uses distro arm-none-eabi GCC.
@@ -20,6 +20,7 @@ install -d /lib/firmware/updates/brcm
 install -m 0644 patches/bcm43455c0/7_45_206/nexmon/brcmfmac43455-sdio.bin \
     /lib/firmware/updates/brcm/brcmfmac43455-sdio.bin
 ln -sfn brcmfmac43455-sdio.bin '/lib/firmware/updates/brcm/brcmfmac43455-sdio.raspberrypi,4-model-b.bin'
+ln -sfn brcmfmac43455-sdio.bin '/lib/firmware/updates/brcm/brcmfmac43455-sdio.raspberrypi,5-model-b.bin'
 # Compile against installed target headers. The target kernel, not the host,
 # determines which version of the maintained nexmon driver is compatible.
 count=0
@@ -40,7 +41,7 @@ for module_dir in /lib/modules/*; do
     python3 /usr/local/src/patch-nexmon-driver.py "$header" "$driver/cfg80211.c" \
         --sdio-header "${header%/net/cfg80211.h}/linux/mmc/sdio_ids.h" \
         >> /usr/share/redux/nexmon-driver-compat.txt
-    make -C "$module_dir/build" M="$driver" ARCH=arm -j2 modules
+    make -C "$module_dir/build" M="$driver" ARCH=arm64 -j2 modules
     install -d "$module_dir/updates"
     install -m 0644 "$driver/brcmfmac.ko" "$module_dir/updates/brcmfmac.ko"
     sha256sum "$module_dir/updates/brcmfmac.ko" >> /usr/share/redux/nexmon-driver.sha256
@@ -52,7 +53,7 @@ for module_dir in /lib/modules/*; do
 done
 [[ $count -gt 0 ]] || { echo 'No target Pi kernel found; refusing to export a partial nexmon image.' >&2; exit 1; }
 sha256sum /lib/firmware/updates/brcm/brcmfmac43455-sdio.bin > /usr/share/redux/nexmon-firmware.sha256
-apt-mark manual bettercap python3 iw rfkill linux-image-rpi-v7l
+apt-mark manual bettercap python3 iw rfkill linux-image-rpi-v8 linux-image-rpi-2712
 # A kernel update could silently drop monitor support. Upgrade kernel + driver
 # together by rebuilding the image rather than silently loading stock brcmfmac.
 mapfile -t kernel_packages < <(dpkg-query -W -f='${binary:Package}\t${db:Status-Status}\n' 'linux-image-*' | nexmon_installed_kernel_packages)

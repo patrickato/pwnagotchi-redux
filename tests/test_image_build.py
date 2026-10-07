@@ -69,7 +69,7 @@ def test_preparation_exports_only_redux_and_targets_pi4(prepared):
     country = invoke(["bash", "-c", 'source "$1"; [[ ! -v WPA_COUNTRY ]]', "bash", str(tree / "config")], env=env)
     assert country.returncode == 0  # Blank-but-set makes upstream raspi-config fail.
     kernel_packages = (tree / "stage0/02-firmware/01-packages").read_text().splitlines()
-    assert kernel_packages == ["initramfs-tools", "raspi-firmware", "linux-image-rpi-v7l", "linux-headers-rpi-v7l"]
+    assert kernel_packages == ["initramfs-tools", "raspi-firmware", "linux-image-rpi-v8", "linux-image-rpi-2712", "linux-headers-rpi-v8", "linux-headers-rpi-2712"]
     # A rerun must not modify a tree containing mounts or valuable build output.
     repeated = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
     assert repeated.returncode != 0
@@ -97,7 +97,7 @@ bash ./00-run.sh
     assert "ExecStart=/usr/bin/python3 -m redux.core.boot" in unit
     assert "User=redux" in unit
     assert "WantedBy=multi-user.target" in unit
-    assert "arm_64bit=0" in (root / "boot/firmware/config.txt").read_text()
+    assert "arm_64bit=1" in (root / "boot/firmware/config.txt").read_text()
     chroot = Path(env["CHROOT_INPUT"]).read_text()
     assert "systemctl enable redux.service" in chroot
     assert "systemctl mask bettercap.service" in chroot
@@ -132,12 +132,13 @@ def test_prerun_copies_lite_root_only_when_missing(tmp_path):
 
 
 @pytest.mark.parametrize("kernel,driver_present,headers_present,reason", [
-    ("6.12.75+rpt-rpi-v7l", True, True, None),
-    ("6.18.40+rpt-rpi-v7l", True, True, None),
-    ("6.12.75+rpt-rpi-v8", True, True, "non-Pi4"),
-    ("6.18.40-microsoft-standard-WSL2", True, True, "non-Pi4"),
-    ("6.12.75+rpt-rpi-v7l", False, True, "driver or headers"),
-    ("6.12.75+rpt-rpi-v7l", True, False, "driver or headers"),
+    ("6.12.75+rpt-rpi-v8", True, True, None),
+    ("6.12.75+rpt-rpi-2712", True, True, None),
+    ("6.18.40+rpt-rpi-v8", True, True, None),
+    ("6.12.75+rpt-rpi-v7l", True, True, "non-arm64"),
+    ("6.18.40-microsoft-standard-WSL2", True, True, "non-arm64"),
+    ("6.12.75+rpt-rpi-v8", False, True, "driver or headers"),
+    ("6.12.75+rpt-rpi-2712", True, False, "driver or headers"),
 ])
 def test_nexmon_selects_installed_target_and_refuses_incompatible_pair(tmp_path, kernel, driver_present, headers_present, reason):
     source = tmp_path / "nexmon"

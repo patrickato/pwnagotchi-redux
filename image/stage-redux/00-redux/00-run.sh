@@ -19,16 +19,15 @@ systemctl mask bettercap.service
 # Keep the image lean; compile tools belong on the build host, not in the field.
 apt-get purge -y build-essential gcc g++ cpp make git gawk qpdf bison flex libfl-dev \
     gcc-arm-none-eabi libnewlib-dev libgmp-dev libmpfr-dev libmpc-dev libnl-3-dev \
-    libnl-genl-3-dev pkg-config linux-headers-rpi-v7l
+    libnl-genl-3-dev pkg-config linux-headers-rpi-v8 linux-headers-rpi-2712
 apt-get autoremove -y
 apt-get clean
 rm -rf /usr/local/src/nexmon /usr/local/src/install-nexmon.sh /usr/local/src/target-kernel.sh /usr/local/src/patch-nexmon-driver.py
 dpkg-query -W -f='${binary:Package}\t${Version}\n' > /usr/share/redux/packages.tsv
 EOF
-# Force the Pi 4 to use the v7l kernel we actually built the driver against.
+# Both boards use their distro-selected arm64 kernel, built above.
 cat >> "$ROOTFS_DIR/boot/firmware/config.txt" <<'EOF'
 
-[pi4]
-arm_64bit=0
 [all]
+arm_64bit=1
 EOF
