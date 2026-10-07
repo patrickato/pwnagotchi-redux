@@ -60,3 +60,17 @@ def test_no_gps_still_records_sighting_without_position():
     bc.pump()
     row = bc.store.query()[0]
     assert row.lat is None and row.lon is None          # honest: recorded, no invented fix
+
+
+def test_ble_flood_detected_and_ble_devices_stored_through_pump():
+    # BLE device events flow through the (newly wired) bridge into the BLE detectors
+    # AND get geo-tagged as 'ble' sightings — one realistic flow, default 13 detectors.
+    evs = _evs([
+        {"tag": "ble.device.new", "time": 2000.0 + i * 0.01, "data": {"mac": f"aa:bb:cc:00:00:{i:02x}"}}
+        for i in range(21)  # > ble_flood threshold (20) inside the 5s window
+    ])
+    bc = Beastcore([ONBOARD], intent=Intent.RECON, driver=FakeDriver(evs))
+    alerts = bc.pump()
+    assert any(a.kind.value == "ble_flood" for a in alerts)       # bridge -> BLE detector fired
+    assert bc.bus.history(Signal.ALERT)                            # alert reached the bus
+    assert bc.store.count(kind="ble") == 21                        # every BLE device persisted
