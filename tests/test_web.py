@@ -1,0 +1,54 @@
+import json
+import threading
+import urllib.request
+
+from redux.web import status_payload, render_page, resolve_host, serve, make_handler
+from redux.core import Beastcore
+from redux.radio import Radio, Intent
+
+ONBOARD = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=False, driver="brcmfmac", onboard=True)
+ALFA = Radio("wlan1", bands=frozenset({"2.4", "5"}), monitor=True, inject=True, driver="mt76x2u", usb_gen=3, high_draw=True)
+
+
+def test_status_payload_has_fields():
+    bc = Beastcore([ONBOARD, ALFA], intent=Intent.HUNT)
+    p = status_payload(bc)
+    assert p["intent"] == "hunt" and p["capture_iface"] == "wlan1"
+    assert "narration" in p and "recommendation" in p
+
+
+def test_page_is_self_contained_html():
+    html = render_page()
+    assert html.lstrip().startswith("<!doctype html>")
+    assert "/api/status" in html and "http" not in html.split("fetch('/api/status')")[0][-200:]
+    # no external asset links (self-contained)
+    assert "src=" not in html and "cdn" not in html.lower()
+
+
+def test_bind_scope_defaults_to_localhost():
+    assert resolve_host("localhost") == "127.0.0.1"
+    assert resolve_host("lan") == "0.0.0.0"
+    assert resolve_host("anything-unknown") == "127.0.0.1"   # safe default
+
+
+def test_handler_serves_status_and_page():
+    bc = Beastcore([ONBOARD, ALFA], intent=Intent.HUNT)
+    snap = status_payload(bc)                 # computed in THIS (store-owning) thread
+    from http.server import ThreadingHTTPServer
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: snap))
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=3) as r:
+            data = json.loads(r.read())
+        assert data["intent"] == "hunt"
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as r:
+            assert b"<!doctype html>" in r.read().lower()
+    finally:
+        srv.shutdown(); srv.server_close()
+
+
+def test_serve_loop_bounded_updates_snapshot():
+    bc = Beastcore([ONBOARD, ALFA], intent=Intent.HUNT)
+    # bounded loop (no driver -> pump is a no-op), just proves serve() runs + binds
+    serve(bc, port=0, bind_scope="localhost", interval=0, pump=True, _cycles=2)
