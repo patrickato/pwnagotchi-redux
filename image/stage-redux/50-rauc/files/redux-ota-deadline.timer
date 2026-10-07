@@ -1,0 +1,9 @@
+[Unit]
+Description=Bound the duration of an uncommitted OTA trial
+
+[Timer]
+OnBootSec=120
+Unit=redux-ota-deadline.service
+
+[Install]
+WantedBy=timers.target

@@ -117,6 +117,149 @@ def test_tft_real_state_and_bounds():
         tft.rows(known, variable, fixed)
 
 
+@pytest.mark.parametrize("stable,candidate", [("A","B"),("B","A")])
+def test_ota_trial_commit_and_rollback(stable, candidate):
+    ota = boot_module("ota")
+    initial = ota.initial_state(stable)
+    staged, commit = ota.transition(initial, stable, stable, "set-primary", candidate)
+    assert commit is None and staged["pending"] == candidate
+    assert initial["pending"] is None  # Pure transition never mutates prior record.
+    with pytest.raises(ValueError, match="observed trial"):
+        ota.transition(staged, stable, candidate, "set-state", candidate, "good", trial=False)
+    healthy, commit = ota.transition(staged, stable, candidate, "set-state", candidate, "good", trial=True)
+    assert commit == candidate and healthy["pending"] is None
+    reverted, commit = ota.transition(staged, stable, stable, "set-state", stable, "good")
+    assert reverted["states"][candidate] == "bad" and reverted["pending"] is None
+    assert "rollback or trial abandoned" in reverted["reason"]
+    recovered, commit = ota.transition(staged, candidate, candidate, "set-state", candidate, "good")
+    assert recovered["states"][candidate] == "good" and "interrupted" in recovered["reason"]
+
+
+def test_ota_refuses_active_slot_and_lost_fallback():
+    ota = boot_module("ota")
+    state = ota.initial_state("A")
+    for action, slot, value in [("set-primary","A",None),("set-state","A","bad"),("set-primary","C",None)]:
+        with pytest.raises(ValueError):
+            ota.transition(state,"A","A",action,slot,value)
+    staged,_ = ota.transition(state,"A","A","set-primary","B")
+    with pytest.raises(ValueError):
+        ota.transition(staged,"A","A","set-primary","B")
+
+
+def test_ota_cmdline_and_selector_strictness():
+    ota = boot_module("ota")
+    text = "console=tty1 root=PARTUUID=old rauc.slot=A init=/usr/lib/raspi-config/init_resize.sh quiet"
+    rewritten = ota.patch_cmdline(text,"B","01234567-89ab-cdef-0123-456789abcdef")
+    assert "init=" not in rewritten and "root=PARTUUID=old" not in rewritten
+    assert "panic=10" in rewritten and ota.slot_from_cmdline(rewritten) == "B"
+    for slot in ("A","B"):
+        assert ota.stable_from_autoboot(ota.autoboot(slot)) == slot
+    with pytest.raises(ValueError):
+        ota.stable_from_autoboot(ota.autoboot("A") + "# operator customization\n")
+    with pytest.raises(ValueError):
+        ota.slot_from_cmdline("rauc.slot=A rauc.slot=B")
+
+
+def test_ota_topology_and_generated_mounts(monkeypatch, tmp_path):
+    ota = boot_module("ota")
+    labels = {1:"REDUXCTRL",2:"REDUXBOOTA",3:"REDUXBOOTB",4:"REDUXROOTA",5:"REDUXROOTB",6:"REDUXCAP"}
+    parts = {n:{"label":label,"uuid":f"00000000-0000-0000-0000-{n:012d}"} for n,label in labels.items()}
+    devices = ota.validate_topology(parts,"B",parts[5]["uuid"])
+    context = {"current":"B","devices":devices}
+    conf = ota.system_conf(context)
+    assert "parent=rootfs.1" in conf and f"device={devices['5']}" in conf
+    monkeypatch.setattr(ota,"RUNTIME",tmp_path / "runtime")
+    ota.generate(tmp_path / "generator",context)
+    firmware = (tmp_path / "generator/boot-firmware.mount").read_text()
+    assert devices["3"] in firmware and "Options=ro" in firmware
+    with pytest.raises(ValueError, match="root does not match"):
+        ota.validate_topology(parts,"B",parts[4]["uuid"])
+    parts[6]["label"] = "someone-elses-data"
+    with pytest.raises(ValueError, match="label"):
+        ota.validate_topology(parts,"B",parts[5]["uuid"])
+
+
+def test_ota_manifest_requires_complete_signed_pair():
+    ota = boot_module("ota")
+    manifest = f"[update]\ncompatible={ota.COMPATIBLE}\n[bundle]\nformat=verity\n[image.boot]\nfilename=boot.tar\nhooks=post-install\n[image.rootfs]\nfilename=rootfs.tar\n"
+    ota.validate_manifest(manifest)
+    for bad in [manifest.replace("[image.rootfs]","[image.captures]"),manifest.replace("hooks=post-install","hooks="),manifest.replace("format=verity","format=plain")]:
+        with pytest.raises(ValueError):
+            ota.validate_manifest(bad)
+
+
+def test_ota_corrupt_checkpoint_cannot_change_selector(tmp_path):
+    ota = boot_module("ota")
+    path = tmp_path / "state.json"
+    assert ota.load_state(path,"A")["pending"] is None
+    path.write_text('{"schema":1,"pending":[],"states":{"A":"good","B":"bad"}}')
+    with pytest.raises(ValueError, match="invalid OTA state"):
+        ota.load_state(path,"A")
+
+
+def test_ota_interrupted_health_commit_keeps_old_checkpoint(monkeypatch,tmp_path):
+    ota = boot_module("ota")
+    state, _ = ota.transition(ota.initial_state("A"),"A","A","set-primary","B")
+    path = tmp_path / "state.json"
+    ota.atomic_checkpoint(path,state)
+    monkeypatch.setattr(ota,"STATE",path)
+    monkeypatch.setattr(ota,"RUNTIME",tmp_path / "runtime")
+    control = tmp_path / "autoboot.txt"
+    control.write_text(ota.autoboot("A"))
+    monkeypatch.setattr(ota,"CONTROL",control)
+    original = Path.read_text
+    monkeypatch.setattr(Path,"read_text",lambda p,*a,**k: "rauc.slot=B" if str(p)=="/proc/cmdline" else original(p,*a,**k))
+    monkeypatch.setattr(ota,"dt_integer",lambda n: {"tryboot":1,"partition":3}[n])
+    monkeypatch.setenv("REDUX_HEALTH_COMMIT","1")
+    def failed_commit(slot):
+        raise OSError("simulated selector write interruption")
+    monkeypatch.setattr(ota,"commit_selector",failed_commit)
+    with pytest.raises(OSError):
+        ota.backend(["set-state","B","good"])
+    assert ota.load_state(path,"A") == state
+    assert control.read_text() == ota.autoboot("A")
+
+
+def test_ota_export_hook_is_after_initramfs_and_before_unmount(tmp_path):
+    tree = tmp_path / "pi-gen"
+    finalise = tree / "export-image/05-finalise/01-run.sh"
+    finalise.parent.mkdir(parents=True)
+    (tree / "export-image/04-set-partuuid").mkdir()
+    finalise.write_text('update-initramfs -k all -c\nunmount "${ROOTFS_DIR}"\nzerofree "$ROOT_DEV"\n')
+    result = invoke([sys.executable, str(REPO / "image/prepare_ota.py"), str(REPO / "image"), str(tree)])
+    assert result.returncode == 0, result.stderr
+    script = finalise.read_text()
+    assert script.index("update-initramfs") < script.index("redux-ota-clone") < script.index("unmount")
+    assert 'mklabel gpt' in (tree / "export-image/prerun.sh").read_text()
+    assert 'p4' in (tree / "export-image/04-set-partuuid/00-run.sh").read_text()
+    repeated = invoke([sys.executable, str(REPO / "image/prepare_ota.py"), str(REPO / "image"), str(tree)])
+    # Reject duplicate injection instead of running a clone twice.
+    assert repeated.returncode != 0
+
+
+def test_ota_discovery_follows_the_root_disk_not_device_number(monkeypatch,tmp_path):
+    ota = boot_module("ota")
+    disk = tmp_path / "devices/nvme0n1"
+    disk.mkdir(parents=True)
+    sysfs = tmp_path / "sysfs"
+    sysfs.mkdir()
+    labels = ["REDUXCTRL","REDUXBOOTA","REDUXBOOTB","REDUXROOTA","REDUXROOTB","REDUXCAP"]
+    uuids = {n:f"00000000-0000-0000-0000-{n:012d}" for n in range(1,7)}
+    for n in range(1,7):
+        node = disk / f"nvme0n1p{n}"
+        node.mkdir()
+        (node / "partition").write_text(str(n))
+        (sysfs / node.name).symlink_to(node)
+    def probe(argv):
+        if "-t" in argv:
+            return "/dev/nvme0n1p5"
+        n = int(argv[-1][-1])
+        return f"PART_ENTRY_UUID={uuids[n]}\nPART_ENTRY_NAME={labels[n-1]}"
+    monkeypatch.setattr(ota,"command",probe)
+    context = ota.discover(f"root=PARTUUID={uuids[5]} rauc.slot=B",sysfs)
+    assert context["current"] == "B" and context["devices"]["5"].endswith(uuids[5])
+
+
 def invoke(args, **kwargs):
     return subprocess.run(args, text=True, capture_output=True, timeout=20, **kwargs)
 

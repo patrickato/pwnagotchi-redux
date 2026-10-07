@@ -240,3 +240,70 @@ real/unknown readings without conflicting GPIO ownership. With a spare card,
 observe the actual low threshold, cancellation when AC returns, graceful shutdown
 and captures/checkpoint recovery. These peripherals are unavailable in this
 session; the shipped default does not claim they are present.
+
+## Signed A/B OTA (Codex backlog 6)
+
+Build the A/B profile by passing `REDUX_OTA_CERT=/absolute/public-keyring.pem`.
+The file must contain a parseable public X.509 certificate; private keys are
+rejected. No production certificate or update URL is invented or committed.
+Without a certificate the ordinary overlay image is built and RAUC is masked.
+The A/B profile uses GPT: selector FAT p1 (32 MiB), Boot A/B p2/p3 (512 MiB each),
+Root A/B p4/p5 (4096 MiB each), captures p6 (512 MiB). Use at least a 16 GB card.
+`REDUX_ROOT_SLOT_MIB` and `REDUX_CAPTURE_MIB` in private image config can increase
+capacity; both root slots remain equal and the exporter refuses an undersized slot.
+Do not run the stock first-boot partition resizer on this topology; it is removed
+from both command lines.
+
+The slot-aware systemd generator discovers the physical disk from the real root
+PARTUUID and validates all six GPT labels/unique UUIDs before creating mounts and
+RAUC config in `/run/redux-ota`. It follows the disk across SD, USB or NVMe names;
+it does not hardcode `/dev/mmcblk0`. Both roots share identical content. Separate
+boot command lines point to their paired roots and declare `rauc.slot=A/B`.
+Boot, selector and lower root mount read-only; captures alone remains writable
+during field operation. RAUC temporarily writes the inactive boot/root slots;
+health commit briefly remounts the selector writable and syncs its replacement.
+Selector FAT power-loss behavior still needs physical testing; filesystem rename
+tests do not establish firmware-level atomicity.
+
+`autoboot.txt` uses the [Raspberry Pi tryboot A/B flow](https://www.raspberrypi.com/documentation/computers/config_txt.html#tryboot_a_b).
+The [RAUC custom backend](https://rauc.readthedocs.io/en/v1.8/integration.html#custom)
+stages an inactive candidate without changing the committed default. Signed
+verity bundles must contain both boot and rootfs; a post-install hook adjusts the
+candidate's command line to this device's actual root UUID. Captures and selector
+are excluded from bundles. State and reasons are synced to `/captures/rauc`.
+The candidate commits only after 60 real seconds of stable redux PID, active
+hardware watchdog, correct firmware partition, overlay/read-only lower root and
+correct writable captures. Failed validation or the independent 120-second trial
+deadline requests a normal reboot to the old slot. Interrupted/abandoned trials
+are recorded honestly; no radio work is replayed.
+
+Before enabling unattended updates, provision and physically test EEPROM
+`BOOT_WATCHDOG_TIMEOUT=15..300` seconds on each board; `redux-ota install` and
+RAUC's pre-install handler refuse updates without it. The A/B image supplies
+`kernel_watchdog_timeout=60` plus PID 1's runtime watchdog to cover handover.
+Codex does not rewrite EEPROM automatically. Verify the firmware version supports
+GPT, tryboot and these watchdog properties, especially early Pi 4 revisions.
+If firmware/kernel never reaches userspace, automatic fallback depends on that
+verified watchdog reset. Keep a recovery card available while testing.
+
+On the release host install `rauc squashfs-tools`, then sign an **uncompressed**
+exported image with an external private key:
+
+```sh
+sudo bash image/make-bundle.sh image.img release.raucb signing-cert.pem signing-key.pem VERSION
+```
+
+The helper mounts A read-only, preserves root ownership/ACLs/xattrs, signs a verity
+bundle, and verifies the result. Keep private keys on the release host. On a
+provisioned board run `sudo redux-ota install /path/release.raucb` or a real HTTPS
+bundle URL. RAUC verifies signatures/compatibility before changing inactive slots;
+successful staging requests `reboot "0 tryboot"`. No periodic downloads are
+configured. A trusted clock and network/storage support for RAUC's streaming path
+are additional deployment gates; local signed bundles need no update server.
+
+**Hardware gates on both models:** normal A and B boot; a signed A→B→A update;
+signature/compatibility rejection; candidate redux failure; candidate kernel/root
+failure with watchdog reset; interrupted install; selector commit power loss on
+a spare card; preserved captures and correct read-only mounts after rollback.
+Record firmware versions, actual RAUC status/journals and boot IDs. These checks
+remain unverified without boards, and no automatic rollback success is claimed.
