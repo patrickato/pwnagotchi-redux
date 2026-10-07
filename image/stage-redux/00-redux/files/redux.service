@@ -1,0 +1,23 @@
+[Unit]
+Description=redux image bootstrap (live supervisor wiring pending)
+After=local-fs.target
+
+[Service]
+Type=simple
+User=redux
+Group=redux
+WorkingDirectory=/opt/redux
+ExecStart=/usr/bin/python3 -m redux.core.boot
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+StateDirectory=redux
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

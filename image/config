@@ -1,0 +1,16 @@
+IMG_NAME=pwnagotchi-redux
+RELEASE=bookworm
+TARGET_HOSTNAME=redux
+DEPLOY_COMPRESSION=xz
+LOCALE_DEFAULT=en_US.UTF-8
+KEYBOARD_KEYMAP=us
+KEYBOARD_LAYOUT='English (US)'
+TIMEZONE_DEFAULT=Etc/UTC
+# Local first-boot provisioning; no shared password, remote login or RF policy.
+# Debian already owns the 'operator' group; avoid its name for user creation.
+FIRST_USER_NAME=field
+ENABLE_SSH=0
+DISABLE_FIRST_BOOT_USER_RENAME=0
+# pi-gen tests whether this variable is set; an empty value is invalid.
+unset WPA_COUNTRY
+STAGE_LIST="stage0 stage1 stage2 stage-redux"
