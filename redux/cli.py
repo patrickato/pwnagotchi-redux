@@ -15,10 +15,16 @@ import json
 import sys
 from typing import List, Optional
 
+import os
+import time
+
 from .radio import Radio, Intent
-from .core import Beastcore
+from .core import Beastcore, Scope
 from .engine import BettercapDriver, ReplayTransport, BettercapConfig
 from .packs import PackManager, DependencyError
+
+# The central authorized-target list every firing-capable function consults.
+_DEFAULT_SCOPE_PATH = os.environ.get("REDUX_SCOPE", "/etc/pwnagotchi/scope.json")
 
 
 # stub radios for the no-hardware paths (real enumeration is `probe()` on a Pi)
@@ -101,6 +107,51 @@ def cmd_packs(args) -> int:
     return 0
 
 
+def cmd_scope(args) -> int:
+    """Manage the central authorized-target Scope — the one list every firing
+    function consults. Edits are saved atomically back to the scope file."""
+    path = args.file
+    scope = Scope.load(path)
+    if args.scope_cmd == "list":
+        s = scope.summary()
+        print(f"scope: {s['active']} active / {s['total']} total"
+              + (f", {s['expired']} expired" if s["expired"] else "")
+              + (f" | jobs: {', '.join(s['jobs'])}" if s["jobs"] else "")
+              + ("  (EMPTY — nothing authorized)" if s["empty"] else ""))
+        now = time.time()
+        for e in scope.entries:
+            state = "active" if e.active(now) else "EXPIRED"
+            exp = "" if e.expires is None else f" exp {time.strftime('%Y-%m-%d', time.gmtime(e.expires))}"
+            job = f" [{e.job}]" if e.job else ""
+            lab = f" — {e.label}" if e.label else ""
+            print(f"  {state:7} {e.kind:5} {e.value}{job}{exp}{lab}")
+        return 0
+    # mutating subcommands
+    if args.scope_cmd == "add":
+        exp = (time.time() + args.expires_days * 86400) if args.expires_days else None
+        e = scope.add(args.target, kind=args.kind, label=args.label or "", job=args.job or "", expires=exp)
+        scope.save(path)
+        print(f"armed: {e.kind} {e.value}" + (f" [{e.job}]" if e.job else "") + f"  (scope now has {len(scope.active_entries())} active)")
+    elif args.scope_cmd == "remove":
+        n = scope.remove(args.target, job=args.job)
+        scope.save(path)
+        print(f"removed {n} entr{'y' if n == 1 else 'ies'}")
+    elif args.scope_cmd == "clear":
+        n = scope.clear(job=args.job)
+        scope.save(path)
+        print(f"cleared {n} entr{'y' if n == 1 else 'ies'}" + (f" from job '{args.job}'" if args.job else " (whole scope)"))
+    elif args.scope_cmd == "import":
+        with open(args.listfile) as f:
+            n = scope.bulk_load(f.read(), job=args.job or "")
+        scope.save(path)
+        print(f"imported {n} target(s)" + (f" into job '{args.job}'" if args.job else "") + f"; scope now has {len(scope.active_entries())} active")
+    elif args.scope_cmd == "arm-lab":
+        n = scope.arm_lab(bssids=args.bssid or [], ssids=args.ssid or [], cidrs=args.cidr or [])
+        scope.save(path)
+        print(f"lab armed: {n} target(s) pre-authorized (no expiry); scope now has {len(scope.active_entries())} active")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="redux", description="redux field-OS control")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -133,6 +184,24 @@ def build_parser() -> argparse.ArgumentParser:
     en = psub.add_parser("enable"); en.add_argument("name")
     di = psub.add_parser("disable"); di.add_argument("name")
     pk.set_defaults(func=cmd_packs)
+
+    sc = sub.add_parser("scope", help="manage the central authorized-target list")
+    sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
+    scsub = sc.add_subparsers(dest="scope_cmd", required=True)
+    scsub.add_parser("list", help="show the scope (active / expired / jobs)")
+    sa = scsub.add_parser("add", help="authorize one target (BSSID / SSID / CIDR, auto-detected)")
+    sa.add_argument("target")
+    sa.add_argument("--kind", choices=["bssid", "ssid", "cidr"], help="override auto-detection")
+    sa.add_argument("--job", help="group under a named engagement")
+    sa.add_argument("--label", help="human note")
+    sa.add_argument("--expires-days", type=float, default=0.0, help="auto-expire after N days")
+    sr = scsub.add_parser("remove", help="remove a target"); sr.add_argument("target"); sr.add_argument("--job")
+    scl = scsub.add_parser("clear", help="clear the whole scope, or one --job"); scl.add_argument("--job")
+    si = scsub.add_parser("import", help="bulk-load targets from a list file (one per line)")
+    si.add_argument("listfile"); si.add_argument("--job")
+    al = scsub.add_parser("arm-lab", help="pre-authorize your own gear (no expiry)")
+    al.add_argument("--bssid", action="append"); al.add_argument("--ssid", action="append"); al.add_argument("--cidr", action="append")
+    sc.set_defaults(func=cmd_scope)
     return p
 
 

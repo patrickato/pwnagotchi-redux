@@ -5,6 +5,7 @@ from .signals import SignalBus, Signal, Emission, WILDCARD, connect_narrator
 from .brain import Brain, Decision, attach as attach_brain
 from .actions import ActionRegistry, Action, ActionSpec, ActionError, register_supervisor_actions
 from .capabilities import Cap, CapState, Provider, CapabilityGraph
+from .scope import Scope, ScopeEntry, classify_target
 from .beastcore import Beastcore
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "Brain", "Decision", "attach_brain",
     "ActionRegistry", "Action", "ActionSpec", "ActionError", "register_supervisor_actions",
     "Cap", "CapState", "Provider", "CapabilityGraph",
+    "Scope", "ScopeEntry", "classify_target",
     "Beastcore",
 ]

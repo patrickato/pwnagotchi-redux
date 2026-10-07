@@ -56,3 +56,28 @@ def test_packs_missing_dependency_errors(tmp_path):
     (tmp_path / "viz" / "pack.json").write_text(json.dumps({"name": "viz", "requires": ["geo"]}))
     rc, _ = _run(["packs", "--dir", str(tmp_path), "enable", "viz"])
     assert rc == 1
+
+
+def test_scope_cli_add_list_and_clear(tmp_path):
+    f = str(tmp_path / "scope.json")
+    rc, out = _run(["scope", "--file", f, "list"])
+    assert rc == 0 and "EMPTY" in out
+    rc, out = _run(["scope", "--file", f, "add", "aa:bb:cc:dd:ee:ff", "--job", "acme", "--label", "my AP"])
+    assert rc == 0 and "armed" in out
+    rc, out = _run(["scope", "--file", f, "list"])
+    assert "aa:bb:cc:dd:ee:ff" in out and "acme" in out
+    # persisted to disk as the central store
+    from redux.core import Scope
+    assert Scope.load(f).permits(bssid="aa:bb:cc:dd:ee:ff") is True
+    rc, out = _run(["scope", "--file", f, "clear", "--job", "acme"])
+    assert "cleared 1" in out
+    assert Scope.load(f).empty is True
+
+
+def test_scope_cli_arm_lab(tmp_path):
+    f = str(tmp_path / "scope.json")
+    rc, out = _run(["scope", "--file", f, "arm-lab", "--bssid", "aa:bb:cc:dd:ee:ff", "--cidr", "10.0.0.0/24"])
+    assert rc == 0 and "2 target" in out
+    from redux.core import Scope
+    s = Scope.load(f)
+    assert s.permits(bssid="aa:bb:cc:dd:ee:ff") and s.permits(ip="10.0.0.9")
