@@ -10,7 +10,7 @@ Stop building on the jayofelony image. Build **our own image** on the same open 
 
 | Layer | pwnagotchi today | Cord-cut platform |
 | --- | --- | --- |
-| Base image | Raspberry Pi OS + their pi-gen | **Our pi-gen**: lean Debian/Pi-OS stable, fast boot, SD-friendly. Kali's tools available as opt-in **Beast Packs / apt repo**, never preinstalled. |
+| Base image | Raspberry Pi OS + their pi-gen | **Our pi-gen**: lean Debian/Pi-OS stable, **arm64, Pi 4 / Pi 5 only** (no Zero/3 or earlier), fast boot, SD-friendly. Kali's tools available as opt-in **Beast Packs / apt repo**, never preinstalled. |
 | Radio | manual iface juggling | **Radio Orchestrator** (the headline — below) |
 | Capture engine | bettercap (via their supervisor) | **bettercap, driven directly** by Beastcore over its REST/websocket API |
 | Supervisor | pwnagotchi Python (agent/automata/epoch) | **Beastcore** (promoted from consumer to supervisor) |
