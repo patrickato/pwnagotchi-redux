@@ -22,3 +22,16 @@ jobs:
         run: pytest
       - name: Shell syntax
         run: for f in $(git ls-files '*.sh'); do bash -n "$f"; done
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[dev]"
+      # shellcheck is preinstalled on the ubuntu-latest runner image.
+      - name: Image stage lint + hardware-free checks
+        run: bash image/ci.sh
