@@ -1,7 +1,6 @@
 """redux.geo — BeastSpatialDB and geospatial helpers.
 
-Sighting store + WiGLE export/queue + location estimate + coverage grid.
-Sighting store + WiGLE export + location estimate + coverage + self-locate.
+Sighting store + WiGLE export/queue + location estimate + coverage grid + self-locate.
 No redux.engine import — lead wires live GPS at integration.
 """
 from __future__ import annotations
