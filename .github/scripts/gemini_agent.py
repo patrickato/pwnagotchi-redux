@@ -1,11 +1,10 @@
 import os
 import json
-import google.generativeai as genai
+from google import genai
 
-# 1. Setup Gemini
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-# Using gemini-2.5-pro for complex coding and logic tasks
-model = genai.GenerativeModel('gemini-2.5-pro') 
+# 1. Setup Gemini using the new SDK
+client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+MODEL_ID = 'gemini-3.1-pro-preview'
 
 # 2. Read Context Files
 def read_file(path):
@@ -45,8 +44,11 @@ You MUST output a raw JSON object (no markdown formatting, no backticks). The JS
 """
 
 # 4. Generate and Parse
-print("Asking Gemini to process the task...")
-response = model.generate_content(prompt)
+print(f"Asking Gemini ({MODEL_ID}) to process the task...")
+response = client.models.generate_content(
+    model=MODEL_ID,
+    contents=prompt
+)
 raw_text = response.text.strip()
 
 # Strip markdown code blocks if the model accidentally includes them
