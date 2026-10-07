@@ -1,36 +1,157 @@
-"""Supervisor (skeleton) — Beastcore's promoted role.
+"""Supervisor — Beastcore's promoted role (task 1.5, logic layer).
 
-Where pwnagotchi's agent/epoch loop used to sit. Owns the Radio Orchestrator,
-the bettercap driver, and the (glass-box) brain seat, and is the hub for the
-Beast data bus. This is a wiring skeleton; real loop lands incrementally.
+Where pwnagotchi's agent/epoch loop used to sit. The Supervisor owns the control
+flow: an **intent** comes in, the Radio Orchestrator decides radio→role
+assignments, the radio layer applies the interface modes, and the bettercap
+driver is repointed at the capture radio. Every move carries a human-readable
+reason (glass-box).
+
+It is wired through small injected interfaces (`RadioControl`, `Driver`) rather
+than hard dependencies, so:
+  - it is unit-testable with fakes, no hardware and no bettercap, right now;
+  - it drops onto the real `RadioManager` (task 1.3, #2) and `BettercapDriver`
+    (task 1.4, #5) at merge with no change here.
+
+The live creature screen (TFT) and the real event loop timing are the labeled
+on-hardware gate (task 1.5 remainder); this module is the decision/wiring core.
+
+Scope: recon/capture is passive. The Supervisor never calls a firing action; any
+deauth stays behind the driver's empty-by-default allowlist gate.
 """
 from __future__ import annotations
 
-from ..radio import decide, Intent
-from ..engine import BettercapDriver
+from typing import Callable, Optional, Protocol
+
+from ..radio import decide, Intent, Role
+
+
+class RadioControl(Protocol):
+    """Applies a role assignment to real interface modes. Satisfied in production
+    by a thin adapter over `RadioManager`; by a fake in tests."""
+    def apply(self, assignment) -> list: ...
+
+
+class Driver(Protocol):
+    """The bettercap-facing surface the Supervisor needs. Satisfied by
+    `BettercapDriver`; by a fake in tests."""
+    def set_interface(self, iface: str): ...
+    def recon(self, on: bool = True): ...
+    def poll_events(self, clear: bool = True) -> list: ...
+
+
+def capture_iface(assignment) -> Optional[str]:
+    """The interface assigned the CAPTURE role, if any."""
+    if assignment is None:
+        return None
+    for iface, role in assignment.roles.items():
+        if role == Role.CAPTURE:
+            return iface
+    return None
 
 
 class Supervisor:
-    def __init__(self, radios=None, intent=Intent.RECON):
-        self._radios = list(radios or [])
+    """Owns radios + intent; turns intent changes and hotplug events into applied
+    radio modes and a repointed capture engine, narrating why.
+
+    All collaborators are optional/injected: with neither `radio_control` nor
+    `driver` it still computes and explains assignments (pure decision mode).
+    """
+
+    def __init__(
+        self,
+        radios=None,
+        intent=Intent.RECON,
+        decider: Callable = decide,
+        radio_control: Optional[RadioControl] = None,
+        driver: Optional[Driver] = None,
+        log: Optional[Callable[[str], None]] = None,
+    ):
+        self._radios = {r.iface: r for r in (radios or [])}
         self._intent = Intent(intent)
-        self._engine = BettercapDriver()
+        self._decide = decider
+        self._radio_control = radio_control
+        self._driver = driver
+        self._log = log or (lambda msg: None)
         self._assignment = None
-
-    def set_intent(self, intent) -> None:
-        self._intent = Intent(intent)
+        self._capture_iface = None
+        self.reasons: list = []
         self._reassign()
 
-    def set_radios(self, radios) -> None:
-        self._radios = list(radios)
-        self._reassign()
-
-    def _reassign(self):
-        self._assignment = decide(self._radios, self._intent)
-        # live: for iface marked CAPTURE, bring up monitor and
-        # self._engine.set_interface(iface). (TASKS.md)
-        return self._assignment
+    # --- state ------------------------------------------------------------- #
 
     @property
     def assignment(self):
         return self._assignment
+
+    @property
+    def intent(self) -> Intent:
+        return self._intent
+
+    @property
+    def capture_iface(self) -> Optional[str]:
+        return self._capture_iface
+
+    # --- inputs ------------------------------------------------------------ #
+
+    def set_intent(self, intent) -> None:
+        self._intent = Intent(intent)
+        self._say(f"intent -> {self._intent.value}")
+        self._reassign()
+
+    def set_radios(self, radios) -> None:
+        self._radios = {r.iface: r for r in radios}
+        self._reassign()
+
+    def add_radio(self, radio) -> None:
+        """Hotplug: a radio appeared."""
+        self._radios[radio.iface] = radio
+        self._say(f"hotplug + {radio.iface}")
+        self._reassign()
+
+    def remove_radio(self, iface) -> None:
+        """Hotplug: a radio was removed."""
+        self._radios.pop(iface, None)
+        self._say(f"hotplug - {iface}")
+        self._reassign()
+
+    # --- core loop step ---------------------------------------------------- #
+
+    def _reassign(self):
+        self._assignment = self._decide(list(self._radios.values()), self._intent)
+        # narrate the orchestrator's own reasons (glass-box)
+        for r in getattr(self._assignment, "reasons", []) or []:
+            self._say(r)
+        for w in getattr(self._assignment, "warnings", []) or []:
+            self._say(f"warning: {w}")
+        # apply interface modes via the radio layer, if wired
+        if self._radio_control is not None:
+            self._radio_control.apply(self._assignment)
+        # repoint the capture engine at the chosen capture radio, if wired
+        self._repoint_driver()
+        return self._assignment
+
+    def _repoint_driver(self) -> None:
+        iface = capture_iface(self._assignment)
+        self._capture_iface = iface
+        if self._driver is None:
+            return
+        if iface is None:
+            self._say("no capture radio this intent; leaving bettercap idle")
+            self._driver.recon(False)
+            return
+        self._say(f"pointing bettercap at {iface} and starting recon")
+        self._driver.set_interface(iface)
+        self._driver.recon(True)
+
+    def tick(self) -> list:
+        """One event-pump step: drain driver events (normalized). Empty without a
+        driver. The real timed loop + creature screen are the on-hardware gate."""
+        if self._driver is None:
+            return []
+        return self._driver.poll_events(clear=True)
+
+    # --- glass-box --------------------------------------------------------- #
+
+    def _say(self, reason: str) -> None:
+        self.reasons.append(reason)
+        self._log(reason)
