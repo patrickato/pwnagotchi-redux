@@ -12,41 +12,36 @@ from typing import Optional
 
 class FrameType(str, Enum):
     BEACON = "beacon"
+    PROBE_REQ = "probe_req"
     PROBE_RESP = "probe_resp"
     DEAUTH = "deauth"
     DISASSOC = "disassoc"
-    WPS = "wps"  # WPS EAP / registrar exchange sighting
-    BLE_ADV = "ble_adv"  # BLE advertisement / scan response
-    PMKID = "pmkid"  # RSN IE PMKID observed (clientless)
-    EAPOL = "eapol"  # 802.1X EAPOL-Key message
+    WPS = "wps"
+    BLE_ADV = "ble_adv"
+    PMKID = "pmkid"
+    EAPOL = "eapol"
     OTHER = "other"
 
 
 @dataclass(frozen=True)
 class Frame:
-    """One observed 802.11 management frame (or normalized sighting).
-
-    Fields are tolerant of partial capture: detectors only read what they need.
-    """
-
     type: FrameType
-    ts: float  # monotonic or epoch seconds; relative deltas matter
+    ts: float
     bssid: str = ""
     ssid: str = ""
-    src: str = ""  # transmitter / SA when distinct from BSSID
+    src: str = ""
     dst: str = ""
     channel: Optional[int] = None
-    security: str = ""  # e.g. "wpa2-psk", "wpa3-sae", "open", "unknown"
+    security: str = ""
     rssi: Optional[int] = None
-    # WPS opcode when type is WPS: m1..m8, nack, done, start, identity, unknown
     wps_opcode: str = ""
-    # BLE advertisement fields (type BLE_ADV)
-    ble_addr: str = ""  # advertiser address
-    ble_name: str = ""  # complete/short local name
-    ble_company_id: str = ""  # e.g. "0x004c" Apple
-    ble_service_uuid: str = ""  # 16/128-bit UUID string if known
-    # EAPOL message number when type is EAPOL: 1..4 (0 = unknown)
+    ble_addr: str = ""
+    ble_name: str = ""
+    ble_company_id: str = ""
+    ble_service_uuid: str = ""
     eapol_msg: int = 0
+    # 802.11w / PMF advertised: "required" | "optional" | "none" | ""
+    pmf: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bssid", (self.bssid or "").lower())
@@ -59,3 +54,4 @@ class Frame:
         object.__setattr__(self, "ble_company_id", (self.ble_company_id or "").lower())
         object.__setattr__(self, "ble_service_uuid", (self.ble_service_uuid or "").lower())
         object.__setattr__(self, "eapol_msg", int(self.eapol_msg or 0))
+        object.__setattr__(self, "pmf", (self.pmf or "").lower())
