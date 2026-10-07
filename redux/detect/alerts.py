@@ -10,6 +10,8 @@ class AlertKind(str, Enum):
     ROGUE_AP = "rogue_ap"
     BEACON_SPAM = "beacon_spam"
     SURVEILLANCE_SWEEP = "surveillance_sweep"
+    KARMA = "karma"
+    CAPTIVE_TWIN = "captive_twin"
 
 
 @dataclass(frozen=True)
