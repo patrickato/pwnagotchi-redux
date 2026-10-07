@@ -31,6 +31,9 @@ class Signal(str, Enum):
     EVENT = "event"                      # payload: event (driver Event)
     BATTERY = "battery"                  # payload: percent (0..100), charging (bool)
     SUGGESTION = "suggestion"            # payload: decision (brain Decision)
+    ACTION = "action"                    # payload: name, args, result, tx
+    TX_BEGIN = "tx_begin"                # payload: tx, label
+    TX_END = "tx_end"                    # payload: tx, label, actions
 
 
 #: subscribe to this to receive every signal
