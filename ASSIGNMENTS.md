@@ -86,6 +86,20 @@ Then, back in the detector lane if you want more: a **BLE tracker/AirTag detecto
 Rule reminder: do NOT import `redux.engine` or touch any other lane; the lead wires geo to the live
 GPS/event sources at integration. Everything stays under `redux/detect/` **or** `redux/geo/`.
 
+
+## Next-batch backlogs (both lanes cleared their first queues — pull from here next)
+
+**Codex next** (image/infra lane): 
+7. Beast Packs infra — an apt repo layout + a `packs` install/remove helper (opt-in Kali-tools pack), image-side only.
+8. A `flash.sh` / release helper that writes the built image to an SD card and verifies it.
+9. CI for the image build (lint the stage scripts; dry-run `./build.sh` arg parsing).
+
+**Grok next** (detector + geo lanes):
+7. BLE tracker / AirTag-style unwanted-tracker detector (`redux/detect/`).
+8. PMKID / handshake-capture detector (`redux/detect/`).
+9. `redux/geo/` WiGLE dedup + incremental upload queue (dedup by BSSID, best-RSSI/first-seen).
+10. `redux/geo/` offline self-geolocation: estimate own position from visible known APs in the store.
+
 ## If the guard fails your PR
 It printed exactly which file is out of lane and which paths your lane allows. Remove the stray file
 from your branch (it belongs to another lane), or ask the lead to make the shared-file change. Do
