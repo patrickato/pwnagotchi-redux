@@ -275,8 +275,9 @@ def test_pack_plan_is_opt_in_arm64_and_passive(tmp_path):
         packs.plan("../other","https://http.kali.org/kali",key)
 
 
-def test_pack_removal_refuses_symlinks_and_mounted_children(tmp_path):
+def test_pack_removal_refuses_symlinks_and_mounted_children(monkeypatch, tmp_path):
     packs = boot_module("packs")
+    monkeypatch.setattr(packs.os, "geteuid", lambda: 0)
     base = tmp_path / "packs"
     root = base / "kali-tools"
     root.mkdir(parents=True)
@@ -299,6 +300,7 @@ def test_pack_removal_refuses_symlinks_and_mounted_children(tmp_path):
 
 def test_failed_pack_install_keeps_partial_record_without_touching_base_os(monkeypatch,tmp_path):
     packs = boot_module("packs")
+    monkeypatch.setattr(packs.os, "geteuid", lambda: 0)
     key = tmp_path / "public.gpg"
     key.write_bytes(b"public fixture")
     monkeypatch.setattr(packs.subprocess,"check_output",lambda *a,**k: "ext4 rw,nodev,nosuid\n")
