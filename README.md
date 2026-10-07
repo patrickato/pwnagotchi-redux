@@ -83,7 +83,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 287 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 412 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
@@ -122,7 +122,7 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 287 tests, no hardware needed
+pytest                 # 412 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)
