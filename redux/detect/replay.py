@@ -35,6 +35,7 @@ def frame_from_dict(d: Dict[str, Any]) -> Frame:
         ble_company_id=str(d.get("ble_company_id", "") or ""),
         ble_service_uuid=str(d.get("ble_service_uuid", "") or ""),
         eapol_msg=int(d.get("eapol_msg", 0) or 0),
+        pmf=str(d.get("pmf", "") or ""),
     )
 
 

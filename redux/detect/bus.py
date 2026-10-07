@@ -57,7 +57,11 @@ class AlertBus:
         severity = alert.severity
         reason = alert.reason
 
-        if count >= self.escalate_after and _rank(severity) < _rank(self.escalate_to):
+        # Escalate ONCE, when the running signature first crosses the threshold
+        # (judged by the stored severity, not the incoming one). After that the
+        # signature stays suppressed within the window — otherwise every repeat
+        # would re-emit and defeat the bus's dedup contract.
+        if count >= self.escalate_after and _rank(last_sev) < _rank(self.escalate_to):
             severity = self.escalate_to
             reason = (
                 f"{alert.reason} "

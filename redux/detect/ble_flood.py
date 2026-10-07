@@ -31,7 +31,11 @@ class BLEFloodDetector:
         while self._events and self._events[0][0] < cutoff:
             self._events.popleft()
         unique = {a for _, a in self._events}
-        if len(unique) < self.unique_addr_threshold or self._fired:
+        if len(unique) < self.unique_addr_threshold:
+            # flood subsided — re-arm so a later burst fires again
+            self._fired = False
+            return None
+        if self._fired:
             return None
         self._fired = True
         reason = (

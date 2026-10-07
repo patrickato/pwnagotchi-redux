@@ -30,3 +30,9 @@ def test_replay_json_string():
     s = json.dumps({"frames": [{"type": "beacon", "ts": 1.0, "ssid": "X", "bssid": "11:11:11:11:11:11"}]})
     alerts = replay_json(s)
     assert isinstance(alerts, list)
+
+
+def test_frame_from_dict_preserves_pmf():
+    # regression: pmf was dropped on load, making PMFMissingDetector false-positive.
+    f = frame_from_dict({"type": "beacon", "ssid": "Home", "security": "wpa2-psk", "pmf": "required"})
+    assert f.pmf == "required"

@@ -98,3 +98,15 @@ def test_bus_publish_many():
     assert len(out) >= 2
     assert out[0].severity == "warning"
     assert any(a.severity == "critical" for a in out)
+
+
+def test_bus_suppresses_duplicates_after_escalation():
+    # regression: post-escalation the bus used to re-emit every duplicate,
+    # defeating dedup. It must escalate once, then stay suppressed in-window.
+    bus = AlertBus({"dedup_window_s": 60.0, "escalate_after": 3, "escalate_to": "critical"})
+    assert bus.publish(_alert(1.0)) is not None
+    assert bus.publish(_alert(2.0)) is None
+    esc = bus.publish(_alert(3.0))
+    assert esc is not None and esc.severity == "critical"
+    assert bus.publish(_alert(4.0)) is None
+    assert bus.publish(_alert(5.0)) is None
