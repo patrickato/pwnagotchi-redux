@@ -8,6 +8,7 @@ from .capabilities import Cap, CapState, Provider, CapabilityGraph
 from .scope import Scope, ScopeEntry, classify_target
 from .governor import Governor, Mode, Reading, GovDecision
 from .doctor import Doctor, DoctorInputs, Finding, Status
+from .post import PowerOnSelfTest, PostCheck, PostResult, PostStatus, Verdict
 from .beastcore import Beastcore
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "Scope", "ScopeEntry", "classify_target",
     "Governor", "Mode", "Reading", "GovDecision",
     "Doctor", "DoctorInputs", "Finding", "Status",
+    "PowerOnSelfTest", "PostCheck", "PostResult", "PostStatus", "Verdict",
     "Beastcore",
 ]

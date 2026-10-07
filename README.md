@@ -41,6 +41,7 @@ everything above them:
 | Central Scope | `redux/core/scope.py` | the one authorized-target list every firing function consults (BSSID/SSID/CIDR, per-job, expiry, bulk-load, arm-lab) |
 | Governor | `redux/core/governor.py` | heat/power/load/RAM shedding (FULL→SURVIVAL), immediate-escalate + held recovery; drives write/loop cadence |
 | Doctor | `redux/core/doctor.py` | headless glass-box self-diagnosis over the graph (OK/ATTENTION/DEGRADED/ACTION + coverage honesty) |
+| Boot-POST | `redux/core/post.py` | power-on self-test: a streaming boot checklist that can't show READY unless the critical probe actually passed (the Doctor, gated) |
 | Detection | `redux/detect/` | `DetectEngine` + registry; 13 **passive** detectors (deauth-flood, rogue-AP, beacon-spam, surveillance-sweep, karma, WPS, BLE-tracker/flood, handshake, PMF, pineapple, PNL, hidden-SSID), confidence, alert bus, replay |
 | Spatial | `redux/geo/` | SQLite sighting store (WAL, coalesced writes), WiGLE, coverage, self-locate, geofence, GPX/KML export, dead-reckoning, geohash, Kismet import, stats |
 | Field Dex | `redux/dex/` | recon ledger over sightings — first/last-seen, rarity, "departed" |
@@ -50,7 +51,7 @@ everything above them:
 | Expeditions | `redux/expedition/` | named field sessions + "Wrapped" recap |
 | Packs / Compat | `redux/packs/`, `redux/compat/` | pack manifest + dependency resolver; pwnagotchi-plugin compat shim |
 | Web | `redux/web/` | glass-box status dashboard + sightings map (self-contained, no external assets) |
-| CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / scope / dex / expedition` |
+| CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / post / scope / dex / expedition` |
 
 Everything assembles on one bus through `Beastcore` and runs as a single system. Offensive
 capabilities are full-power but consult the central Scope for aiming (see below).
@@ -83,7 +84,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 412 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 429 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
@@ -98,7 +99,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 redux/radio/      Radio Orchestrator (decision engine + probe + hotplug)
 redux/engine/     bettercap driver
 redux/core/       Supervisor spine: signals, narrator, brain, actions, capability graph,
-                  Scope, Governor, Doctor, Beastcore
+                  Scope, Governor, Doctor, boot-POST, Beastcore
 redux/detect/     passive detector suite + engine/registry
 redux/geo/        spatial database + WiGLE/GPS/coverage/export
 redux/dex/        Field Dex (recon ledger over sightings)
@@ -111,7 +112,7 @@ redux/expedition/ named field sessions + Wrapped recap
 redux/packs/      Beast Packs (manifest + manager)
 redux/compat/     pwnagotchi-plugin compat shim
 redux/web/        glass-box status dashboard + sightings map
-redux/cli.py      operator entrypoint (status/run/web/packs/doctor/scope/dex/expedition)
+redux/cli.py      operator entrypoint (status/run/web/packs/doctor/post/scope/dex/expedition)
 image/            pi-gen image stack (boot, overlay, watchdog, UPS, OTA)
 tests/            unit/integration tests (real logic, no hardware needed)
 docs/             architecture, vision, proposals
@@ -122,12 +123,13 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 412 tests, no hardware needed
+pytest                 # 429 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)
 redux web              # serve the glass-box dashboard (least-exposed bind scope by default)
 redux doctor           # headless self-diagnosis (OK / ATTENTION / DEGRADED / ACTION)
+redux post             # boot-POST (power-on self-test); exit 0/1/2 = READY/DEGRADED/HALT
 redux scope            # manage the central authorized-target list (add/import/arm-lab)
 redux dex              # the Field Dex — recon ledger over sightings
 redux expedition       # start/end a field session + Wrapped recap

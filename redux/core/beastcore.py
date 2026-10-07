@@ -186,15 +186,28 @@ class Beastcore:
         g.register(Provider.of("deauth-gate", requires=[Cap.RADIO_WIFI_MONITOR], reason="firing gate"))
         return g
 
-    def doctor_report(self) -> dict:
-        """A headless, glass-box self-diagnosis built from live state."""
-        return Doctor().report(DoctorInputs(
+    def _doctor_inputs(self) -> DoctorInputs:
+        """The one read-only snapshot both the Doctor and the boot-POST reason
+        over, so they never diverge into two health systems."""
+        return DoctorInputs(
             graph=self.capability_graph(),
             governor=self._gov,
             scope=self.scope,
             detector_count=getattr(self.engine, "detector_count", None),
             sightings=self.store.count() if hasattr(self.store, "count") else None,
-        ))
+        )
+
+    def doctor_report(self) -> dict:
+        """A headless, glass-box self-diagnosis built from live state."""
+        return Doctor().report(self._doctor_inputs())
+
+    def boot_post(self, extra=()) -> dict:
+        """The power-on self-test: the Doctor rendered as a gated, streaming boot
+        checklist that cannot show READY unless the capture radio actually
+        checked out this run. `extra` appends hardware probes the boot layer owns
+        (TFT init, RTC, storage) — see redux.core.post.PowerOnSelfTest."""
+        from .post import PowerOnSelfTest
+        return PowerOnSelfTest.standard(self._doctor_inputs(), extra=extra).report()
 
     def dex(self):
         """The Field Dex: the recon ledger built from this device's sightings."""

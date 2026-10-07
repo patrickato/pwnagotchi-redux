@@ -178,6 +178,22 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_post(args) -> int:
+    """Run the boot-POST and render it as the device would at power-up.
+
+    Exit code mirrors the verdict so an init script can gate on it:
+    0 = READY, 1 = DEGRADED, 2 = HALT."""
+    from .core.post import PowerOnSelfTest
+    bc = _build(args)
+    pst = PowerOnSelfTest.standard(bc._doctor_inputs())
+    results = pst.results()
+    if args.tft:
+        print("\n".join(pst.tft_frame(results, width=args.width)))
+    else:
+        print(pst.console(results))
+    return {"ready": 0, "degraded": 1, "halt": 2}[pst.verdict(results).value]
+
+
 def cmd_scope(args) -> int:
     """Manage the central authorized-target Scope — the one list every firing
     function consults. Edits are saved atomically back to the scope file."""
@@ -258,6 +274,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    po = sub.add_parser("post", help="run the boot-POST (power-on self-test)")
+    add_radio_flags(po)
+    po.add_argument("--tft", action="store_true", help="render as the small TFT boot frame")
+    po.add_argument("--width", type=int, default=40, help="TFT frame width in chars")
+    po.set_defaults(func=cmd_post)
 
     ex = sub.add_parser("expedition", help="start/end a field session + Wrapped recap")
     ex.add_argument("--file", default=_DEFAULT_EXPEDITIONS_PATH, help="expeditions store path")
