@@ -134,3 +134,39 @@ Geo:
 - G6. kismetdb import: read a Kismet SQLite into the sighting store.
 - G7. Store stats/query API: top SSIDs, new-since-<ts>, densest cells, counts by security.
 - G8. Sighting-store schema versioning + migrations.
+
+## Grok STANDING directive (read this when the DEEP backlog is done — do NOT ask for more)
+
+You are faster than the queue. So: **keep building valuable, in-lane work autonomously** and keep
+opening PRs. Only stop if you genuinely cannot find worthwhile in-lane work. Rules unchanged: one
+topic per branch `grok/<topic>`, build in `redux/detect/` OR `redux/geo/` ONLY, hardware-free tests,
+PR to main, never merge, never touch other lanes or shared files (the lead unions `AlertKind`/
+`FrameType`/`__init__` at merge). Prefer depth and correctness over racing.
+
+### More backlog (pull in order, then self-direct):
+Detect:
+- DD1. Deauth-source attribution (which station is the aggressor; victim AP/clients).
+- DD2. Hidden-SSID reveal detector (SSID disclosed via probe/assoc after a cloaked beacon).
+- DD3. CSA (channel-switch-announcement) abuse detector.
+- DD4. WPA3-downgrade / transition-mode exploitation detector.
+- DD5. Threat-report aggregator: roll all recent alerts into one readable, severity-sorted report
+  (`redux/detect/report.py`), glass-box.
+- DD6. Recorded-hostile-capture fixtures + tests (a `tests/fixtures/`-style JSON of attack frames,
+  under tests/).
+- DD7. Per-detector tunable thresholds via the existing config layer; document defaults.
+
+Geo:
+- GG1. Haversine/bearing geo-utils module (`redux/geo/geoutil.py`) — distance, bearing, destination.
+- GG2. Track simplification (Douglas-Peucker).
+- GG3. Sighting clustering (DBSCAN-lite) to find AP hotspots.
+- GG4. Heatmap data generator (grid density -> values for a future renderer).
+- GG5. GeoJSON FeatureCollection export of sightings/AP estimates.
+- GG6. WiGLE CSV *import* (round-trip the other direction into the store).
+- GG7. Per-BSSID revisit / time-of-day analysis.
+- GG8. "Survey session" abstraction: start/stop, per-session stats.
+- GG9. Multi-node sighting merge (dedup across node IDs, keep provenance).
+- GG10. Store maintenance: indexes, vacuum, integrity check.
+
+### After that — self-direct within your lanes:
+More defensive detectors, more geo/spatial features, better tests, module docs, and hardening of
+anything already in `redux/detect/` or `redux/geo/`. Keep each PR small and tested. Keep going.
