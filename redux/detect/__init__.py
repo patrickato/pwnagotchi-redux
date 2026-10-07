@@ -16,6 +16,7 @@ from redux.detect.frames import Frame, FrameType
 from redux.detect.karma import KarmaCaptiveDetector
 from redux.detect.rogue_ap import RogueAPDetector, TrustedNetwork
 from redux.detect.surveillance_sweep import SurveillanceSweepDetector
+from redux.detect.wps_attack import WPSAttackDetector
 
 __all__ = [
     "Alert",
@@ -29,4 +30,5 @@ __all__ = [
     "RogueAPDetector",
     "SurveillanceSweepDetector",
     "TrustedNetwork",
+    "WPSAttackDetector",
 ]
