@@ -578,6 +578,39 @@ def test_flash_refuses_unsafe_disks(change):
         flash.select_disk({'blockdevices': [disk]}, '/dev/sdb', 4096)
 
 
+def test_image_scripts_pass_shellcheck_and_syntax():
+    import shutil
+    if shutil.which('shellcheck') is None:
+        pytest.fail('Image CI requires shellcheck; install shellcheck on the Linux test host.')
+    scripts = [REPO / 'build.sh']
+    for folder in ('image', 'boot'):
+        scripts.extend(sorted((REPO / folder).rglob('*.sh')))
+    for script in scripts:
+        syntax = invoke(['bash', '-n', str(script)])
+        assert syntax.returncode == 0, syntax.stderr
+    lint = invoke(['shellcheck', '--shell=bash', '--severity=warning', *map(str, scripts)])
+    assert lint.returncode == 0, lint.stdout + lint.stderr
+
+
+@pytest.mark.parametrize('arguments, expected', [(['--help'], 0), (['-h'], 0), (['--invalid'], 2), (['--prepare-only', '--invalid'], 2), (['--help', '--invalid'], 2)])
+def test_build_argument_dry_run_never_fetches_or_creates_workspace(tmp_path, arguments, expected):
+    import shutil
+    # Actual parser, with every subsequent prerequisite replaced by a tripwire.
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    marker = tmp_path / 'unexpected-prerequisite'
+    for command in ('uname', 'git', 'realpath', 'install', 'tar', 'python3'):
+        shim = bin_dir / command
+        shim.write_text(f'#!/bin/sh\necho invoked > "{marker}"\nexit 99\n')
+        shim.chmod(0o755)
+    build = tmp_path / 'must-not-exist'
+    result = invoke([shutil.which('bash'), str(REPO / 'build.sh'), *arguments],
+                    env=dict(os.environ, PATH=str(bin_dir) + os.pathsep + '/usr/bin:/bin', REDUX_BUILD_DIR=str(build)))
+    assert result.returncode == expected, result.stderr
+    assert not marker.exists()
+    assert not build.exists()
+
+
 def test_trim_selects_real_storage_modules_and_builtin_support():
     policy = boot_policy_module()
     selected = policy.select_modules(['kernel/fs/ext4/ext4.ko', 'kernel/fs/overlayfs/overlay.ko', 'kernel/drivers/mmc/core/mmc_block.ko', 'kernel/drivers/nvme/host/nvme.ko.xz', 'kernel/drivers/net/ethernet/other.ko'])
