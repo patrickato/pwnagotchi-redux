@@ -45,9 +45,10 @@ Gemini is not part of this project. Do not add a `gemini/` lane or any Gemini CI
 
 ## Non-negotiable scope (same as the rest of the project)
 
-- **Authorized / passive by default.** Any deauth/jam/targeting/firing capability gates on an
-  **explicit authorized-target allowlist (BSSID/SSID), empty by default** — never physical/range
-  assumptions. No turnkey-attack modules in this tree.
+- **Authorized / passive by default.** Any deauth/jam/targeting/firing-capable capability gates on
+  an **explicit authorized-target allowlist (BSSID/SSID), empty by default** — never physical/range
+  assumptions. Ship modules as turnkey (polished, one-click, automatic) as possible — the single
+  exclusion is a **turnkey attack/weaponized module** (one-click-to-fire).
 - **Real data only** in anything user-facing (no decorative fake telemetry).
 - **Glass-box:** decisions carry a human-readable reason.
 

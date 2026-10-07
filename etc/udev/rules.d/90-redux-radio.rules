@@ -1,0 +1,18 @@
+# 90-redux-radio.rules — redux Radio Orchestrator hotplug hook
+#
+# Fires the hotplug handler whenever a wireless netdev appears or disappears, so the
+# orchestrator can promote/fall-back radios with no manual steps. No polling, no reboot.
+#
+# Install:
+#   sudo cp etc/udev/rules.d/90-redux-radio.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#
+# We match on SUBSYSTEM=net (the interface is what the orchestrator reasons about), and
+# restrict to wlan* so we don't fire on eth/usb-serial/etc. RUN launches the handler
+# detached (udev kills long-running RUN children) via systemd-run.
+
+ACTION=="add",    SUBSYSTEM=="net", KERNEL=="wlan*", \
+  RUN+="/bin/sh -c '/usr/bin/systemd-run --no-block /opt/redux/scripts/redux-hotplug.sh add %k'"
+
+ACTION=="remove", SUBSYSTEM=="net", KERNEL=="wlan*", \
+  RUN+="/bin/sh -c '/usr/bin/systemd-run --no-block /opt/redux/scripts/redux-hotplug.sh remove %k'"
