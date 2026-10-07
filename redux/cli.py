@@ -178,6 +178,19 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_ghost(args) -> int:
+    """Produce a sanitized 'ghost' of a recorded session — real MACs/SSIDs
+    pseudonymized and location dropped, timing/structure preserved — so it can be
+    replayed or shared without leaking real recon data. Plays via --replay."""
+    from .replay import sanitize_file
+    stats = sanitize_file(args.infile, args.outfile, seed=args.seed, keep_oui=not args.no_keep_oui)
+    print(f"ghosted {stats['events']} event(s) → {args.outfile}: "
+          f"{stats['unique_macs']} identit(y/ies) and {stats['unique_names']} name(s) pseudonymized, "
+          f"locations dropped")
+    print(f"replay it with:  redux web --replay {args.outfile}   (or: redux run --replay ...)")
+    return 0
+
+
 def cmd_post(args) -> int:
     """Run the boot-POST and render it as the device would at power-up.
 
@@ -285,6 +298,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    gh = sub.add_parser("ghost", help="sanitize a recorded session for safe replay/sharing")
+    gh.add_argument("infile", help="a recorded bettercap events JSON")
+    gh.add_argument("outfile", help="where to write the sanitized ghost")
+    gh.add_argument("--seed", default="redux-ghost", help="pseudonymization seed (stable mapping)")
+    gh.add_argument("--no-keep-oui", action="store_true",
+                    help="synthesize locally-administered MACs instead of preserving vendor OUIs")
+    gh.set_defaults(func=cmd_ghost)
 
     po = sub.add_parser("post", help="run the boot-POST (power-on self-test)")
     add_radio_flags(po)

@@ -49,9 +49,10 @@ everything above them:
 | Offense (scope-gated) | `redux/crack/`, `redux/netrecon/`, `redux/portal/` | capture→crack pipeline, network kill-chain (scan/enumerate/cred-test/loot), captive portal for authorized testing |
 | SDR | `redux/sdr/` | passive-sensing ingest (rtl_433 ISM + ADS-B) into the same sightings store/Dex |
 | Expeditions | `redux/expedition/` | named field sessions + "Wrapped" recap |
+| Replay / Ghost | `redux/replay/` | record a session; produce a **sanitized ghost** (identities pseudonymized, location dropped, timing preserved) to replay or share without leaking real recon data |
 | Packs / Compat | `redux/packs/`, `redux/compat/` | pack manifest + dependency resolver; pwnagotchi-plugin compat shim |
 | Web | `redux/web/` | glass-box status dashboard + sightings map (self-contained, no external assets) |
-| CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / post / scope / dex / expedition` |
+| CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / post / scope / dex / expedition / ghost` |
 
 Everything assembles on one bus through `Beastcore` and runs as a single system. Offensive
 capabilities are full-power but consult the central Scope for aiming (see below).
@@ -86,7 +87,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 440 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 451 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
@@ -111,10 +112,11 @@ redux/netrecon/   network kill-chain: scan/enumerate/cred-test/loot (scope-gated
 redux/portal/     captive portal for authorized client testing
 redux/sdr/        passive SDR ingest (rtl_433 ISM + ADS-B)
 redux/expedition/ named field sessions + Wrapped recap
+redux/replay/     record a session + sanitized "ghost" for safe replay/sharing
 redux/packs/      Beast Packs (manifest + manager)
 redux/compat/     pwnagotchi-plugin compat shim
 redux/web/        glass-box status dashboard + sightings map
-redux/cli.py      operator entrypoint (status/run/web/packs/doctor/post/scope/dex/expedition)
+redux/cli.py      operator entrypoint (status/run/web/packs/doctor/post/scope/dex/expedition/ghost)
 image/            pi-gen image stack (boot, overlay, watchdog, UPS, OTA)
 tests/            unit/integration tests (real logic, no hardware needed)
 docs/             architecture, vision, proposals
@@ -125,7 +127,7 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 440 tests, no hardware needed
+pytest                 # 451 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)
@@ -135,6 +137,7 @@ redux post             # boot-POST (power-on self-test); exit 0/1/2 = READY/DEGR
 redux scope            # manage the central authorized-target list (add/import/arm-lab)
 redux dex              # the Field Dex — recon ledger over sightings
 redux expedition       # start/end a field session + Wrapped recap
+redux ghost in.json out.json   # sanitize a recording for safe replay/sharing
 redux packs            # manage Beast Packs
 ```
 
