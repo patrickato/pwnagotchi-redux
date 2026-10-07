@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Protocol
 
 from ..radio import decide, Intent, Role
+from .event_bridge import events_to_frames
 
 
 class RadioControl(Protocol):
@@ -65,6 +66,8 @@ class Supervisor:
         radio_control: Optional[RadioControl] = None,
         driver: Optional[Driver] = None,
         log: Optional[Callable[[str], None]] = None,
+        narrator=None,
+        detect_engine=None,
     ):
         self._radios = {r.iface: r for r in (radios or [])}
         self._intent = Intent(intent)
@@ -72,6 +75,8 @@ class Supervisor:
         self._radio_control = radio_control
         self._driver = driver
         self._log = log or (lambda msg: None)
+        self._narrator = narrator
+        self._detect_engine = detect_engine
         self._assignment = None
         self._capture_iface = None
         self.reasons: list = []
@@ -150,8 +155,35 @@ class Supervisor:
             return []
         return self._driver.poll_events(clear=True)
 
+    def pump(self) -> list:
+        """Full event step: drain driver events, bridge them to detector frames,
+        run the detectors, and narrate any alerts. Returns the alerts (empty
+        without a driver or detect engine). Passive — raises alerts only, never TX.
+
+        Honest coverage: bettercap's REST events only bridge to beacon-class frames
+        (see event_bridge), so this lights up the AP-watching detectors; raw-frame
+        detectors (deauth flood, sweep) stay dark until a raw-capture tap exists."""
+        events = self.tick()
+        if self._detect_engine is None:
+            return []
+        alerts = self._detect_engine.feed_many(events_to_frames(events))
+        if self._narrator is not None:
+            for a in alerts:
+                self._narrator.say_alert(a)
+        return alerts
+
+    def creature_lines(self, n: Optional[int] = None):
+        """Recent glass-box creature narration (empty without a narrator)."""
+        return self._narrator.lines(n) if self._narrator is not None else []
+
+    def creature_tft(self) -> str:
+        """One-line TFT string from the narrator (placeholder without one)."""
+        return self._narrator.tft() if self._narrator is not None else "…"
+
     # --- glass-box --------------------------------------------------------- #
 
     def _say(self, reason: str) -> None:
         self.reasons.append(reason)
         self._log(reason)
+        if self._narrator is not None:
+            self._narrator.say_reason(reason)
