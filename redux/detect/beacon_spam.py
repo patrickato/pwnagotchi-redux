@@ -16,7 +16,7 @@ from redux.detect.frames import Frame, FrameType
 class BeaconSpamDetector:
     """Sliding-window unique-SSID (or BSSID) rate detector for beacon floods."""
 
-    def __init(
+    def __init__(
         self,
         *,
         window_s: float = 10.0,

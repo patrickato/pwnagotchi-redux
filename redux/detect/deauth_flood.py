@@ -20,7 +20,7 @@ class DeauthFloodDetector:
     Defaults are conservative for lab/demo use; tune via constructor.
     """
 
-    def __init(
+    def __init__(
         self,
         *,
         window_s: float = 5.0,
