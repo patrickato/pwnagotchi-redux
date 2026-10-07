@@ -1,6 +1,6 @@
 """redux.geo — BeastSpatialDB and geospatial helpers.
 
-Sighting store + WiGLE export + location estimate + coverage grid.
+Sighting store + WiGLE export/queue + location estimate + coverage grid.
 No redux.engine import — lead wires live GPS at integration.
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ from redux.geo.wigle import (
     kismetdb_to_wiglecsv_dump,
     write_wigle_csv,
 )
+from redux.geo.wigle_queue import WigleExportQueue
 
 __all__ = [
     "CoverageGrid",
@@ -24,6 +25,7 @@ __all__ = [
     "Sighting",
     "SightingStore",
     "WIGLE_COLUMNS",
+    "WigleExportQueue",
     "channel_to_frequency_mhz",
     "coverage_from_track",
     "estimate_from_coords",
