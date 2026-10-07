@@ -53,12 +53,13 @@ everything above them:
 | Frameworks / Range | `redux/frameworks/` | ATT&CK/D3FEND/PTES map for every action + **purple Range mode** (attack yourself, grade your own detectors, name the gaps) |
 | Engagement report | `redux/report/` | chain-of-authorization deliverable — every action re-checked against Scope, **out-of-scope actions flagged not hidden**, ATT&CK-tagged, optional ghost-sanitized |
 | Sentinel (blue/purple) | `redux/sentinel/` | deploy-and-watch guardian — detector alerts + CSI motion → severity + windowed de-dup → LoRa/log notifier; armed-vs-home so CSI only alerts when you've left |
+| Mesh scope-sync | `redux/mesh/` | off-grid swarm: arm once, propagate to the fleet over LoRa — **HMAC-signed deltas, forged ones rejected**, last-writer-wins convergence |
 | Expeditions | `redux/expedition/` | named field sessions + "Wrapped" recap |
 | Replay / Ghost | `redux/replay/` | record a session; produce a **sanitized ghost** (identities pseudonymized, location dropped, timing preserved) to replay or share without leaking real recon data |
 | Packs / Compat | `redux/packs/`, `redux/compat/` | pack manifest + dependency resolver; pwnagotchi-plugin compat shim |
 | Web | `redux/web/` | glass-box status dashboard + sightings map (self-contained, no external assets) |
 | Personas | `redux/core/persona.py` | one box, pick your hat (red/blue/purple/recon/mesh/sigint) — a declarative capability+posture set; posture is an *extra* gate that can only tighten firing, never widen it |
-| CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / post / persona / sense / sentinel / capture / eap / range / report / scope / dex / expedition / ghost` |
+| CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / post / persona / sense / sentinel / mesh / capture / eap / range / report / scope / dex / expedition / ghost` |
 
 Everything assembles on one bus through `Beastcore` and runs as a single system. Offensive
 capabilities are full-power but consult the central Scope for aiming (see below).
@@ -93,7 +94,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 537 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 546 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
@@ -122,12 +123,13 @@ redux/sdr/        passive SDR ingest (rtl_433 ISM + ADS-B)
 redux/frameworks/ ATT&CK/D3FEND/PTES map + purple Range mode (grade your detectors)
 redux/report/     engagement report — chain of authorization, out-of-scope flagged
 redux/sentinel/   deploy-and-watch guardian (detector + CSI alerts → LoRa/log)
+redux/mesh/       authenticated distributed Scope sync over LoRa (swarm)
 redux/expedition/ named field sessions + Wrapped recap
 redux/replay/     record a session + sanitized "ghost" for safe replay/sharing
 redux/packs/      Beast Packs (manifest + manager)
 redux/compat/     pwnagotchi-plugin compat shim
 redux/web/        glass-box status dashboard + sightings map
-redux/cli.py      operator entrypoint (status/run/web/packs/doctor/post/persona/sense/sentinel/capture/eap/range/report/scope/dex/expedition/ghost)
+redux/cli.py      operator entrypoint (status/run/web/packs/doctor/post/persona/sense/sentinel/mesh/capture/eap/range/report/scope/dex/expedition/ghost)
 image/            pi-gen image stack (boot, overlay, watchdog, UPS, OTA)
 tests/            unit/integration tests (real logic, no hardware needed)
 docs/             architecture, vision, proposals
@@ -138,7 +140,7 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 537 tests, no hardware needed
+pytest                 # 546 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)
@@ -155,6 +157,7 @@ redux eap plan --ssid CorpWiFi --authorized   # gated WPA-Enterprise EAP harvest
 redux range demo       # purple: attack set graded vs your detectors (ATT&CK → D3FEND)
 redux report demo      # chain-of-authorization engagement report (out-of-scope flagged)
 redux sentinel demo    # deploy-and-watch guardian (detector + CSI alerts, armed vs home)
+redux mesh demo        # swarm scope-sync: arm converges; a forged delta is rejected
 redux expedition       # start/end a field session + Wrapped recap
 redux ghost in.json out.json   # sanitize a recording for safe replay/sharing
 redux packs            # manage Beast Packs

@@ -194,6 +194,31 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_mesh(args) -> int:
+    """Mesh demo: a 3-node swarm sharing one authorized Scope over the (simulated)
+    LoRa lane — arm on one node, it converges everywhere; a forged delta (wrong
+    swarm key) is rejected."""
+    from .mesh import ScopeSync, LoopbackMesh, SignedMessage, sign
+    key = b"swarm-shared-key"
+    mesh = LoopbackMesh()
+    nodes = {name: ScopeSync(Scope(), key, node_id=name) for name in ("alpha", "bravo", "charlie")}
+    for n in nodes.values():
+        mesh.register(n)
+    print("redux mesh demo — 3-node swarm, one authenticated Scope (SIMULATED LoRa)")
+    msg = nodes["alpha"].arm("00:11:22:33:44:55", "bssid", job="op1", now=100.0)
+    mesh.broadcast(nodes["alpha"], msg, now=100.0)
+    for name, n in nodes.items():
+        print(f"  {name}: permits target? {n.scope.permits(bssid='00:11:22:33:44:55')}")
+    # a stranger forges a delta with the wrong key
+    forged = SignedMessage(payload={"op": "add", "kind": "ssid", "value": "EvilTarget",
+                                    "job": "", "expires": None, "ts": 200.0, "origin": "attacker"},
+                           sig=sign({"op": "add"}, b"WRONG-KEY"))
+    ok, reason = nodes["bravo"].apply(forged, now=200.0)
+    print(f"  forged delta from a stranger → applied={ok} ({reason})")
+    print(f"  bravo permits the forged target? {nodes['bravo'].scope.permits(ssid='EvilTarget')}")
+    return 0
+
+
 def cmd_eap(args) -> int:
     """WPA-Enterprise EAP harvest. `plan` builds the Scope-aimed, posture-gated
     rogue-AP plan (refuses if the SSID isn't armed / posture passive / not
@@ -561,6 +586,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    me = sub.add_parser("mesh", help="off-grid swarm — authenticated distributed Scope sync")
+    mesub = me.add_subparsers(dest="mesh_cmd", required=True)
+    mesub.add_parser("demo", help="3-node swarm: propagate an arm + reject a forged delta")
+    me.set_defaults(func=cmd_mesh)
 
     ep = sub.add_parser("eap", help="WPA-Enterprise EAP credential capture (scope+posture gated)")
     add_radio_flags(ep)
