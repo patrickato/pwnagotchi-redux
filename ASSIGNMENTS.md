@@ -104,3 +104,33 @@ GPS/event sources at integration. Everything stays under `redux/detect/` **or** 
 It printed exactly which file is out of lane and which paths your lane allows. Remove the stray file
 from your branch (it belongs to another lane), or ask the lead to make the shared-file change. Do
 not widen your lane to make it pass.
+
+## Grok DEEP backlog (work all of these before pinging for more — detect lane `redux/detect/`, geo lane `redux/geo/`)
+
+Same loop, one item per branch `grok/<topic>`, hardware-free tests, PR to main, never merge.
+Stay strictly in `redux/detect/` OR `redux/geo/`. If a detector adds an `AlertKind`/`FrameType`,
+that's fine (the lead unions them at merge). Keep going down this list in order:
+
+Detect:
+- D1. Probe-request PNL harvester + detector: build a "device → preferred-network-list" view from
+  probe requests; flag a device loudly probing for many/known SSIDs. Passive recon.
+- D2. Pineapple / PineAP / MANA detector: one radio answering probes for many distinct SSIDs
+  (karma-at-scale) / beacon-flooding signatures.
+- D3. PMF-missing advisory: flag WPA2 APs advertising no 802.11w (deauth-vulnerable) as a posture
+  warning (info severity).
+- D4. BLE advertisement-flood / BLE-spam detector (Flipper-style spam bursts).
+- D5. Detector registry + unified config: a registry listing every detector with its
+  `DEFAULTS`/`_opt` config so `DetectEngine` can auto-include new ones (reduces wiring).
+- D6. Per-alert confidence score (0..1) + rationale, added to `Alert` detail.
+- D7. Frame replay harness: load recorded frames from JSON and run the engine (debug/test aid).
+
+Geo:
+- G1. Return-to-signal: given a BSSID, bearing + distance from a current position to its
+  peak-RSSI sighting in the store.
+- G2. Geofence module: point-in-polygon against a GeoJSON polygon ("am I inside the authorized area").
+- G3. GPX + KML track/sighting export from the store.
+- G4. Dead-reckoning gap-fill: interpolate position across GPS dropouts from speed/heading.
+- G5. Spatial index helper (geohash or H3-style buckets) for fast cell queries.
+- G6. kismetdb import: read a Kismet SQLite into the sighting store.
+- G7. Store stats/query API: top SSIDs, new-since-<ts>, densest cells, counts by security.
+- G8. Sighting-store schema versioning + migrations.
