@@ -16,6 +16,8 @@ class FrameType(str, Enum):
     DEAUTH = "deauth"
     DISASSOC = "disassoc"
     WPS = "wps"  # WPS EAP / registrar exchange sighting
+    PMKID = "pmkid"  # RSN IE PMKID observed (clientless)
+    EAPOL = "eapol"  # 802.1X EAPOL-Key message
     OTHER = "other"
 
 
@@ -37,6 +39,8 @@ class Frame:
     rssi: Optional[int] = None
     # WPS opcode when type is WPS: m1..m8, nack, done, start, identity, unknown
     wps_opcode: str = ""
+    # EAPOL message number when type is EAPOL: 1..4 (0 = unknown)
+    eapol_msg: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bssid", (self.bssid or "").lower())
@@ -44,3 +48,4 @@ class Frame:
         object.__setattr__(self, "dst", (self.dst or "").lower())
         object.__setattr__(self, "security", (self.security or "").lower())
         object.__setattr__(self, "wps_opcode", (self.wps_opcode or "").lower())
+        object.__setattr__(self, "eapol_msg", int(self.eapol_msg or 0))
