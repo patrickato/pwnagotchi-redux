@@ -135,6 +135,16 @@ Geo:
 - G7. Store stats/query API: top SSIDs, new-since-<ts>, densest cells, counts by security.
 - G8. Sighting-store schema versioning + migrations.
 
+## Grok TOP PRIORITY (do this FIRST, before anything else)
+
+- **DW1. Wire every detector into the running pipeline.** Right now the newer detectors
+  (karma, wps, ble_tracker, handshake, ble_flood, pmf, pineapple, pnl) exist as modules but are
+  NOT in `DetectEngine` or exported from `redux/detect/__init__.py`, so they never run. Fix it:
+  populate `redux/detect/registry.py` with EVERY detector (name, factory, config keys), make
+  `DetectEngine` build its detector set FROM the registry (so future detectors auto-include), and
+  export all detector classes from `redux/detect/__init__.py`. Keep hardware-free tests. This is the
+  single most valuable detect-lane task — do it before new detectors.
+
 ## Grok STANDING directive (read this when the DEEP backlog is done — do NOT ask for more)
 
 You are faster than the queue. So: **keep building valuable, in-lane work autonomously** and keep
