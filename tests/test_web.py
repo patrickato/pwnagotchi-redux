@@ -17,6 +17,21 @@ def test_status_payload_has_fields():
     assert "narration" in p and "recommendation" in p
 
 
+def test_status_payload_includes_own_position_honestly():
+    # no position provider → position is None, never a fabricated coordinate
+    bc = Beastcore([ONBOARD], intent=Intent.RECON)
+    assert status_payload(bc)["position"] is None
+    bc2 = Beastcore([ONBOARD], intent=Intent.RECON, position_provider=lambda: (45.0, -93.0))
+    assert status_payload(bc2)["position"] == {"lat": 45.0, "lon": -93.0}
+
+
+def test_page_has_rich_skin_toggle_and_moving_track():
+    html = render_page()
+    assert "skinbtn" in html and "data-skin" in html      # plain/rich skin toggle
+    assert "TRACK" in html and "renderMap" in html         # client-accumulated track
+    assert "src=" not in html and "cdn" not in html.lower()  # still self-contained
+
+
 def test_page_is_self_contained_html():
     html = render_page()
     assert html.lstrip().startswith("<!doctype html>")

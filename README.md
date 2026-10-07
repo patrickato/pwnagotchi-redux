@@ -59,7 +59,7 @@ everything above them:
 | Expeditions | `redux/expedition/` | named field sessions + "Wrapped" recap |
 | Replay / Ghost | `redux/replay/` | record a session; produce a **sanitized ghost** (identities pseudonymized, location dropped, timing preserved) to replay or share without leaking real recon data |
 | Packs / Compat | `redux/packs/`, `redux/compat/` | pack manifest + dependency resolver; pwnagotchi-plugin compat shim |
-| Web | `redux/web/` | glass-box status dashboard + sightings map (self-contained, no external assets) |
+| Web | `redux/web/` | glass-box dashboard — **live moving map** (own track + colored AP pins + radar marker), activity sparkline, plain/rich skin toggle; rendered client-side (no Pi cost), self-contained, offline |
 | Personas | `redux/core/persona.py` | one box, pick your hat (red/blue/purple/recon/mesh/sigint) — a declarative capability+posture set; posture is an *extra* gate that can only tighten firing, never widen it |
 | CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / post / persona / sense / sentinel / mesh / campaign / hunt / capture / eap / range / report / scope / dex / expedition / ghost` |
 
@@ -96,7 +96,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 571 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 573 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
@@ -144,7 +144,7 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 571 tests, no hardware needed
+pytest                 # 573 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)

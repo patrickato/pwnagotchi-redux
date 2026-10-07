@@ -1,12 +1,16 @@
 """Web status dashboard — the glass-box view in a browser (atlas P-11).
 
 Serves two things from a running Beastcore: `GET /api/status` (the JSON snapshot)
-and `GET /` (a tiny self-contained page that polls it and shows what the device is
-doing and *why*). No external assets, no fake data — it renders exactly what the
-system reports.
+and `GET /` (a self-contained page that polls it and shows what the device is doing
+and *why*). No external assets, no fake data — it renders exactly what the system
+reports.
 
-Exposure follows the repo rule: default `bind_scope=localhost`; a wider scope is a
-deliberate choice, and `serve()` always logs the exact URL it bound.
+Rendering lives on the *viewer's* browser (phone/laptop), not the Pi: the Pi only
+serves a small JSON blob, so the rich moving map / radar / sparkline cost the device
+nothing (the heavy pixels are drawn client-side). A `plain` skin drops to a stark,
+pwnagotchi-style readout; a `rich` skin adds the live map and extras. Exposure
+follows the repo rule: default `bind_scope=localhost`; a wider scope is a deliberate
+choice, and `serve()` always logs the exact URL.
 """
 from __future__ import annotations
 
@@ -29,11 +33,15 @@ _SCOPE_HOST = {
 
 
 def status_payload(beastcore) -> Dict:
-    """The snapshot the dashboard renders: Beastcore.status() + recent narration."""
+    """The snapshot the dashboard renders: Beastcore.status() + recent narration +
+    located sightings + this device's own position (for the moving map)."""
     data = dict(beastcore.status())
     data["narration"] = [l.text for l in beastcore.narrator.lines(12)]
     data["located"] = (
         beastcore.located_sightings() if hasattr(beastcore, "located_sightings") else []
+    )
+    data["position"] = (
+        beastcore.current_position() if hasattr(beastcore, "current_position") else None
     )
     return data
 
@@ -41,46 +49,78 @@ def status_payload(beastcore) -> Dict:
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>redux</title><style>
-:root{--bg:#0b0e13;--fg:#e6edf3;--mut:#8b98a5;--acc:#4ec9b0;--warn:#e3b341;--crit:#f85149;--card:#141a22}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 ui-monospace,Menlo,Consolas,monospace}
-header{padding:16px 18px;border-bottom:1px solid #222b36;display:flex;gap:12px;align-items:baseline}
-h1{font-size:18px;margin:0;letter-spacing:.5px}.mut{color:var(--mut)}
-main{max-width:820px;margin:0 auto;padding:18px;display:grid;gap:14px}
-.card{background:var(--card);border:1px solid #222b36;border-radius:10px;padding:14px 16px}
-.row{display:flex;flex-wrap:wrap;gap:10px}.kv{flex:1 1 150px}.k{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
-.v{font-size:18px;margin-top:2px}.creature{font-size:20px;color:var(--acc)}
-.reason{color:var(--mut);font-size:13px;margin-top:4px}
-ul{margin:6px 0 0;padding-left:18px}li{color:var(--mut);font-size:13px}
-.badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#1d2630;font-size:12px}
-#map{width:100%;height:auto;display:block;background:#0e141b;border:1px solid #222b36;border-radius:8px}
-#map circle{fill:var(--acc);fill-opacity:.75;stroke:#0e141b;stroke-width:.6}
-</style></head><body>
-<header><h1>redux</h1><span class="mut" id="sub">glass-box status</span></header>
+:root{--bg:#0a0e13;--fg:#e6edf3;--mut:#8b98a5;--dim:#5a7187;--acc:#4ec9b0;--warn:#e3b341;
+--crit:#f85149;--card:#121922;--line:#1f2a35;--wifi:#5aa0ff;--ble:#9a7bff;--me:#4ec9b0;
+--mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--mono)}
+header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center}
+h1{font-size:17px;margin:0;letter-spacing:1px}.sp{flex:1}
+.mut{color:var(--mut)}.dim{color:var(--dim)}
+button{font:12px var(--mono);background:#18222d;color:var(--fg);border:1px solid var(--line);
+border-radius:7px;padding:5px 10px;cursor:pointer}button.on{border-color:var(--acc);color:var(--acc)}
+main{max-width:900px;margin:0 auto;padding:16px;display:grid;gap:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.row{display:flex;flex-wrap:wrap;gap:12px}.kv{flex:1 1 120px}
+.k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+.v{font-size:17px;margin-top:2px}.creature{font-size:19px;color:var(--acc)}
+.reason{color:var(--mut);font-size:12px;margin-top:4px}
+ul{margin:6px 0 0;padding-left:16px}li{color:var(--mut);font-size:12px}
+.badge{display:inline-block;padding:1px 8px;border-radius:999px;background:#1d2630;font-size:12px}
+.badge.crit{background:#3a1416;color:var(--crit)}.badge.warn{background:#352a12;color:var(--warn)}
+#wrap{position:relative}
+#map{width:100%;height:340px;display:block;background:#0b1118;border:1px solid var(--line);border-radius:9px}
+#map .track{fill:none;stroke:var(--acc);stroke-width:1.4;stroke-opacity:.55}
+#map text{font:10px var(--mono);fill:var(--mut)}
+.leg{display:flex;gap:14px;margin-top:6px;font-size:11px}.leg i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.ping{animation:ping 2.2s ease-out infinite}
+@keyframes ping{0%{r:4;opacity:.9}100%{r:26;opacity:0}}
+#spark{width:100%;height:40px;display:block}
+body[data-skin="plain"] .rich{display:none}
+body[data-skin="plain"]{--card:#0d1319}
+body[data-skin="plain"] .card{border-color:#16202a}
+</style></head><body data-skin="rich">
+<header><h1>redux</h1><span class="mut" id="sub">glass-box</span><span class="sp"></span>
+ <button id="skinbtn" title="toggle skin">rich</button></header>
 <main>
  <div class="card"><div class="creature" id="creature">…</div><div class="reason" id="mood"></div></div>
+ <div class="card rich"><div class="k">airspace · real GPS fixes only · moves as you move</div>
+   <div id="wrap"><svg id="map" viewBox="0 0 400 340" preserveAspectRatio="xMidYMid meet"
+     aria-label="live sighting map"></svg></div>
+   <div class="leg mut"><span><i style="background:var(--me)"></i>you</span>
+     <span><i style="background:var(--wifi)"></i>wifi</span>
+     <span><i style="background:var(--ble)"></i>ble</span><span id="maprange" class="dim"></span></div></div>
  <div class="card"><div class="row">
    <div class="kv"><div class="k">persona</div><div class="v" id="persona">—</div></div>
    <div class="kv"><div class="k">intent</div><div class="v" id="intent">—</div></div>
    <div class="kv"><div class="k">capture radio</div><div class="v" id="cap">—</div></div>
-   <div class="kv"><div class="k">capture engine</div><div class="v" id="capeng">—</div></div>
+   <div class="kv"><div class="k">engine</div><div class="v" id="capeng">—</div></div>
    <div class="kv"><div class="k">sightings</div><div class="v" id="sight">—</div></div>
    <div class="kv"><div class="k">alerts</div><div class="v" id="alerts">—</div></div>
- </div></div>
+ </div>
+ <svg id="spark" class="rich" viewBox="0 0 400 40" preserveAspectRatio="none"></svg></div>
  <div class="card"><div class="k">brain recommends</div>
    <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div></div>
- <div class="card" id="sensecard" style="display:none"><div class="k">presence (CSI)</div>
+ <div class="card rich" id="sensecard" style="display:none"><div class="k">presence (CSI)</div>
    <div class="v"><span class="badge" id="sense">—</span> <span class="badge" id="occ">—</span></div>
    <div class="reason" id="sensewhy"></div></div>
  <div class="card" id="sentcard" style="display:none"><div class="k">sentinel</div>
    <div class="v"><span class="badge" id="sentarm">—</span> dispatched <span id="sentd">0</span> · suppressed <span id="sents">0</span></div>
    <div class="reason" id="sentlast"></div></div>
- <div class="card"><div class="k">located sightings · real GPS fixes only</div>
-   <svg id="map" viewBox="0 0 400 220" preserveAspectRatio="xMidYMid meet" aria-label="sighting coordinate plot"></svg>
-   <div class="reason" id="maprange">—</div></div>
  <div class="card"><div class="k">recent narration</div><ul id="narr"></ul></div>
 </main>
 <script>
+var TRACK=[],SPARK=[],lastSight=null;
+var skin=(function(){try{return localStorage.getItem('redux.skin')||'rich'}catch(e){return 'rich'}})();
+function applySkin(){document.body.setAttribute('data-skin',skin);
+ var b=document.getElementById('skinbtn');b.textContent=skin;b.className=skin==='rich'?'on':''}
+document.getElementById('skinbtn').onclick=function(){skin=(skin==='rich')?'plain':'rich';
+ try{localStorage.setItem('redux.skin',skin)}catch(e){}applySkin()};
+applySkin();
+function setb(id,txt,cls){var e=document.getElementById(id);e.textContent=txt;e.className='badge'+(cls?' '+cls:'')}
 async function tick(){try{const r=await fetch('/api/status');const d=await r.json();
+ document.getElementById('sub').textContent='glass-box';paint(d);
+}catch(e){document.getElementById('sub').textContent='disconnected'}}
+function paint(d){
  document.getElementById('creature').textContent=d.creature||'…';
  document.getElementById('mood').textContent='mood: '+(d.mood||'');
  document.getElementById('persona').textContent=(d.persona||'(none)')+(d.posture?(' · '+d.posture):'');
@@ -89,37 +129,50 @@ async function tick(){try{const r=await fetch('/api/status');const d=await r.jso
  document.getElementById('capeng').textContent=d.capture_engine||'none';
  document.getElementById('sight').textContent=d.sightings??'—';
  document.getElementById('alerts').textContent=d.recent_alerts??'—';
+ const rc=d.recommendation||{};document.getElementById('rec').textContent=rc.intent||'(steady)';
+ document.getElementById('recwhy').textContent=rc.reason||'';
  const se=d.sense,sc=document.getElementById('sensecard');
- if(se){sc.style.display='';document.getElementById('sense').textContent=se.sense||'—';
+ if(se){sc.style.display='';setb('sense',se.sense||'—',se.sense==='motion'?'crit':'');
   document.getElementById('occ').textContent='occ: '+(se.occupancy||'—');
   document.getElementById('sensewhy').textContent=se.reason||''}else{sc.style.display='none'}
  const st=d.sentinel,stc=document.getElementById('sentcard');
- if(st){stc.style.display='';document.getElementById('sentarm').textContent=st.armed?'ARMED':'disarmed';
-  document.getElementById('sentd').textContent=st.dispatched??0;
-  document.getElementById('sents').textContent=st.suppressed??0;
+ if(st){stc.style.display='';setb('sentarm',st.armed?'ARMED':'disarmed',st.armed?'warn':'');
+  document.getElementById('sentd').textContent=st.dispatched??0;document.getElementById('sents').textContent=st.suppressed??0;
   document.getElementById('sentlast').textContent=st.last?('last: '+st.last.summary+' ['+st.last.severity+']'):''}
   else{stc.style.display='none'}
- const rc=d.recommendation||{};document.getElementById('rec').textContent=rc.intent||'(steady)';
- document.getElementById('recwhy').textContent=rc.reason||'';
  const ul=document.getElementById('narr');ul.innerHTML='';
  (d.narration||[]).slice().reverse().forEach(t=>{const li=document.createElement('li');li.textContent=t;ul.appendChild(li)});
- renderMap(d.located||[]);
-}catch(e){document.getElementById('sub').textContent='disconnected'}}
-function renderMap(pts){const svg=document.getElementById('map'),rng=document.getElementById('maprange');
- while(svg.firstChild)svg.removeChild(svg.firstChild);
- if(!pts.length){rng.textContent='no located sightings yet — needs a GPS fix';return}
- const W=400,H=220,P=14,NS='http://www.w3.org/2000/svg';
- let la=pts.map(p=>p.lat),lo=pts.map(p=>p.lon);
- let laMin=Math.min(...la),laMax=Math.max(...la),loMin=Math.min(...lo),loMax=Math.max(...lo);
- const laSpan=(laMax-laMin)||1e-4,loSpan=(loMax-loMin)||1e-4;
- pts.forEach(p=>{const x=P+((p.lon-loMin)/loSpan)*(W-2*P);
-  const y=P+(1-(p.lat-laMin)/laSpan)*(H-2*P); // north up
-  const c=document.createElementNS(NS,'circle');c.setAttribute('cx',x.toFixed(1));c.setAttribute('cy',y.toFixed(1));
-  c.setAttribute('r','3.2');const t=document.createElementNS(NS,'title');
-  t.textContent=(p.kind||'?')+' '+(p.ssid||p.mac||'')+' @ '+p.lat.toFixed(5)+','+p.lon.toFixed(5);
-  c.appendChild(t);svg.appendChild(c)});
- rng.textContent=pts.length+' located · lat '+laMin.toFixed(4)+'…'+laMax.toFixed(4)+' · lon '+loMin.toFixed(4)+'…'+loMax.toFixed(4);
+ if(d.position&&d.position.lat!=null){var p=TRACK[TRACK.length-1];
+  if(!p||p.lat!==d.position.lat||p.lon!==d.position.lon){TRACK.push({lat:d.position.lat,lon:d.position.lon});if(TRACK.length>400)TRACK.shift()}}
+ if(typeof d.sightings==='number'){if(lastSight!==null)SPARK.push(Math.max(0,d.sightings-lastSight));lastSight=d.sightings;if(SPARK.length>120)SPARK.shift()}
+ renderMap(d.located||[],d.position||null);renderSpark();
 }
+function renderMap(pts,pos){const NS='http://www.w3.org/2000/svg',svg=document.getElementById('map'),rng=document.getElementById('maprange');
+ while(svg.firstChild)svg.removeChild(svg.firstChild);
+ var all=pts.map(p=>[p.lat,p.lon]).concat(TRACK.map(t=>[t.lat,t.lon]));if(pos&&pos.lat!=null)all.push([pos.lat,pos.lon]);
+ if(!all.length){var t=document.createElementNS(NS,'text');t.setAttribute('x',12);t.setAttribute('y',24);
+  t.textContent='no located sightings yet — needs a GPS fix';svg.appendChild(t);rng.textContent='';return}
+ const W=400,H=340,P=22;var la=all.map(a=>a[0]),lo=all.map(a=>a[1]);
+ var laMin=Math.min(...la),laMax=Math.max(...la),loMin=Math.min(...lo),loMax=Math.max(...lo);
+ var laSpan=(laMax-laMin)||1e-4,loSpan=(loMax-loMin)||1e-4;
+ function X(lon){return P+((lon-loMin)/loSpan)*(W-2*P)}function Y(lat){return P+(1-(lat-laMin)/laSpan)*(H-2*P)}
+ if(TRACK.length>1){var d='';TRACK.forEach((t,i)=>{d+=(i?'L':'M')+X(t.lon).toFixed(1)+' '+Y(t.lat).toFixed(1)+' '});
+  var pl=document.createElementNS(NS,'path');pl.setAttribute('d',d);pl.setAttribute('class','track');svg.appendChild(pl)}
+ pts.forEach(p=>{var c=document.createElementNS(NS,'circle');c.setAttribute('cx',X(p.lon).toFixed(1));c.setAttribute('cy',Y(p.lat).toFixed(1));
+  c.setAttribute('r','3.4');c.setAttribute('fill',p.kind==='ble'?'var(--ble)':'var(--wifi)');c.setAttribute('fill-opacity','.85');
+  var ti=document.createElementNS(NS,'title');var when=p.ts?(' · '+new Date(p.ts*1000).toISOString().slice(0,19).replace('T',' ')):'';
+  ti.textContent=(p.kind||'?')+' '+(p.ssid||p.mac||'')+when+' @ '+p.lat.toFixed(5)+','+p.lon.toFixed(5);c.appendChild(ti);svg.appendChild(c)});
+ if(pos&&pos.lat!=null){var g=document.createElementNS(NS,'g');
+  var ring=document.createElementNS(NS,'circle');ring.setAttribute('cx',X(pos.lon).toFixed(1));ring.setAttribute('cy',Y(pos.lat).toFixed(1));
+  ring.setAttribute('r','4');ring.setAttribute('fill','none');ring.setAttribute('stroke','var(--me)');ring.setAttribute('class','ping');g.appendChild(ring);
+  var me=document.createElementNS(NS,'circle');me.setAttribute('cx',X(pos.lon).toFixed(1));me.setAttribute('cy',Y(pos.lat).toFixed(1));
+  me.setAttribute('r','4');me.setAttribute('fill','var(--me)');g.appendChild(me);svg.appendChild(g)}
+ rng.textContent='· '+pts.length+' located · '+(TRACK.length>1?TRACK.length+' track pts':'no track yet');
+}
+function renderSpark(){const NS='http://www.w3.org/2000/svg',svg=document.getElementById('spark');
+ while(svg.firstChild)svg.removeChild(svg.firstChild);if(!SPARK.length)return;
+ var mx=Math.max(1,...SPARK),n=SPARK.length,d='';for(var i=0;i<n;i++){var x=(i/(n-1||1))*400,y=40-(SPARK[i]/mx)*36-2;d+=(i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' '}
+ var pl=document.createElementNS(NS,'path');pl.setAttribute('d',d);pl.setAttribute('fill','none');pl.setAttribute('stroke','var(--acc)');pl.setAttribute('stroke-width','1.3');svg.appendChild(pl)}
 tick();setInterval(tick,2000);
 </script></body></html>"""
 

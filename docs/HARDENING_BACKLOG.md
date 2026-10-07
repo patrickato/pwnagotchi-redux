@@ -1,0 +1,66 @@
+# Hardening backlog — "have we thought of everything?"
+
+The 13 subsystems are feature-complete and green in the sandbox. This is the honest
+list of what stands between a green sandbox and a thing you hand to pros and
+classmates to run on real sites. These are **tracked, not yet built** (except where
+noted). Mostly hardening/productization, not missing core capability. Ordered by
+leverage.
+
+## P0 — the one architectural gap
+
+- **Raw-frame capture tap.** `deauth-flood` + `surveillance-sweep` detection AND the
+  fingerprint PNL/IE re-identification all need raw 802.11 frames (radiotap/pcap
+  monitor tap) that bettercap's REST event stream does not expose. Everything
+  needing raw frames is honestly dark today. **One tap lights up three features** —
+  highest-leverage single build left. (Lands in the detect/geo lane + a core feed;
+  coordinate the detector side with Grok.)
+
+## P1 — field-device safety (a dropbox can be found/seized)
+
+- **Secrets at rest.** Handshakes, cracked PSKs, EAP hashes, the Scope, and the
+  **swarm key** sit in plaintext. Add loot-at-rest encryption (key from a boot
+  secret / operator passphrase) so a seized card doesn't spill the engagement.
+- **Anti-tamper dead-man.** We have CSI motion + boot-POST; wire "tamper detected →
+  wipe loot / alert over LoRa" (the CSI anti-tamper idea). Opt-in, glass-box.
+- **Swarm-key lifecycle.** Mesh deltas are HMAC-signed, but there's no key
+  generation/rotation/distribution story. Define one (generate on arm-lab, QR/LoRa
+  exchange, rotate per job).
+
+## P1 — surface auth
+
+- **Web dashboard has no auth.** bind-scope limits exposure, but on lan/tailscale
+  it's open to anyone who reaches it. Add a token/basic-auth gate (or bind-scope
+  localhost-only for anything sensitive) before it's deployed.
+
+## P2 — productization / onboarding
+
+- **First-run + field-operator guide.** Flash → first boot → arm scope → set swarm
+  key → EAP cert. Current quickstart is dev-focused; write the operator path for the
+  community.
+- **Unified config.** Config is scattered across JSON stores + per-module defaults.
+  A single `config.toml` (paths, default persona, bind scopes, keys) with the fork's
+  `>>> USER INPUT REQUIRED <<<` markers.
+- **Data lifecycle.** The sightings DB grows unbounded; add retention/rotation/export
+  (WAL + dedup already help SD-wear, but there's no pruning/backup policy).
+
+## P2 — UI polish (optional, by where it renders)
+
+- **Rich web dashboard — DONE** (moving map + track + pins + sparkline + plain/rich
+  skin; client-rendered, zero Pi cost). Further: offline map tiles when internet is
+  present, a channel waterfall / RSSI meter panel, per-security pin coloring (needs
+  an encryption field on sightings).
+- **TFT stays lean on purpose** (SPI redraw = Pi CPU → heat/battery). Candidate:
+  selectable low-cost "faces" (pwnagotchi-style), NOT heavy animation.
+
+## Known, already-coordinated
+
+- **Detector-side ATT&CK/D3FEND tags** — the mapping layer exists (`redux/frameworks`);
+  tagging the detectors inline is Grok's lane, coordinated.
+- **Governor real collector** — needs the on-Pi `vcgencmd`/battery feed
+  (needs-hardware; runbook §2b.9).
+
+## Not building (would be theater on this hardware)
+
+- Wi-Fi 7 / 6GHz / MLO offense (no Pi 7 radio), on-device LLM operator (infeasible +
+  unsafe; the deterministic operator is the answer), FTM/802.11mc ranging (not
+  Pi-ready), BLE GATT MITM (needs BLE hardware + its own subsystem).

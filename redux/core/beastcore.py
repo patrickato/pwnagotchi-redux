@@ -418,6 +418,17 @@ class Beastcore:
         e = self._explog.end()
         return wrapped(self.store, e) if e is not None else None
 
+    def current_position(self):
+        """This device's own current GPS fix as {lat, lon}, or None when there is
+        no fix — never a fabricated coordinate. Lets the dashboard show 'you' and
+        draw a track as you move."""
+        if self._position is None:
+            return None
+        fix = self._position()
+        if not fix:
+            return None
+        return {"lat": fix[0], "lon": fix[1]}
+
     def located_sightings(self, limit: int = 500) -> list:
         """Recent sightings that carry a real GPS fix, newest first.
 
