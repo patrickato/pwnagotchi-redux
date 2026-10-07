@@ -69,6 +69,7 @@ class SenseReading:
     baseline: float       # calibrated quiet baseline (mean)
     z: float              # how many sigma above the quiet baseline
     reason: str
+    ts: float = 0.0       # the observed frame's timestamp (so consumers have real time)
 
 
 def _mean(xs: Sequence[float]) -> float:
@@ -142,16 +143,17 @@ class MotionSensor:
         full AND a baseline has been measured — never a default 'still'."""
         if frame.valid():
             self._frames.append(frame)
+        fts = float(getattr(frame, "ts", 0.0) or 0.0)
         if len(self._frames) < self.window:
             return SenseReading(Sense.UNKNOWN, 0.0, self._baseline_mean or 0.0, 0.0,
-                                f"warming up ({len(self._frames)}/{self.window} frames)")
+                                f"warming up ({len(self._frames)}/{self.window} frames)", ts=fts)
         if not self.calibrated:
             return SenseReading(Sense.UNKNOWN, _motion_value(self._frames) or 0.0, 0.0, 0.0,
-                                "no quiet baseline measured yet — calibrate against a still room first")
+                                "no quiet baseline measured yet — calibrate against a still room first", ts=fts)
         value = _motion_value(self._frames)
         if value is None:
             return SenseReading(Sense.UNKNOWN, 0.0, self._baseline_mean, 0.0,
-                                "frames inconsistent (subcarrier width changed)")
+                                "frames inconsistent (subcarrier width changed)", ts=fts)
         std = self._baseline_std or 0.0
         if std <= 1e-12:
             # degenerate near-flat baseline (synthetic/ideal): use a ratio, not a
@@ -161,7 +163,7 @@ class MotionSensor:
             reason = (f"{ratio:.1f}x quiet baseline (flat baseline, ratio test)" if moving
                       else "at/below quiet baseline (flat baseline, ratio test)")
             return SenseReading(Sense.MOTION if moving else Sense.STILL,
-                                value, self._baseline_mean, ratio, reason)
+                                value, self._baseline_mean, ratio, reason, ts=fts)
         z = (value - self._baseline_mean) / std
         moving = z > self.sensitivity
         sense = Sense.MOTION if moving else Sense.STILL
@@ -170,7 +172,7 @@ class MotionSensor:
                       if z >= 1000 else f"{z:.1f}sigma above quiet baseline")
         else:
             reason = f"within {self.sensitivity:.0f}sigma of quiet baseline"
-        return SenseReading(sense, value, self._baseline_mean, z, reason)
+        return SenseReading(sense, value, self._baseline_mean, z, reason, ts=fts)
 
 
 @dataclass

@@ -127,6 +127,27 @@ def probe_scope(inp: DoctorInputs) -> Finding:
                    {"active": s["active"], "jobs": s["jobs"]})
 
 
+def probe_capture_engine(inp: DoctorInputs) -> Finding:
+    """Which capture engine is actually providing CAPTURE_HANDSHAKE — so a box with
+    no engine present (no AngryOxide binary, no bettercap driver) can't read clean.
+    Not in the built-in set (needs a graph that registers capture providers); the
+    Beastcore doctor path and boot-POST add it, where that graph exists."""
+    if inp.graph is None:
+        return Finding("capture engine", Status.UNKNOWN, "Can't assess the capture engine.",
+                       "no capability graph provided")
+    ex = inp.graph.explain(Cap.CAPTURE_HANDSHAKE)
+    if not ex.get("candidates"):
+        return Finding("capture engine", Status.UNKNOWN, "Can't assess the capture engine.",
+                       "no capture provider registered in the graph")
+    if ex["available"]:
+        return Finding("capture engine", Status.OK,
+                       f"capture engine: {ex['active_provider']} is providing it.", ex["reason"],
+                       {"provider": ex["active_provider"]})
+    return Finding("capture engine", Status.ACTION_REQUIRED, "No capture engine is available.",
+                   ex["reason"], {"candidates": ex["candidates"]},
+                   "install AngryOxide or bring up the bettercap driver")
+
+
 BUILTIN_PROBES: List[Callable[[DoctorInputs], Finding]] = [
     probe_thermal_power, probe_capture_radio, probe_location, probe_detectors, probe_scope,
 ]

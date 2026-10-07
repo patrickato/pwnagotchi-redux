@@ -29,7 +29,7 @@ from typing import Callable, Iterator, List, Optional, Sequence, Tuple, Union
 from .doctor import (
     Doctor, DoctorInputs, Finding, Status,
     probe_capture_radio, probe_thermal_power, probe_location,
-    probe_detectors, probe_scope,
+    probe_detectors, probe_scope, probe_capture_engine,
 )
 
 # A probe returns (ok, reason): ok True→PASS, False→FAIL, None→UNKNOWN. A probe
@@ -132,6 +132,7 @@ class PowerOnSelfTest:
         """
         checks = [
             PostCheck("capture", "Capture radio", _doctor_probe(probe_capture_radio, inp), critical=True),
+            PostCheck("capture-engine", "Capture engine", _doctor_probe(probe_capture_engine, inp)),
             PostCheck("thermal", "Thermal / power", _doctor_probe(probe_thermal_power, inp)),
             PostCheck("detectors", "Detectors armed", _doctor_probe(probe_detectors, inp)),
             PostCheck("location", "Location fix", _doctor_probe(probe_location, inp)),

@@ -65,7 +65,7 @@ def _authorize(scope, target: str):
     # cidr or ip → test an address for membership in an armed CIDR
     try:
         net = ipaddress.ip_network(target, strict=False)
-        ip = str(net.network_address if net.num_addresses > 1 else net.network_address)
+        ip = str(net.network_address)
     except ValueError:
         ip = target
     return scope.authorize(ip=ip)

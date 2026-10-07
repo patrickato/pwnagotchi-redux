@@ -34,13 +34,18 @@ class MschapV2Credential:
     response: str               # 24-byte NT response, hex
     domain: str = ""
 
+    @property
+    def principal(self) -> str:
+        """username, qualified with the domain when one was captured."""
+        return f"{self.domain}\\{self.username}" if self.domain else self.username
+
     def hashcat_5500(self) -> str:
         """hashcat -m 5500 (NetNTLMv1) line: user::::<response>:<challenge>."""
-        return f"{self.username}::::{self.response.lower()}:{self.challenge.lower()}"
+        return f"{self.principal}::::{self.response.lower()}:{self.challenge.lower()}"
 
     def john_netntlm(self) -> str:
         """John NETNTLM line: user:$NETNTLM$<challenge>$<response>."""
-        return f"{self.username}:$NETNTLM${self.challenge.lower()}${self.response.lower()}"
+        return f"{self.principal}:$NETNTLM${self.challenge.lower()}${self.response.lower()}"
 
 
 @dataclass(frozen=True)

@@ -146,17 +146,35 @@ def test_standard_appends_extra_hardware_probes():
 
 # --- integration through Beastcore ------------------------------------------- #
 
-def _bc(radios):
-    return Beastcore(radios=radios, intent=Intent.RECON)
+class _FakeDriver:
+    """No-op bettercap driver so the CAPTURE_HANDSHAKE engine is present."""
+    def __getattr__(self, name):
+        return lambda *a, **k: {}
 
 
-def test_beastcore_boot_post_ready_with_a_monitor_radio():
+def _bc(radios, driver=None):
+    return Beastcore(radios=radios, intent=Intent.RECON, driver=driver)
+
+
+def test_beastcore_boot_post_ready_with_a_monitor_radio_and_engine():
+    mon = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=False,
+                driver="brcmfmac", onboard=True)
+    rep = _bc([mon], driver=_FakeDriver()).boot_post()   # driver up → capture engine present
+    cap = next(c for c in rep["checks"] if c["key"] == "capture")
+    eng = next(c for c in rep["checks"] if c["key"] == "capture-engine")
+    assert cap["status"] == "pass" and eng["status"] == "pass"
+    assert rep["verdict"] == "ready" and rep["ready"] is True
+
+
+def test_beastcore_boot_post_degraded_when_engine_absent():
+    # a monitor radio but NO capture engine (no driver / no AngryOxide) → honest
+    # DEGRADED, not READY: you can't capture without an engine.
     mon = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=False,
                 driver="brcmfmac", onboard=True)
     rep = _bc([mon]).boot_post()
-    cap = next(c for c in rep["checks"] if c["key"] == "capture")
-    assert cap["status"] == "pass"
-    assert rep["verdict"] == "ready" and rep["ready"] is True
+    assert next(c for c in rep["checks"] if c["key"] == "capture")["status"] == "pass"
+    assert next(c for c in rep["checks"] if c["key"] == "capture-engine")["status"] == "fail"
+    assert rep["verdict"] == "degraded" and rep["ready"] is False
 
 
 def test_beastcore_boot_post_halts_without_a_capture_radio():

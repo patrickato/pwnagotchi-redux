@@ -137,3 +137,15 @@ def test_beastcore_capture_plan_active_with_armed_scope():
     plan = bc.capture_plan()
     assert plan["offense_enabled"] is True
     assert plan["selected_engine"] in ("angryoxide", "bettercap")
+
+
+def test_beastcore_doctor_reports_capture_engine_health():
+    r = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=True, driver="mt76")
+    # no driver / no AngryOxide binary → capture engine is ACTION (honest, not clean)
+    bare = Beastcore(radios=[r], intent=Intent.RECON)
+    areas = {f["area"]: f["status"] for f in bare.doctor_report()["findings"]}
+    assert areas.get("capture engine") == "action"
+    # with the bettercap driver up → capture engine OK
+    up = Beastcore(radios=[r], intent=Intent.RECON, driver=_FakeDriver())
+    areas2 = {f["area"]: f["status"] for f in up.doctor_report()["findings"]}
+    assert areas2.get("capture engine") == "ok"

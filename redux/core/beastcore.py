@@ -209,8 +209,13 @@ class Beastcore:
         )
 
     def doctor_report(self) -> dict:
-        """A headless, glass-box self-diagnosis built from live state."""
-        return Doctor().report(self._doctor_inputs())
+        """A headless, glass-box self-diagnosis built from live state. Adds a
+        capture-engine probe (over the live graph's CAPTURE_HANDSHAKE providers) on
+        top of the built-ins, so a box with no capture engine present can't read
+        clean."""
+        from .doctor import BUILTIN_PROBES, probe_capture_engine
+        return Doctor(probes=list(BUILTIN_PROBES) + [probe_capture_engine]).report(
+            self._doctor_inputs())
 
     def boot_post(self, extra=()) -> dict:
         """The power-on self-test: the Doctor rendered as a gated, streaming boot
@@ -248,8 +253,12 @@ class Beastcore:
                 "intent": {"from": before["intent"], "to": p.intent},
                 "offense_enabled": {"from": before["offense_enabled"], "to": self.offense_enabled()},
                 "bind_scope": {"from": before["bind_scope"], "to": p.bind_scope},
-                "detectors": p.detectors,
             },
+            # declared, not applied here: the detector set is a preference this
+            # persona expresses; pruning the live engine is not enforced from here,
+            # so it's reported honestly as a declaration rather than a change.
+            "declares": {"detectors": p.detectors,
+                         "note": "detector set is a declared preference (not enforced here)"},
         }
 
     def persona(self):
@@ -316,6 +325,20 @@ class Beastcore:
         s = self.sentinel()
         return s.status() if s is not None else {"enabled": False}
 
+    # --- mesh scope-sync (bind the swarm to THIS box's Scope) --------------- #
+
+    def enable_scope_sync(self, key, node_id: str = "node"):
+        """Bind a ScopeSync to this box's own central Scope, so arming here emits
+        signed deltas to the swarm and received deltas merge into the real Scope
+        (not a throwaway). Returns the ScopeSync."""
+        from ..mesh import ScopeSync
+        k = key if isinstance(key, (bytes, bytearray)) else str(key).encode()
+        self._scope_sync = ScopeSync(self.scope, bytes(k), node_id=node_id)
+        return self._scope_sync
+
+    def scope_sync(self):
+        return getattr(self, "_scope_sync", None)
+
     def sense_status(self) -> dict:
         eng = self.sense()
         return eng.status() if eng is not None else {
@@ -343,18 +366,19 @@ class Beastcore:
         --notransmit) and refuses an empty scope rather than sweeping broadly."""
         from ..crack.capture import AngryOxideProvider, BettercapProvider, AngryOxideConfig
         active = self.offense_enabled()
+        from ..crack.capture import select_capture_provider
         ao = AngryOxideProvider(config=AngryOxideConfig(iface=iface or "wlan1"))
         bc = BettercapProvider(driver=getattr(self.supervisor, "driver", None))
         order = [ao, bc] if prefer in ("auto", "angryoxide") else [bc, ao]
-        for prov in order:
-            if prov.available():
-                plan = prov.plan(self.scope, active=active, iface=iface)
-                out = plan.to_dict()
-                out["selected_engine"] = prov.name
-                out["offense_enabled"] = active
-                return out
-        return {"selected_engine": None, "runnable": False, "offense_enabled": active,
-                "reason": "no capture engine available (no AngryOxide binary, no bettercap driver)"}
+        prov, why = select_capture_provider(order)
+        if prov is None:
+            return {"selected_engine": None, "runnable": False, "offense_enabled": active,
+                    "reason": "no capture engine available (no AngryOxide binary, no bettercap driver)"}
+        plan = prov.plan(self.scope, active=active, iface=iface)
+        out = plan.to_dict()
+        out["selected_engine"] = prov.name
+        out["offense_enabled"] = active
+        return out
 
     def dex(self):
         """The Field Dex: the recon ledger built from this device's sightings."""
@@ -418,4 +442,7 @@ class Beastcore:
         }
         if self.sense() is not None:
             status["sense"] = self.sense_status()
+        if self.sentinel() is not None:
+            status["sentinel"] = self.sentinel_status()
+        status["capture_engine"] = self.capture_plan().get("selected_engine")
         return status

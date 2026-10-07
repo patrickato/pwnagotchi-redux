@@ -462,6 +462,9 @@ def cmd_persona(args) -> int:
             print(f"  {k}: {v['from']} -> {v['to']}")
         else:
             print(f"  {k}: {v}")
+    dec = rec.get("declares") or {}
+    if dec:
+        print(f"  declares: detectors={dec.get('detectors')} ({dec.get('note')})")
     print(f"  why: {rec['reason']}")
     return 0
 

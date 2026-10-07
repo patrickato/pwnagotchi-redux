@@ -92,13 +92,13 @@ class ScopeSync:
             now: Optional[float] = None) -> SignedMessage:
         now = time.time() if now is None else now
         self.scope.add(value, kind, job=job, expires=expires, now=now)
-        self._clock[(kind, value.lower(), job)] = now
+        self._clock[(kind, value.lower())] = now
         return self._sign(ScopeDelta("add", kind, value, job, expires, now, self.node_id))
 
     def unarm(self, value: str, kind: str, *, job: str = "", now: Optional[float] = None) -> SignedMessage:
         now = time.time() if now is None else now
         self.scope.remove(value, job=job or None)
-        self._clock[(kind, value.lower(), job)] = now
+        self._clock[(kind, value.lower())] = now
         return self._sign(ScopeDelta("remove", kind, value, job, None, now, self.node_id))
 
     def emit_full(self, now: Optional[float] = None) -> List[SignedMessage]:
@@ -108,7 +108,7 @@ class ScopeSync:
         out = []
         for e in self.scope.active_entries(now=now):
             out.append(self._sign(ScopeDelta("add", e.kind, e.value, e.job, e.expires,
-                                             self._clock.get((e.kind, e.value.lower(), e.job), now),
+                                             self._clock.get((e.kind, e.value.lower()), now),
                                              self.node_id)))
         return out
 
@@ -127,7 +127,7 @@ class ScopeSync:
         except (KeyError, TypeError, ValueError):
             self.rejected += 1
             return False, "rejected: malformed delta"
-        ckey = (kind, value.lower(), job)
+        ckey = (kind, value.lower())
         if ts < self._clock.get(ckey, float("-inf")):
             return False, f"ignored: stale delta (ts {ts} older than known)"
         self._clock[ckey] = ts

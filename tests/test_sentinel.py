@@ -112,6 +112,24 @@ def _frames(kind, n, t0=0):
     return out
 
 
+def test_motion_refires_after_window_using_reading_ts():
+    # regression: SenseReading carries the frame ts, so motion isn't blinded forever
+    s = Sentinel(armed=True, dedup_window=60.0)
+    r1 = SenseReading(Sense.MOTION, 9.9, 0.001, 42.0, "m", ts=0.0)
+    r2 = SenseReading(Sense.MOTION, 9.9, 0.001, 42.0, "m", ts=30.0)    # within window
+    r3 = SenseReading(Sense.MOTION, 9.9, 0.001, 42.0, "m", ts=70.0)    # past window
+    assert s.observe_motion(r1) is not None
+    assert s.observe_motion(r2) is None        # collapsed
+    assert s.observe_motion(r3) is not None     # re-fires, not silent forever
+
+
+def test_beastcore_status_includes_sentinel_when_enabled():
+    bc = Beastcore(radios=None, intent=Intent.RECON)
+    assert "sentinel" not in bc.status()
+    bc.enable_sentinel(armed=True)
+    assert bc.status().get("sentinel", {}).get("armed") is True
+
+
 def test_beastcore_observe_csi_routes_motion_to_armed_sentinel():
     bc = Beastcore(radios=None, intent=Intent.RECON)
     eng = bc.enable_sense(window=16, sensitivity=5.0)

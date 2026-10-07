@@ -59,13 +59,21 @@ ul{margin:6px 0 0;padding-left:18px}li{color:var(--mut);font-size:13px}
 <main>
  <div class="card"><div class="creature" id="creature">…</div><div class="reason" id="mood"></div></div>
  <div class="card"><div class="row">
+   <div class="kv"><div class="k">persona</div><div class="v" id="persona">—</div></div>
    <div class="kv"><div class="k">intent</div><div class="v" id="intent">—</div></div>
    <div class="kv"><div class="k">capture radio</div><div class="v" id="cap">—</div></div>
+   <div class="kv"><div class="k">capture engine</div><div class="v" id="capeng">—</div></div>
    <div class="kv"><div class="k">sightings</div><div class="v" id="sight">—</div></div>
    <div class="kv"><div class="k">alerts</div><div class="v" id="alerts">—</div></div>
  </div></div>
  <div class="card"><div class="k">brain recommends</div>
    <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div></div>
+ <div class="card" id="sensecard" style="display:none"><div class="k">presence (CSI)</div>
+   <div class="v"><span class="badge" id="sense">—</span> <span class="badge" id="occ">—</span></div>
+   <div class="reason" id="sensewhy"></div></div>
+ <div class="card" id="sentcard" style="display:none"><div class="k">sentinel</div>
+   <div class="v"><span class="badge" id="sentarm">—</span> dispatched <span id="sentd">0</span> · suppressed <span id="sents">0</span></div>
+   <div class="reason" id="sentlast"></div></div>
  <div class="card"><div class="k">located sightings · real GPS fixes only</div>
    <svg id="map" viewBox="0 0 400 220" preserveAspectRatio="xMidYMid meet" aria-label="sighting coordinate plot"></svg>
    <div class="reason" id="maprange">—</div></div>
@@ -75,10 +83,22 @@ ul{margin:6px 0 0;padding-left:18px}li{color:var(--mut);font-size:13px}
 async function tick(){try{const r=await fetch('/api/status');const d=await r.json();
  document.getElementById('creature').textContent=d.creature||'…';
  document.getElementById('mood').textContent='mood: '+(d.mood||'');
+ document.getElementById('persona').textContent=(d.persona||'(none)')+(d.posture?(' · '+d.posture):'');
  document.getElementById('intent').textContent=d.intent||'—';
  document.getElementById('cap').textContent=d.capture_iface||'none';
+ document.getElementById('capeng').textContent=d.capture_engine||'none';
  document.getElementById('sight').textContent=d.sightings??'—';
  document.getElementById('alerts').textContent=d.recent_alerts??'—';
+ const se=d.sense,sc=document.getElementById('sensecard');
+ if(se){sc.style.display='';document.getElementById('sense').textContent=se.sense||'—';
+  document.getElementById('occ').textContent='occ: '+(se.occupancy||'—');
+  document.getElementById('sensewhy').textContent=se.reason||''}else{sc.style.display='none'}
+ const st=d.sentinel,stc=document.getElementById('sentcard');
+ if(st){stc.style.display='';document.getElementById('sentarm').textContent=st.armed?'ARMED':'disarmed';
+  document.getElementById('sentd').textContent=st.dispatched??0;
+  document.getElementById('sents').textContent=st.suppressed??0;
+  document.getElementById('sentlast').textContent=st.last?('last: '+st.last.summary+' ['+st.last.severity+']'):''}
+  else{stc.style.display='none'}
  const rc=d.recommendation||{};document.getElementById('rec').textContent=rc.intent||'(steady)';
  document.getElementById('recwhy').textContent=rc.reason||'';
  const ul=document.getElementById('narr');ul.innerHTML='';

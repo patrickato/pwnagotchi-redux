@@ -102,6 +102,21 @@ def test_stale_remove_does_not_resurrect_or_delete():
     assert b.scope.permits(ssid="CorpNet") is True       # not removed by the stale delta
 
 
+def test_global_remove_supersedes_and_stale_readd_cannot_resurrect():
+    # clock is keyed on the target (not the job label), so a newer remove wins and
+    # a stale re-add under the original job can't bring the target back
+    b = _node("b")
+    signer = ScopeSync(Scope(), KEY, "a")
+    b.apply(signer.arm("CorpNet", "ssid", job="op1", now=10.0), now=10.0)
+    assert b.scope.permits(ssid="CorpNet") is True
+    b.apply(signer.unarm("CorpNet", "ssid", now=20.0), now=20.0)
+    assert b.scope.permits(ssid="CorpNet") is False
+    stale_readd = ScopeSync(Scope(), KEY, "c").arm("CorpNet", "ssid", job="op1", now=15.0)
+    ok, reason = b.apply(stale_readd, now=21.0)
+    assert ok is False and "stale" in reason
+    assert b.scope.permits(ssid="CorpNet") is False
+
+
 def test_newer_remove_wins():
     b = _node("b")
     signer = ScopeSync(Scope(), KEY, "a")
