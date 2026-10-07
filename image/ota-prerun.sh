@@ -31,7 +31,7 @@ LOOP_DEV=$(losetup --show --find --partscan "$IMG_FILE")
 ensure_loopdev_partitions "$LOOP_DEV"
 BOOT_DEV="${LOOP_DEV}p2"
 ROOT_DEV="${LOOP_DEV}p4"
-mkdosfs -n REDUXCTRL -F 32 "${LOOP_DEV}p1" >/dev/null
+mkdosfs -n REDUXCTRL -F 16 "${LOOP_DEV}p1" >/dev/null
 for number in 2 3; do mkdosfs -n "${names[number-1]}" -F 32 "${LOOP_DEV}p${number}" >/dev/null; done
 for number in 4 5 6; do mkfs.ext4 -L "${names[number-1]}" -O '^huge_file,^64bit' "${LOOP_DEV}p${number}" >/dev/null; done
 mount "$ROOT_DEV" "$ROOTFS_DIR" -t ext4
