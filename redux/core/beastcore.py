@@ -418,6 +418,13 @@ class Beastcore:
         e = self._explog.end()
         return wrapped(self.store, e) if e is not None else None
 
+    def tft_frame(self, face="status", width: int = 46, ascii: bool = False):
+        """Render the on-device TFT frame (list of rows) from live status. Lean,
+        static (no animation), monochrome-safe — see redux.tft."""
+        from ..tft import render, Face
+        f = face if isinstance(face, Face) else Face(face)
+        return render(self.status(), face=f, width=width, ascii=ascii)
+
     def current_position(self):
         """This device's own current GPS fix as {lat, lon}, or None when there is
         no fix — never a fabricated coordinate. Lets the dashboard show 'you' and

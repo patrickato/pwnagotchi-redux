@@ -231,6 +231,28 @@ def cmd_campaign(args) -> int:
     return 0
 
 
+def cmd_tft(args) -> int:
+    """Render the on-device TFT frame to the terminal (see it without hardware).
+    --face plain|status, --ascii for a plain-terminal fallback."""
+    from .tft import render, Face
+    bc = _build(args)
+    if args.persona:
+        bc.apply_persona(args.persona)
+    status = bc.status()
+    if args.demo:
+        status = {**status, "creature": "> hunting", "mood": "hunting",
+                  "persona": "purple", "posture": "active", "capture_engine": "angryoxide",
+                  "capture_iface": "wlan1", "sightings": 142, "recent_alerts": 3,
+                  "governor": {"mode": "guarded"},
+                  "sense": {"available": True, "sense": "motion", "occupancy": "occupied"},
+                  "sentinel": {"armed": True, "dispatched": 4, "suppressed": 2,
+                               "last": {"summary": "ble_skimmer", "severity": "critical"}},
+                  "narration": ["ch6 dwell - 3 new APs, 1 PMKID elicited"]}
+    for line in render(status, face=Face(args.face), ascii=args.ascii):
+        print(line)
+    return 0
+
+
 def cmd_hunt(args) -> int:
     """Fox-hunt demo: a SIMULATED approach then retreat, showing warmer/colder, the
     proximity band, and (with GPS-tagged samples) a position estimate + bearing."""
@@ -662,6 +684,14 @@ def build_parser() -> argparse.ArgumentParser:
     cad_ = casub.add_parser("demo", help="run the chain with fake executors + render the report")
     cad_.add_argument("--targets", nargs="*", help="targets to run the chain against")
     ca.set_defaults(func=cmd_campaign)
+
+    tf = sub.add_parser("tft", help="render the on-device TFT frame to the terminal")
+    add_radio_flags(tf)
+    tf.add_argument("--face", default="status", choices=["plain", "status"])
+    tf.add_argument("--persona", help="apply a persona first")
+    tf.add_argument("--ascii", action="store_true", help="ascii fallback (no box/block glyphs)")
+    tf.add_argument("--demo", action="store_true", help="populate with sample data")
+    tf.set_defaults(func=cmd_tft)
 
     hu = sub.add_parser("hunt", help="RSSI-gradient fox-hunt (warmer/colder + bearing)")
     husub = hu.add_subparsers(dest="hunt_cmd", required=True)

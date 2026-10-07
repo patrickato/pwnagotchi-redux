@@ -61,7 +61,7 @@ everything above them:
 | Packs / Compat | `redux/packs/`, `redux/compat/` | pack manifest + dependency resolver; pwnagotchi-plugin compat shim |
 | Web | `redux/web/` | glass-box dashboard — **live moving map** (own track + colored AP pins + radar marker), activity sparkline, plain/rich skin toggle; rendered client-side (no Pi cost), self-contained, offline |
 | Personas | `redux/core/persona.py` | one box, pick your hat (red/blue/purple/recon/mesh/sigint) — a declarative capability+posture set; posture is an *extra* gate that can only tighten firing, never widen it |
-| CLI | `redux/cli.py` | `redux status / run / web / packs / doctor / post / persona / sense / sentinel / mesh / campaign / hunt / capture / eap / range / report / scope / dex / expedition / ghost` |
+| CLI | `redux/cli.py` | `redux status / run / web / tft / packs / doctor / post / persona / sense / sentinel / mesh / campaign / hunt / capture / eap / range / report / scope / dex / expedition / ghost` |
 
 Everything assembles on one bus through `Beastcore` and runs as a single system. Offensive
 capabilities are full-power but consult the central Scope for aiming (see below).
@@ -96,7 +96,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 573 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 581 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
@@ -132,8 +132,9 @@ redux/expedition/ named field sessions + Wrapped recap
 redux/replay/     record a session + sanitized "ghost" for safe replay/sharing
 redux/packs/      Beast Packs (manifest + manager)
 redux/compat/     pwnagotchi-plugin compat shim
-redux/web/        glass-box status dashboard + sightings map
-redux/cli.py      operator entrypoint (status/run/web/packs/doctor/post/persona/sense/sentinel/mesh/campaign/hunt/capture/eap/range/report/scope/dex/expedition/ghost)
+redux/web/        glass-box dashboard + live moving map (client-rendered)
+redux/tft/        lean on-device TFT faces (plain/status, box-drawing, no animation)
+redux/cli.py      operator entrypoint (status/run/web/tft/packs/doctor/post/persona/sense/sentinel/mesh/campaign/hunt/capture/eap/range/report/scope/dex/expedition/ghost)
 image/            pi-gen image stack (boot, overlay, watchdog, UPS, OTA)
 tests/            unit/integration tests (real logic, no hardware needed)
 docs/             architecture, vision, proposals
@@ -144,7 +145,7 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 573 tests, no hardware needed
+pytest                 # 581 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)
@@ -164,6 +165,7 @@ redux sentinel demo    # deploy-and-watch guardian (detector + CSI alerts, armed
 redux mesh demo        # swarm scope-sync: arm converges; a forged delta is rejected
 redux campaign … plan  # autonomous kill-chain plan (every step gated, glass-box)
 redux hunt demo        # RSSI fox-hunt: warmer/colder + bearing to a target
+redux tft --demo       # preview the on-device TFT face (--face plain|status, --ascii)
 redux expedition       # start/end a field session + Wrapped recap
 redux ghost in.json out.json   # sanitize a recording for safe replay/sharing
 redux packs            # manage Beast Packs
