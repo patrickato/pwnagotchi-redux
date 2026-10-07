@@ -57,7 +57,8 @@ def test_low_battery_requires_uninterrupted_confirmed_discharge():
     power = boot_module("power")
     low = power.Reading(5, 3.3, "Discharging", "fixture", "measured fixture")
     policy = power.LowBattery(10, 30)
-    assert not policy.decision(low, 0)[0]
+    for now in range(0, 30, 5):
+        assert not policy.decision(low, now)[0]
     assert not policy.decision(low, 29)[0]
     assert policy.decision(low, 30)[0]
     unknown = power.Reading(None, None, "Unknown", "fixture", "missing fixture")
@@ -76,6 +77,37 @@ def test_low_battery_requires_uninterrupted_confirmed_discharge():
 def test_low_battery_invalid_policy(threshold, interval):
     with pytest.raises(ValueError):
         boot_module("power").LowBattery(threshold, interval)
+
+
+def test_low_battery_does_not_count_unobserved_time_as_confirmation():
+    power = boot_module("power")
+    low = power.Reading(5, 3.3, "Discharging", "fixture", "synthetic low reading")
+    policy = power.LowBattery(10, 30)
+    assert not policy.decision(low, 0)[0]
+    poweroff, reason = policy.decision(low, 60)
+    assert not poweroff
+    assert 'sample gap' in reason and 'confirmation restarted' in reason
+    for now in (65, 70, 75, 80, 85):
+        assert not policy.decision(low, now)[0]
+    assert policy.decision(low, 90)[0]
+
+
+@pytest.mark.parametrize('poll', [0.5, 5, 10])
+def test_low_battery_sampling_bound_matches_configured_poll(poll):
+    power = boot_module('power')
+    low = power.Reading(5, 3.3, 'Discharging', 'fixture', 'synthetic low reading')
+    policy = power.LowBattery(10, 30, max_sample_gap=2 * poll)
+    assert not policy.decision(low, 0)[0]
+    assert not policy.decision(low, 2 * poll)[0]  # One missed cycle is tolerated.
+    poweroff, reason = policy.decision(low, 5 * poll)
+    assert not poweroff and 'confirmation restarted' in reason
+    assert policy.since == 5 * poll
+
+
+@pytest.mark.parametrize('gap', [0, -1, float('nan'), float('inf')])
+def test_low_battery_rejects_invalid_sampling_bounds(gap):
+    with pytest.raises(ValueError, match='sample gap'):
+        boot_module('power').LowBattery(max_sample_gap=gap)
 
 
 def test_poweroff_commits_reason_before_sync_and_systemd(monkeypatch, tmp_path):
