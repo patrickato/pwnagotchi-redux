@@ -13,6 +13,8 @@ class AlertKind(str, Enum):
     KARMA = "karma"
     CAPTIVE_TWIN = "captive_twin"
     WPS_ATTACK = "wps_attack"
+    BLE_TRACKER = "ble_tracker"
+    BLE_SKIMMER = "ble_skimmer"
 
 
 @dataclass(frozen=True)
