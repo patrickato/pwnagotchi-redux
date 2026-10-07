@@ -529,6 +529,55 @@ def boot_policy_module():
     return module
 
 
+def flash_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('flash', REPO / 'image/flash.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_flash_validates_compressed_release_and_full_readback(tmp_path):
+    import hashlib
+    import io
+    import lzma
+    flash = flash_module()
+    raw = bytearray(4096)
+    raw[510:512] = b'\x55\xaa'
+    path = tmp_path / 'fixture.img.xz'
+    path.write_bytes(lzma.compress(bytes(raw)))
+    release_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    size, digest = flash.inspect_image(path, release_hash)
+    assert size == 4096 and digest == hashlib.sha256(raw).hexdigest()
+    with pytest.raises(ValueError, match='checksum'):
+        flash.inspect_image(path, '0' * 64)
+
+    class ShortWriter(io.BytesIO):
+        def write(self, data):
+            return super().write(data[:13])
+
+    disk = ShortWriter()
+    flash.copy_stream(io.BytesIO(raw), disk, size, digest)
+    assert disk.getvalue() == raw
+    flash.verify_stream(io.BytesIO(raw), size, digest)
+    with pytest.raises(ValueError, match='truncated'):
+        flash.verify_stream(io.BytesIO(raw[:-1]), size, digest)
+    with pytest.raises(ValueError, match='mismatch'):
+        flash.verify_stream(io.BytesIO(b'x' * size), size, digest)
+    with pytest.raises(ValueError, match='changed'):
+        flash.copy_stream(io.BytesIO(bytes(raw) + b'x'), io.BytesIO(), size, digest)
+
+
+@pytest.mark.parametrize('change', [dict(rm=False), dict(ro=True), dict(type='part'), dict(size=512), dict(children=[dict(path='/dev/sdb1', mountpoints=['/media/card'])])])
+def test_flash_refuses_unsafe_disks(change):
+    disk = dict(path='/dev/sdb', type='disk', rm=True, ro=False, size=8192, mountpoints=[None])
+    flash = flash_module()
+    assert flash.select_disk({'blockdevices': [disk]}, '/dev/sdb', 4096) == disk
+    disk.update(change)
+    with pytest.raises(ValueError):
+        flash.select_disk({'blockdevices': [disk]}, '/dev/sdb', 4096)
+
+
 def test_trim_selects_real_storage_modules_and_builtin_support():
     policy = boot_policy_module()
     selected = policy.select_modules(['kernel/fs/ext4/ext4.ko', 'kernel/fs/overlayfs/overlay.ko', 'kernel/drivers/mmc/core/mmc_block.ko', 'kernel/drivers/nvme/host/nvme.ko.xz', 'kernel/drivers/net/ethernet/other.ko'])

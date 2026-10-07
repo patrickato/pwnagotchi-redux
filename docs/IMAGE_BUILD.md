@@ -346,3 +346,26 @@ kernel/driver checksums stay identical; reboot to confirm captures persistence.
 Test disk-full and interrupted installation and verify explicit removal refuses
 any active mounts. Repo metadata and pure helper guards are hardware-free checks;
 network installation/real Pi storage behavior are labeled deployment gates.
+
+## Flash and verify a release
+
+On Linux, obtain the image SHA256 through a trusted release channel. Unmount all
+partitions of the removable SD-card reader, inspect `lsblk`, then run:
+
+```sh
+bash image/flash.sh release.img.xz --sha256 TRUSTED_SHA256 --device /dev/sdb --dry-run
+sudo bash image/flash.sh release.img.xz --sha256 TRUSTED_SHA256 --device /dev/sdb --confirm-device /dev/sdb
+```
+
+The second command erases the selected card. The helper checks the compressed
+release hash and decompresses the entire image before writing, requires a writable
+removable whole disk with enough space and no mounted descendants, and prints its
+actual model/capacity and reason. It rechecks disk identity, handles short writes,
+flushes and invalidates the block cache, then verifies every image byte by SHA256
+read-back. Fixed disks and partition targets are refused. Some readers report
+themselves as fixed disks; use a reader that exposes removable media.
+
+Tests use explicitly synthetic image streams and block-inventory fixtures.
+**Hardware gate:** SD-card write/read-back, safe removal and subsequent physical
+Pi 4/5 boot remain unverified without the card reader and boards. A verified byte
+copy establishes storage integrity, not firmware compatibility or successful boot.
