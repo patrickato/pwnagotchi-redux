@@ -24,6 +24,7 @@ from typing import Callable, Optional, Protocol
 
 from ..radio import decide, Intent, Role
 from .event_bridge import events_to_frames
+from .signals import Signal
 
 
 class RadioControl(Protocol):
@@ -68,6 +69,7 @@ class Supervisor:
         log: Optional[Callable[[str], None]] = None,
         narrator=None,
         detect_engine=None,
+        bus=None,
     ):
         self._radios = {r.iface: r for r in (radios or [])}
         self._intent = Intent(intent)
@@ -77,6 +79,7 @@ class Supervisor:
         self._log = log or (lambda msg: None)
         self._narrator = narrator
         self._detect_engine = detect_engine
+        self._bus = bus  # SignalBus hub; optional. Use a bus OR a direct narrator, not both.
         self._assignment = None
         self._capture_iface = None
         self.reasons: list = []
@@ -100,22 +103,26 @@ class Supervisor:
 
     def set_intent(self, intent) -> None:
         self._intent = Intent(intent)
+        self._emit(Signal.INTENT_CHANGED, intent=self._intent.value)
         self._say(f"intent -> {self._intent.value}")
         self._reassign()
 
     def set_radios(self, radios) -> None:
         self._radios = {r.iface: r for r in radios}
+        self._emit(Signal.RADIOS_CHANGED, ifaces=list(self._radios))
         self._reassign()
 
     def add_radio(self, radio) -> None:
         """Hotplug: a radio appeared."""
         self._radios[radio.iface] = radio
+        self._emit(Signal.HOTPLUG_ADD, iface=radio.iface)
         self._say(f"hotplug + {radio.iface}")
         self._reassign()
 
     def remove_radio(self, iface) -> None:
         """Hotplug: a radio was removed."""
         self._radios.pop(iface, None)
+        self._emit(Signal.HOTPLUG_REMOVE, iface=iface)
         self._say(f"hotplug - {iface}")
         self._reassign()
 
@@ -128,6 +135,7 @@ class Supervisor:
             self._say(r)
         for w in getattr(self._assignment, "warnings", []) or []:
             self._say(f"warning: {w}")
+        self._emit(Signal.ASSIGNMENT, assignment=self._assignment)
         # apply interface modes via the radio layer, if wired
         if self._radio_control is not None:
             self._radio_control.apply(self._assignment)
@@ -138,6 +146,7 @@ class Supervisor:
     def _repoint_driver(self) -> None:
         iface = capture_iface(self._assignment)
         self._capture_iface = iface
+        self._emit(Signal.CAPTURE_IFACE, iface=iface)
         if self._driver is None:
             return
         if iface is None:
@@ -164,11 +173,14 @@ class Supervisor:
         (see event_bridge), so this lights up the AP-watching detectors; raw-frame
         detectors (deauth flood, sweep) stay dark until a raw-capture tap exists."""
         events = self.tick()
+        for e in events:
+            self._emit(Signal.EVENT, event=e)
         if self._detect_engine is None:
             return []
         alerts = self._detect_engine.feed_many(events_to_frames(events))
-        if self._narrator is not None:
-            for a in alerts:
+        for a in alerts:
+            self._emit(Signal.ALERT, alert=a)
+            if self._narrator is not None:
                 self._narrator.say_alert(a)
         return alerts
 
@@ -187,3 +199,12 @@ class Supervisor:
         self._log(reason)
         if self._narrator is not None:
             self._narrator.say_reason(reason)
+        if self._bus is not None:
+            if reason.lower().startswith("warning:"):
+                self._emit(Signal.WARNING, reason=reason[len("warning:"):].strip())
+            else:
+                self._emit(Signal.REASON, reason=reason)
+
+    def _emit(self, signal, **payload) -> None:
+        if self._bus is not None:
+            self._bus.emit(signal, **payload)
