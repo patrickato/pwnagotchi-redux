@@ -196,6 +196,11 @@ class Beastcore:
             sightings=self.store.count() if hasattr(self.store, "count") else None,
         ))
 
+    def dex(self):
+        """The Field Dex: the recon ledger built from this device's sightings."""
+        from ..dex import build_dex
+        return build_dex(self.store)
+
     def located_sightings(self, limit: int = 500) -> list:
         """Recent sightings that carry a real GPS fix, newest first.
 

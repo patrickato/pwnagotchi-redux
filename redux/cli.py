@@ -107,6 +107,31 @@ def cmd_packs(args) -> int:
     return 0
 
 
+def cmd_dex(args) -> int:
+    """Print the Field Dex — the recon ledger over recorded sightings."""
+    from .dex import build_dex
+    from .geo import SightingStore
+    store = SightingStore(args.store) if args.store else SightingStore()
+    dex = build_dex(store)
+    s = dex.summary
+    if not args.store:
+        print("(no --store given; showing an empty in-memory dex)")
+    print(f"Field Dex: {s['total']} known · {s['located']} located · {s['departed']} departed"
+          + (f" · vendors {s['unique_vendors']}" if s['total'] else ""))
+    if s["total"]:
+        print("  by kind:  " + ", ".join(f"{k}={v}" for k, v in sorted(s["by_kind"].items())))
+        print("  by rarity: " + ", ".join(f"{k}={v}" for k, v in sorted(s["by_rarity"].items())))
+        print("  rarest:")
+        for e in dex.rarest(limit=args.top):
+            print(f"    [{e.rarity.value:9}] {e.kind:4} {e.ssid or e.mac} — known {e.known_days:.0f}d")
+        dep = dex.departed()
+        if dep:
+            print("  departed:")
+            for e in dep[:args.top]:
+                print(f"    {e.ssid or e.mac} — {e.reason}")
+    return 0
+
+
 def cmd_doctor(args) -> int:
     """Print the headless, glass-box self-diagnosis from live state."""
     bc = _build(args)
@@ -202,6 +227,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    dx = sub.add_parser("dex", help="the Field Dex — recon ledger over sightings")
+    dx.add_argument("--store", help="path to a sightings store (SQLite)")
+    dx.add_argument("--top", type=int, default=10, help="how many rarest/departed to show")
+    dx.set_defaults(func=cmd_dex)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
