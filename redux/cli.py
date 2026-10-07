@@ -194,6 +194,40 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_range(args) -> int:
+    """Purple Range mode: `techniques` lists the ATT&CK→D3FEND map; `demo` runs a
+    SIMULATED attack set and grades your detectors, naming the coverage gaps."""
+    from .frameworks import attack_defend_pairs, run_exercise, range_report
+    if args.range_cmd == "techniques":
+        print("redux framework map — action: ATT&CK → D3FEND (PTES phase)")
+        for p in attack_defend_pairs():
+            det = f"  detectors: {', '.join(p['detects'])}" if p["detects"] else "  detectors: (none expected)"
+            print(f"  {p['action']:17} {','.join(p['attack']):18} → {','.join(p['defend']):10} "
+                  f"[{p['phase']}]")
+            print(det)
+        return 0
+    # demo: a simulated engagement. The "fired" sets are illustrative, not real.
+    print("redux range demo — SIMULATED attack set + detector results (not a live run)")
+    scenario = [
+        ("deauth", ["deauth-flood", "surveillance-sweep"]),   # fully caught
+        ("evil_twin", ["rogue-AP"]),                           # partial: pineapple/karma missed
+        ("captive_portal", []),                                # missed: nothing fired
+        ("pmkid_capture", []),                                 # n/a: passive
+        ("handshake_capture", ["handshake"]),                  # caught
+    ]
+    results = [run_exercise(a, fired) for a, fired in scenario]
+    for r in results:
+        print(f"  [{r.verdict.value.upper():9}] {r.label:28} {','.join(r.attack_ids):14} "
+              f"→ {','.join(r.defend)}")
+        if r.verdict.value in ("partial", "missed"):
+            print(f"              {r.reason}")
+    rep = range_report(results)
+    cov = "n/a" if rep["coverage"] is None else f"{rep['coverage']*100:.0f}%"
+    print(f"coverage: {rep['fully_detected']}/{rep['applicable']} applicable fully detected ({cov}); "
+          f"{len(rep['gaps'])} gap(s)")
+    return 0
+
+
 def cmd_capture(args) -> int:
     """Show the capture plan: which engine is selected (AngryOxide scalpel when
     present, else bettercap), aimed only at the armed Scope, posture-correct."""
@@ -429,6 +463,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
     add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+
+    rg = sub.add_parser("range", help="purple Range mode — grade your detectors vs ATT&CK (and D3FEND)")
+    rgsub = rg.add_subparsers(dest="range_cmd", required=True)
+    rgsub.add_parser("techniques", help="list the ATT&CK→D3FEND framework map")
+    rgsub.add_parser("demo", help="run a simulated attack set and score detector coverage")
+    rg.set_defaults(func=cmd_range)
 
     cap = sub.add_parser("capture", help="show the capture plan (engine selection, Scope-aimed)")
     add_radio_flags(cap)
