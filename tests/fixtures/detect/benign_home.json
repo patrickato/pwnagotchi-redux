@@ -1,0 +1,11 @@
+{
+  "name": "benign home baseline",
+  "description": "A few normal beacons from one AP — should stay quiet",
+  "frames": [
+    {"type": "beacon", "ts": 1.0, "bssid": "22:22:22:22:22:22", "ssid": "HomeNet", "security": "wpa2-psk", "pmf": "required", "channel": 6},
+    {"type": "beacon", "ts": 2.0, "bssid": "22:22:22:22:22:22", "ssid": "HomeNet", "security": "wpa2-psk", "pmf": "required", "channel": 6},
+    {"type": "beacon", "ts": 3.0, "bssid": "22:22:22:22:22:22", "ssid": "HomeNet", "security": "wpa2-psk", "pmf": "required", "channel": 6},
+    {"type": "probe_req", "ts": 3.5, "src": "33:33:33:33:33:33", "ssid": "HomeNet"},
+    {"type": "probe_resp", "ts": 3.6, "bssid": "22:22:22:22:22:22", "ssid": "HomeNet", "security": "wpa2-psk", "pmf": "required"}
+  ]
+}

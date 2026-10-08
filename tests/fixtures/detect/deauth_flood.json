@@ -1,0 +1,31 @@
+{
+  "name": "synthetic deauth flood",
+  "description": "25 deauth frames from one aggressor toward one AP within 2s",
+  "frames": [
+    {"type": "deauth", "ts": 0.05, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.10, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.15, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.20, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.25, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.30, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.35, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.40, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.45, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.50, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.55, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.60, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.65, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.70, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.75, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.80, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.85, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.90, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 0.95, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 1.00, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 1.05, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 1.10, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 1.15, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 1.20, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"},
+    {"type": "deauth", "ts": 1.25, "bssid": "11:22:33:44:55:66", "src": "aa:aa:aa:aa:aa:99", "dst": "11:22:33:44:55:66"}
+  ]
+}
