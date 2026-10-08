@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pwnagotchi-redux"
 version = "0.0.1"
-description = "Standalone field-OS platform: lean image, bettercap-direct, Beastcore supervisor, Radio Orchestrator."
+description = "Augur — standalone field-OS platform: lean image, bettercap-direct, Augur supervisor, Radio Orchestrator."
 requires-python = ">=3.11"
 dependencies = []
 
@@ -14,6 +14,10 @@ redux = "redux.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+# At-rest encryption (redux.vault). Optional on purpose: the core stays
+# dependency-free, and the vault reports itself unavailable (honest, fail-closed)
+# rather than storing plaintext when this isn't installed.
+crypto = ["cryptography>=42"]
 
 [tool.setuptools.packages.find]
 include = ["redux*"]

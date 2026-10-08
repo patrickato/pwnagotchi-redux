@@ -18,11 +18,20 @@ leverage.
 
 ## P1 — field-device safety (a dropbox can be found/seized)
 
-- **Secrets at rest.** Handshakes, cracked PSKs, EAP hashes, the Scope, and the
-  **swarm key** sit in plaintext. Add loot-at-rest encryption (key from a boot
-  secret / operator passphrase) so a seized card doesn't spill the engagement.
-- **Anti-tamper dead-man.** We have CSI motion + boot-POST; wire "tamper detected →
-  wipe loot / alert over LoRa" (the CSI anti-tamper idea). Opt-in, glass-box.
+- **Secrets at rest — DONE (the protective half).** `redux/vault/` seals captured
+  data (handshakes, cracked PSKs, EAP hashes, the Scope, the swarm key, an exported
+  Cache) with Fernet (AES-128-CBC + HMAC-SHA256), key derived from an operator
+  passphrase via scrypt; fresh salt per seal in the envelope. Optional `crypto`
+  extra, and **honest/fail-closed**: no backend → the Vault refuses rather than
+  writing plaintext. CLI: `redux vault seal|open`, `redux cache export --encrypt`
+  (sealed in memory — plaintext never hits disk). **Remaining:** seal the live
+  on-device stores in place at shutdown / open at boot (lifecycle wiring), and the
+  swarm-key item below.
+- **Anti-tamper "dead-man" wipe — NOT building (by design).** A destroy-loot-on-tamper
+  mechanism is anti-forensics, not data protection, so it's deliberately out of
+  scope. At-rest encryption (above) is the protective answer for a lost/seized card.
+  A non-destructive "tamper detected → alert over LoRa" could be considered separately
+  if wanted, but nothing here wipes data.
 - **Swarm-key lifecycle.** Mesh deltas are HMAC-signed, but there's no key
   generation/rotation/distribution story. Define one (generate on arm-lab, QR/LoRa
   exchange, rotate per job).

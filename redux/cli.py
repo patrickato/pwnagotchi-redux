@@ -108,10 +108,43 @@ def cmd_cache(args) -> int:
                 store.vacuum()
                 print("vacuumed (pages reclaimed)")
         elif args.cache_cmd == "export":
-            n = store.export(args.out, fmt=args.format, kind=args.kind)
-            print(f"exported {n} rows -> {args.out} ({args.format})")
+            if getattr(args, "encrypt", False):
+                from .vault import Vault, crypto_available, resolve_passphrase
+                if not crypto_available():
+                    print("cache export --encrypt: crypto extra not installed "
+                          "(pip install 'pwnagotchi-redux[crypto]')")
+                    return 3
+                from pathlib import Path as _P
+                rows = store.query(kind=args.kind)
+                sealed = Vault(resolve_passphrase(confirm=True)).seal(
+                    store.export_bytes(fmt=args.format, kind=args.kind))
+                _P(args.out).write_bytes(sealed)   # plaintext never hits disk
+                print(f"exported {len(rows)} rows -> {args.out} (sealed, {args.format})")
+            else:
+                n = store.export(args.out, fmt=args.format, kind=args.kind)
+                print(f"exported {n} rows -> {args.out} ({args.format})")
     finally:
         store.close()
+    return 0
+
+
+def cmd_vault(args) -> int:
+    from .vault import Vault, crypto_available, resolve_passphrase, BadVaultData
+    if not crypto_available():
+        print("vault: at-rest encryption unavailable — install the crypto extra:")
+        print("       pip install 'pwnagotchi-redux[crypto]'")
+        return 3
+    try:
+        v = Vault(resolve_passphrase(confirm=(args.vault_cmd == "seal")))
+        if args.vault_cmd == "seal":
+            n = v.seal_file(args.inp, args.out)
+            print(f"sealed {args.inp} -> {args.out} ({n} bytes)")
+        else:
+            n = v.unseal_file(args.inp, args.out)
+            print(f"opened {args.inp} -> {args.out} ({n} bytes)")
+    except BadVaultData as e:
+        print(f"vault: {e}")
+        return 4
     return 0
 
 
@@ -735,7 +768,17 @@ def build_parser() -> argparse.ArgumentParser:
     cae.add_argument("--out", required=True, help="output file path")
     cae.add_argument("--format", default="jsonl", choices=["jsonl", "csv"])
     cae.add_argument("--kind", default=None, help="filter by kind (wifi/ble/sdr)")
+    cae.add_argument("--encrypt", action="store_true",
+                     help="seal the export at rest (needs crypto extra; passphrase via AUGUR_PASSPHRASE or prompt)")
     ca.set_defaults(func=cmd_cache)
+
+    va = sub.add_parser("vault", help="seal/open captured data at rest (needs the crypto extra)")
+    vasub = va.add_subparsers(dest="vault_cmd", required=True)
+    for _name, _help in (("seal", "encrypt a file"), ("open", "decrypt a file")):
+        vp = vasub.add_parser(_name, help=_help)
+        vp.add_argument("--in", dest="inp", required=True, help="input file")
+        vp.add_argument("--out", required=True, help="output file")
+    va.set_defaults(func=cmd_vault)
 
     pk = sub.add_parser("packs", help="manage Packs")
     pk.add_argument("--dir", required=True, help="packs directory")

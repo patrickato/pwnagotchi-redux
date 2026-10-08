@@ -9,6 +9,7 @@ No redux.engine import — the lead wires live GPS/events at integration.
 from __future__ import annotations
 
 import csv
+import io
 import json
 import sqlite3
 import time
@@ -284,6 +285,25 @@ class SightingStore:
         self._conn.execute("VACUUM")
         self._conn.commit()
 
+    def _dump(self, rows, fmt: str) -> bytes:
+        fmt = (fmt or "jsonl").lower()
+        if fmt == "csv":
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(_FIELDS)
+            for s in rows:
+                w.writerow([getattr(s, k) for k in _FIELDS])
+            return buf.getvalue().encode()
+        if fmt == "jsonl":
+            return "".join(json.dumps(asdict(s)) + "\n" for s in rows).encode()
+        raise ValueError(f"unknown export format {fmt!r} (use 'jsonl' or 'csv')")
+
+    def export_bytes(self, *, fmt: str = "jsonl", kind: Optional[str] = None,
+                     since: Optional[float] = None, until: Optional[float] = None) -> bytes:
+        """The export serialized to bytes (no file), so an *encrypted* export can
+        be sealed in memory — a plaintext temp file never touches disk."""
+        return self._dump(self.query(kind=kind, since=since, until=until), fmt)
+
     def export(self, path: PathLike, *, fmt: str = "jsonl",
                kind: Optional[str] = None, since: Optional[float] = None,
                until: Optional[float] = None) -> int:
@@ -291,20 +311,7 @@ class SightingStore:
         `fmt` is 'jsonl' or 'csv'; filters pass through to query(). Returns rows
         written. Real stored rows only — nothing synthesized."""
         rows = self.query(kind=kind, since=since, until=until)
-        fmt = (fmt or "jsonl").lower()
-        p = Path(path)
-        if fmt == "csv":
-            with p.open("w", newline="") as f:
-                w = csv.writer(f)
-                w.writerow(_FIELDS)
-                for s in rows:
-                    w.writerow([getattr(s, k) for k in _FIELDS])
-        elif fmt == "jsonl":
-            with p.open("w") as f:
-                for s in rows:
-                    f.write(json.dumps(asdict(s)) + "\n")
-        else:
-            raise ValueError(f"unknown export format {fmt!r} (use 'jsonl' or 'csv')")
+        Path(path).write_bytes(self._dump(rows, fmt))
         return len(rows)
 
     def stats(self) -> dict:

@@ -15,7 +15,7 @@ doesn't have. Identity, voice, and the creature face: `docs/AUGUR.md`.
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
 > record/ghost, packs, plugin-compat shim, CLI, and web dashboard —
-> is built and green under the test suite (612 tests, no hardware required). **No part has had a
+> is built and green under the test suite (622 tests, no hardware required). **No part has had a
 > real-hardware pass on a physical Pi yet** (see *Verification status*). Sandbox-green ≠ done.
 
 ## What it is
@@ -143,7 +143,8 @@ redux/face/       Augur's face — one deterministic expression engine (TFT + we
 redux/web/        glass-box dashboard + live moving map (client-rendered)
 redux/tft/        lean on-device TFT faces (plain/status, box-drawing, event-driven redraw)
 redux/captap/     raw 802.11 tap (deauth + probe-request IE fingerprint → Dex/detectors)
-redux/cli.py      operator entrypoint (status/run/web/tft/captap/packs/doctor/post/persona/sense/sentinel/mesh/campaign/hunt/capture/eap/range/report/scope/dex/expedition/ghost)
+redux/vault/      at-rest encryption for captured data (optional crypto extra; honest/fail-closed)
+redux/cli.py      operator entrypoint (status/run/web/tft/captap/vault/cache/packs/doctor/post/persona/sense/sentinel/mesh/campaign/hunt/capture/eap/range/report/scope/dex/expedition/ghost)
 image/            pi-gen image stack (boot, overlay, watchdog, UPS, OTA)
 tests/            unit/integration tests (real logic, no hardware needed)
 docs/             architecture, vision, proposals
@@ -178,7 +179,8 @@ redux tft --demo       # preview the on-device TFT face (--face plain|status, --
 redux captap demo      # raw-frame tap: re-identify a phone across MAC rotation (PNL/IE)
 redux expedition       # start/end a field session + Wrapped recap
 redux ghost in.json out.json   # sanitize a recording for safe replay/sharing
-redux cache stats      # inspect the Cache; prune (retention) / export (jsonl|csv)
+redux cache stats      # inspect the Cache; prune (retention) / export (jsonl|csv, --encrypt)
+redux vault seal --in loot --out loot.vault   # at-rest encryption (needs crypto extra)
 redux packs            # manage Packs
 ```
 
