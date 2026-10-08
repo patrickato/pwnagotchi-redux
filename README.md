@@ -14,8 +14,8 @@ doesn't have. Identity, voice, and the creature face: `docs/AUGUR.md`.
 > central Scope, resource Governor, Doctor, boot-POST, personas, radio orchestrator, bettercap
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
-> record/ghost, packs, plugin-compat shim, CLI, and web dashboard —
-> is built and green under the test suite (794 tests, no hardware required). **No part has had a
+> record/ghost, packs, plugin-compat shim, CLI, passive survey, and web dashboard —
+> is built and green under the test suite (805 tests, no hardware required). **No part has had a
 > real-hardware pass on a physical Pi yet** (see *Verification status*). Sandbox-green ≠ done.
 
 ## What it is
