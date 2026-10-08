@@ -78,21 +78,38 @@ def cmd_run(args) -> int:
     return 0
 
 
+def _cfg(args):
+    """Load the config named by --config, or None when not given. Config values are
+    consulted ONLY when --config is passed; an explicit flag always wins. So every
+    command's no-config behavior is exactly as before."""
+    path = getattr(args, "config", None)
+    if not path:
+        return None
+    from .config import AugurConfig
+    return AugurConfig.load(path)
+
+
 def cmd_web(args) -> int:
     from .web import serve
+    cfg = _cfg(args)
     driver = None
     if args.replay:
         events = json.loads(open(args.replay).read())
         driver = BettercapDriver(config=BettercapConfig(),
                                  transport=ReplayTransport(events=events))
     bc = _build(args, driver=driver)
-    serve(bc, port=args.port, bind_scope=args.bind_scope, token=args.token)   # blocks until Ctrl-C
+    bind_scope = args.bind_scope or (cfg.web.bind_scope if cfg else None) or "localhost"
+    port = args.port if args.port is not None else (cfg.web.port if cfg else None) or 8080
+    token = args.token if args.token is not None else ((cfg.web.token or None) if cfg else None)
+    serve(bc, port=port, bind_scope=bind_scope, token=token)   # blocks until Ctrl-C
     return 0
 
 
 def cmd_cache(args) -> int:
     from .geo.db import SightingStore, DEFAULT_DB_PATH
-    store = SightingStore(args.db or DEFAULT_DB_PATH)
+    cfg = _cfg(args)
+    db = args.db or (cfg.cache.db_path if cfg else None) or DEFAULT_DB_PATH
+    store = SightingStore(db)
     try:
         if args.cache_cmd == "stats":
             s = store.stats()
@@ -101,8 +118,14 @@ def cmd_cache(args) -> int:
                 span = f"  · span {(s['newest_ts'] - s['oldest_ts']) / 3600:.1f}h"
             print(f"cache: {s['count']} sightings  {s['by_kind']}{span}")
         elif args.cache_cmd == "prune":
-            older = args.older_than_days * 86400 if args.older_than_days else None
-            n = store.prune(older_than=older, max_rows=args.max_rows)
+            if args.older_than_days:
+                older = args.older_than_days * 86400
+            elif cfg and cfg.cache.retention_days:
+                older = cfg.cache.retention_days * 86400
+            else:
+                older = None
+            max_rows = args.max_rows if args.max_rows is not None else (cfg.cache.max_rows if cfg else None)
+            n = store.prune(older_than=older, max_rows=max_rows)
             print(f"pruned {n} rows; {store.count()} remain")
             if args.vacuum:
                 store.vacuum()
@@ -375,7 +398,9 @@ def cmd_tft(args) -> int:
                   "sentinel": {"armed": True, "dispatched": 4, "suppressed": 2,
                                "last": {"summary": "ble_skimmer", "severity": "critical"}},
                   "narration": ["ch6 dwell - 3 new APs, 1 PMKID elicited"]}
-    for line in render(status, face=Face(args.face), ascii=args.ascii, pack=args.pack):
+    cfg = _cfg(args)
+    pack = args.pack or (cfg.tft.face_pack if cfg else None) or "augur"
+    for line in render(status, face=Face(args.face), ascii=args.ascii, pack=pack):
         print(line)
     return 0
 
@@ -441,6 +466,11 @@ def cmd_mesh_key(args) -> int:
         print("mesh key: the sealed keystore needs the crypto extra — "
               "pip install 'pwnagotchi-redux[crypto]'")
         return 3
+    cfg = _cfg(args)
+    args.store = args.store or (cfg.mesh.keystore if cfg else None)
+    if not args.store:
+        print("mesh key: a keystore path is required (--store, or [mesh].keystore via --config)")
+        return 2
     ttl = (args.ttl_days * 86400) if getattr(args, "ttl_days", None) else None
     try:
         if args.key_cmd == "gen":
@@ -844,10 +874,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     wb = sub.add_parser("web", help="serve the glass-box web dashboard")
     add_radio_flags(wb)
-    wb.add_argument("--port", type=int, default=8080)
-    wb.add_argument("--bind-scope", default="localhost", choices=["localhost", "lan", "tailscale", "auto"])
+    wb.add_argument("--port", type=int, default=None, help="default 8080 (or [web].port from --config)")
+    wb.add_argument("--bind-scope", default=None, choices=["localhost", "lan", "tailscale", "auto"],
+                    help="default localhost (or [web].bind_scope from --config)")
     wb.add_argument("--token", default=None,
                     help="dashboard access token; required (auto-generated if omitted) for any off-box bind")
+    wb.add_argument("--config", default=None, help="config.toml to read [web] defaults from")
     wb.add_argument("--replay", help="path to a recorded bettercap events JSON")
     wb.set_defaults(func=cmd_web)
 
@@ -855,7 +887,8 @@ def build_parser() -> argparse.ArgumentParser:
     casub = ca.add_subparsers(dest="cache_cmd", required=True)
 
     def _db(p):
-        p.add_argument("--db", default=None, help="sightings DB path (default: on-device path)")
+        p.add_argument("--db", default=None, help="sightings DB path (default: on-device path or [cache].db_path)")
+        p.add_argument("--config", default=None, help="config.toml to read [cache] defaults from")
 
     _db(casub.add_parser("stats", help="counts, per-kind, and time span"))
     cap = casub.add_parser("prune", help="delete old/excess rows (bound growth)")
@@ -923,8 +956,9 @@ def build_parser() -> argparse.ArgumentParser:
     tf.add_argument("--face", default="status", choices=["plain", "status"])
     tf.add_argument("--persona", help="apply a persona first")
     tf.add_argument("--ascii", action="store_true", help="ascii fallback (no box/block glyphs)")
-    tf.add_argument("--pack", default="augur", choices=["augur", "owl", "fox"],
-                    help="face look (default: augur / the corvid)")
+    tf.add_argument("--pack", default=None, choices=["augur", "owl", "fox"],
+                    help="face look (default: augur, or [tft].face_pack via --config)")
+    tf.add_argument("--config", default=None, help="config.toml to read [tft] defaults from")
     tf.add_argument("--demo", action="store_true", help="populate with sample data")
     tf.set_defaults(func=cmd_tft)
 
@@ -941,7 +975,8 @@ def build_parser() -> argparse.ArgumentParser:
     mksub = mk.add_subparsers(dest="key_cmd", required=True)
 
     def _store(p):
-        p.add_argument("--store", required=True, help="sealed keystore path")
+        p.add_argument("--store", default=None, help="sealed keystore path (or [mesh].keystore via --config)")
+        p.add_argument("--config", default=None, help="config.toml to read [mesh] defaults from")
 
     kg = mksub.add_parser("gen", help="generate a new swarm key")
     _store(kg)

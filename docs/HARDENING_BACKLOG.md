@@ -67,9 +67,10 @@ leverage.
   `defaults.toml` style with explicit `>>> USER INPUT REQUIRED <<<` markers. Partial
   files merge over defaults; `validate()` returns all problems at once. CLI:
   `redux config init|show|check` (token masked in `show`). Secrets aren't stored —
-  only the passphrase env-var *name*. **Remaining:** have each subsystem actually
-  read it (wire `redux web` / `cache prune` / `mesh` to resolve from the file),
-  which is the incremental adoption step.
+  only the passphrase env-var *name*. **Load-bearing:** `--config` now drives
+  `web` / `cache` / `mesh key` / `tft` (explicit flags win; no-config behavior
+  unchanged). Remaining: an on-device boot service that reads it into the
+  long-running processes (pairs with onboarding).
 - **Data lifecycle — DONE.** The Cache (`SpatialDB`) can now be bounded:
   `prune(older_than=…, max_rows=…)` (single commit, SD-friendly; opt-in `vacuum()`),
   `export(path, fmt=jsonl|csv)` to pull it off-box, and `stats()` for honest

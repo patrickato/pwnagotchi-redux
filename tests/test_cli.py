@@ -81,3 +81,21 @@ def test_scope_cli_arm_lab(tmp_path):
     from redux.core import Scope
     s = Scope.load(f)
     assert s.permits(bssid="aa:bb:cc:dd:ee:ff") and s.permits(ip="10.0.0.9")
+
+
+def test_tft_pack_from_config(tmp_path):
+    cfg = tmp_path / "c.toml"
+    cfg.write_text('[tft]\nface_pack = "owl"\n')
+    rc, out = _run(["tft", "--onboard", "--demo", "--face", "plain", "--config", str(cfg)])
+    assert rc == 0 and "(@.@)" in out               # owl RUFFLE eyes, driven by config
+    rc2, out2 = _run(["tft", "--onboard", "--demo", "--face", "plain"])
+    assert rc2 == 0 and "(@.@)" not in out2          # default (augur) shows ‹✺_✺› instead
+
+
+def test_cache_db_path_from_config(tmp_path):
+    db = tmp_path / "sight.db"
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(f'[cache]\ndb_path = "{db}"\n')
+    rc, out = _run(["cache", "stats", "--config", str(cfg)])
+    assert rc == 0 and "0 sightings" in out
+    assert db.exists()                               # opened the configured db, not the default path

@@ -38,9 +38,18 @@ redux config show  --config ./dev.toml     # resolved values, token masked
 Library: `AugurConfig.load(path)` / `AugurConfig.resolve(path_or_None)` →
 defaults when absent; `.validate() -> [problems]`; `template() -> str`.
 
-## Remaining
+## Load-bearing
 
-Each subsystem still takes its settings by argument; the incremental adoption step
-is to have `redux web` / `cache prune` / the swarm keystore resolve their defaults
-from this file (so, e.g., the active swarm key auto-loads at boot and the Cache
-prunes on the configured retention).
+The config now drives the CLI. Pass `--config <path>` to a command and it fills the
+relevant defaults; an explicit flag always wins, and with no `--config` behavior is
+exactly as before (nothing silently changes):
+
+- `redux web --config c.toml` → `[web]` bind_scope / port / token
+- `redux cache stats|prune|export --config c.toml` → `[cache]` db_path, and prune's
+  retention_days / max_rows
+- `redux mesh key … --config c.toml` → `[mesh]` keystore (so `--store` is optional)
+- `redux tft --config c.toml` → `[tft]` face_pack
+
+Remaining: the on-device service that reads the config once at boot and wires it into
+the long-running processes (so the swarm key auto-loads and the Cache prunes on a
+schedule) — a systemd/runner concern that pairs with the first-run onboarding.
