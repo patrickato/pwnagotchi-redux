@@ -16,6 +16,7 @@ class FrameType(str, Enum):
     BLE_ADV = "ble_adv"
     PMKID = "pmkid"
     EAPOL = "eapol"
+    CSA = "csa"  # 802.11h channel switch announcement
     OTHER = "other"
 
 
@@ -36,9 +37,9 @@ class Frame:
     ble_company_id: str = ""
     ble_service_uuid: str = ""
     eapol_msg: int = 0
-    pmf: str = ""  # required | optional | none |
-    # 802.11w / PMF advertised: "required" | "optional" | "none" | ""
     pmf: str = ""
+    # CSA: announced new channel (type CSA); channel field may be current
+    csa_new_channel: Optional[int] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bssid", (self.bssid or "").lower())
