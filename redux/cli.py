@@ -90,6 +90,31 @@ def cmd_web(args) -> int:
     return 0
 
 
+def cmd_cache(args) -> int:
+    from .geo.db import SightingStore, DEFAULT_DB_PATH
+    store = SightingStore(args.db or DEFAULT_DB_PATH)
+    try:
+        if args.cache_cmd == "stats":
+            s = store.stats()
+            span = ""
+            if s["oldest_ts"] and s["newest_ts"]:
+                span = f"  · span {(s['newest_ts'] - s['oldest_ts']) / 3600:.1f}h"
+            print(f"cache: {s['count']} sightings  {s['by_kind']}{span}")
+        elif args.cache_cmd == "prune":
+            older = args.older_than_days * 86400 if args.older_than_days else None
+            n = store.prune(older_than=older, max_rows=args.max_rows)
+            print(f"pruned {n} rows; {store.count()} remain")
+            if args.vacuum:
+                store.vacuum()
+                print("vacuumed (pages reclaimed)")
+        elif args.cache_cmd == "export":
+            n = store.export(args.out, fmt=args.format, kind=args.kind)
+            print(f"exported {n} rows -> {args.out} ({args.format})")
+    finally:
+        store.close()
+    return 0
+
+
 def cmd_packs(args) -> int:
     mgr = PackManager(args.dir)
     try:
@@ -692,6 +717,25 @@ def build_parser() -> argparse.ArgumentParser:
                     help="dashboard access token; required (auto-generated if omitted) for any off-box bind")
     wb.add_argument("--replay", help="path to a recorded bettercap events JSON")
     wb.set_defaults(func=cmd_web)
+
+    ca = sub.add_parser("cache", help="inspect / prune / export the sighting Cache")
+    casub = ca.add_subparsers(dest="cache_cmd", required=True)
+
+    def _db(p):
+        p.add_argument("--db", default=None, help="sightings DB path (default: on-device path)")
+
+    _db(casub.add_parser("stats", help="counts, per-kind, and time span"))
+    cap = casub.add_parser("prune", help="delete old/excess rows (bound growth)")
+    _db(cap)
+    cap.add_argument("--older-than-days", type=float, default=None, help="drop rows older than N days")
+    cap.add_argument("--max-rows", type=int, default=None, help="keep only the most-recent N by time")
+    cap.add_argument("--vacuum", action="store_true", help="reclaim pages after prune (heavy; off hot path)")
+    cae = casub.add_parser("export", help="dump rows to a file (jsonl/csv)")
+    _db(cae)
+    cae.add_argument("--out", required=True, help="output file path")
+    cae.add_argument("--format", default="jsonl", choices=["jsonl", "csv"])
+    cae.add_argument("--kind", default=None, help="filter by kind (wifi/ble/sdr)")
+    ca.set_defaults(func=cmd_cache)
 
     pk = sub.add_parser("packs", help="manage Packs")
     pk.add_argument("--dir", required=True, help="packs directory")

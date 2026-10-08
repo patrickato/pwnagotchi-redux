@@ -8,12 +8,19 @@ No redux.engine import — the lead wires live GPS/events at integration.
 """
 from __future__ import annotations
 
+import csv
+import json
 import sqlite3
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
 
 PathLike = Union[str, Path]
+
+# Column order for export (matches the Sighting fields that round-trip).
+_FIELDS = ["kind", "mac", "ssid", "lat", "lon", "rssi", "channel",
+           "source_radio", "ts", "first_seen", "provenance"]
 
 # Default on-device path (bus convention); tests use :memory: or a temp file.
 DEFAULT_DB_PATH = "/var/lib/redux/geo/sightings.db"
@@ -244,6 +251,74 @@ class SightingStore:
                 (kind.lower(),),
             ).fetchone()
         return int(row["n"]) if row else 0
+
+    # --- data lifecycle (a field device runs for days; bound the growth) ----- #
+
+    def prune(self, *, older_than: Optional[float] = None,
+              max_rows: Optional[int] = None, now: Optional[float] = None) -> int:
+        """Delete old / excess rows so the store can't grow unbounded on a
+        long-running drop. `older_than` is an age in seconds (rows with
+        ts < now-older_than go); `max_rows` keeps only the most-recent N by ts.
+        Both may be combined. Returns rows deleted; commits once (SD-friendly).
+        Does not VACUUM by default — reclaiming pages rewrites the whole DB, which
+        is the opposite of SD-friendly; pass vacuum=True only when you mean it."""
+        now = time.time() if now is None else now
+        deleted = 0
+        if older_than is not None:
+            cutoff = now - float(older_than)
+            c = self._conn.execute("DELETE FROM sightings WHERE ts < ?", (cutoff,))
+            deleted += c.rowcount or 0
+        if max_rows is not None and max_rows >= 0:
+            c = self._conn.execute(
+                "DELETE FROM sightings WHERE id NOT IN "
+                "(SELECT id FROM sightings ORDER BY ts DESC, id DESC LIMIT ?)",
+                (int(max_rows),),
+            )
+            deleted += c.rowcount or 0
+        self._conn.commit()
+        return deleted
+
+    def vacuum(self) -> None:
+        """Reclaim freed pages. Heavy (full rewrite) — call sparingly, off the
+        hot path, after a big prune."""
+        self._conn.execute("VACUUM")
+        self._conn.commit()
+
+    def export(self, path: PathLike, *, fmt: str = "jsonl",
+               kind: Optional[str] = None, since: Optional[float] = None,
+               until: Optional[float] = None) -> int:
+        """Dump sightings to a file so the operator can pull the Cache off-box.
+        `fmt` is 'jsonl' or 'csv'; filters pass through to query(). Returns rows
+        written. Real stored rows only — nothing synthesized."""
+        rows = self.query(kind=kind, since=since, until=until)
+        fmt = (fmt or "jsonl").lower()
+        p = Path(path)
+        if fmt == "csv":
+            with p.open("w", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(_FIELDS)
+                for s in rows:
+                    w.writerow([getattr(s, k) for k in _FIELDS])
+        elif fmt == "jsonl":
+            with p.open("w") as f:
+                for s in rows:
+                    f.write(json.dumps(asdict(s)) + "\n")
+        else:
+            raise ValueError(f"unknown export format {fmt!r} (use 'jsonl' or 'csv')")
+        return len(rows)
+
+    def stats(self) -> dict:
+        """Glass-box health of the store: total, per-kind, and the time span it
+        covers (so retention policy has something honest to act on)."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n, MIN(ts) AS oldest, MAX(ts) AS newest FROM sightings"
+        ).fetchone()
+        by = {r["kind"]: int(r["n"]) for r in self._conn.execute(
+            "SELECT kind, COUNT(*) AS n FROM sightings GROUP BY kind")}
+        return {"count": int(row["n"]) if row else 0,
+                "by_kind": by,
+                "oldest_ts": row["oldest"] if row else None,
+                "newest_ts": row["newest"] if row else None}
 
 
 def _better_rssi(new: Optional[int], old: Optional[int]) -> bool:

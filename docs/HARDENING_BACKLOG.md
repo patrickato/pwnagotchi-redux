@@ -46,8 +46,12 @@ leverage.
 - **Unified config.** Config is scattered across JSON stores + per-module defaults.
   A single `config.toml` (paths, default persona, bind scopes, keys) with the fork's
   `>>> USER INPUT REQUIRED <<<` markers.
-- **Data lifecycle.** The sightings DB grows unbounded; add retention/rotation/export
-  (WAL + dedup already help SD-wear, but there's no pruning/backup policy).
+- **Data lifecycle — DONE.** The Cache (`SpatialDB`) can now be bounded:
+  `prune(older_than=…, max_rows=…)` (single commit, SD-friendly; opt-in `vacuum()`),
+  `export(path, fmt=jsonl|csv)` to pull it off-box, and `stats()` for honest
+  count/per-kind/time-span. CLI: `redux cache stats|prune|export`. **Remaining:** a
+  default on-device retention *policy* (a scheduled prune) — the mechanism is here,
+  the cron/age defaults are an operator/config choice (pairs with the config.toml item).
 
 ## P2 — UI polish (optional, by where it renders)
 

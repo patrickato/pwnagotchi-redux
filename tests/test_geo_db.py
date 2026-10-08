@@ -126,3 +126,51 @@ def test_weaker_rssi_backfills_missing_location():
     store.insert(Sighting(kind="wifi", mac="aa:bb:cc:dd:ee:ff", rssi=-90, lat=10.0, lon=10.0, provenance="t"))
     row2 = store.get("wifi", "aa:bb:cc:dd:ee:ff")
     assert row2.lat == 51.5 and row2.lon == -0.1
+
+
+# --- data lifecycle: bound the growth on a long-running field device -------- #
+
+def test_prune_older_than_drops_aged_rows():
+    st = SightingStore(":memory:")
+    for i, t in enumerate((0.0, 100.0, 200.0)):
+        st.insert(_s(mac=f"aa:bb:cc:00:00:0{i}", ts=t))
+    # now=200, older_than=50 -> cutoff 150 -> ts 0 and 100 go, 200 stays
+    assert st.prune(older_than=50, now=200.0) == 2
+    assert st.count() == 1
+
+
+def test_prune_max_rows_keeps_newest():
+    st = SightingStore(":memory:")
+    for i, t in enumerate((10.0, 20.0, 30.0, 40.0, 50.0)):
+        st.insert(_s(mac=f"aa:bb:cc:00:00:1{i}", ts=t))
+    assert st.prune(max_rows=2) == 3
+    assert {s.ts for s in st.query()} == {40.0, 50.0}
+
+
+def test_export_jsonl_and_csv(tmp_path):
+    import json
+    st = SightingStore(":memory:")
+    st.insert(_s(mac="aa:bb:cc:00:00:aa", ssid="A", ts=1.0))
+    st.insert(_s(mac="aa:bb:cc:00:00:bb", ssid="B", ts=2.0))
+    jl = tmp_path / "out.jsonl"
+    assert st.export(jl, fmt="jsonl") == 2
+    lines = jl.read_text().strip().splitlines()
+    assert len(lines) == 2 and json.loads(lines[0])["mac"]
+    cv = tmp_path / "out.csv"
+    assert st.export(cv, fmt="csv") == 2
+    assert "mac" in cv.read_text().splitlines()[0]
+
+
+def test_export_rejects_unknown_format(tmp_path):
+    st = SightingStore(":memory:")
+    with pytest.raises(ValueError):
+        st.export(tmp_path / "x", fmt="xml")
+
+
+def test_stats_reports_count_kind_and_span():
+    st = SightingStore(":memory:")
+    st.insert(_s(mac="aa:bb:cc:00:00:c1", kind="wifi", ts=100.0))
+    st.insert(_s(mac="aa:bb:cc:00:00:c2", kind="ble", ssid="", ts=300.0))
+    s = st.stats()
+    assert s["count"] == 2 and s["by_kind"]["wifi"] == 1 and s["by_kind"]["ble"] == 1
+    assert s["oldest_ts"] == 100.0 and s["newest_ts"] == 300.0
