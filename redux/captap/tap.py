@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 from .dot11 import parse_dot11, Dot11Frame
+from .detect_bridge import to_frame
 from ..dex.fingerprint import DeviceObservation, DeviceLinker
 
 
@@ -29,6 +30,7 @@ class DeauthEvent:
     bssid: str
     reason: Optional[int]
     ts: float
+    kind: str = "deauth"      # deauth | disassoc (kept so the Frame conversion is faithful)
 
     def to_dict(self) -> dict:
         return self.__dict__.copy()
@@ -43,6 +45,7 @@ class CaptureTap:
     _first: Dict[str, float] = field(default_factory=dict)
     _last: Dict[str, float] = field(default_factory=dict)
     deauths: List[DeauthEvent] = field(default_factory=list)
+    det_frames: List = field(default_factory=list)   # detector Frames, in capture order
     frames_seen: int = 0
 
     def feed(self, buf: bytes, *, radiotap: bool = False, ts: float = 0.0) -> Optional[Dot11Frame]:
@@ -61,7 +64,12 @@ class CaptureTap:
             self._first.setdefault(s, ts)
             self._last[s] = ts
         elif f.kind in ("deauth", "disassoc"):
-            self.deauths.append(DeauthEvent(f.src, f.dst, f.bssid, f.reason, ts))
+            self.deauths.append(DeauthEvent(f.src, f.dst, f.bssid, f.reason, ts, f.kind))
+        # also stage it as a detector Frame (deauth/disassoc/probe_req) so captured
+        # frames flow through the same DetectEngine — the chain that was dark.
+        fr = to_frame(f, ts=ts)
+        if fr is not None:
+            self.det_frames.append(fr)
         return f
 
     def observations(self) -> List[DeviceObservation]:
@@ -84,6 +92,11 @@ class CaptureTap:
     def deauth_events(self) -> List[dict]:
         """Normalized deauth/disassoc events for the flood detectors (other lane)."""
         return [d.to_dict() for d in self.deauths]
+
+    def detect_frames(self) -> List:
+        """Captured frames as detector `Frame`s (deauth/disassoc/probe_req), in
+        order — feed straight to a DetectEngine / DeauthFloodDetector."""
+        return list(self.det_frames)
 
 
 def live_source(iface: str, *, _socket=None):

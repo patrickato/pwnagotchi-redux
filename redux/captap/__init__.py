@@ -10,8 +10,10 @@ needs-hardware adapter; everything else is testable from raw bytes.
 """
 from .dot11 import Dot11Frame, parse_dot11, parse_radiotap_len, build_probe_req, build_deauth
 from .tap import CaptureTap, DeauthEvent, live_source
+from .detect_bridge import to_frame, frames_from
 
 __all__ = [
     "Dot11Frame", "parse_dot11", "parse_radiotap_len", "build_probe_req", "build_deauth",
     "CaptureTap", "DeauthEvent", "live_source",
+    "to_frame", "frames_from",
 ]

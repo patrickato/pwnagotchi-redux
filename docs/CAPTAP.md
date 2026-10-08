@@ -33,10 +33,18 @@ re-identification. One tap feeds all three.
   error rather than yielding fake frames. The parser/tap take bytes from any source,
   so only that one adapter depends on a radio.
 
+## Detector wiring (closed)
+
+The detector lane has landed, so the loop is closed in software: `detect_bridge.to_frame`
+maps a `Dot11Frame` → the detector lane's `Frame` (deauth→DEAUTH, disassoc→DISASSOC,
+probe-req→PROBE_REQ), `CaptureTap.detect_frames()` yields them in capture order, and
+`Augur.ingest_frames()` runs them through the same `DetectEngine` as every other
+source. A real deauth burst fires `deauth_flood` end-to-end (raw bytes → parse →
+bridge → detector → voiced alert) — verified in tests and `redux captap demo`. The
+`DeauthEvent` list is still exposed for consumers that want the normalized events.
+
 ## What's left
 
-- **Detector-side consumption** (deauth-flood / surveillance-sweep reading the
-  `DeauthEvent`s) lives in the detector build lane — staged here, wired there
-  (coordinate with that lane). The event shape is the contract.
 - **Live capture on hardware** — monitor mode + raw-socket privileges on the Pi
-  (runbook §2b.1/2b.6). The producer and the fingerprint wiring are sandbox-done.
+  (runbook §2b.1/2b.6). The parser, bridge, detector wiring, and fingerprint re-id
+  are all sandbox-done; only the AF_PACKET monitor source is a Pi step.

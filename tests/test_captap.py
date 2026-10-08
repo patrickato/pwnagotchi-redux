@@ -2,8 +2,11 @@
 import struct
 
 from redux.captap import (
-    parse_dot11, parse_radiotap_len, build_probe_req, build_deauth, CaptureTap,
+    parse_dot11, parse_radiotap_len, build_probe_req, build_deauth, CaptureTap, to_frame,
 )
+from redux.captap.dot11 import Dot11Frame
+from redux.detect.deauth_flood import DeauthFloodDetector
+from redux.detect.frames import FrameType
 from redux.core import Augur
 from redux.radio import Intent
 
@@ -95,3 +98,38 @@ def test_augur_ingest_frames():
     out = bc.ingest_frames(frames)
     assert out["frames"] == 3 and out["deauth_events"] == 1
     assert out["device_identities"]["reidentified"] == 1
+
+
+# --- the P0 chain: captured frames reach the detectors ----------------------- #
+
+def test_to_frame_maps_kinds():
+    d = parse_dot11(build_deauth("aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66", "11:22:33:44:55:66"))
+    assert to_frame(d, ts=5.0).type is FrameType.DEAUTH and to_frame(d, ts=5.0).ts == 5.0
+    p = parse_dot11(build_probe_req("a2:11:11:11:11:11", "HomeNet", ies=IES))
+    assert to_frame(p).type is FrameType.PROBE_REQ
+    assert to_frame(Dot11Frame(kind="disassoc", bssid="11:22:33:44:55:66")).type is FrameType.DISASSOC
+    assert to_frame(Dot11Frame(kind="other")) is None        # not a consumed kind
+
+
+def test_captured_deauths_fire_the_flood_detector():
+    # raw bytes -> parse -> bridge -> detector: a real deauth burst must alert
+    tap = CaptureTap()
+    for i in range(22):
+        tap.feed(build_deauth("de:ad:00:00:00:01", "ff:ff:ff:ff:ff:ff", "11:22:33:44:55:66"),
+                 ts=100.0 + i * 0.1)
+    det = DeauthFloodDetector(window_s=5.0, threshold=20)
+    alerts = det.feed_many(tap.detect_frames())
+    assert alerts and alerts[0].kind.value == "deauth_flood"
+    assert alerts[0].bssid == "11:22:33:44:55:66" and alerts[0].reason
+
+
+def test_ingest_frames_closes_loop_to_detector():
+    # end-to-end through the core: a captured flood surfaces as a deauth_flood alert
+    frames = [(build_deauth("de:ad:00:00:00:01", "ff:ff:ff:ff:ff:ff", "11:22:33:44:55:66"),
+               200.0 + i * 0.1) for i in range(22)]
+    bc = Augur(radios=None, intent=Intent.RECON)
+    out = bc.ingest_frames(frames)
+    assert out["detector_frames"] == 22
+    assert "deauth_flood" in out["alerts"]
+    # and it was voiced (glass-box) in the creature's narration
+    assert any("deauth_flood" in l.text for l in bc.narrator.lines())

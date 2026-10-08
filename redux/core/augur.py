@@ -433,8 +433,18 @@ class Augur:
             tap.feed(buf, radiotap=rt, ts=ts)
         linker = tap.link()
         self._captap = tap
+        # Close the loop: the captured management frames (deauth/disassoc/probe-req)
+        # go through the SAME detect engine as every other source — this is the only
+        # path by which those frames reach the flood/sweep detectors at all. Fired
+        # alerts are voiced (glass-box) like any other detection.
+        det_frames = tap.detect_frames()
+        alerts = self.engine.feed_many(det_frames)
+        for a in alerts:
+            self.narrator.say_alert(a)
         return {"frames": tap.frames_seen, "deauth_events": len(tap.deauths),
-                "device_identities": linker.summary(), "linker": linker}
+                "device_identities": linker.summary(), "linker": linker,
+                "detector_frames": len(det_frames),
+                "alerts": [a.kind.value for a in alerts]}
 
     def tft_frame(self, face="status", width: int = 46, ascii: bool = False,
                   pack: str = "augur"):

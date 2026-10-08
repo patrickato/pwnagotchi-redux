@@ -339,9 +339,10 @@ def cmd_captap(args) -> int:
             tap.feed(build_probe_req(mac, ssid, ies=ies), ts=100.0)
     # an unrelated device
     tap.feed(build_probe_req("b6:99:99:99:99:99", "Guest", ies=[(1, b"\x82\x84")]), ts=101.0)
-    # a deauth burst against an AP
-    for _ in range(5):
-        tap.feed(build_deauth("aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66", "11:22:33:44:55:66"), ts=102.0)
+    # a deauth burst against an AP — enough to trip the flood detector
+    for i in range(22):
+        tap.feed(build_deauth("aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66", "11:22:33:44:55:66"),
+                 ts=102.0 + i * 0.1)
     linker = tap.link()
     s = linker.summary()
     print(f"  frames parsed: {tap.frames_seen}  |  deauth events staged: {len(tap.deauths)}")
@@ -349,6 +350,11 @@ def cmd_captap(args) -> int:
     for i in linker.identities():
         if i.reidentified:
             print(f"    DEVICE (str {i.strength:.2f}): {i.mac_count} MACs -> one device, PNL={sorted(i.ssids)[:3]}")
+    # the closed loop: captured frames through the real detect engine
+    from .detect.engine import DetectEngine
+    alerts = DetectEngine().feed_many(tap.detect_frames())
+    kinds = sorted({a.kind.value for a in alerts})
+    print(f"  captured frames → detectors: {len(tap.detect_frames())} frames, alerts fired: {kinds or 'none'}")
     return 0
 
 

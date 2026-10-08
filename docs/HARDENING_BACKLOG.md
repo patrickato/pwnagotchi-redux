@@ -6,14 +6,18 @@ classmates to run on real sites. These are **tracked, not yet built** (except wh
 noted). Mostly hardening/productization, not missing core capability. Ordered by
 leverage.
 
-## P0 — the one architectural gap — PRODUCER DONE
+## P0 — the one architectural gap — SOFTWARE-COMPLETE
 
 - **Raw-frame capture tap.** ✅ Built (`redux/captap/`, docs/CAPTAP.md): a pure
   802.11 parser (deauth/disassoc + probe-request IE fingerprint) + a tap that feeds
-  the fingerprint Dex real PNL/IE (cross-MAC re-id now works, sandbox-verified) and
-  stages normalized deauth events. **Remaining:** (a) the detector-side consumption
-  of those deauth events (deauth-flood / surveillance-sweep) lives in the detector
-  lane — coordinate with Grok; (b) live monitor capture on the Pi (needs-hardware,
+  the fingerprint Dex real PNL/IE (cross-MAC re-id, sandbox-verified) and now routes
+  captured management frames into the detectors. ✅ **Consumer wired** (Grok's
+  detector lane landed): `redux/captap/detect_bridge.py` maps `Dot11Frame` →
+  detector `Frame`, `CaptureTap.detect_frames()` yields them in order, and
+  `Augur.ingest_frames()` runs them through the same `DetectEngine` — a real deauth
+  burst fires `deauth_flood` end-to-end (raw bytes → parse → bridge → detector →
+  voiced alert), verified in tests and `redux captap demo`. **Remaining:** only the
+  live monitor source on the Pi (AF_PACKET on a monitor interface — needs-hardware,
   runbook §2b.1/2b.6).
 
 ## P1 — field-device safety (a dropbox can be found/seized)
