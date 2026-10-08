@@ -42,6 +42,27 @@ def test_status_payload_includes_own_position_honestly():
     assert status_payload(bc2)["position"] == {"lat": 45.0, "lon": -93.0}
 
 
+def test_status_payload_lists_access_points_from_cache():
+    from redux.geo.db import Sighting
+    bc = Augur([ONBOARD], intent=Intent.RECON)
+    bc.store.insert(Sighting(kind="wifi", mac="aa:bb:cc:11:22:33", ssid="HomeLab",
+                             channel=6, rssi=-42, ts=100.0, provenance="test"))
+    bc.store.insert(Sighting(kind="wifi", mac="de:ad:be:ef:00:01", ssid="",
+                             channel=11, rssi=-70, ts=101.0, provenance="test"))
+    bc.store.insert(Sighting(kind="ble", mac="ff:ee:dd:cc:bb:aa", ts=102.0, provenance="test"))
+    aps = status_payload(bc)["access_points"]
+    macs = {a["bssid"] for a in aps}
+    assert "aa:bb:cc:11:22:33" in macs and "de:ad:be:ef:00:01" in macs
+    assert "ff:ee:dd:cc:bb:aa" not in macs          # BLE is a device, not an AP
+    ap = next(a for a in aps if a["bssid"] == "aa:bb:cc:11:22:33")
+    assert ap["ssid"] == "HomeLab" and ap["channel"] == 6 and ap["rssi"] == -42
+
+
+def test_page_has_access_points_panel():
+    html = render_page()
+    assert "renderAPs" in html and "aptbl" in html and "access_points" in html
+
+
 def test_page_has_rich_skin_toggle_and_moving_track():
     html = render_page()
     assert "skinbtn" in html and "data-skin" in html      # plain/rich skin toggle

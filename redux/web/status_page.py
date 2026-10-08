@@ -55,6 +55,17 @@ def status_payload(augur) -> Dict:
                             "rssi": rssi_histogram(augur.store)}
     except Exception:
         data["airspace"] = {"channels": {}, "rssi": {}}
+    # access points in range — the survey inventory, sourced from the Cache (the
+    # APs this device has actually recorded). Read-only situational awareness.
+    try:
+        from ..geo.latest_n import latest_n
+        aps = latest_n(augur.store, 16, kind="wifi")
+        data["access_points"] = [
+            {"bssid": s.mac, "ssid": s.ssid, "channel": s.channel, "rssi": s.rssi, "ts": s.ts}
+            for s in aps
+        ]
+    except Exception:
+        data["access_points"] = []
     return data
 
 
@@ -94,6 +105,9 @@ ul{margin:6px 0 0;padding-left:16px}li{color:var(--mut);font-size:12px}
 #chanbars,#rssibars{width:100%;display:block;margin-top:4px}
 #chanbars rect{fill:var(--wifi)}#rssibars rect{fill:var(--acc)}
 #chanbars text,#rssibars text{font:9px var(--mono);fill:var(--dim)}
+.aptbl{display:grid;grid-template-columns:30px 148px 48px 1fr;gap:3px 10px;margin-top:6px;font-size:12px}
+.aptbl .h{color:var(--mut);font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+.aptbl .c{color:var(--dim)}
 body[data-skin="plain"] .rich{display:none}
 body[data-skin="plain"]{--card:#0d1319}
 body[data-skin="plain"] .card{border-color:#16202a}
@@ -129,6 +143,9 @@ body[data-skin="plain"] .card{border-color:#16202a}
    <svg id="chanbars" viewBox="0 0 400 92" preserveAspectRatio="none"></svg>
    <svg id="rssibars" viewBox="0 0 400 72" preserveAspectRatio="none"></svg>
    <div class="leg mut"><span id="airnote">no channel/RSSI data yet</span></div></div>
+ <div class="card"><div class="k">access points · seen in range (from the Cache · listen-only)</div>
+   <div class="aptbl" id="aptbl"></div>
+   <div class="leg mut"><span id="apnote">no APs recorded yet</span></div></div>
  <div class="card"><div class="k">recent narration</div><ul id="narr"></ul></div>
 </main>
 <script>
@@ -172,7 +189,7 @@ function paint(d){
  if(d.position&&d.position.lat!=null){var p=TRACK[TRACK.length-1];
   if(!p||p.lat!==d.position.lat||p.lon!==d.position.lon){TRACK.push({lat:d.position.lat,lon:d.position.lon});if(TRACK.length>400)TRACK.shift()}}
  if(typeof d.sightings==='number'){if(lastSight!==null)SPARK.push(Math.max(0,d.sightings-lastSight));lastSight=d.sightings;if(SPARK.length>120)SPARK.shift()}
- renderMap(d.located||[],d.position||null);renderSpark();renderAirspace(d.airspace||{});
+ renderMap(d.located||[],d.position||null);renderSpark();renderAirspace(d.airspace||{});renderAPs(d.access_points||[]);
 }
 function _bars(svgId,pairs,W,H,labEvery){const NS='http://www.w3.org/2000/svg',svg=document.getElementById(svgId);
  while(svg.firstChild)svg.removeChild(svg.firstChild);if(!pairs.length)return;
@@ -189,6 +206,16 @@ function renderAirspace(a){var ch=a.channels||{},rs=a.rssi||{};
  _bars('rssibars',rp.map(p=>[p[0]+'dBm',p[1]]),400,72,1);
  var note=document.getElementById('airnote');
  note.textContent=cp.length?(cp.length+' channels · '+rp.length+' RSSI buckets · real sightings only'):'no channel/RSSI data yet';
+}
+function renderAPs(aps){var el=document.getElementById('aptbl'),note=document.getElementById('apnote');
+ el.innerHTML='';
+ if(!aps.length){note.textContent='no APs recorded yet';return}
+ aps=aps.slice().sort(function(a,b){return (b.rssi==null?-999:b.rssi)-(a.rssi==null?-999:a.rssi)});
+ ['CH','BSSID','SIG','SSID'].forEach(function(h){var d=document.createElement('div');d.className='h';d.textContent=h;el.appendChild(d)});
+ function cell(t,cls){var d=document.createElement('div');if(cls)d.className=cls;d.textContent=t;el.appendChild(d)}
+ aps.forEach(function(a){cell(a.channel!=null?String(a.channel):'-','c');cell(a.bssid||'—');
+  cell(a.rssi!=null?(a.rssi+''):'—','c');cell(a.ssid||'<hidden>')});
+ note.textContent=aps.length+' AP'+(aps.length>1?'s':'')+' · strongest first · real sightings only';
 }
 function renderMap(pts,pos){const NS='http://www.w3.org/2000/svg',svg=document.getElementById('map'),rng=document.getElementById('maprange');
  while(svg.firstChild)svg.removeChild(svg.firstChild);
