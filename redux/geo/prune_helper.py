@@ -6,16 +6,22 @@ from typing import Optional
 from redux.geo.db import SightingStore
 
 
-def prune_older_than(store: SightingStore, older_than_ts: float) -> dict:
-    """Remove sightings with ts older than older_than_ts."""
+def prune_older_than(
+    store: SightingStore,
+    age_s: float,
+    *,
+    now: Optional[float] = None,
+) -> dict:
+    """Remove sightings older than age_s seconds (relative to now)."""
     before = store.count()
-    # SightingStore.prune accepts older_than as a timestamp threshold
-    store.prune(older_than=older_than_ts)
+    deleted = store.prune(older_than=age_s, now=now)
     after = store.count()
-    deleted = before - after
     return {
         "deleted": deleted,
         "remaining": after,
-        "older_than": older_than_ts,
-        "reason": f"prune: removed {deleted} row(s) with ts < {older_than_ts}, remaining={after}",
+        "age_s": age_s,
+        "reason": (
+            f"prune: removed {deleted} row(s) older than {age_s}s, "
+            f"remaining={after} (before={before})"
+        ),
     }
