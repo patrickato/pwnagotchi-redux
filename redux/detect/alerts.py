@@ -23,6 +23,7 @@ class AlertKind(str, Enum):
     LOUD_PROBER = "loud_prober"
     HIDDEN_SSID_REVEAL = "hidden_ssid_reveal"
     CSA_ABUSE = "csa_abuse"
+    WPA3_DOWNGRADE = "wpa3_downgrade"
 
 
 @dataclass(frozen=True)
