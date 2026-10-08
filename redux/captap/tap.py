@@ -36,6 +36,18 @@ class DeauthEvent:
         return self.__dict__.copy()
 
 
+@dataclass(frozen=True)
+class AccessPoint:
+    """An AP seen on the air (from its own beacons / probe-responses). Pure
+    situational awareness — what's in earshot, on which channel — not a target."""
+    bssid: str
+    ssid: str                 # "" when hidden / not yet seen
+    channel: Optional[int]
+    frames: int               # how many beacons/probe-responses we heard from it
+    first_seen: float
+    last_seen: float
+
+
 @dataclass
 class CaptureTap:
     """Accumulates per-station PNL + IE fingerprint from probe requests, and a list
@@ -46,6 +58,7 @@ class CaptureTap:
     _last: Dict[str, float] = field(default_factory=dict)
     deauths: List[DeauthEvent] = field(default_factory=list)
     det_frames: List = field(default_factory=list)   # detector Frames, in capture order
+    _aps: Dict[str, dict] = field(default_factory=dict)   # bssid -> accumulating AP record
     frames_seen: int = 0
 
     def feed(self, buf: bytes, *, radiotap: bool = False, ts: float = 0.0) -> Optional[Dot11Frame]:
@@ -65,6 +78,18 @@ class CaptureTap:
             self._last[s] = ts
         elif f.kind in ("deauth", "disassoc"):
             self.deauths.append(DeauthEvent(f.src, f.dst, f.bssid, f.reason, ts, f.kind))
+        elif f.kind in ("beacon", "probe_resp"):
+            # an AP announcing itself → passive inventory of what's in earshot
+            r = self._aps.get(f.bssid)
+            if r is None:
+                r = {"ssid": "", "channel": None, "frames": 0, "first": ts, "last": ts}
+                self._aps[f.bssid] = r
+            if f.ssid:
+                r["ssid"] = f.ssid
+            if f.channel is not None:
+                r["channel"] = f.channel
+            r["frames"] += 1
+            r["last"] = ts
         # also stage it as a detector Frame (deauth/disassoc/probe_req) so captured
         # frames flow through the same DetectEngine — the chain that was dark.
         fr = to_frame(f, ts=ts)
@@ -88,6 +113,14 @@ class CaptureTap:
         for obs in self.observations():
             linker.observe(obs)
         return linker
+
+    def access_points(self) -> List[AccessPoint]:
+        """The APs heard on the air — passive situational awareness. Sorted by how
+        much we heard from each (busiest first), then BSSID for stability."""
+        out = [AccessPoint(bssid=b, ssid=r["ssid"], channel=r["channel"],
+                           frames=r["frames"], first_seen=r["first"], last_seen=r["last"])
+               for b, r in self._aps.items()]
+        return sorted(out, key=lambda a: (-a.frames, a.bssid))
 
     def deauth_events(self) -> List[dict]:
         """Normalized deauth/disassoc events for the flood detectors (other lane)."""

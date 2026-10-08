@@ -35,25 +35,28 @@ def parse_radiotap_len(buf: bytes) -> int:
 
 @dataclass(frozen=True)
 class Dot11Frame:
-    kind: str                       # deauth | disassoc | probe_req | other
+    kind: str                       # deauth | disassoc | probe_req | beacon | probe_resp | other
     dst: str = ""
     src: str = ""
     bssid: str = ""
     reason: Optional[int] = None    # deauth/disassoc reason code
-    ssid: str = ""                  # probe-req directed SSID (a PNL entry), "" if wildcard
+    ssid: str = ""                  # SSID (probe-req directed SSID / beacon network name), "" if hidden/wildcard
     ie_tags: Tuple[int, ...] = ()   # ordered IE tag numbers present
     ie_hash: str = ""               # fingerprint over capability IEs (SSID excluded)
+    channel: Optional[int] = None   # from DS Parameter Set / HT Operation (beacons mainly)
     ts: float = 0.0
 
 
-def _parse_ies(body: bytes) -> Tuple[str, Tuple[int, ...], str]:
-    """Walk 802.11 tagged parameters → (ssid, ordered_tags, ie_fingerprint_hash).
+def _parse_ies(body: bytes) -> Tuple[str, Tuple[int, ...], str, Optional[int]]:
+    """Walk 802.11 tagged parameters → (ssid, ordered_tags, ie_fingerprint_hash, channel).
     The fingerprint hashes the ordered (tag,value) of capability IEs with the SSID
     (tag 0) EXCLUDED, so it identifies the device regardless of which network it is
-    probing for."""
+    probing for. `channel` comes from the DS Parameter Set (tag 3) or HT Operation
+    (tag 61) when present — mainly in beacons/probe-responses."""
     ssid = ""
     tags: List[int] = []
     fp_parts: List[bytes] = []
+    channel: Optional[int] = None
     i = 0
     n = len(body)
     while i + 2 <= n:
@@ -67,9 +70,13 @@ def _parse_ies(body: bytes) -> Tuple[str, Tuple[int, ...], str]:
             ssid = val.decode("utf-8", "replace")
         else:
             fp_parts.append(bytes([tag, ln]) + val)
+            if tag == 3 and ln >= 1:            # DS Parameter Set → current channel
+                channel = val[0]
+            elif tag == 61 and ln >= 1 and channel is None:  # HT Operation primary channel
+                channel = val[0]
         i += 2 + ln
     ie_hash = hashlib.sha256(b"".join(fp_parts)).hexdigest()[:16] if fp_parts else ""
-    return ssid, tuple(tags), ie_hash
+    return ssid, tuple(tags), ie_hash, channel
 
 
 def parse_dot11(buf: bytes, *, radiotap: bool = False, ts: float = 0.0) -> Optional[Dot11Frame]:
@@ -91,9 +98,13 @@ def parse_dot11(buf: bytes, *, radiotap: bool = False, ts: float = 0.0) -> Optio
         return Dot11Frame("deauth" if subtype == 12 else "disassoc",
                           dst=dst, src=src, bssid=bssid, reason=reason, ts=ts)
     if subtype == 4:                # probe request
-        ssid, tags, ie_hash = _parse_ies(body)
+        ssid, tags, ie_hash, channel = _parse_ies(body)
         return Dot11Frame("probe_req", dst=dst, src=src, bssid=bssid,
-                          ssid=ssid, ie_tags=tags, ie_hash=ie_hash, ts=ts)
+                          ssid=ssid, ie_tags=tags, ie_hash=ie_hash, channel=channel, ts=ts)
+    if subtype in (8, 5):           # beacon / probe-response → an AP announcing itself
+        ssid, tags, ie_hash, channel = _parse_ies(body[12:])  # skip 12B fixed (timestamp+interval+caps)
+        return Dot11Frame("beacon" if subtype == 8 else "probe_resp", dst=dst, src=src, bssid=bssid,
+                          ssid=ssid, ie_tags=tags, ie_hash=ie_hash, channel=channel, ts=ts)
     return Dot11Frame("other", dst=dst, src=src, bssid=bssid, ts=ts)
 
 
@@ -116,3 +127,14 @@ def build_deauth(src: str, dst: str, bssid: str, reason: int = 7, *, ts: float =
         return bytes(int(x, 16) for x in m.split(":"))
     hdr = bytes([0xC0, 0x00]) + b"\x00\x00" + macb(dst) + macb(src) + macb(bssid) + b"\x00\x00"
     return hdr + struct.pack("<H", reason)
+
+
+def build_beacon(bssid: str, ssid: str = "", channel: int = 6, *, ts: float = 0.0) -> bytes:
+    """Build a beacon frame (AP announcement) with an SSID + DS-Parameter-Set channel.
+    For tests and the survey demo."""
+    def macb(m):
+        return bytes(int(x, 16) for x in m.split(":"))
+    hdr = bytes([0x80, 0x00]) + b"\x00\x00" + macb("ff:ff:ff:ff:ff:ff") + macb(bssid) + macb(bssid) + b"\x00\x00"
+    fixed = b"\x00" * 8 + b"\x64\x00" + b"\x01\x00"          # timestamp + beacon interval + caps
+    body = bytes([0, len(ssid)]) + ssid.encode() + bytes([3, 1, channel])   # SSID IE + DS Param (channel)
+    return hdr + fixed + body

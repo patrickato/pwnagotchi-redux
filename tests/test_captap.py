@@ -2,8 +2,8 @@
 import struct
 
 from redux.captap import (
-    parse_dot11, parse_radiotap_len, build_probe_req, build_deauth, CaptureTap, to_frame,
-    capture_run, live_source,
+    parse_dot11, parse_radiotap_len, build_probe_req, build_deauth, build_beacon,
+    CaptureTap, AccessPoint, to_frame, capture_run, live_source,
 )
 from redux.detect.engine import DetectEngine
 from redux.captap.dot11 import Dot11Frame
@@ -154,6 +154,51 @@ def test_capture_run_respects_max_frames():
     src = [(build_probe_req("a2:11:11:11:11:11", "N", ies=IES), float(i)) for i in range(100)]
     tap, _ = capture_run(iter(src), max_frames=5)
     assert tap.frames_seen == 5                                  # bounded, didn't drain the source
+
+
+# --- beacons → passive AP inventory (the survey) ---------------------------- #
+
+def test_build_beacon_parses_to_ap_with_channel():
+    f = parse_dot11(build_beacon("aa:bb:cc:11:22:33", "HomeLab", channel=6))
+    assert f is not None and f.kind == "beacon"
+    assert f.bssid == "aa:bb:cc:11:22:33" and f.ssid == "HomeLab" and f.channel == 6
+
+
+def test_tap_collects_access_points_busiest_first():
+    tap = CaptureTap()
+    for _ in range(5):
+        tap.feed(build_beacon("aa:bb:cc:11:22:33", "HomeLab", 6), ts=1.0)
+    for _ in range(2):
+        tap.feed(build_beacon("de:ad:be:ef:00:01", "CoffeeShop", 11), ts=2.0)
+    aps = tap.access_points()
+    assert len(aps) == 2 and all(isinstance(a, AccessPoint) for a in aps)
+    assert aps[0].bssid == "aa:bb:cc:11:22:33" and aps[0].frames == 5
+    assert aps[0].channel == 6 and aps[0].ssid == "HomeLab"
+    assert aps[1].bssid == "de:ad:be:ef:00:01" and aps[1].frames == 2 and aps[1].channel == 11
+
+
+def test_tap_ap_hidden_ssid_is_empty():
+    tap = CaptureTap()
+    tap.feed(build_beacon("12:34:56:78:9a:bc", "", channel=1), ts=1.0)
+    aps = tap.access_points()
+    assert len(aps) == 1 and aps[0].ssid == "" and aps[0].channel == 1
+
+
+def test_ap_record_tracks_first_last_and_counts():
+    tap = CaptureTap()
+    tap.feed(build_beacon("aa:bb:cc:11:22:33", "HomeLab", 6), ts=10.0)
+    tap.feed(build_beacon("aa:bb:cc:11:22:33", "HomeLab", 6), ts=25.0)
+    ap = tap.access_points()[0]
+    assert ap.frames == 2 and ap.first_seen == 10.0 and ap.last_seen == 25.0
+
+
+def test_beacons_are_passive_only_no_detector_frames_or_deauths():
+    # a survey of beacons must not fabricate detector traffic or deauth events
+    tap = CaptureTap()
+    for _ in range(10):
+        tap.feed(build_beacon("aa:bb:cc:11:22:33", "HomeLab", 6), ts=1.0)
+    assert tap.detect_frames() == [] and tap.deauths == []
+    assert tap.frames_seen == 10 and len(tap.access_points()) == 1
 
 
 # --- regression: live monitor frames carry a radiotap header (hardware-found) --- #

@@ -520,6 +520,77 @@ def _captap_demo(args) -> int:
     return 0
 
 
+def cmd_survey(args) -> int:
+    """Passive situational-awareness sweep: listen only (never transmit) and inventory
+    the APs in earshot — BSSID, channel, SSID, how many beacons heard — plus any
+    rogue-AP / flood alerts the detectors raise during the sweep. Read-only: it does
+    not target, arm, populate, or transmit anything. --demo runs on synthetic beacons."""
+    from .captap import CaptureTap, capture_run, build_beacon
+    from .detect.engine import DetectEngine
+
+    alerts = []
+    if getattr(args, "demo", False):
+        print("redux survey — SYNTHETIC beacons (no radio)")
+        tap = CaptureTap()
+        demo = [("aa:bb:cc:11:22:33", "HomeLab", 6),
+                ("de:ad:be:ef:00:01", "CoffeeShop", 11),
+                ("12:34:56:78:9a:bc", "", 1)]          # a hidden-SSID AP
+        for bssid, ssid, ch in demo:
+            for _ in range(5 if ssid else 2):
+                tap.feed(build_beacon(bssid, ssid, ch), ts=1.0)
+    else:
+        if not args.iface:
+            print("  survey needs --iface <monitor interface> (or --demo for synthetic)")
+            return 2
+        import subprocess
+        import threading
+        from .captap import live_source
+        stop = threading.Event()
+
+        def _setch(ch):
+            try:
+                subprocess.run(["iw", "dev", args.iface, "set", "channel", str(ch)],
+                               capture_output=True, text=True, timeout=5)
+            except Exception:
+                pass  # best-effort; capture still reports honestly if it can't tune
+
+        if args.channel:
+            _setch(args.channel)
+            print(f"redux survey — passive sweep on {args.iface} ch{args.channel} (≤{args.seconds}s)")
+        else:
+            chans = [1, 6, 11]
+            print(f"redux survey — passive sweep on {args.iface}, hopping {chans} (≤{args.seconds}s)")
+
+            def _hop():
+                i = 0
+                while not stop.is_set():
+                    _setch(chans[i % len(chans)])
+                    i += 1
+                    stop.wait(2.0)
+            threading.Thread(target=_hop, daemon=True).start()
+        print("  (listening only — no frames transmitted)")
+        try:
+            tap, alerts = capture_run(live_source(args.iface), seconds=args.seconds,
+                                      max_frames=args.max, engine=DetectEngine())
+        except RuntimeError as e:
+            stop.set()
+            print(f"  unavailable: {e}")
+            return 3
+        finally:
+            stop.set()
+
+    aps = tap.access_points()
+    print(f"  access points seen: {len(aps)}")
+    if aps:
+        print(f"    {'CH':>3}  {'BSSID':<17}  {'FRAMES':>6}  SSID")
+        for a in aps:
+            ch = str(a.channel) if a.channel is not None else "-"
+            print(f"    {ch:>3}  {a.bssid:<17}  {a.frames:>6}  {a.ssid or '<hidden>'}")
+    kinds = sorted({al.kind.value for al in alerts})
+    print(f"  alerts during sweep: {kinds or 'none'}")
+    return 0
+
+
 def cmd_tft(args) -> int:
     """Render the on-device TFT frame to the terminal (see it without hardware).
     --face plain|status, --ascii for a plain-terminal fallback."""
@@ -1104,6 +1175,14 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--channel", type=int, default=None, help="park the receiver on this channel (one number)")
     cl.add_argument("--hop", action="store_true", help="sweep channels 1/6/11 (no need to know the channel)")
     ct.set_defaults(func=cmd_captap)
+
+    sv = sub.add_parser("survey", help="passive situational-awareness sweep — inventory APs in earshot (read-only, no transmit)")
+    sv.add_argument("--iface", default=None, help="monitor-mode interface (e.g. wlan1mon); omit with --demo")
+    sv.add_argument("--seconds", type=float, default=20.0, help="listen for N seconds (default 20)")
+    sv.add_argument("--max", type=int, default=None, help="stop after N frames")
+    sv.add_argument("--channel", type=int, default=None, help="park on one channel instead of hopping 1/6/11")
+    sv.add_argument("--demo", action="store_true", help="synthetic beacons, no radio")
+    sv.set_defaults(func=cmd_survey)
 
     tf = sub.add_parser("tft", help="render the on-device TFT frame to the terminal")
     add_radio_flags(tf)
