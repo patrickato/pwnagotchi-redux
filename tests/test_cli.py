@@ -99,3 +99,22 @@ def test_cache_db_path_from_config(tmp_path):
     rc, out = _run(["cache", "stats", "--config", str(cfg)])
     assert rc == 0 and "0 sightings" in out
     assert db.exists()                               # opened the configured db, not the default path
+
+
+def test_init_writes_config_and_keystore(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUGUR_PASSPHRASE", "lab-pass")
+    rc, out = _run(["init", "--dir", str(tmp_path), "--node-id", "augur-lab-1"])
+    assert rc == 0
+    from redux.config import AugurConfig
+    cfg = AugurConfig.load(tmp_path / "config.toml")
+    assert cfg.mesh.node_id == "augur-lab-1" and cfg.validate() == []   # node_id patched + valid
+    ks = tmp_path / "swarm.keys"
+    assert ks.is_file() and ks.read_bytes().startswith(b"AUGURv1")      # sealed keystore minted
+
+
+def test_init_without_passphrase_skips_keystore(tmp_path, monkeypatch):
+    monkeypatch.delenv("AUGUR_PASSPHRASE", raising=False)
+    rc, out = _run(["init", "--dir", str(tmp_path)])
+    assert rc == 0 and (tmp_path / "config.toml").is_file()
+    assert not (tmp_path / "swarm.keys").exists()        # no passphrase → honestly skipped
+    assert "AUGUR_PASSPHRASE" in out                      # told the operator how to finish

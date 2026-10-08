@@ -15,7 +15,7 @@ doesn't have. Identity, voice, and the creature face: `docs/AUGUR.md`.
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
 > record/ghost, packs, plugin-compat shim, CLI, and web dashboard —
-> is built and green under the test suite (772 tests, no hardware required). **No part has had a
+> is built and green under the test suite (774 tests, no hardware required). **No part has had a
 > real-hardware pass on a physical Pi yet** (see *Verification status*). Sandbox-green ≠ done.
 
 ## What it is
@@ -183,6 +183,7 @@ redux ghost in.json out.json   # sanitize a recording for safe replay/sharing
 redux cache stats      # inspect the Cache; prune (retention) / export (jsonl|csv, --encrypt)
 redux vault seal --in loot --out loot.vault   # at-rest encryption (needs crypto extra)
 redux mesh key gen --store swarm.keys  # swarm-key lifecycle: gen/rotate/show/export/import (sealed)
+redux init --dir /etc/redux --node-id augur-01   # first-run setup (config + swarm key + checklist; see docs/ONBOARDING.md)
 redux config init      # write config.toml template; config check validates it
 redux packs            # manage Packs
 ```

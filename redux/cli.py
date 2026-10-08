@@ -151,6 +151,57 @@ def cmd_cache(args) -> int:
     return 0
 
 
+def cmd_init(args) -> int:
+    """First-run setup: write config.toml, generate a sealed swarm key (when the
+    passphrase + crypto backend are present), and print the operator checklist.
+    Idempotent — existing files are left alone unless --force. The one-gesture
+    'flash → armed' path for the field operator."""
+    import os
+    from pathlib import Path as _P
+    from .config import template, MARKER
+    d = _P(args.dir)
+    d.mkdir(parents=True, exist_ok=True)
+    cfg_path = d / "config.toml"
+    created = []
+    if cfg_path.exists() and not args.force:
+        print(f"init: {cfg_path} exists — leaving it (use --force to overwrite)")
+    else:
+        text = template()
+        if args.node_id:
+            text = text.replace('node_id = "augur-01"', f'node_id = "{args.node_id}"')
+        cfg_path.write_text(text)
+        created.append(str(cfg_path))
+
+    ks_path = d / "swarm.keys"
+    from .vault import crypto_available
+    note = ""
+    if ks_path.exists() and not args.force:
+        note = f"swarm keystore already present at {ks_path}"
+    elif not crypto_available():
+        note = f"swarm keystore NOT created — install the crypto extra, then: redux mesh key gen --store {ks_path}"
+    elif not os.environ.get("AUGUR_PASSPHRASE"):
+        note = f"swarm keystore NOT created — set AUGUR_PASSPHRASE, then: redux mesh key gen --store {ks_path}"
+    else:
+        from .mesh import SwarmKeyring, save as ks_save
+        from .vault import resolve_passphrase
+        ring = SwarmKeyring()
+        k = ring.rotate(label=args.node_id or "lab")
+        ks_save(ring, ks_path, resolve_passphrase())
+        created.append(f"{ks_path} (swarm key {k.kid})")
+
+    print("Augur first-run setup")
+    for c in created:
+        print(f"  created: {c}")
+    if note:
+        print(f"  note: {note}")
+    print("next steps:")
+    print(f"  1. edit {cfg_path} — fill every {MARKER} field (node_id; web token for an off-box bind)")
+    print("  2. export AUGUR_PASSPHRASE=…   (at-rest encryption + the swarm keystore)")
+    print(f"  3. arm your lab:   redux scope --file {d / 'scope.json'} arm-lab --cidr <your.lab.cidr>")
+    print(f"  4. validate:       redux config check --config {cfg_path}")
+    return 0
+
+
 def cmd_config(args) -> int:
     from pathlib import Path as _P
     import json as _json
@@ -923,6 +974,12 @@ def build_parser() -> argparse.ArgumentParser:
     cc = cfsub.add_parser("check", help="validate a config and list problems")
     cc.add_argument("--config", default=None, help="config path to validate")
     cf.set_defaults(func=cmd_config)
+
+    ini = sub.add_parser("init", help="first-run setup: write config + swarm key + operator checklist")
+    ini.add_argument("--dir", default="/etc/redux", help="config directory (default /etc/redux)")
+    ini.add_argument("--node-id", default=None, help="this device's unique node id")
+    ini.add_argument("--force", action="store_true", help="overwrite existing config/keystore")
+    ini.set_defaults(func=cmd_init)
 
     pk = sub.add_parser("packs", help="manage Packs")
     pk.add_argument("--dir", required=True, help="packs directory")

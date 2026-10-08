@@ -58,9 +58,12 @@ leverage.
 
 ## P2 — productization / onboarding
 
-- **First-run + field-operator guide.** Flash → first boot → arm scope → set swarm
-  key → EAP cert. Current quickstart is dev-focused; write the operator path for the
-  community.
+- **First-run + field-operator guide — DONE.** `redux init` lays down `config.toml`
+  (node_id filled) + a sealed swarm keystore (when passphrase + crypto are present,
+  else an honest how-to note) and prints the 4-step operator checklist (edit USER
+  INPUT, set passphrase, arm scope, validate). Idempotent. Operator path written in
+  docs/ONBOARDING.md. Remaining: the on-boot service that reads the config into the
+  long-running processes (a Pi/systemd step).
 - **Unified config — DONE.** `redux/config/`: one typed, validated `config.toml`
   (Cache paths + retention, web bind-scope/port/token, mesh keystore + node_id,
   default persona, the at-rest passphrase *env-var name*) built on the fork's
