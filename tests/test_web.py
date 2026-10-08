@@ -1,10 +1,27 @@
 import json
 import threading
 import urllib.request
+import urllib.error
 
-from redux.web import status_payload, render_page, resolve_host, serve, make_handler
+from redux.web import status_payload, render_page, resolve_host, serve, make_handler, auth_token
 from redux.core import Augur
 from redux.radio import Radio, Intent
+
+
+def _serve(handler):
+    from http.server import ThreadingHTTPServer
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.server_address[1]
+
+
+def _get(port, path, headers=None):
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
 
 ONBOARD = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=False, driver="brcmfmac", onboard=True)
 ALFA = Radio("wlan1", bands=frozenset({"2.4", "5"}), monitor=True, inject=True, driver="mt76x2u", usb_gen=3, high_draw=True)
@@ -95,3 +112,44 @@ def test_page_has_map_panel():
     assert 'id="map"' in html and "renderMap" in html
     # honest empty state wording present
     assert "needs a GPS fix" in html
+
+
+# --- surface auth (fail-closed when exposed off-box) ------------------------- #
+
+def test_auth_token_policy():
+    assert auth_token("localhost") is None                 # loopback: open by default
+    assert auth_token("localhost", "x") == "x"             # explicit token always wins
+    assert auth_token("lan", "x") == "x"
+    t = auth_token("lan")                                   # exposed + no token → minted, fail-closed
+    assert isinstance(t, str) and len(t) >= 16
+
+
+def test_api_requires_token_when_set():
+    srv, port = _serve(make_handler(lambda: {"intent": "hunt"}, token="s3cret"))
+    try:
+        assert _get(port, "/api/status")[0] == 401                                   # none
+        assert _get(port, "/api/status", {"Authorization": "Bearer wrong"})[0] == 401  # wrong
+        code, body = _get(port, "/api/status", {"Authorization": "Bearer s3cret"})
+        assert code == 200 and json.loads(body)["intent"] == "hunt"                   # right
+    finally:
+        srv.shutdown(); srv.server_close()
+
+
+def test_page_shows_login_until_token_then_dashboard():
+    srv, port = _serve(make_handler(lambda: {"intent": "hunt"}, token="s3cret"))
+    try:
+        code, body = _get(port, "/")
+        assert code == 401 and "access token" in body and "renderMap" not in body    # unlock page only
+        code, body = _get(port, "/", {"Cookie": "augur_token=s3cret"})
+        assert code == 200 and "renderMap" in body                                    # cookie unlocks the real page
+    finally:
+        srv.shutdown(); srv.server_close()
+
+
+def test_open_handler_needs_no_token():
+    srv, port = _serve(make_handler(lambda: {"intent": "hunt"}))   # token=None → open (localhost default)
+    try:
+        assert _get(port, "/api/status")[0] == 200
+        assert "renderMap" in _get(port, "/")[1]
+    finally:
+        srv.shutdown(); srv.server_close()

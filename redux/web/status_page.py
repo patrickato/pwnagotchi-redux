@@ -14,12 +14,15 @@ choice, and `serve()` always logs the exact URL.
 """
 from __future__ import annotations
 
+import hmac
+import http.cookies
 import json
 import logging
+import secrets
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 _log = logging.getLogger("redux.web")
 
@@ -189,8 +192,66 @@ def render_page() -> str:
     return PAGE
 
 
-def make_handler(status_provider: Callable[[], Dict]):
-    """Build a request handler class that serves `/` and `/api/status`."""
+# A tiny, self-contained unlock page shown when a token is required and absent.
+# It stores the token in a scoped cookie (so the dashboard's own fetch carries it)
+# and reloads — the token never rides in a URL, where it would leak to logs/history.
+LOGIN_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Augur</title><style>
+:root{--bg:#0a0e13;--fg:#e6edf3;--mut:#8b98a5;--acc:#4ec9b0;--line:#1f2a35;--card:#121922;
+--mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);
+font:14px/1.5 var(--mono);display:grid;place-items:center;min-height:100vh}
+form{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:26px;width:300px;max-width:92vw}
+.face{font-size:40px;color:var(--acc);text-align:center;margin-bottom:6px}
+h1{font-size:18px;margin:0 0 2px;letter-spacing:1px}.mut{color:var(--mut);font-size:12px;margin:0 0 14px}
+input,button{width:100%;font:14px var(--mono);padding:9px 11px;border-radius:8px;border:1px solid var(--line);margin-top:8px}
+input{background:#0b1118;color:var(--fg)}button{background:#16202a;color:var(--acc);border-color:var(--acc);cursor:pointer}
+</style></head><body>
+<form id="f"><div class="face">&#8249;-_-&#8250;</div><h1>Augur</h1>
+<p class="mut">this dashboard is protected — enter the access token</p>
+<input id="t" type="password" placeholder="access token" autofocus autocomplete="off">
+<button type="submit">unlock</button></form>
+<script>
+document.getElementById('f').onsubmit=function(e){e.preventDefault();
+ var t=document.getElementById('t').value.trim();if(!t)return;
+ document.cookie='augur_token='+encodeURIComponent(t)+';path=/;max-age=86400;samesite=strict';
+ location.replace('/');};
+</script></body></html>"""
+
+
+def auth_token(bind_scope: str, token: Optional[str] = None) -> Optional[str]:
+    """The effective access token for a bind scope. An explicit token always
+    wins. On `localhost` (single-user loopback) auth is off by default; any wider
+    exposure is fail-closed — a token is required, and one is minted here if you
+    didn't supply one (serve() prints it so you can reach the dashboard)."""
+    if token:
+        return token
+    if bind_scope == "localhost":
+        return None
+    return secrets.token_urlsafe(18)
+
+
+def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = None):
+    """Build a request handler for `/` and `/api/status`.
+
+    If `token` is set, every route is gated: `/api/status` needs it (401 without),
+    and `/` serves the unlock page until the cookie is present. Token travels via
+    an `Authorization: Bearer <token>` header or an `augur_token` cookie, compared
+    in constant time. `token=None` means open (the localhost default)."""
+    def _present(headers) -> Optional[str]:
+        auth = headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            return auth[7:].strip()
+        raw = headers.get("Cookie", "")
+        if raw:
+            try:
+                c = http.cookies.SimpleCookie(raw)
+                if "augur_token" in c:
+                    return c["augur_token"].value
+            except Exception:
+                return None
+        return None
+
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code, body, ctype):
             self.send_response(code)
@@ -199,10 +260,23 @@ def make_handler(status_provider: Callable[[], Dict]):
             self.end_headers()
             self.wfile.write(body)
 
+        def _authed(self) -> bool:
+            if not token:
+                return True
+            got = _present(self.headers)
+            return bool(got) and hmac.compare_digest(got, token)
+
         def do_GET(self):
+            authed = self._authed()
             if self.path.rstrip("/") == "/api/status" or self.path == "/api/status":
+                if not authed:
+                    self._send(401, b'{"error":"unauthorized"}', "application/json")
+                    return
                 self._send(200, json.dumps(status_provider()).encode(), "application/json")
             elif self.path == "/" or self.path == "":
+                if not authed:
+                    self._send(401, LOGIN_PAGE.encode(), "text/html; charset=utf-8")
+                    return
                 self._send(200, render_page().encode(), "text/html; charset=utf-8")
             else:
                 self._send(404, b"not found", "text/plain")
@@ -217,18 +291,26 @@ def resolve_host(bind_scope: str) -> str:
 
 
 def serve(augur, port: int = 8080, bind_scope: str = "localhost",
-          interval: float = 2.0, pump: bool = True, _cycles=None):
+          interval: float = 2.0, pump: bool = True, token: Optional[str] = None,
+          _cycles=None):
     """Run the dashboard (foreground loop). The HTTP server runs in a daemon thread
     and serves a cached snapshot; this thread owns the SightingStore, so it is the
     only one that pumps and recomputes the snapshot (SQLite is single-thread). Logs
     the exact URL. `_cycles` bounds the loop for tests; otherwise runs until Ctrl-C."""
     host = resolve_host(bind_scope)
+    tok = auth_token(bind_scope, token)
     holder = {"d": status_payload(augur)}
-    httpd = ThreadingHTTPServer((host, port), make_handler(lambda: holder["d"]))
+    httpd = ThreadingHTTPServer((host, port), make_handler(lambda: holder["d"], token=tok))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     url = f"http://{host}:{port}/"
-    _log.info("Augur web dashboard on %s (bind_scope=%s)", url, bind_scope)
+    _log.info("Augur web dashboard on %s (bind_scope=%s, auth=%s)", url, bind_scope, "on" if tok else "off")
     print(f"Augur web dashboard: {url}  (bind_scope={bind_scope})")
+    if tok:
+        print(f"  access token: {tok}")
+        print(f"  reach it: open the page and paste the token, or")
+        print(f"            curl -H 'Authorization: Bearer {tok}' {url}api/status")
+        if not token:
+            print("  (auto-generated because this bind is reachable off-box — set your own with --token)")
     n = 0
     try:
         while _cycles is None or n < _cycles:

@@ -29,9 +29,14 @@ leverage.
 
 ## P1 — surface auth
 
-- **Web dashboard has no auth.** bind-scope limits exposure, but on lan/tailscale
-  it's open to anyone who reaches it. Add a token/basic-auth gate (or bind-scope
-  localhost-only for anything sensitive) before it's deployed.
+- **Web dashboard auth — DONE.** Fail-closed token gate (`redux/web`): `localhost`
+  stays open (single-user loopback), but any off-box bind (`lan`/`tailscale`)
+  requires a token — supply one with `--token` or `serve(token=…)`, else one is
+  minted and printed to the operator console. Token travels as an
+  `Authorization: Bearer` header or an `augur_token` cookie (never in a URL),
+  compared in constant time; `/api/status` returns 401 without it and `/` shows a
+  self-contained unlock page. **Remaining:** transport is still plain HTTP — pair
+  with TLS (or keep it inside the tailnet) for anything crossing an untrusted LAN.
 
 ## P2 — productization / onboarding
 

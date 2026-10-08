@@ -86,7 +86,7 @@ def cmd_web(args) -> int:
         driver = BettercapDriver(config=BettercapConfig(),
                                  transport=ReplayTransport(events=events))
     bc = _build(args, driver=driver)
-    serve(bc, port=args.port, bind_scope=args.bind_scope)   # blocks until Ctrl-C
+    serve(bc, port=args.port, bind_scope=args.bind_scope, token=args.token)   # blocks until Ctrl-C
     return 0
 
 
@@ -688,6 +688,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_radio_flags(wb)
     wb.add_argument("--port", type=int, default=8080)
     wb.add_argument("--bind-scope", default="localhost", choices=["localhost", "lan", "tailscale", "auto"])
+    wb.add_argument("--token", default=None,
+                    help="dashboard access token; required (auto-generated if omitted) for any off-box bind")
     wb.add_argument("--replay", help="path to a recorded bettercap events JSON")
     wb.set_defaults(func=cmd_web)
 
