@@ -1,24 +1,54 @@
 """Thread-safe wrapper around SightingStore (stdlib threading.Lock)."""
 from __future__ import annotations
 
+import sqlite3
 import threading
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from redux.geo.db import Sighting, SightingStore
 
+PathLike = Union[str, "os.PathLike[str]"]
+
 
 class LockedSightingStore:
-    """Serialize insert/query/get/count on an underlying SightingStore."""
+    """Serialize insert/query/get/count.
 
-    def __init__(self, store: SightingStore) -> None:
-        self._store = store
+    Opens (or wraps) a SightingStore whose sqlite connection allows
+    cross-thread use; all public methods take an RLock so callers never
+    race the connection.
+    """
+
+    def __init__(self, store: Optional[SightingStore] = None, path: str = ":memory:") -> None:
+        if store is not None:
+            self._store = store
+            # Force cross-thread use on the existing connection
+            conn = self._store._conn
+            conn.isolation_level = conn.isolation_level  # touch
+            try:
+                # sqlite3 Connection has check_same_thread as init-only on some versions;
+                # replace connection if needed.
+                self._store._conn = sqlite3.connect(
+                    self._store.path if getattr(self._store, "path", None) else path,
+                    check_same_thread=False,
+                )
+                self._store._conn.row_factory = sqlite3.Row
+                # re-apply schema
+                from redux.geo.db import _SCHEMA
+
+                self._store._conn.executescript(_SCHEMA)
+                self._store._conn.commit()
+            except Exception:
+                pass
+        else:
+            self._store = SightingStore(path)
+            self._store._conn.close()
+            self._store._conn = sqlite3.connect(path, check_same_thread=False)
+            self._store._conn.row_factory = sqlite3.Row
+            from redux.geo.db import _SCHEMA
+
+            self._store._conn.executescript(_SCHEMA)
+            self._store._conn.commit()
         self._lock = threading.RLock()
-        # Allow the underlying connection to be used from the locking thread only;
-        # all access goes through this lock.
-        try:
-            self._store._conn.check_same_thread = False
-        except Exception:
-            pass
 
     def insert(self, sighting: Sighting) -> None:
         with self._lock:
