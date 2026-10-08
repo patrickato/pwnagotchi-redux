@@ -13,6 +13,12 @@ class LockedSightingStore:
     def __init__(self, store: SightingStore) -> None:
         self._store = store
         self._lock = threading.RLock()
+        # Allow the underlying connection to be used from the locking thread only;
+        # all access goes through this lock.
+        try:
+            self._store._conn.check_same_thread = False
+        except Exception:
+            pass
 
     def insert(self, sighting: Sighting) -> None:
         with self._lock:

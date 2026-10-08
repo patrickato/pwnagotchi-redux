@@ -1,4 +1,5 @@
 import threading
+from pathlib import Path
 
 from redux.geo import Sighting, SightingStore
 from redux.geo.locked_store import LockedSightingStore
@@ -11,9 +12,9 @@ def test_basic_ops():
         assert db.get("wifi", "aa:aa:aa:aa:aa:01") is not None
 
 
-def test_concurrent_inserts():
-    raw = SightingStore(":memory:")
-    db = LockedSightingStore(raw)
+def test_concurrent_inserts(tmp_path: Path):
+    path = str(tmp_path / "sightings.db")
+    db = LockedSightingStore(SightingStore(path))
 
     def worker(start: int) -> None:
         for i in range(20):
