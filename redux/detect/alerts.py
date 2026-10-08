@@ -22,6 +22,7 @@ class AlertKind(str, Enum):
     PINEAPPLE = "pineapple"
     LOUD_PROBER = "loud_prober"
     HIDDEN_SSID_REVEAL = "hidden_ssid_reveal"
+    WPA3_DOWNGRADE = "wpa3_downgrade"
 
 
 @dataclass(frozen=True)
