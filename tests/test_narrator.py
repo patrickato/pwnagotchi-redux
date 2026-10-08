@@ -47,6 +47,16 @@ def test_tft_is_short_and_glyphed():
     assert len(out) <= 20
 
 
+def test_voice_leadins_match_the_face_lexicon():
+    n = Narrator()
+    l1 = n.say_reason("PMKID elicited from HomeNet on ch6")
+    assert l1.mood is Mood.HUNTING and "cached" in l1.text and "HomeNet" in l1.text
+    l2 = n.say_reason("new AP seen: CoffeeShop (WPA2)")
+    assert l2.mood is Mood.HUNTING and "new face" in l2.text and "CoffeeShop" in l2.text
+    # the real machine reason is always carried verbatim (glass-box)
+    assert l1.reason == "PMKID elicited from HomeNet on ch6"
+
+
 # --- event bridge (honest coverage) ----------------------------------------- #
 
 def test_ap_new_event_bridges_to_beacon_frame():

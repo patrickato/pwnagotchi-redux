@@ -62,17 +62,26 @@ class Narrator:
     # --- inputs ------------------------------------------------------------ #
 
     def say_reason(self, reason: str) -> Optional[Line]:
-        """Voice an orchestrator/supervisor decision reason."""
+        """Voice an orchestrator/supervisor decision reason in Augur's register.
+
+        Terse, concrete, honest — lead-ins echo the creature's face lexicon
+        (hunt / cache / new-face / read / feathers-up), but the real machine
+        reason is always carried verbatim so nothing is lost or invented.
+        See docs/AUGUR.md for the voice."""
         r = (reason or "").strip()
         if not r:
             return None
         low = r.lower()
         if low.startswith("warning:"):
-            return self._emit(Mood.ALERT, f"heads up — {r[len('warning:'):].strip()}", r)
+            return self._emit(Mood.ALERT, f"feathers up — {r[len('warning:'):].strip()}", r)
+        if any(k in low for k in ("handshake", "pmkid", "cracked", "captured", "cached")):
+            return self._emit(Mood.HUNTING, f"cached — {r}", r)
+        if any(k in low for k in ("new ap", "new client", "new device", "new network", "new face")):
+            return self._emit(Mood.HUNTING, f"new face — {r}", r)
         if "capture" in low or "recon" in low or "pointing bettercap" in low:
-            return self._emit(Mood.HUNTING, f"on it: {r}", r)
-        if "intent" in low or "->" in r:
-            return self._emit(Mood.THINKING, f"rethinking: {r}", r)
+            return self._emit(Mood.HUNTING, f"on the hunt — {r}", r)
+        if "intent" in low or "->" in r or "re-decid" in low:
+            return self._emit(Mood.THINKING, f"reading the air — {r}", r)
         return self._emit(self._mood, r, r)
 
     def say_alert(self, alert) -> Optional[Line]:
@@ -81,7 +90,8 @@ class Narrator:
         sev = getattr(alert, "severity", "warning")
         kind = getattr(getattr(alert, "kind", None), "value", "") or "alert"
         mood = Mood.ALERT
-        lead = "!! " if sev in _CRITICAL else "⚠ "
+        # calm but clear — a critical alert is marked, never shouted (no "!!")
+        lead = "⚠ " if sev in _CRITICAL else "— "
         return self._emit(mood, f"{lead}{kind}: {reason}", reason)
 
     def say_assessment(self, ssid: str, assessment) -> Optional[Line]:
