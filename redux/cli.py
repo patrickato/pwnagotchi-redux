@@ -213,6 +213,25 @@ def cmd_init(args) -> int:
     return 0
 
 
+def cmd_selftest(args) -> int:
+    """On-device software battery + environment probe. Prints PASS/FAIL/SKIP you can
+    paste back; exit 1 if anything FAILed. Physical tests are listed as manual steps."""
+    from .selftest import run_selftest
+    checks = run_selftest()
+    npass = sum(c.status == "PASS" for c in checks)
+    nfail = sum(c.status == "FAIL" for c in checks)
+    nskip = sum(c.status == "SKIP" for c in checks)
+    print("Augur selftest")
+    for c in checks:
+        print(f"  [{c.status:4}] {c.name:24} {c.detail}")
+    print(f"summary: {npass} pass · {nfail} fail · {nskip} skip")
+    print("manual (physical) tests — walk these with Claude; see docs/HARDWARE_VALIDATION.md:")
+    print("  - handshake capture on YOUR OWN AP (bettercap, monitor mode)")
+    print("  - redux captap live --iface <mon> --seconds 30   (+ a short deauth burst on YOUR OWN AP)")
+    print("  - fox-hunt walk · EAP on your own enterprise SSID · mesh LoRa (2 nodes) · Governor under load")
+    return 1 if nfail else 0
+
+
 def cmd_config(args) -> int:
     from pathlib import Path as _P
     import json as _json
@@ -1019,6 +1038,9 @@ def build_parser() -> argparse.ArgumentParser:
     ini.add_argument("--node-id", default=None, help="this device's unique node id")
     ini.add_argument("--force", action="store_true", help="overwrite existing config/keystore")
     ini.set_defaults(func=cmd_init)
+
+    st = sub.add_parser("selftest", help="on-device software battery + environment probe (paste the report back)")
+    st.set_defaults(func=cmd_selftest)
 
     pk = sub.add_parser("packs", help="manage Packs")
     pk.add_argument("--dir", required=True, help="packs directory")
