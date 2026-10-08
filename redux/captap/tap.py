@@ -128,7 +128,11 @@ def live_source(iface: str, *, _socket=None):
     NEEDS-HARDWARE: requires a real monitor-mode interface and raw-socket
     privileges. Honest about absence — if a raw socket can't be opened it raises a
     clear error rather than yielding fabricated frames. The parser/tap above do not
-    depend on this; they take bytes from any source."""
+    depend on this; they take bytes from any source.
+
+    Yields (raw, ts, radiotap=True) 3-tuples: a mac80211 monitor interface prepends a
+    radiotap header to every frame, so the parser must skip it — capture_run reads
+    the third element and passes radiotap through."""
     import socket as _s
     sock = _socket
     if sock is None:
@@ -139,7 +143,7 @@ def live_source(iface: str, *, _socket=None):
             raise RuntimeError(
                 f"monitor-mode capture unavailable on '{iface}': {e} "
                 "(needs a monitor interface + raw-socket privileges)") from e
+    import time as _t
     while True:
-        import time as _t
         raw = sock.recv(4096)
-        yield raw, _t.time()
+        yield raw, _t.time(), True   # monitor frames carry a radiotap header → skip it

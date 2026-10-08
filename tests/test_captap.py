@@ -3,7 +3,7 @@ import struct
 
 from redux.captap import (
     parse_dot11, parse_radiotap_len, build_probe_req, build_deauth, CaptureTap, to_frame,
-    capture_run,
+    capture_run, live_source,
 )
 from redux.detect.engine import DetectEngine
 from redux.captap.dot11 import Dot11Frame
@@ -154,3 +154,30 @@ def test_capture_run_respects_max_frames():
     src = [(build_probe_req("a2:11:11:11:11:11", "N", ies=IES), float(i)) for i in range(100)]
     tap, _ = capture_run(iter(src), max_frames=5)
     assert tap.frames_seen == 5                                  # bounded, didn't drain the source
+
+
+# --- regression: live monitor frames carry a radiotap header (hardware-found) --- #
+
+_RT = b"\x00\x00" + struct.pack("<H", 8) + b"\x00\x00\x00\x00"   # radiotap, it_len=8
+
+
+def test_live_source_flags_radiotap():
+    frame = _RT + build_deauth("aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66", "11:22:33:44:55:66")
+
+    class FakeSock:
+        def recv(self, n):
+            return frame
+
+    raw, ts, radiotap = next(live_source("wlan1mon", _socket=FakeSock()))
+    assert radiotap is True and raw == frame        # monitor frames must be flagged radiotap
+
+
+def test_capture_run_parses_radiotap_frames_not_garbage():
+    # the bug: a radiotap-prefixed frame fed WITHOUT the flag misparses to nothing
+    src = [(_RT + build_deauth("de:ad:00:00:00:01", "ff:ff:ff:ff:ff:ff", "11:22:33:44:55:66"),
+            10.0 + i * 0.1, True) for i in range(22)]
+    tap, alerts = capture_run(iter(src), engine=DetectEngine())
+    assert len(tap.deauths) == 22 and "deauth_flood" in {a.kind.value for a in alerts}
+    # same bytes, no radiotap flag → header misread, nothing recognized (what live_source now prevents)
+    bad, _ = capture_run(iter([(src[0][0], 1.0)]))
+    assert len(bad.deauths) == 0
