@@ -24,6 +24,7 @@ class AlertKind(str, Enum):
     HIDDEN_SSID_REVEAL = "hidden_ssid_reveal"
     CSA_ABUSE = "csa_abuse"
     WPA3_DOWNGRADE = "wpa3_downgrade"
+    CLIENT_BURST = "client_burst"
 
 
 @dataclass(frozen=True)
