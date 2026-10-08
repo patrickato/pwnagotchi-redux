@@ -436,12 +436,14 @@ class Augur:
         return {"frames": tap.frames_seen, "deauth_events": len(tap.deauths),
                 "device_identities": linker.summary(), "linker": linker}
 
-    def tft_frame(self, face="status", width: int = 46, ascii: bool = False):
+    def tft_frame(self, face="status", width: int = 46, ascii: bool = False,
+                  pack: str = "augur"):
         """Render the on-device TFT frame (list of rows) from live status. Lean,
-        static (no animation), monochrome-safe — see redux.tft."""
+        static (no animation), monochrome-safe — see redux.tft. `pack` selects the
+        face look (augur/owl/fox)."""
         from ..tft import render, Face
         f = face if isinstance(face, Face) else Face(face)
-        return render(self.status(), face=f, width=width, ascii=ascii)
+        return render(self.status(), face=f, width=width, ascii=ascii, pack=pack)
 
     def current_position(self):
         """This device's own current GPS fix as {lat, lon}, or None when there is

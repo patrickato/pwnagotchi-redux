@@ -369,7 +369,7 @@ def cmd_tft(args) -> int:
                   "sentinel": {"armed": True, "dispatched": 4, "suppressed": 2,
                                "last": {"summary": "ble_skimmer", "severity": "critical"}},
                   "narration": ["ch6 dwell - 3 new APs, 1 PMKID elicited"]}
-    for line in render(status, face=Face(args.face), ascii=args.ascii):
+    for line in render(status, face=Face(args.face), ascii=args.ascii, pack=args.pack):
         print(line)
     return 0
 
@@ -917,6 +917,8 @@ def build_parser() -> argparse.ArgumentParser:
     tf.add_argument("--face", default="status", choices=["plain", "status"])
     tf.add_argument("--persona", help="apply a persona first")
     tf.add_argument("--ascii", action="store_true", help="ascii fallback (no box/block glyphs)")
+    tf.add_argument("--pack", default="augur", choices=["augur", "owl", "fox"],
+                    help="face look (default: augur / the corvid)")
     tf.add_argument("--demo", action="store_true", help="populate with sample data")
     tf.set_defaults(func=cmd_tft)
 

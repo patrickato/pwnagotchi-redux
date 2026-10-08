@@ -34,29 +34,9 @@ class AugurState(str, Enum):
     ROOST = "roost"     # settled with the murder (mesh peers present)
 
 
-# Eyes. The ‹ › beak-frame is Augur's signature; the pair between is the
-# expression. Two glyph sets: unicode (nice on the panel font / web) and a pure
-# ASCII fallback for mono panels and ascii-only rendering.
-_EYES_U: Dict[AugurState, str] = {
-    AugurState.WATCH:  "‹·_·›",
-    AugurState.READ:   "‹o_·›",
-    AugurState.HUNT:   "‹►_◄›",
-    AugurState.MARK:   "‹!_·›",
-    AugurState.CACHE:  "‹^_^›",
-    AugurState.RUFFLE: "‹✺_✺›",
-    AugurState.BLIND:  "‹-_-›",
-    AugurState.ROOST:  "‹u_u›",
-}
-_EYES_A: Dict[AugurState, str] = {
-    AugurState.WATCH:  "<._.>",
-    AugurState.READ:   "<o_.>",
-    AugurState.HUNT:   "<=_=>",
-    AugurState.MARK:   "<!_.>",
-    AugurState.CACHE:  "<^_^>",
-    AugurState.RUFFLE: "<*_*>",
-    AugurState.BLIND:  "<-_->",
-    AugurState.ROOST:  "<u_u>",
-}
+# The eyes/glyphs for each state live in `packs.py` (selectable looks); the default
+# "augur" pack is the corvid with its ‹ › beak-frame signature. This module owns the
+# state machine and the honest reasons; packs only swap how a state is drawn.
 
 _REASON: Dict[AugurState, str] = {
     AugurState.WATCH:  "watching — quiet",
@@ -70,8 +50,9 @@ _REASON: Dict[AugurState, str] = {
 }
 
 
-def eyes(state: AugurState, ascii: bool = False) -> str:
-    return (_EYES_A if ascii else _EYES_U)[state]
+def eyes(state: AugurState, ascii: bool = False, pack: str = "augur") -> str:
+    from .packs import eyes_for      # local import avoids a face<->packs cycle
+    return eyes_for(state, pack=pack, ascii=ascii)
 
 
 @dataclass(frozen=True)
@@ -79,8 +60,9 @@ class AugurFace:
     state: AugurState
     reason: str   # the honest, human-readable reason this face is showing
 
-    def eyes(self, ascii: bool = False) -> str:
-        return (_EYES_A if ascii else _EYES_U)[self.state]
+    def eyes(self, ascii: bool = False, pack: str = "augur") -> str:
+        from .packs import eyes_for
+        return eyes_for(self.state, pack=pack, ascii=ascii)
 
 
 def face_for(status: Dict) -> AugurFace:

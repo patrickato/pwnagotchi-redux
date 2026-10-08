@@ -62,15 +62,21 @@ class VaultCfg:
 
 
 @dataclass
+class TftCfg:
+    face_pack: str = "augur"                   # augur | owl | fox
+
+
+@dataclass
 class AugurConfig:
     cache: CacheCfg = field(default_factory=CacheCfg)
     web: WebCfg = field(default_factory=WebCfg)
     mesh: MeshCfg = field(default_factory=MeshCfg)
     persona: PersonaCfg = field(default_factory=PersonaCfg)
     vault: VaultCfg = field(default_factory=VaultCfg)
+    tft: TftCfg = field(default_factory=TftCfg)
 
     _SECTIONS = {"cache": CacheCfg, "web": WebCfg, "mesh": MeshCfg,
-                 "persona": PersonaCfg, "vault": VaultCfg}
+                 "persona": PersonaCfg, "vault": VaultCfg, "tft": TftCfg}
 
     @classmethod
     def from_dict(cls, d: Dict) -> "AugurConfig":
@@ -115,6 +121,13 @@ class AugurConfig:
             p.append("mesh.node_id must be set to a unique value")
         if not self.vault.passphrase_env:
             p.append("vault.passphrase_env must name the env var holding the passphrase")
+        try:
+            from ..face import list_packs
+            packs = list_packs()
+        except Exception:
+            packs = ["augur", "owl", "fox"]
+        if self.tft.face_pack not in packs:
+            p.append(f"tft.face_pack '{self.tft.face_pack}' unknown (use one of {', '.join(packs)})")
         return p
 
     def to_display(self) -> Dict:
@@ -149,4 +162,7 @@ default = "recon"            # recon | red | blue | purple | mesh | sigint
 
 [vault]
 passphrase_env = "AUGUR_PASSPHRASE"   # env var that holds the at-rest passphrase (never the value)
+
+[tft]
+face_pack = "augur"          # on-device face look: augur (corvid) | owl | fox
 """

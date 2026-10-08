@@ -79,8 +79,10 @@ leverage.
   skin; client-rendered, zero Pi cost). Further: offline map tiles when internet is
   present, a channel waterfall / RSSI meter panel, per-security pin coloring (needs
   an encryption field on sightings).
-- **TFT stays lean on purpose** (SPI redraw = Pi CPU → heat/battery). Candidate:
-  selectable low-cost "faces" (pwnagotchi-style), NOT heavy animation.
+- **TFT stays lean on purpose** (SPI redraw = Pi CPU → heat/battery). Selectable
+  low-cost **face-packs — DONE** (`redux/face/packs.py`: augur/owl/fox, static,
+  `--pack` / `[tft] face_pack`), NOT heavy animation. Remaining candidates: a
+  channel-waterfall / RSSI meter panel (web), offline map tiles.
 
 ## Known, already-coordinated
 

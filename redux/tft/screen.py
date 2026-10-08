@@ -56,7 +56,7 @@ def _clip(s: str, n: int, ell: str = "…") -> str:
 
 
 def render(status: Dict, *, face: Face = Face.STATUS, width: int = 46,
-           ascii: bool = False) -> List[str]:
+           ascii: bool = False, pack: str = "augur") -> List[str]:
     """Render a status snapshot into a fixed-width TFT frame (list of rows)."""
     g = _A if ascii else _U
     ell = g["ell"]
@@ -96,7 +96,7 @@ def render(status: Dict, *, face: Face = Face.STATUS, width: int = 46,
     # Augur's face — the same deterministic engine the web face uses, so the
     # creature has one identity whichever way you look at it.
     fobj = face_for(status)
-    eyes = fobj.eyes(ascii=ascii)
+    eyes = fobj.eyes(ascii=ascii, pack=pack)
     fstate = fobj.state.value.upper()
 
     if face is Face.PLAIN:

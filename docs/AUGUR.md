@@ -91,6 +91,17 @@ they're already clear and un-beasted. A handful of internal design-doc terms (`B
 "Beast Recon Suite") are legacy vocabulary migrating as those docs are touched; references to
 the **sibling `beastagotchi` repo** are a different real project and keep their name.
 
+## Face-packs
+
+The face *state machine* (which expression, and why) is fixed and honest. A **pack**
+only swaps the glyphs that draw each state, so the look is selectable without
+touching what the face means: **augur** (the corvid, default), **owl** (round-eyed
+night watcher), **fox** (the fox-hunt mascot). Every pack covers all eight states
+with a pure-ASCII fallback, single code points so the fixed-width layout stays
+aligned. `redux tft --pack owl`, or `[tft] face_pack` in `config.toml`. New looks are
+one entry in `redux/face/packs.py`. (`redux/face/` owns the machine; `packs.py` owns
+the looks.)
+
 ## Where it renders
 
 Two surfaces, split by where the pixels cost something:
