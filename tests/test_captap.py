@@ -3,7 +3,9 @@ import struct
 
 from redux.captap import (
     parse_dot11, parse_radiotap_len, build_probe_req, build_deauth, CaptureTap, to_frame,
+    capture_run,
 )
+from redux.detect.engine import DetectEngine
 from redux.captap.dot11 import Dot11Frame
 from redux.detect.deauth_flood import DeauthFloodDetector
 from redux.detect.frames import FrameType
@@ -133,3 +135,22 @@ def test_ingest_frames_closes_loop_to_detector():
     assert "deauth_flood" in out["alerts"]
     # and it was voiced (glass-box) in the creature's narration
     assert any("deauth_flood" in l.text for l in bc.narrator.lines())
+
+
+def test_capture_run_over_a_canned_source():
+    # capture_run consumes any (raw, ts) iterable → re-id + detector alerts, no radio
+    src = []
+    for mac in ("a2:11:11:11:11:11", "de:22:22:22:22:22"):      # one phone, two MACs
+        for ssid in ("HomeLab-5G", "CoffeeShop"):
+            src.append((build_probe_req(mac, ssid, ies=IES), 10.0))
+    for i in range(22):                                          # a deauth burst
+        src.append((build_deauth("de:ad:00:00:00:01", "ff:ff:ff:ff:ff:ff", "11:22:33:44:55:66"), 20.0 + i * 0.1))
+    tap, alerts = capture_run(iter(src), engine=DetectEngine())
+    assert tap.link().summary()["reidentified"] == 1
+    assert "deauth_flood" in {a.kind.value for a in alerts}
+
+
+def test_capture_run_respects_max_frames():
+    src = [(build_probe_req("a2:11:11:11:11:11", "N", ies=IES), float(i)) for i in range(100)]
+    tap, _ = capture_run(iter(src), max_frames=5)
+    assert tap.frames_seen == 5                                  # bounded, didn't drain the source

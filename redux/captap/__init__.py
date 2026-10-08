@@ -9,11 +9,11 @@ normalized events for the flood detectors. The live monitor socket is the one
 needs-hardware adapter; everything else is testable from raw bytes.
 """
 from .dot11 import Dot11Frame, parse_dot11, parse_radiotap_len, build_probe_req, build_deauth
-from .tap import CaptureTap, DeauthEvent, live_source
+from .tap import CaptureTap, DeauthEvent, live_source, capture_run
 from .detect_bridge import to_frame, frames_from
 
 __all__ = [
     "Dot11Frame", "parse_dot11", "parse_radiotap_len", "build_probe_req", "build_deauth",
-    "CaptureTap", "DeauthEvent", "live_source",
+    "CaptureTap", "DeauthEvent", "live_source", "capture_run",
     "to_frame", "frames_from",
 ]

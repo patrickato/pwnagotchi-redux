@@ -99,6 +99,29 @@ class CaptureTap:
         return list(self.det_frames)
 
 
+def capture_run(source, *, max_frames=None, seconds=None, engine=None, clock=None):
+    """Consume (raw, ts[, radiotap]) items from `source` into a CaptureTap, bounded
+    by `max_frames` and/or `seconds`, then run `engine` (a DetectEngine, optional)
+    over the captured frames. Returns (tap, alerts).
+
+    Pure over any iterable, so it's testable with canned frames and no hardware —
+    the live monitor socket is just one such iterable (see `live_source`)."""
+    import time as _t
+    clock = clock or _t.time
+    tap = CaptureTap()
+    t0 = clock()
+    for item in source:
+        buf, ts = item[0], item[1]
+        rt = item[2] if len(item) > 2 else False
+        tap.feed(buf, radiotap=rt, ts=ts)
+        if max_frames and tap.frames_seen >= max_frames:
+            break
+        if seconds and (clock() - t0) >= seconds:
+            break
+    alerts = list(engine.feed_many(tap.detect_frames())) if engine is not None else []
+    return tap, alerts
+
+
 def live_source(iface: str, *, _socket=None):
     """A generator of raw frames from a monitor-mode interface (AF_PACKET).
 

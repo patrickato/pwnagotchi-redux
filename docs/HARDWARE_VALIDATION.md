@@ -131,9 +131,9 @@ error radius. **No fake meters — a coarse band only.**
 
 ### 2b.6 — fingerprint re-identification (`redux/dex/fingerprint.py` + `redux/captap/`)
 ```sh
-redux captap demo        # synthetic sanity (fires re-id + a deauth_flood); then go live
-# put an adapter in monitor mode and feed live frames via the captap AF_PACKET source
-redux dex --identities
+redux captap demo        # synthetic sanity (fires re-id + a deauth_flood)
+# then LIVE, adapter in monitor mode (on YOUR OWN gear only):
+redux captap live --iface wlan1mon --seconds 30
 ```
 **Pass:** with live monitor capture feeding captap, your own phone is re-identified as ONE device
 across its MAC randomizations (shared PNL/IE); two unrelated devices never collapse. The tap
@@ -176,7 +176,8 @@ The deauth-flood / surveillance-sweep chain is now **wired**: captap parses raw 
 the same `DetectEngine` as every other source (sandbox-verified end-to-end — `redux captap demo`
 fires `deauth_flood`). The remaining step is the live monitor source:
 ```sh
-# adapter in monitor mode; on YOUR OWN AP, trigger a short deauth burst against YOUR OWN client
+redux captap live --iface wlan1mon --seconds 30   # mid-run, trigger a short deauth burst
+# on YOUR OWN AP against YOUR OWN client (e.g. aireplay-ng --deauth)
 ```
 **Pass:** a real deauth burst on your own gear raises a glass-box `deauth_flood` alert (voiced /
 notified over the real notifier); a quiet airspace stays silent (no false positives). The CSA and

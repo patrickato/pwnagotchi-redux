@@ -410,6 +410,34 @@ def cmd_campaign(args) -> int:
 
 
 def cmd_captap(args) -> int:
+    if getattr(args, "captap_cmd", "demo") == "live":
+        return _captap_live(args)
+    return _captap_demo(args)
+
+
+def _captap_live(args) -> int:
+    """Live monitor-mode capture → the same re-id + flood-detector chain as the demo,
+    but from a real radio. Honest about hardware absence (no monitor iface / no
+    raw-socket privileges → a clear message, not fabricated frames)."""
+    from .captap import live_source, capture_run
+    from .detect.engine import DetectEngine
+    print(f"redux captap live — monitor capture on {args.iface} "
+          f"(≤{args.max or '∞'} frames / ≤{args.seconds}s)")
+    try:
+        tap, alerts = capture_run(live_source(args.iface), max_frames=args.max,
+                                  seconds=args.seconds, engine=DetectEngine())
+    except RuntimeError as e:
+        print(f"  unavailable: {e}")
+        return 3
+    s = tap.link().summary()
+    print(f"  frames parsed: {tap.frames_seen}  |  deauth events: {len(tap.deauths)}")
+    print(f"  device identities: {s['identities']} total, {s['reidentified']} re-identified across MAC")
+    kinds = sorted({a.kind.value for a in alerts})
+    print(f"  alerts fired: {kinds or 'none'}")
+    return 0
+
+
+def _captap_demo(args) -> int:
     """Raw-frame tap demo: SYNTHETIC probe requests from a phone that rotated its
     MAC (same PNL + IE fingerprint) plus a deauth burst, parsed and routed — shows
     cross-MAC re-identification and the staged deauth events. No radio."""
@@ -1017,6 +1045,10 @@ def build_parser() -> argparse.ArgumentParser:
     ct = sub.add_parser("captap", help="raw 802.11 tap — probe/deauth parsing + cross-MAC re-id")
     ctsub = ct.add_subparsers(dest="captap_cmd", required=True)
     ctsub.add_parser("demo", help="synthetic frames: re-identify a phone across MAC rotation")
+    cl = ctsub.add_parser("live", help="live monitor-mode capture → re-id + flood detectors (needs hardware)")
+    cl.add_argument("--iface", required=True, help="monitor-mode interface (e.g. wlan1mon)")
+    cl.add_argument("--seconds", type=float, default=30.0, help="stop after N seconds (default 30)")
+    cl.add_argument("--max", type=int, default=None, help="stop after N frames")
     ct.set_defaults(func=cmd_captap)
 
     tf = sub.add_parser("tft", help="render the on-device TFT frame to the terminal")
