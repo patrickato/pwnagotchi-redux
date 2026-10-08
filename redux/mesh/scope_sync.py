@@ -79,6 +79,10 @@ class ScopeSync:
     scope: object
     key: bytes
     node_id: str = "node"
+    # Extra keys accepted ONLY for verifying received deltas — the rotation grace
+    # window, so deltas signed with a just-rotated key still verify. Signing always
+    # uses `key` (the current one). Empty by default → unchanged single-key behavior.
+    verify_keys: List[bytes] = field(default_factory=list)
     _clock: Dict[Tuple[str, str, str], float] = field(default_factory=dict)
     rejected: int = 0
 
@@ -116,7 +120,8 @@ class ScopeSync:
 
     def apply(self, message: SignedMessage, *, now: Optional[float] = None) -> Tuple[bool, str]:
         now = time.time() if now is None else now
-        if not verify(message.payload, message.sig, self.key):
+        if not (verify(message.payload, message.sig, self.key)
+                or any(verify(message.payload, message.sig, k) for k in self.verify_keys)):
             self.rejected += 1
             return False, "rejected: bad signature — not from the swarm key"
         p = message.payload

@@ -389,6 +389,65 @@ def cmd_mesh(args) -> int:
     return 0
 
 
+def cmd_mesh_key(args) -> int:
+    """Swarm-key lifecycle, persisted to a sealed keystore (needs the crypto
+    extra). Passphrase via AUGUR_PASSPHRASE or prompt — never argv."""
+    from pathlib import Path as _P
+    import time as _t
+    from .mesh import SwarmKeyring, export_token, save as ks_save, load as ks_load
+    from .vault import crypto_available, resolve_passphrase, BadVaultData
+    if not crypto_available():
+        print("mesh key: the sealed keystore needs the crypto extra — "
+              "pip install 'pwnagotchi-redux[crypto]'")
+        return 3
+    ttl = (args.ttl_days * 86400) if getattr(args, "ttl_days", None) else None
+    try:
+        if args.key_cmd == "gen":
+            ring = SwarmKeyring()
+            k = ring.rotate(label=args.label, ttl=ttl)
+            ks_save(ring, args.store, resolve_passphrase(confirm=True))
+            print(f"generated swarm key {k.kid}" + (f" [{k.label}]" if k.label else "")
+                  + f" → sealed {args.store}")
+        elif args.key_cmd == "rotate":
+            pw = resolve_passphrase()
+            ring = ks_load(args.store, pw)
+            k = ring.rotate(label=args.label, ttl=ttl)
+            ks_save(ring, args.store, pw)
+            print(f"rotated → current {k.kid}; {len(ring.keys) - 1} prior key(s) held for grace")
+        elif args.key_cmd == "show":
+            ring = ks_load(args.store, resolve_passphrase())
+            now = _t.time()
+            if not ring.keys:
+                print("(empty keyring)")
+                return 0
+            for i, k in enumerate(ring.keys):
+                role = "current" if i == 0 else "grace"
+                exp = ("never" if k.expires is None
+                       else "EXPIRED" if k.is_expired(now) else f"~{int((k.expires - now) / 3600)}h")
+                print(f"  {k.kid}  {role:7} {('[' + k.label + '] ') if k.label else ''}expires {exp}")
+        elif args.key_cmd == "export":
+            ring = ks_load(args.store, resolve_passphrase())
+            k = ring.active()
+            if k is None:
+                print("no active key to export")
+                return 4
+            print(export_token(k))   # key material — hand to a trusted peer via QR/LoRa
+        elif args.key_cmd == "import":
+            pw = resolve_passphrase()
+            tok = _P(args.token_file).read_text().strip()
+            ring = ks_load(args.store, pw)
+            k = ring.import_token(tok)
+            ks_save(ring, args.store, pw)
+            print(f"imported swarm key {k.kid} → {args.store}")
+    except BadVaultData as e:
+        print(f"mesh key: {e}")
+        return 4
+    except (ValueError, FileNotFoundError, OSError) as e:
+        print(f"mesh key: {e}")
+        return 4
+    return 0
+
+
 def cmd_eap(args) -> int:
     """WPA-Enterprise EAP harvest. `plan` builds the Scope-aimed, posture-gated
     rogue-AP plan (refuses if the SSID isn't armed / posture passive / not
@@ -824,6 +883,27 @@ def build_parser() -> argparse.ArgumentParser:
     me = sub.add_parser("mesh", help="off-grid swarm — authenticated distributed Scope sync")
     mesub = me.add_subparsers(dest="mesh_cmd", required=True)
     mesub.add_parser("demo", help="3-node swarm: propagate an arm + reject a forged delta")
+    mk = mesub.add_parser("key", help="swarm-key lifecycle: gen/rotate/show/export/import (sealed)")
+    mksub = mk.add_subparsers(dest="key_cmd", required=True)
+
+    def _store(p):
+        p.add_argument("--store", required=True, help="sealed keystore path")
+
+    kg = mksub.add_parser("gen", help="generate a new swarm key")
+    _store(kg)
+    kg.add_argument("--label", default="", help="job/lab label")
+    kg.add_argument("--ttl-days", type=float, default=None, help="expire the key after N days")
+    kr = mksub.add_parser("rotate", help="new current key; recent kept for a grace window")
+    _store(kr)
+    kr.add_argument("--label", default="")
+    kr.add_argument("--ttl-days", type=float, default=None)
+    _store(mksub.add_parser("show", help="list key ids + status (never the key material)"))
+    _store(mksub.add_parser("export", help="print the active key's exchange token (QR/LoRa)"))
+    ki = mksub.add_parser("import", help="import a key exchange token from a file")
+    _store(ki)
+    ki.add_argument("--token-file", required=True, help="file holding an AKEY1 token")
+    mk.set_defaults(func=cmd_mesh_key)
+
     me.set_defaults(func=cmd_mesh)
 
     ep = sub.add_parser("eap", help="WPA-Enterprise EAP credential capture (scope+posture gated)")

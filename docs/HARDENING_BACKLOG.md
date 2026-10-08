@@ -32,9 +32,14 @@ leverage.
   scope. At-rest encryption (above) is the protective answer for a lost/seized card.
   A non-destructive "tamper detected → alert over LoRa" could be considered separately
   if wanted, but nothing here wipes data.
-- **Swarm-key lifecycle.** Mesh deltas are HMAC-signed, but there's no key
-  generation/rotation/distribution story. Define one (generate on arm-lab, QR/LoRa
-  exchange, rotate per job).
+- **Swarm-key lifecycle — DONE.** `redux/mesh/keyring.py`: generate a random key,
+  **rotate** per job (new current + a bounded grace window of recent keys so
+  in-flight deltas still verify — `ScopeSync.verify_keys`), per-key **expiry** (a
+  lapsed key stops authorizing), out-of-band **exchange** via an `AKEY1` token
+  (QR/LoRa), and a keystore **sealed at rest** through `redux.vault` (honest/
+  fail-closed). CLI: `redux mesh key gen|rotate|show|export|import`. **Remaining:**
+  auto-wire the active key into the running `ScopeSync` from the keystore at boot
+  (config item), rather than passing keys in by hand.
 
 ## P1 — surface auth
 
