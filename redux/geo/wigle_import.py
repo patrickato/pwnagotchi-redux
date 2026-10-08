@@ -27,17 +27,23 @@ def _parse_int(v: str):
 
 def import_wigle_csv(source: Union[PathLike, TextIO, str], store: SightingStore) -> int:
     """Import WiGLE CSV rows into store. Returns rows processed."""
-    if isinstance(source, (str, Path)):
-        p = Path(source)
-        if p.exists():
-            text = p.read_text(encoding="utf-8", errors="replace")
+    if hasattr(source, "read"):
+        f = source  # type: ignore[assignment]
+    elif isinstance(source, Path):
+        f = io.StringIO(source.read_text(encoding="utf-8", errors="replace"))
+    elif isinstance(source, str):
+        # Multiline / has commas → treat as CSV body; else path if it exists
+        if "\n" in source or source.count(",") > 3:
+            f = io.StringIO(source)
         else:
-            text = str(source)
-        f = io.StringIO(text)
+            p = Path(source)
+            if p.exists():
+                f = io.StringIO(p.read_text(encoding="utf-8", errors="replace"))
+            else:
+                f = io.StringIO(source)
     else:
-        f = source
+        f = io.StringIO(str(source))
 
-    # Skip WiGLE metadata lines starting with WigleWifi-
     lines = []
     for line in f:
         if line.startswith("WigleWifi-") or line.startswith("WigleWifi"):
@@ -46,7 +52,6 @@ def import_wigle_csv(source: Union[PathLike, TextIO, str], store: SightingStore)
     reader = csv.DictReader(io.StringIO("".join(lines)))
     n = 0
     for row in reader:
-        # Common column names in WigleWifi-1.6
         mac = (row.get("MAC") or row.get("mac") or "").strip()
         if not mac:
             continue
