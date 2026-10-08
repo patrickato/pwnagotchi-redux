@@ -1,10 +1,10 @@
 """Per-BSSID revisit / time-of-day analysis from sighting timestamps."""
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 from redux.geo.db import Sighting, SightingStore
 
@@ -17,7 +17,7 @@ class RevisitInfo:
     first_ts: float
     last_ts: float
     span_s: float
-    hour_histogram: dict  # hour 0..23 -> count
+    hour_histogram: dict
     reason: str
 
 
@@ -31,7 +31,6 @@ def revisit_for_mac(
     *,
     kind: str = "wifi",
 ) -> Optional[RevisitInfo]:
-    """Summarize revisit pattern for one BSSID using store row times."""
     row = store.get(kind, mac)
     if row is None:
         return None
@@ -62,6 +61,7 @@ def hour_histogram_from_sightings(sightings: Sequence[Sighting]) -> Dict[int, in
     """UTC hour-of-day histogram across a list of sightings."""
     c: Counter[int] = Counter()
     for s in sightings:
-        if s.ts:
-            c[_hour_utc(s.ts)] += 1
+        if s.ts is None:
+            continue
+        c[_hour_utc(float(s.ts))] += 1
     return dict(c)
