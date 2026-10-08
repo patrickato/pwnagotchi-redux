@@ -25,6 +25,7 @@ class AlertKind(str, Enum):
     CSA_ABUSE = "csa_abuse"
     WPA3_DOWNGRADE = "wpa3_downgrade"
     CLIENT_BURST = "client_burst"
+    PROBE_FLOOD = "probe_flood"
 
 
 @dataclass(frozen=True)
