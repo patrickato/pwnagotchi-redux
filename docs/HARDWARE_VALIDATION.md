@@ -129,14 +129,15 @@ redux hunt demo        # sanity; then feed live RSSI for your own AP while walki
 `colder`; with a real GPS, the weighted-centroid estimate lands near the AP within its stated
 error radius. **No fake meters — a coarse band only.**
 
-### 2b.6 — fingerprint re-identification (`redux/dex/fingerprint.py`)
+### 2b.6 — fingerprint re-identification (`redux/dex/fingerprint.py` + `redux/captap/`)
 ```sh
-# requires a probe-request / raw-frame tap feeding real PNL/IE into observations
+redux captap demo        # synthetic sanity (fires re-id + a deauth_flood); then go live
+# put an adapter in monitor mode and feed live frames via the captap AF_PACKET source
 redux dex --identities
 ```
-**Pass:** with a raw-frame tap, your own phone is re-identified as ONE device across its MAC
-randomizations (shared PNL/IE); two unrelated devices never collapse. Until the tap exists this
-is a **labeled gap** — the linker is correct, the rich input is the hardware dependency.
+**Pass:** with live monitor capture feeding captap, your own phone is re-identified as ONE device
+across its MAC randomizations (shared PNL/IE); two unrelated devices never collapse. The tap
+producer + linker are sandbox-done; the remaining hardware dependency is just monitor-mode capture.
 
 ### 2b.7 — Sentinel end-to-end (`redux/sentinel/`)
 ```sh
@@ -170,10 +171,28 @@ UNKNOWN, never a green.
 **Pass:** `redux scope add`/`arm-lab`, reboot, `redux scope list` still shows the armed targets;
 an expired entry has lapsed on its own. The firing gate refuses when empty.
 
-### 2b.12 — raw-frame detectors (still dark until a tap exists)
-`deauth-flood` and `surveillance-sweep` need raw 802.11 deauth frames (radiotap/pcap tap), which
-the bettercap REST event stream does not expose. **Pass = honestly confirm they stay dark** (no
-false positives) until a capture tap is added; do not claim them live.
+### 2b.12 — raw-frame detectors via the live tap (`redux/captap/` → `redux/detect/`)
+The deauth-flood / surveillance-sweep chain is now **wired**: captap parses raw 802.11 and feeds
+the same `DetectEngine` as every other source (sandbox-verified end-to-end — `redux captap demo`
+fires `deauth_flood`). The remaining step is the live monitor source:
+```sh
+# adapter in monitor mode; on YOUR OWN AP, trigger a short deauth burst against YOUR OWN client
+```
+**Pass:** a real deauth burst on your own gear raises a glass-box `deauth_flood` alert (voiced /
+notified over the real notifier); a quiet airspace stays silent (no false positives). The CSA and
+WPA3-downgrade detectors (from the detector lane) likewise fire only on their real signatures.
+
+### 2b.13 — operator first-run, at-rest encryption, dashboard auth
+```sh
+export AUGUR_PASSPHRASE='…'; redux init --dir /etc/redux --node-id <name>
+redux config check --config /etc/redux/config.toml
+redux web --bind-scope lan --config /etc/redux/config.toml      # note the printed access token
+```
+**Pass:** `init` writes `config.toml` + a **sealed** swarm keystore (the file begins `AUGURv1`, not
+plaintext); `config check` is clean once the USER-INPUT fields are filled; the LAN dashboard refuses
+without the token (401) and serves with it; `redux vault seal`/`open` round-trips a loot file; the
+airspace panel shows real channel/RSSI from the Cache. With the crypto extra absent, the keystore
+is honestly skipped (never written in plaintext).
 
 ## 3. Recording results
 
