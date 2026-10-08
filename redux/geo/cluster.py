@@ -1,12 +1,19 @@
 """DBSCAN-lite clustering of lat/lon points (AP hotspot finding)."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
-from redux.geo.geoutil import haversine_m
-
 Point = Tuple[float, float]  # lat, lon
+_EARTH_R_M = 6_371_000.0
+
+
+def _hav_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    rlat1, rlon1, rlat2, rlon2 = map(math.radians, (lat1, lon1, lat2, lon2))
+    dlat, dlon = rlat2 - rlat1, rlon2 - rlon1
+    a = math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
+    return 2 * _EARTH_R_M * math.asin(min(1.0, math.sqrt(a)))
 
 
 @dataclass(frozen=True)
@@ -22,7 +29,7 @@ def _neighbors(i: int, points: Sequence[Point], eps_m: float) -> List[int]:
     return [
         j
         for j, (la, lo) in enumerate(points)
-        if haversine_m(lat, lon, la, lo) <= eps_m
+        if _hav_m(lat, lon, la, lo) <= eps_m
     ]
 
 
@@ -36,7 +43,7 @@ def dbscan_lite(
     n = len(points)
     if n == 0:
         return []
-    labels = [-1] * n  # -1 noise, >=0 cluster id
+    labels = [-1] * n
     cluster_id = 0
     visited = [False] * n
 
