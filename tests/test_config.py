@@ -47,6 +47,15 @@ def test_validate_flags_bad_values():
     assert "persona.default" in joined and "node_id" in joined
 
 
+def test_validate_never_raises_on_mistyped_fields():
+    # valid TOML, wrong types — validate() must REPORT, not crash (glass-box contract)
+    c = AugurConfig.from_dict({"cache": {"retention_days": "30", "max_rows": "lots"},
+                               "mesh": {"node_id": 5}})
+    probs = c.validate()                    # must not raise
+    j = " ".join(probs)
+    assert "retention_days" in j and "max_rows" in j and "node_id" in j
+
+
 def test_to_display_masks_token():
     c = AugurConfig.from_dict({"web": {"token": "s3cret"}})
     d = c.to_display()

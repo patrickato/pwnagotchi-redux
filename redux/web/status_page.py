@@ -264,7 +264,10 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
             if not token:
                 return True
             got = _present(self.headers)
-            return bool(got) and hmac.compare_digest(got, token)
+            # compare as bytes: hmac.compare_digest rejects non-ASCII str, and the
+            # presented value is attacker-controlled — a bad/odd token must 401, not crash
+            return bool(got) and hmac.compare_digest(got.encode("utf-8", "replace"),
+                                                      token.encode("utf-8"))
 
         def do_GET(self):
             authed = self._authed()

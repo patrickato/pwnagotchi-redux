@@ -111,13 +111,17 @@ class AugurConfig:
             p.append(f"web.token is required for an off-box bind ({self.web.bind_scope})")
         if not isinstance(self.web.port, int) or not (1 <= self.web.port <= 65535):
             p.append(f"web.port {self.web.port!r} out of range")
-        if self.cache.retention_days < 0:
+        if not isinstance(self.cache.retention_days, (int, float)) or isinstance(self.cache.retention_days, bool):
+            p.append(f"cache.retention_days must be a number (got {self.cache.retention_days!r})")
+        elif self.cache.retention_days < 0:
             p.append("cache.retention_days must be >= 0 (0 = keep forever)")
-        if self.cache.max_rows <= 0:
+        if not isinstance(self.cache.max_rows, int) or isinstance(self.cache.max_rows, bool):
+            p.append(f"cache.max_rows must be an integer (got {self.cache.max_rows!r})")
+        elif self.cache.max_rows <= 0:
             p.append("cache.max_rows must be > 0")
         if self.persona.default not in _PERSONAS:
             p.append(f"persona.default '{self.persona.default}' unknown (use one of {', '.join(_PERSONAS)})")
-        if not self.mesh.node_id or MARKER in self.mesh.node_id:
+        if not isinstance(self.mesh.node_id, str) or not self.mesh.node_id or MARKER in self.mesh.node_id:
             p.append("mesh.node_id must be set to a unique value")
         if not self.vault.passphrase_env:
             p.append("vault.passphrase_env must name the env var holding the passphrase")

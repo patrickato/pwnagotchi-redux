@@ -135,6 +135,15 @@ def test_api_requires_token_when_set():
         srv.shutdown(); srv.server_close()
 
 
+def test_non_ascii_token_401s_not_crashes():
+    # an odd/non-ASCII presented token must fail closed with 401, never crash the thread
+    srv, port = _serve(make_handler(lambda: {"intent": "hunt"}, token="s3cret"))
+    try:
+        assert _get(port, "/api/status", {"Authorization": "Bearer café"})[0] == 401
+    finally:
+        srv.shutdown(); srv.server_close()
+
+
 def test_page_shows_login_until_token_then_dashboard():
     srv, port = _serve(make_handler(lambda: {"intent": "hunt"}, token="s3cret"))
     try:

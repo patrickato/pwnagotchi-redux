@@ -261,8 +261,8 @@ class SightingStore:
         long-running drop. `older_than` is an age in seconds (rows with
         ts < now-older_than go); `max_rows` keeps only the most-recent N by ts.
         Both may be combined. Returns rows deleted; commits once (SD-friendly).
-        Does not VACUUM by default — reclaiming pages rewrites the whole DB, which
-        is the opposite of SD-friendly; pass vacuum=True only when you mean it."""
+        Does not VACUUM — reclaiming pages rewrites the whole DB, the opposite of
+        SD-friendly; call the separate vacuum() method sparingly after a big prune."""
         now = time.time() if now is None else now
         deleted = 0
         if older_than is not None:
