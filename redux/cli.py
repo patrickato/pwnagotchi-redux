@@ -437,17 +437,47 @@ def cmd_captap(args) -> int:
 def _captap_live(args) -> int:
     """Live monitor-mode capture → the same re-id + flood-detector chain as the demo,
     but from a real radio. Honest about hardware absence (no monitor iface / no
-    raw-socket privileges → a clear message, not fabricated frames)."""
+    raw-socket privileges → a clear message, not fabricated frames). Manages its own
+    receiver channel: --channel N parks it, --hop sweeps 1/6/11 (no separate `iw`)."""
+    import subprocess
+    import threading
     from .captap import live_source, capture_run
     from .detect.engine import DetectEngine
-    print(f"redux captap live — monitor capture on {args.iface} "
-          f"(≤{args.max or '∞'} frames / ≤{args.seconds}s)")
+
+    def _setch(ch):
+        try:
+            subprocess.run(["iw", "dev", args.iface, "set", "channel", str(ch)],
+                           capture_output=True, text=True, timeout=5)
+        except Exception:
+            pass  # best-effort; if it can't tune, capture_run reports honestly
+
+    stop = threading.Event()
+    if args.hop:
+        chans = [1, 6, 11]
+        print(f"redux captap live — {args.iface}, hopping {chans} (≤{args.seconds}s)")
+
+        def _hop():
+            i = 0
+            while not stop.is_set():
+                _setch(chans[i % len(chans)])
+                i += 1
+                stop.wait(2.0)
+        threading.Thread(target=_hop, daemon=True).start()
+    elif args.channel:
+        _setch(args.channel)
+        print(f"redux captap live — {args.iface} ch{args.channel} (≤{args.seconds}s)")
+    else:
+        print(f"redux captap live — monitor capture on {args.iface} "
+              f"(≤{args.max or '∞'} frames / ≤{args.seconds}s)")
     try:
         tap, alerts = capture_run(live_source(args.iface), max_frames=args.max,
                                   seconds=args.seconds, engine=DetectEngine())
     except RuntimeError as e:
+        stop.set()
         print(f"  unavailable: {e}")
         return 3
+    finally:
+        stop.set()
     s = tap.link().summary()
     print(f"  frames parsed: {tap.frames_seen}  |  deauth events: {len(tap.deauths)}")
     print(f"  device identities: {s['identities']} total, {s['reidentified']} re-identified across MAC")
@@ -1071,6 +1101,8 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--iface", required=True, help="monitor-mode interface (e.g. wlan1mon)")
     cl.add_argument("--seconds", type=float, default=30.0, help="stop after N seconds (default 30)")
     cl.add_argument("--max", type=int, default=None, help="stop after N frames")
+    cl.add_argument("--channel", type=int, default=None, help="park the receiver on this channel (one number)")
+    cl.add_argument("--hop", action="store_true", help="sweep channels 1/6/11 (no need to know the channel)")
     ct.set_defaults(func=cmd_captap)
 
     tf = sub.add_parser("tft", help="render the on-device TFT frame to the terminal")
