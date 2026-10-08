@@ -118,3 +118,17 @@ def test_init_without_passphrase_skips_keystore(tmp_path, monkeypatch):
     assert rc == 0 and (tmp_path / "config.toml").is_file()
     assert not (tmp_path / "swarm.keys").exists()        # no passphrase → honestly skipped
     assert "AUGUR_PASSPHRASE" in out                      # told the operator how to finish
+
+
+def test_bad_config_path_is_clean_not_a_traceback():
+    rc, out = _run(["tft", "--onboard", "--demo", "--config", "/no/such/config.toml"])
+    assert rc == 4 and "not found" in out and "Traceback" not in out   # clean message, not a crash
+
+
+def test_init_scope_path_matches_firing_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("AUGUR_PASSPHRASE", raising=False)
+    monkeypatch.setenv("REDUX_SCOPE", str(tmp_path / "scope.json"))
+    rc, out = _run(["init", "--dir", str(tmp_path)])
+    # the path init tells the operator to arm is the one the firing tools read
+    from redux.cli import _DEFAULT_SCOPE_PATH
+    assert rc == 0 and _DEFAULT_SCOPE_PATH in out

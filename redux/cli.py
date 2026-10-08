@@ -78,15 +78,25 @@ def cmd_run(args) -> int:
     return 0
 
 
+class ConfigError(Exception):
+    """A --config path that's missing or unparseable; main() renders it cleanly."""
+
+
 def _cfg(args):
     """Load the config named by --config, or None when not given. Config values are
     consulted ONLY when --config is passed; an explicit flag always wins. So every
-    command's no-config behavior is exactly as before."""
+    command's no-config behavior is exactly as before. A bad path raises ConfigError
+    (clean message + exit 4 via main), never a raw traceback."""
     path = getattr(args, "config", None)
     if not path:
         return None
     from .config import AugurConfig
-    return AugurConfig.load(path)
+    try:
+        return AugurConfig.load(path)
+    except FileNotFoundError:
+        raise ConfigError(f"config: {path} not found")
+    except Exception as e:   # malformed TOML
+        raise ConfigError(f"config: failed to parse {path}: {e}")
 
 
 def cmd_web(args) -> int:
@@ -197,7 +207,8 @@ def cmd_init(args) -> int:
     print("next steps:")
     print(f"  1. edit {cfg_path} — fill every {MARKER} field (node_id; web token for an off-box bind)")
     print("  2. export AUGUR_PASSPHRASE=…   (at-rest encryption + the swarm keystore)")
-    print(f"  3. arm your lab:   redux scope --file {d / 'scope.json'} arm-lab --cidr <your.lab.cidr>")
+    print(f"  3. arm your lab:   redux scope --file {_DEFAULT_SCOPE_PATH} arm-lab --cidr <your.lab.cidr>")
+    print(f"       (that's the scope file the firing tools read by default; override with REDUX_SCOPE)")
     print(f"  4. validate:       redux config check --config {cfg_path}")
     return 0
 
@@ -1169,7 +1180,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ConfigError as e:
+        print(e)
+        return 4
 
 
 if __name__ == "__main__":

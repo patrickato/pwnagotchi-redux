@@ -424,7 +424,14 @@ class Augur:
         through the capture tap: probe-requests re-identify devices across MAC
         randomization in the Dex, deauth/disassoc become events for the flood
         detectors. Returns a glass-box summary. (Live monitor capture is
-        needs-hardware; this takes frames from any source.)"""
+        needs-hardware; this takes frames from any source.)
+
+        Note: alerts come from the live, shared DetectEngine, whose sliding windows
+        persist across calls — correct for continuous monotonic capture (the field
+        case). The per-call counts (frames/deauth_events/detector_frames) describe
+        THIS batch; `alerts` reflects the engine's cumulative window. Feed replayed
+        / out-of-order batches through a fresh DetectEngine if you need per-batch
+        isolation."""
         from ..captap import CaptureTap
         tap = CaptureTap()
         for item in frames:
