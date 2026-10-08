@@ -84,9 +84,10 @@ leverage.
 ## P2 — UI polish (optional, by where it renders)
 
 - **Rich web dashboard — DONE** (moving map + track + pins + sparkline + plain/rich
-  skin; client-rendered, zero Pi cost). Further: offline map tiles when internet is
-  present, a channel waterfall / RSSI meter panel, per-security pin coloring (needs
-  an encryption field on sightings).
+  skin; client-rendered, zero Pi cost). ✅ **Airspace panel added** — channel
+  occupancy + RSSI distribution bars (reuses the geo `channel_stats` / `rssi_histogram`
+  helpers). Further: offline map tiles when internet is present, per-security pin
+  coloring (needs an encryption field on sightings).
 - **TFT stays lean on purpose** (SPI redraw = Pi CPU → heat/battery). Selectable
   low-cost **face-packs — DONE** (`redux/face/packs.py`: augur/owl/fox, static,
   `--pack` / `[tft] face_pack`), NOT heavy animation. Remaining candidates: a

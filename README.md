@@ -15,7 +15,7 @@ doesn't have. Identity, voice, and the creature face: `docs/AUGUR.md`.
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
 > record/ghost, packs, plugin-compat shim, CLI, and web dashboard —
-> is built and green under the test suite (774 tests, no hardware required). **No part has had a
+> is built and green under the test suite (776 tests, no hardware required). **No part has had a
 > real-hardware pass on a physical Pi yet** (see *Verification status*). Sandbox-green ≠ done.
 
 ## What it is

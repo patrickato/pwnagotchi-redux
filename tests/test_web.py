@@ -162,3 +162,19 @@ def test_open_handler_needs_no_token():
         assert "renderMap" in _get(port, "/")[1]
     finally:
         srv.shutdown(); srv.server_close()
+
+
+def test_status_payload_airspace_from_store():
+    from redux.geo.db import Sighting
+    bc = Augur([ONBOARD], intent=Intent.RECON)
+    bc.store.insert(Sighting(kind="wifi", mac="aa:aa:aa:aa:aa:01", channel=6, rssi=-55, ts=1.0, provenance="t"))
+    bc.store.insert(Sighting(kind="wifi", mac="aa:aa:aa:aa:aa:02", channel=11, rssi=-72, ts=2.0, provenance="t"))
+    air = status_payload(bc)["airspace"]
+    assert air["channels"].get(6) == 1 and air["channels"].get(11) == 1   # channel occupancy
+    assert sum(air["rssi"].values()) == 2                                  # RSSI distribution
+
+
+def test_page_has_airspace_panel():
+    html = render_page()
+    assert "renderAirspace" in html and 'id="chanbars"' in html and "airspace" in html
+    assert "src=" not in html and "cdn" not in html.lower()                # still self-contained

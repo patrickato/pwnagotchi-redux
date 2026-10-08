@@ -46,6 +46,15 @@ def status_payload(augur) -> Dict:
     data["position"] = (
         augur.current_position() if hasattr(augur, "current_position") else None
     )
+    # airspace aggregates from the Cache (reuses the geo helpers) — channel
+    # occupancy + RSSI distribution for the dashboard's airspace panel.
+    try:
+        from ..geo.channel_stats import channel_counts
+        from ..geo.rssi_histogram import rssi_histogram
+        data["airspace"] = {"channels": channel_counts(augur.store),
+                            "rssi": rssi_histogram(augur.store)}
+    except Exception:
+        data["airspace"] = {"channels": {}, "rssi": {}}
     return data
 
 
@@ -82,6 +91,9 @@ ul{margin:6px 0 0;padding-left:16px}li{color:var(--mut);font-size:12px}
 .ping{animation:ping 2.2s ease-out infinite}
 @keyframes ping{0%{r:4;opacity:.9}100%{r:26;opacity:0}}
 #spark{width:100%;height:40px;display:block}
+#chanbars,#rssibars{width:100%;display:block;margin-top:4px}
+#chanbars rect{fill:var(--wifi)}#rssibars rect{fill:var(--acc)}
+#chanbars text,#rssibars text{font:9px var(--mono);fill:var(--dim)}
 body[data-skin="plain"] .rich{display:none}
 body[data-skin="plain"]{--card:#0d1319}
 body[data-skin="plain"] .card{border-color:#16202a}
@@ -113,6 +125,10 @@ body[data-skin="plain"] .card{border-color:#16202a}
  <div class="card" id="sentcard" style="display:none"><div class="k">sentinel</div>
    <div class="v"><span class="badge" id="sentarm">—</span> dispatched <span id="sentd">0</span> · suppressed <span id="sents">0</span></div>
    <div class="reason" id="sentlast"></div></div>
+ <div class="card rich"><div class="k">airspace · channel occupancy / RSSI distribution</div>
+   <svg id="chanbars" viewBox="0 0 400 92" preserveAspectRatio="none"></svg>
+   <svg id="rssibars" viewBox="0 0 400 72" preserveAspectRatio="none"></svg>
+   <div class="leg mut"><span id="airnote">no channel/RSSI data yet</span></div></div>
  <div class="card"><div class="k">recent narration</div><ul id="narr"></ul></div>
 </main>
 <script>
@@ -156,7 +172,23 @@ function paint(d){
  if(d.position&&d.position.lat!=null){var p=TRACK[TRACK.length-1];
   if(!p||p.lat!==d.position.lat||p.lon!==d.position.lon){TRACK.push({lat:d.position.lat,lon:d.position.lon});if(TRACK.length>400)TRACK.shift()}}
  if(typeof d.sightings==='number'){if(lastSight!==null)SPARK.push(Math.max(0,d.sightings-lastSight));lastSight=d.sightings;if(SPARK.length>120)SPARK.shift()}
- renderMap(d.located||[],d.position||null);renderSpark();
+ renderMap(d.located||[],d.position||null);renderSpark();renderAirspace(d.airspace||{});
+}
+function _bars(svgId,pairs,W,H,labEvery){const NS='http://www.w3.org/2000/svg',svg=document.getElementById(svgId);
+ while(svg.firstChild)svg.removeChild(svg.firstChild);if(!pairs.length)return;
+ var mx=Math.max(1,...pairs.map(p=>p[1])),n=pairs.length,bw=W/n;
+ pairs.forEach(function(p,i){var h=(p[1]/mx)*(H-14),x=i*bw;
+  var r=document.createElementNS(NS,'rect');r.setAttribute('x',(x+1).toFixed(1));r.setAttribute('y',(H-12-h).toFixed(1));
+  r.setAttribute('width',Math.max(1,bw-2).toFixed(1));r.setAttribute('height',Math.max(0,h).toFixed(1));svg.appendChild(r);
+  if(i%labEvery===0){var t=document.createElementNS(NS,'text');t.setAttribute('x',(x+bw/2).toFixed(1));t.setAttribute('y',H-2);
+   t.setAttribute('text-anchor','middle');t.textContent=p[0];svg.appendChild(t)}});}
+function renderAirspace(a){var ch=a.channels||{},rs=a.rssi||{};
+ var cp=Object.keys(ch).map(k=>[+k,ch[k]]).sort((x,y)=>x[0]-y[0]);
+ var rp=Object.keys(rs).map(k=>[+k,rs[k]]).sort((x,y)=>x[0]-y[0]);
+ _bars('chanbars',cp.map(p=>[String(p[0]),p[1]]),400,92,1);
+ _bars('rssibars',rp.map(p=>[p[0]+'dBm',p[1]]),400,72,1);
+ var note=document.getElementById('airnote');
+ note.textContent=cp.length?(cp.length+' channels · '+rp.length+' RSSI buckets · real sightings only'):'no channel/RSSI data yet';
 }
 function renderMap(pts,pos){const NS='http://www.w3.org/2000/svg',svg=document.getElementById('map'),rng=document.getElementById('maprange');
  while(svg.firstChild)svg.removeChild(svg.firstChild);
