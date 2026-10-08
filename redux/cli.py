@@ -128,6 +128,41 @@ def cmd_cache(args) -> int:
     return 0
 
 
+def cmd_config(args) -> int:
+    from pathlib import Path as _P
+    import json as _json
+    from .config import AugurConfig, template, DEFAULT_CONFIG_PATH
+    if args.config_cmd == "init":
+        out = _P(args.out or DEFAULT_CONFIG_PATH)
+        if out.exists() and not args.force:
+            print(f"config: {out} exists (use --force to overwrite)")
+            return 4
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(template())
+        print(f"wrote config template → {out}  (edit the >>> USER INPUT REQUIRED <<< fields)")
+        return 0
+    try:
+        cfg = AugurConfig.load(args.config) if args.config else AugurConfig()
+    except FileNotFoundError:
+        print(f"config: {args.config} not found")
+        return 4
+    except Exception as e:   # malformed TOML
+        print(f"config: failed to parse {args.config}: {e}")
+        return 4
+    if args.config_cmd == "show":
+        print(_json.dumps(cfg.to_display(), indent=2))
+    elif args.config_cmd == "check":
+        problems = cfg.validate()
+        if not problems:
+            print("config OK — no problems")
+            return 0
+        print(f"config: {len(problems)} problem(s):")
+        for pr in problems:
+            print(f"  - {pr}")
+        return 4
+    return 0
+
+
 def cmd_vault(args) -> int:
     from .vault import Vault, crypto_available, resolve_passphrase, BadVaultData
     if not crypto_available():
@@ -838,6 +873,17 @@ def build_parser() -> argparse.ArgumentParser:
         vp.add_argument("--in", dest="inp", required=True, help="input file")
         vp.add_argument("--out", required=True, help="output file")
     va.set_defaults(func=cmd_vault)
+
+    cf = sub.add_parser("config", help="unified operator config.toml: init/show/check")
+    cfsub = cf.add_subparsers(dest="config_cmd", required=True)
+    ci = cfsub.add_parser("init", help="write a config.toml template with USER-INPUT markers")
+    ci.add_argument("--out", default=None, help="output path (default /etc/redux/config.toml)")
+    ci.add_argument("--force", action="store_true", help="overwrite if it exists")
+    cs = cfsub.add_parser("show", help="print the resolved config (token masked)")
+    cs.add_argument("--config", default=None, help="config path (default: built-in defaults)")
+    cc = cfsub.add_parser("check", help="validate a config and list problems")
+    cc.add_argument("--config", default=None, help="config path to validate")
+    cf.set_defaults(func=cmd_config)
 
     pk = sub.add_parser("packs", help="manage Packs")
     pk.add_argument("--dir", required=True, help="packs directory")

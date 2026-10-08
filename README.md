@@ -15,7 +15,7 @@ doesn't have. Identity, voice, and the creature face: `docs/AUGUR.md`.
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
 > record/ghost, packs, plugin-compat shim, CLI, and web dashboard —
-> is built and green under the test suite (632 tests, no hardware required). **No part has had a
+> is built and green under the test suite (639 tests, no hardware required). **No part has had a
 > real-hardware pass on a physical Pi yet** (see *Verification status*). Sandbox-green ≠ done.
 
 ## What it is
@@ -144,6 +144,7 @@ redux/web/        glass-box dashboard + live moving map (client-rendered)
 redux/tft/        lean on-device TFT faces (plain/status, box-drawing, event-driven redraw)
 redux/captap/     raw 802.11 tap (deauth + probe-request IE fingerprint → Dex/detectors)
 redux/vault/      at-rest encryption for captured data (optional crypto extra; honest/fail-closed)
+redux/config/     unified operator config.toml (typed, validated; USER-INPUT markers)
 redux/cli.py      operator entrypoint (status/run/web/tft/captap/vault/cache/packs/doctor/post/persona/sense/sentinel/mesh/campaign/hunt/capture/eap/range/report/scope/dex/expedition/ghost)
 image/            pi-gen image stack (boot, overlay, watchdog, UPS, OTA)
 tests/            unit/integration tests (real logic, no hardware needed)
@@ -182,6 +183,7 @@ redux ghost in.json out.json   # sanitize a recording for safe replay/sharing
 redux cache stats      # inspect the Cache; prune (retention) / export (jsonl|csv, --encrypt)
 redux vault seal --in loot --out loot.vault   # at-rest encryption (needs crypto extra)
 redux mesh key gen --store swarm.keys  # swarm-key lifecycle: gen/rotate/show/export/import (sealed)
+redux config init      # write config.toml template; config check validates it
 redux packs            # manage Packs
 ```
 

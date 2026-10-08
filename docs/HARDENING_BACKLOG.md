@@ -57,9 +57,15 @@ leverage.
 - **First-run + field-operator guide.** Flash → first boot → arm scope → set swarm
   key → EAP cert. Current quickstart is dev-focused; write the operator path for the
   community.
-- **Unified config.** Config is scattered across JSON stores + per-module defaults.
-  A single `config.toml` (paths, default persona, bind scopes, keys) with the fork's
-  `>>> USER INPUT REQUIRED <<<` markers.
+- **Unified config — DONE.** `redux/config/`: one typed, validated `config.toml`
+  (Cache paths + retention, web bind-scope/port/token, mesh keystore + node_id,
+  default persona, the at-rest passphrase *env-var name*) built on the fork's
+  `defaults.toml` style with explicit `>>> USER INPUT REQUIRED <<<` markers. Partial
+  files merge over defaults; `validate()` returns all problems at once. CLI:
+  `redux config init|show|check` (token masked in `show`). Secrets aren't stored —
+  only the passphrase env-var *name*. **Remaining:** have each subsystem actually
+  read it (wire `redux web` / `cache prune` / `mesh` to resolve from the file),
+  which is the incremental adoption step.
 - **Data lifecycle — DONE.** The Cache (`SpatialDB`) can now be bounded:
   `prune(older_than=…, max_rows=…)` (single commit, SD-friendly; opt-in `vacuum()`),
   `export(path, fmt=jsonl|csv)` to pull it off-box, and `stats()` for honest
