@@ -629,9 +629,11 @@ def test_heavy_snapshot_is_sampled_at_bounded_cadence_but_doctor_stays_live(
         first = runtime._snapshot
         assert first["sightings"] == 1
         assert first["runtime"]["visual_sampled_utc"] is not None
+        assert first["runtime"]["visual_revision"] == 1
         clock[0] = 102.0
         runtime._checkpoint()
         assert len(sampled) == 1 and len(ledgers) == 1
+        assert runtime._snapshot["runtime"]["visual_revision"] == 1
         assert agent.doctor_calls == 2
         assert runtime._snapshot is not first
         assert first["runtime"]["updated_utc"] == first["runtime"]["updated_utc"]
@@ -641,12 +643,14 @@ def test_heavy_snapshot_is_sampled_at_bounded_cadence_but_doctor_stays_live(
         clock[0] = 105.0
         runtime._checkpoint()
         assert len(sampled) == 2 and len(ledgers) == 2
+        assert runtime._snapshot["runtime"]["visual_revision"] == 2
         # A newly seen real event invalidates the view immediately,
         # even when the interval has not yet elapsed.
         runtime._observe(SimpleNamespace(payload={"event": None}))
         clock[0] = 105.1
         runtime._checkpoint()
         assert len(sampled) == 3 and len(ledgers) == 2
+        assert runtime._snapshot["runtime"]["visual_revision"] == 3
         assert runtime._snapshot["runtime"]["events_seen"] == 1
         assert agent.doctor_calls == 5
     finally:
