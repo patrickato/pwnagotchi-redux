@@ -173,6 +173,21 @@ class live_runtime_after_release:
         self.instance.close()
 
 
+def test_low_storage_does_not_launch_engine(tmp_path, monkeypatch):
+    clock = [0]
+    launches = []
+    monkeypatch.setattr(live, "free_bytes", lambda path: 1024)
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [radio()],
+                               spawn=lambda *a, **kw: launches.append(a),
+                               clock=lambda: clock[0])
+    try:
+        assert runtime.tick() == "degraded"
+        assert "free-space reserve" in runtime.last_error
+        assert launches == []
+    finally:
+        runtime.close()
+
+
 def test_stale_capture_recovered_without_running_radio(tmp_path):
     import os
     import time
