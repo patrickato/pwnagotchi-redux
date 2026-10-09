@@ -26,7 +26,7 @@ def _commit(value):
 
 
 def _mbr_layout(sector):
-    if len(sector) != 512 or sector[510:512] != b"\x55\\xaa":
+    if len(sector) != 512 or sector[510:512] != b"\x55\xaa":
         raise ValueError("missing disk MBR 0x55AA signature")
     records = []
     for idx in range(3):
@@ -88,7 +88,7 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
         raise ValueError(f"decompressed disk image too small: {total} bytes")
     if any((start + sectors) * 512 > total for _, start, sectors in partitions):
         raise ValueError("image partition extends beyond decompressed disk")
-    if checks["ext4_magic"][1] != b"\x53\\xef":
+    if checks["ext4_magic"][1] != b"\x53\xef":
         raise ValueError("REDUXCAP ext4 superblock magic missing")
     if checks["ext4_label"][1].rstrip(b"\x00") != b"REDUXCAP":
         raise ValueError("REDUXCAP ext4 filesystem label missing")
