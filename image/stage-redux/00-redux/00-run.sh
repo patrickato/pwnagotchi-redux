@@ -13,6 +13,16 @@ cat > "$ROOTFS_DIR/usr/local/bin/redux" <<'REDUX_LAUNCHER'
 PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.cli "$@"
 REDUX_LAUNCHER
 chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux"
+cat > "$ROOTFS_DIR/usr/local/bin/redux-kiosk" <<'REDUX_KIOSK_LAUNCHER'
+#!/bin/sh
+PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.display.kiosk "$@"
+REDUX_KIOSK_LAUNCHER
+chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-kiosk"
+# Record the browser profile only if explicitly requested by the build host.
+# Never enable a desktop autostart unit or claim the TFT has passed acceptance.
+if [[ -f files/kiosk-profile ]]; then
+    install -m 0644 files/kiosk-profile "$ROOTFS_DIR/usr/share/redux/kiosk-profile"
+fi
 # Preinstall processing workers into the standalone image. The read-only root
 # stores code/config; jobs/results live on the dedicated writable /captures.
 install -d "$ROOTFS_DIR/etc/redux" "$ROOTFS_DIR/captures"
