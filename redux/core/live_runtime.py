@@ -165,7 +165,7 @@ class LiveDriver(BettercapDriver):
     """Treat Bettercap REST command errors as startup/recovery failures."""
 
     def _checked(self, result, action):
-        if isinstance(result, dict) and result.get("error"):
+        if not isinstance(result, dict) or result.get("error") or result.get("success") is False:
             raise RuntimeError(f"Bettercap rejected {action}")
         return result
 
@@ -174,6 +174,9 @@ class LiveDriver(BettercapDriver):
 
     def recon(self, on=True):
         return self._checked(super().recon(on), "passive recon")
+
+    def set_handshake_file(self, path):
+        return self._checked(super().set_handshake_file(path), "capture output configuration")
 
 
 class LiveRuntime:
@@ -319,9 +322,7 @@ class LiveRuntime:
     def _connect(self):
         self.transport.session()  # authenticated readiness probe
         driver = LiveDriver(config=self.transport.config, transport=self.transport)
-        result = driver.set_handshake_file(str(self.capture_file))
-        if isinstance(result, dict) and result.get("error"):
-            raise RuntimeError("Bettercap rejected capture output configuration")
+        driver.set_handshake_file(str(self.capture_file))
         radios = [r for r in self.radio_probe() if r.iface == self.iface]
         if not radios:
             raise RuntimeError("capture radio disappeared during startup")
