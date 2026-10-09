@@ -25,8 +25,29 @@ def _commit(value):
     return value
 
 
+def _mbr_layout(sector):
+    if len(sector) != 512 or sector[510:512] != b"\x55\\xaa":
+        raise ValueError("missing disk MBR 0x55AA signature")
+    records = []
+    for idx in range(3):
+        entry = sector[446 + idx * 16: 462 + idx * 16]
+        kind = entry[4]
+        start = int.from_bytes(entry[8:12], "little")
+        sectors = int.from_bytes(entry[12:16], "little")
+        if start == 0 or sectors == 0 or kind == 0:
+            raise ValueError("missing/invalid Pi image partition " + str(idx + 1))
+        records.append((kind, start, sectors))
+    if records[2][0] != 0x83:
+        raise ValueError("REDUXCAP partition must use Linux MBR type 0x83")
+    occupied = sorted((start, start + sectors) for _, start, sectors in records)
+    for left, right in zip(occupied, occupied[1:]):
+        if left[1] > right[0]:
+            raise ValueError("overlapping image partitions")
+    return records
+
+
 def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
-    """Stream two bounded passes; no root, mounts, guest boot, or large RAM."""
+    """Verify xz, MBR topology, REDUXCAP ext4 label and digest without mounting."""
     path = Path(path)
     meta = path.lstat()
     if not stat.S_ISREG(meta.st_mode) or not path.name.endswith(".img.xz"):
@@ -39,23 +60,49 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
             digest.update(block)
 
     total = 0
-    prefix = b""
+    checks = {}
     try:
         with lzma.open(path, "rb") as reader:
+            sector = reader.read(512)
+            partitions = _mbr_layout(sector)
+            capture_start = partitions[2][1] * 512
+            checks = {
+                "ext4_magic": (capture_start + 1024 + 0x38, b"", 2),
+                "ext4_label": (capture_start + 1024 + 0x78, b"", 16),
+            }
+            total = len(sector)
             while block := reader.read(1024 * 1024):
-                if len(prefix) < 512:
-                    prefix += block[:512 - len(prefix)]
-                total += len(block)
+                start = total
+                end = start + len(block)
+                for name, (offset, previous, size) in checks.items():
+                    # Capture the few bytes we need even across read boundaries.
+                    region_start = max(start, offset + len(previous))
+                    region_end = min(end, offset + size)
+                    if region_start < region_end:
+                        previous += block[region_start - start:region_end - start]
+                        checks[name] = (offset, previous, size)
+                total = end
     except (lzma.LZMAError, EOFError, OSError) as error:
         raise ValueError(f"corrupt or truncated xz image: {type(error).__name__}") from error
     if total < minimum_bytes:
         raise ValueError(f"decompressed disk image too small: {total} bytes")
-    if prefix[510:512] != b"\x55\xaa":
-        raise ValueError("missing disk MBR/protective-MBR 0x55AA signature")
+    if any((start + sectors) * 512 > total for _, start, sectors in partitions):
+        raise ValueError("image partition extends beyond decompressed disk")
+    if checks["ext4_magic"][1] != b"\x53\\xef":
+        raise ValueError("REDUXCAP ext4 superblock magic missing")
+    if checks["ext4_label"][1].rstrip(b"\x00") != b"REDUXCAP":
+        raise ValueError("REDUXCAP ext4 filesystem label missing")
     if path.lstat().st_size != meta.st_size or path.lstat().st_mtime_ns != meta.st_mtime_ns:
         raise ValueError("compressed image changed while being validated")
-    return {"sha256": digest.hexdigest(),
-            "compressed_bytes": meta.st_size, "disk_bytes": total}
+    return {
+        "sha256": digest.hexdigest(),
+        "compressed_bytes": meta.st_size, "disk_bytes": total,
+        "partitions": [
+            {"mbr_type": kind, "start_lba": start, "sector_count": sectors}
+            for kind, start, sectors in partitions
+        ],
+        "captures_filesystem": "ext4", "captures_label": "REDUXCAP",
+    }
 
 
 def _write_private_atomic(target: Path, data: bytes):
@@ -92,7 +139,7 @@ def publish(path, revision, pi_gen_revision, nexmon_revision, *,
         "image": image.name,
         "revisions": revs,
         **info,
-        "checks": ["xz_stream", "disk_boot_signature", "sha256"],
+        "checks": ["xz_stream", "disk_mbr_partitions", "reduxcap_ext4_label", "sha256"],
         "hardware_tested": False,
         "boot_tested": False,
         "note": "File-integrity checks only. ARM64 boot, partition mounts, radio and capture require physical validation.",
