@@ -230,6 +230,29 @@ Use `redux live doctor` for the reason behind a processing alert,
 A crashed scan may leave no new heartbeat; its previously recorded timestamp
 will eventually become overdue. No data is invented to cover that interval.
 
+## Confirmed process shutdown and closed-capture handoff
+
+The supervisor now treats stopping Bettercap as a **verified operation**,
+not simply a successful call to `terminate()`. It waits for the child to
+exit, escalates to `kill()` after a bounded timeout, and reaps it before
+closing the shared diagnostic log or moving a captured file to the processing
+queue. An already-exited child is also reaped.
+
+If either process signal or the final wait fails, Redux enters
+`termination_pending`, preserves the original child reference and active
+capture, and **does not start a second engine or hand off that open file**.
+Subsequent supervisor cycles retry stopping it. A successful retry only
+returns to normal capture startup after the configured backoff. On service
+shutdown an unreaped child makes Redux exit with an error instead of reporting
+a successful stop. The packaged systemd unit explicitly specifies
+`KillMode=control-group` so the service manager cleans up descendants in the
+same unit before restart.
+
+These guards prevent incorrectly publishing a still-open capture. They do
+not guarantee an interrupted process wrote a valid, complete capture or that
+the service can overcome kernel-level uninterruptible I/O. The original
+`.pcap` remains in the active directory for recovery when handoff is unsafe.
+
 ## Bounded scan selection and dashboard query cost
 
 Capture ingest no longer loads and sorts **every filename** in
