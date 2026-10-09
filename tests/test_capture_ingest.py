@@ -313,3 +313,16 @@ def test_corrupted_scan_metadata_is_not_presented_as_healthy(tmp_path):
     assert scan["scan_error"] == "invalid stored scan record"
 
 
+
+def test_readonly_worker_health_refuses_symlinked_ledger(tmp_path):
+    cfg = settings(tmp_path)
+    with CaptureIngestor(cfg) as worker:
+        worker.scan()
+    shortcut = tmp_path / "ledger-link.db"
+    shortcut.symlink_to(cfg.database)
+    status = read_summary(shortcut)
+    assert status["available"] is False
+    assert "symlink" in status["reason"]
+    assert read_summary(cfg.database)["available"] is True
+
+
