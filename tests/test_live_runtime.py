@@ -590,6 +590,114 @@ def test_live_status_reuses_one_processing_ledger_read(tmp_path, monkeypatch):
         runtime.close()
 
 
+def test_heavy_snapshot_is_sampled_at_bounded_cadence_but_doctor_stays_live(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    clock = [100.0]
+    runtime = live.LiveRuntime(cfg(tmp_path, status_sample_seconds=5),
+                               radio_probe=lambda: [], clock=lambda: clock[0])
+    class FakeAugur:
+        def __init__(self):
+            self.doctor_calls = 0
+        def doctor_report(self):
+            self.doctor_calls += 1
+            return {"findings": []}
+        def flush_sightings(self):
+            return 0
+        _sighting_buffer = []
+        _sighting_flush_error = ""
+        _sighting_flush_failures = 0
+        store = SimpleNamespace(close=lambda: None)
+    agent = FakeAugur()
+    runtime.augur = agent
+    sampled = []
+    ledgers = []
+    report = {"available": True, "artifacts": 0, "by_status": {},
+              "last_scan": {"completed_utc": 1000, "scanned": 0, "outcomes": {}}}
+    def heavy(augur, processing_report=None):
+        sampled.append(clock[0])
+        assert processing_report is report
+        return {"sightings": len(sampled), "airspace": {"channels": {}}}
+    def ledger(path):
+        ledgers.append(clock[0])
+        return report
+    monkeypatch.setattr(live, "status_payload", heavy)
+    monkeypatch.setattr(live, "read_summary", ledger)
+    try:
+        runtime._checkpoint()
+        first = runtime._snapshot
+        assert first["sightings"] == 1
+        assert first["runtime"]["visual_sampled_utc"] is not None
+        clock[0] = 102.0
+        runtime._checkpoint()
+        assert len(sampled) == 1 and len(ledgers) == 1
+        assert agent.doctor_calls == 2
+        assert runtime._snapshot is not first
+        assert first["runtime"]["updated_utc"] == first["runtime"]["updated_utc"]
+        clock[0] = 104.9
+        runtime._checkpoint()
+        assert len(sampled) == 1
+        clock[0] = 105.0
+        runtime._checkpoint()
+        assert len(sampled) == 2 and len(ledgers) == 2
+        # A newly seen real event invalidates the view immediately,
+        # even when the interval has not yet elapsed.
+        runtime._observe(SimpleNamespace(payload={"event": None}))
+        clock[0] = 105.1
+        runtime._checkpoint()
+        assert len(sampled) == 3 and len(ledgers) == 2
+        assert runtime._snapshot["runtime"]["events_seen"] == 1
+        assert agent.doctor_calls == 5
+    finally:
+        runtime.close()
+
+
+def test_live_snapshot_is_published_atomically_after_doctor_completion(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [])
+    runtime._snapshot = {"runtime": {"state": "stable-old"}, "doctor": {"old": True}}
+    old = runtime._snapshot
+    class FakeAugur:
+        _sighting_buffer = []
+        _sighting_flush_error = ""
+        _sighting_flush_failures = 0
+        store = SimpleNamespace(close=lambda: None)
+        def flush_sightings(self):
+            return 0
+        def doctor_report(self):
+            # The HTTP thread should still see a full previous snapshot while
+            # the store thread computes an updated health assessment.
+            assert runtime._snapshot is old
+            assert old["runtime"]["state"] == "stable-old"
+            assert old["doctor"] == {"old": True}
+            return {"findings": []}
+    runtime.augur = FakeAugur()
+    monkeypatch.setattr(live, "read_summary", lambda path: {
+        "available": False, "reason": "not yet recorded"})
+    monkeypatch.setattr(live, "status_payload",
+                        lambda augur, processing_report=None: {"sightings": 3})
+    try:
+        runtime._checkpoint()
+        assert runtime._snapshot is not old
+        assert runtime._snapshot["runtime"]["state"] == "starting"
+        assert runtime._snapshot["doctor"]["findings"]
+        assert runtime._snapshot["sightings"] == 3
+        assert old == {"runtime": {"state": "stable-old"}, "doctor": {"old": True}}
+    finally:
+        runtime.close()
+
+
+def test_status_sample_config_rejects_invalid_limits(tmp_path):
+    for invalid in (0, -1, 31, 999):
+        with pytest.raises(ValueError, match="status_sample_seconds"):
+            cfg(tmp_path, status_sample_seconds=invalid).validate()
+    cfg(tmp_path, status_sample_seconds=1).validate()
+    cfg(tmp_path, status_sample_seconds=30).validate()
+
+
 def test_stuck_child_cannot_publish_capture_or_start_second_engine(tmp_path):
     clock = [10.0]
     class FlakyChild(Child):
