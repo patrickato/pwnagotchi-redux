@@ -12,8 +12,8 @@ install -m 0600 files/pipeline/pipeline.toml "$ROOTFS_DIR/etc/redux/pipeline.tom
 for unit in redux-capture-ingest redux-capture-audit; do
     sed -e '/^\[Unit\]$/a RequiresMountsFor=/captures' \
         -e '/^\[Service\]$/a Environment=PYTHONPATH=/opt/redux' \
-        files/pipeline/$unit.service > "$ROOTFS_DIR/etc/systemd/system/$unit.service"
-    install -m 0644 files/pipeline/$unit.timer "$ROOTFS_DIR/etc/systemd/system/$unit.timer"
+        "files/pipeline/$unit.service" > "$ROOTFS_DIR/etc/systemd/system/$unit.service"
+    install -m 0644 "files/pipeline/$unit.timer" "$ROOTFS_DIR/etc/systemd/system/$unit.timer"
 done
 install -m 0755 files/install-nexmon.sh "$ROOTFS_DIR/usr/local/src/install-nexmon.sh"
 install -m 0644 files/target-kernel.sh "$ROOTFS_DIR/usr/local/src/target-kernel.sh"
