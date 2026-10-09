@@ -373,7 +373,7 @@ class LiveRuntime:
         report = None
         if self.augur is not None:
             try:
-                self._snapshot = status_payload(self.augur)
+                self._snapshot = status_payload(self.augur, processing_report=processing)
                 self._snapshot["runtime"] = metadata
                 # The live worker's configured ledger is authoritative. Augur
                 # status may consult a generic/default DB, not this instance.
