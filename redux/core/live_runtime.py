@@ -720,8 +720,9 @@ class LiveRuntime:
         if not self._capture_mount_ok():
             self.capture_mount_lost = True
         if self.capture_mount_lost:
-            if self.process is not None or self.augur is not None:
-                self._drop()
+            if (self.process is not None or self.augur is not None) and not self._drop():
+                self._checkpoint()
+                return self.state
             self.state = "storage_paused"
             self.last_error = (
                 "REDUXCAP partition unavailable; restart redux-live.service "
@@ -750,23 +751,35 @@ class LiveRuntime:
         if now - self.last_recovery >= 20:
             self._recover_abandoned()
             self.last_recovery = now
+        if self.state == "termination_pending":
+            if self._drop():
+                self.state = "degraded"
+                self.next_try = now + self.config.retry_seconds
+            self._checkpoint()
+            return self.state
         if self.process is not None and self.process.poll() is not None:
             self.last_error = "Bettercap exited unexpectedly"
-            self._drop()
+            if not self._drop():
+                self._checkpoint()
+                return self.state
             self.state = "degraded"
             self.next_try = now + self.config.retry_seconds
 
         if self.augur is not None:
             try:
                 if free_bytes(self.config.active_dir) < self.config.min_free_bytes:
-                    self._drop()
+                    if not self._drop():
+                        self._checkpoint()
+                        return self.state
                     self.state = "storage_paused"
                     self.last_error = "capture partition is below free-space reserve"
                     self.next_try = now + self.config.retry_seconds
                     self._checkpoint()
                     return self.state
                 if now - self.started >= self.config.rotation_seconds:
-                    self._drop()
+                    if not self._drop():
+                        self._checkpoint()
+                        return self.state
                     self.state = "rotating"
                     self.next_try = now + 1
                     self._checkpoint()
@@ -802,7 +815,9 @@ class LiveRuntime:
             except Exception as error:
                 self.last_error = f"live polling stopped: {str(error)[:150]}"
                 _LOG.warning("%s", self.last_error)
-                self._drop()
+                if not self._drop():
+                    self._checkpoint()
+                    return self.state
                 self.state = "degraded"
                 self.next_try = now + self.config.retry_seconds
         elif self.process is not None:
@@ -812,7 +827,9 @@ class LiveRuntime:
                 # Startup grace permits REST to come up without restarting radio.
                 if now - self.started > 15:
                     self.last_error = f"engine initialization: {str(error)[:150]}"
-                    self._drop()
+                    if not self._drop():
+                        self._checkpoint()
+                        return self.state
                     self.state = "degraded"
                     self.next_try = now + self.config.retry_seconds
         elif now >= self.next_try:
@@ -828,22 +845,31 @@ class LiveRuntime:
             except Exception as error:
                 self.last_error = f"engine launch: {str(error)[:150]}"
                 _LOG.warning("%s", self.last_error)
-                self._drop()
+                if not self._drop():
+                    self._checkpoint()
+                    return self.state
                 self.state = "degraded"
                 self.next_try = now + self.config.retry_seconds
         self._checkpoint()
         return self.state
 
     def close(self):
-        self._drop()
-        if self.web is not None:
-            self.web.shutdown()
-            self.web.server_close()
-            self.web = None
-        self.state = "stopped"
-        self._checkpoint()
-        fcntl.flock(self._lock.fileno(), fcntl.LOCK_UN)
-        self._lock.close()
+        # Even on stop failure, release the Python supervisor's resources and
+        # exit non-zero. systemd's default KillMode=control-group then retains
+        # responsibility for any surviving service child before a new start.
+        stopped = self._drop()
+        try:
+            if self.web is not None:
+                self.web.shutdown()
+                self.web.server_close()
+                self.web = None
+            self.state = "stopped" if stopped else "termination_pending"
+            self._checkpoint()
+        finally:
+            fcntl.flock(self._lock.fileno(), fcntl.LOCK_UN)
+            self._lock.close()
+        if not stopped:
+            raise RuntimeError("Bettercap child remained alive during Redux shutdown")
 
 
 def preflight(config, *, which=shutil.which, radio_probe=probe,
