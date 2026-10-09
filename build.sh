@@ -81,6 +81,12 @@ xserver-xorg-input-libinput
 KIOSK_PACKAGES
         printf '%s\n' 'manual-x11 (operator-started, hardware-unverified)' > \
             "$PI_GEN_DIR/stage-redux/00-redux/files/kiosk-profile"
+        # The unit is merely installed, not enabled: a logged-in operator
+        # must configure their actual fbN and X11 seat before starting it.
+        cp "$REPO_DIR/systemd/redux-kiosk.service" \
+            "$PI_GEN_DIR/stage-redux/00-redux/files/redux-kiosk.service"
+        cp "$REPO_DIR/config/kiosk.example.env" \
+            "$PI_GEN_DIR/stage-redux/00-redux/files/kiosk.example.env"
         ;;
     *) echo 'Unsupported REDUX_KIOSK_PROFILE: choose none or manual-x11.' >&2; exit 1 ;;
 esac
