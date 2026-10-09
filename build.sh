@@ -74,6 +74,7 @@ case ${REDUX_KIOSK_PROFILE:-none} in
 chromium
 xinit
 xauth
+x11-utils
 xserver-xorg-core
 xserver-xorg-legacy
 xserver-xorg-video-fbdev
