@@ -439,6 +439,7 @@ bash ./00-run.sh
     unit = (root / "etc/systemd/system/redux.service").read_text()
     assert "ExecStart=/usr/bin/python3 -m redux.core.boot" in unit
     assert "User=redux" in unit
+    assert "ExecStartPre=+/usr/bin/install -d -o redux -g redux -m 0700 /captures/boot" in unit
     assert "WantedBy=multi-user.target" in unit
     assert "arm_64bit=1" in (root / "boot/firmware/config.txt").read_text()
     chroot = Path(env["CHROOT_INPUT"]).read_text()
@@ -567,7 +568,7 @@ def test_overlay_stage_preserves_capture_writes_and_hardens_service(tmp_path):
     unit = (root / "etc/systemd/system/redux.service").read_text()
     assert 'RequiresMountsFor=/captures' in unit
     assert 'StateDirectory=' not in unit
-    assert 'ReadWritePaths=/captures/redux' in unit
+    assert 'ReadWritePaths=/captures/boot' in unit
 
 
 def boot_policy_module():
