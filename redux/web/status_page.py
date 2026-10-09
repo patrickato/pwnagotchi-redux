@@ -79,11 +79,12 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 --crit:#f85149;--card:#121922;--line:#1f2a35;--wifi:#5aa0ff;--ble:#9a7bff;--me:#4ec9b0;
 --mono:ui-monospace,Menlo,Consolas,monospace}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--mono)}
-header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center}
+header{position:sticky;top:0;z-index:2;background:var(--bg);padding:8px 12px;
+border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center}
 h1{font-size:17px;margin:0;letter-spacing:1px}.sp{flex:1}
 .mut{color:var(--mut)}.dim{color:var(--dim)}
 button{font:12px var(--mono);background:#18222d;color:var(--fg);border:1px solid var(--line);
-border-radius:7px;padding:5px 10px;cursor:pointer}button.on{border-color:var(--acc);color:var(--acc)}
+border-radius:7px;padding:5px 10px;min-height:42px;cursor:pointer;touch-action:manipulation}button.on{border-color:var(--acc);color:var(--acc)}
 main{max-width:900px;margin:0 auto;padding:16px;display:grid;gap:13px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
 .row{display:flex;flex-wrap:wrap;gap:12px}.kv{flex:1 1 120px}
@@ -123,7 +124,16 @@ body[data-skin="plain"] .card{border-color:#16202a}
 .doctor-finding{border-top:1px solid var(--line);padding-top:7px;font-size:12px}
 .doctor-title{font-weight:bold}.doctor-remedy{color:var(--fg);margin-top:2px}
 .doctor-details{margin-top:9px;color:var(--mut);font-size:12px}
-.doctor-details summary{cursor:pointer}
+.doctor-details summary{cursor:pointer;min-height:44px;display:flex;align-items:center;
+touch-action:manipulation}
+@media(max-width:520px){
+ main{padding:8px;gap:7px}.card{border-radius:7px;padding:8px 10px}
+ header{padding:5px 9px}h1{font-size:16px}
+ #map{height:174px}.aptbl{grid-template-columns:24px minmax(0,1fr) 37px 42px;
+ gap:2px 4px;font-size:11px;overflow-wrap:anywhere}
+ .row{gap:7px}.kv{flex:1 1 92px}.v{font-size:15px}
+ .leg{gap:7px;flex-wrap:wrap}.doctor-top{gap:8px}
+}
 </style></head><body data-skin="rich">
 <header><h1>Augur</h1><span class="mut" id="sub">glass-box</span><span class="sp"></span>
  <button id="skinbtn" title="toggle skin">rich</button></header>
@@ -178,7 +188,16 @@ body[data-skin="plain"] .card{border-color:#16202a}
  <div class="card"><div class="k">recent narration</div><ul id="narr"></ul></div>
 </main>
 <script>
-var TRACK=[],SPARK=[],lastSight=null;
+var TRACK=[],SPARK=[],lastSight=null,lastVisualSample=null;
+var fetchPending=false,lastRuntimeVersion=null,lastVersionChanged=0;
+function markStale(why){
+ document.getElementById('sub').textContent='STALE · '+why;
+ document.getElementById('doctorheart').className='doctor-heart unknown';
+ document.getElementById('doctorheart').textContent='♡';
+ document.getElementById('doctorlabel').textContent='UNKNOWN · STALE';
+ document.getElementById('doctorcoverage').textContent=
+  'Live health cannot be verified. Last known findings may be out of date.';
+}
 var skin=(function(){try{return localStorage.getItem('augur.skin')||'rich'}catch(e){return 'rich'}})();
 function applySkin(){document.body.setAttribute('data-skin',skin);
  var b=document.getElementById('skinbtn');b.textContent=skin;b.className=skin==='rich'?'on':''}
@@ -243,9 +262,29 @@ function renderPipeline(d){
  document.getElementById('pipelinereason').textContent=
   finding?(finding.reason||''):(p.reason||'No verified worker status');
 }
-async function tick(){try{const r=await fetch('/api/status');const d=await r.json();
- document.getElementById('sub').textContent='glass-box';paint(d);
-}catch(e){document.getElementById('sub').textContent='disconnected'}}
+async function tick(){
+ if(fetchPending||document.hidden)return; // never queue overlapping polls
+ fetchPending=true;
+ const ctrl=new AbortController();
+ const deadline=setTimeout(function(){ctrl.abort()},5000);
+ try{
+  const r=await fetch('/api/status',{signal:ctrl.signal,cache:'no-store'});
+  if(!r.ok)throw Error('HTTP '+r.status);
+  const d=await r.json();
+  paint(d);
+  const version=d.runtime&&d.runtime.updated_utc;
+  const now=performance.now();
+  if(typeof version==='number'&&Number.isFinite(version)){
+   if(version!==lastRuntimeVersion){lastRuntimeVersion=version;lastVersionChanged=now}
+   if(now-lastVersionChanged>12000)markStale('no new supervisor checkpoint');
+   else document.getElementById('sub').textContent='live · measured';
+  }else document.getElementById('sub').textContent='glass-box · no runtime heartbeat';
+ }catch(e){
+  markStale(e&&e.name==='AbortError'?'request timed out':'connection unavailable');
+ }finally{
+  clearTimeout(deadline);fetchPending=false;
+ }
+}
 function paint(d){
  renderDoctor(d.doctor||null);
  renderPipeline(d);
@@ -277,7 +316,13 @@ function paint(d){
  if(d.position&&d.position.lat!=null){var p=TRACK[TRACK.length-1];
   if(!p||p.lat!==d.position.lat||p.lon!==d.position.lon){TRACK.push({lat:d.position.lat,lon:d.position.lon});if(TRACK.length>400)TRACK.shift()}}
  if(typeof d.sightings==='number'){if(lastSight!==null)SPARK.push(Math.max(0,d.sightings-lastSight));lastSight=d.sightings;if(SPARK.length>120)SPARK.shift()}
- renderMap(d.located||[],d.position||null);renderSpark();renderAirspace(d.airspace||{});renderAPs(d.access_points||[]);
+ const sample=d.runtime&&d.runtime.visual_sampled_utc;
+ const changed=typeof sample!=='number'||sample!==lastVisualSample;
+ if(changed){
+  lastVisualSample=typeof sample==='number'?sample:null;
+  renderMap(d.located||[],d.position||null);
+  renderSpark();renderAirspace(d.airspace||{});renderAPs(d.access_points||[]);
+ }
 }
 function _bars(svgId,pairs,W,H,labEvery){const NS='http://www.w3.org/2000/svg',svg=document.getElementById(svgId);
  while(svg.firstChild)svg.removeChild(svg.firstChild);if(!pairs.length)return;
@@ -332,6 +377,7 @@ function renderSpark(){const NS='http://www.w3.org/2000/svg',svg=document.getEle
  var mx=Math.max(1,...SPARK),n=SPARK.length,d='';for(var i=0;i<n;i++){var x=(i/(n-1||1))*400,y=40-(SPARK[i]/mx)*36-2;d+=(i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' '}
  var pl=document.createElementNS(NS,'path');pl.setAttribute('d',d);pl.setAttribute('fill','none');pl.setAttribute('stroke','var(--acc)');pl.setAttribute('stroke-width','1.3');svg.appendChild(pl)}
 tick();setInterval(tick,2000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)tick()});
 </script></body></html>"""
 
 
