@@ -121,53 +121,69 @@ def chromium_argv(browser: str, port: int, *, profile: Path) -> list[str]:
 
 def supervise(command: list[str], *, spawn=subprocess.Popen,
               sleep=time.sleep, max_failures=5, restart_delay=3) -> int:
-    """Bound crash loops and ensure a kiosk child is reaped on exit.
+    """Run an opted-in local kiosk with bounded crash and shutdown behavior.
 
-    The operator must opt in and supply a passing framebuffer/browser/session
-    preflight before this function is reached. An exited browser is restarted
-    a limited number of times; repeated crashes fail the unit rather than spin.
+    Normal browser exit is a successful stop, not a crash. Unexpected exits
+    are retried a finite number of times, after which systemd's own start
+    limit can apply. Termination is polled to avoid hanging on an ignored
+    signal, and the child is reaped before the supervisor exits.
     """
+    if not 1 <= max_failures <= 10 or not 0 <= restart_delay <= 60:
+        raise ValueError("invalid kiosk restart policy")
+    if not command or not os.path.isabs(command[0]):
+        raise ValueError("kiosk command must start with an absolute executable")
     failures = 0
     stopping = False
     child = None
     previous = {}
+
     def request_stop(signum, frame):
         nonlocal stopping
         stopping = True
-        if child is not None and child.poll() is None:
-            child.terminate()
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         previous[sig] = signal.getsignal(sig)
         signal.signal(sig, request_stop)
     try:
         while not stopping and failures < max_failures:
-            child = spawn(command, start_new_session=False)
             try:
-                code = child.wait()
-            except KeyboardInterrupt:
-                stopping = True
-                if child.poll() is None:
-                    child.terminate()
-                child.wait()
-                break
+                child = spawn(command, start_new_session=False)
+            except OSError as error:
+                print(f"kiosk spawn failed: {type(error).__name__}", file=sys.stderr)
+                return 1
+            while not stopping:
+                try:
+                    code = child.wait(timeout=0.5)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
             if stopping:
                 break
+            child = None  # successful wait reaped the exact child
+            if code == 0:
+                return 0
             failures += 1
-            if failures >= max_failures:
-                break
-            sleep(restart_delay)
+            if failures < max_failures:
+                sleep(restart_delay)
         return 0 if stopping else 1
     finally:
-        for sig, old in previous.items():
-            signal.signal(sig, old)
-        if child is not None and child.poll() is None:
-            child.terminate()
-            try:
-                child.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait(timeout=2)
-
+        try:
+            if child is not None and child.poll() is None:
+                try:
+                    child.terminate()
+                except ProcessLookupError:
+                    pass
+                try:
+                    child.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    try:
+                        child.kill()
+                    except ProcessLookupError:
+                        pass
+                    child.wait(timeout=2)
+        finally:
+            for sig, old in previous.items():
+                signal.signal(sig, old)
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Redux optional 480x320 kiosk launcher")
