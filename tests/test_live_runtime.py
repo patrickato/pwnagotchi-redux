@@ -171,6 +171,57 @@ class live_runtime_after_release:
         self.instance.close()
 
 
+def test_stale_capture_recovered_without_running_radio(tmp_path):
+    import os
+    import time
+    settings = cfg(tmp_path)
+    settings.active_dir.mkdir(parents=True)
+    source = settings.active_dir / "bettercap-orphan.pcap"
+    source.write_bytes(b"orphaned synthetic packet bytes")
+    old = time.time() - 90
+    os.utime(source, (old, old))
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [], clock=lambda: 0)
+    try:
+        runtime.tick()  # no radio, but recovery must still make forward progress
+        assert not source.exists()
+        assert (settings.capture_dir / source.name).read_bytes() == b"orphaned synthetic packet bytes"
+        assert runtime.handoffs == 1
+    finally:
+        runtime.close()
+
+
+def test_fresh_active_capture_never_ingested_early(tmp_path):
+    settings = cfg(tmp_path)
+    settings.active_dir.mkdir(parents=True)
+    source = settings.active_dir / "bettercap-active.pcap"
+    source.write_bytes(b"synthetic currently open capture")
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [], clock=lambda: 0)
+    try:
+        runtime.tick()
+        assert source.is_file()
+        assert not (settings.capture_dir / source.name).exists()
+    finally:
+        runtime.close()
+
+
+def test_bad_handoff_source_and_collision_preserve_data(tmp_path):
+    settings = cfg(tmp_path)
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [])
+    try:
+        source = settings.active_dir / "bettercap-same.pcap"
+        source.write_bytes(b"source bytes")
+        target = settings.capture_dir / source.name
+        target.write_bytes(b"keep me")
+        assert runtime._handoff(source) is False
+        assert source.read_bytes() == b"source bytes"
+        assert target.read_bytes() == b"keep me"
+        other = settings.active_dir / "bettercap-link.pcap"
+        other.symlink_to(source)
+        assert runtime._handoff(other) is False
+    finally:
+        runtime.close()
+
+
 def test_no_radio_retries_without_spawning(tmp_path, monkeypatch):
     clock = [0]
     calls = []
