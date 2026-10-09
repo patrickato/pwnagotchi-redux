@@ -11,3 +11,4 @@ enable_web = true # Localhost only. Later UI may expose via an authenticated pro
 retry_seconds = 10
 probe_seconds = 30
 rotation_seconds = 300 # Close each session and hand off its completed capture
+min_free_bytes = 67108864 # Pause capture if /captures has less than 64 MiB free
