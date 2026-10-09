@@ -31,6 +31,29 @@ def test_normalize_event_maps_and_reasons():
     assert normalize_event({"tag": "weird.thing", "data": {}}).type == "weird.thing"
 
 
+
+def test_normalize_rfc3339_event_timestamps_to_real_unix_seconds():
+    utc = normalize_event({
+        "tag": "wifi.ap.new",
+        "time": "2024-01-01T00:00:00.123456789Z",
+        "data": {"mac": "aa:bb:cc:dd:ee:ff"},
+    })
+    offset = normalize_event({
+        "tag": "wifi.ap.new",
+        "time": "2024-01-01T02:00:00.123456789+02:00",
+        "data": {"mac": "aa:bb:cc:dd:ee:ff"},
+    })
+    assert utc.at == pytest.approx(1704067200.123456)
+    assert offset.at == pytest.approx(utc.at)
+    assert normalize_event({"tag": "wifi.ap.new", "time": 123.5}).at == 123.5
+
+
+def test_bad_event_clock_never_raises():
+    for invalid in ("not-a-clock", "", "2024-01-01T00:00:00", float("nan"),
+                    float("inf"), True, None):
+        ev = normalize_event({"tag": "wifi.ap.new", "time": invalid})
+        assert ev.at > 0
+
 def test_set_interface_builds_command_and_logs():
     rec = []
     t = ReplayTransport()
