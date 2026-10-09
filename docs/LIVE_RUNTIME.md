@@ -98,8 +98,8 @@ the radio supervisor; failed handoffs remain visible in Doctor and the status
 snapshot. No automatic capture deletion occurs. When Bettercap exits or the
 radio disappears, the child is reaped, the SQLite store is closed, and
 the supervisor retries. Each restart creates a *new* capture file so
-completed files can settle and convert. Logs are kept private; startup
-rotates the Bettercap log at 4 MiB.
+completed files can settle and convert. Logs are kept private; the supervisor enforces a configurable
+Bettercap log-size budget during operation.
 
 The service prefers an existing monitor virtual interface on each physical
 radio and ignores PHY devices that lack a usable network interface. With
@@ -111,6 +111,50 @@ capture device can override this behavior with `allow_connected_capture = true`
 in `/etc/redux/live.toml`; the override explicitly permits disconnecting that
 interface. Network managers that independently own the same interface may
 still interfere and will require configuration based on the physical Pi.
+
+## Bounded Bettercap logs and REDUXCAP mount safety
+
+A running Bettercap process keeps its private diagnostic log open. Redux now
+checks that same append-only file descriptor each supervisor tick and truncates
+the log when it reaches the configured `max_log_bytes` budget (4 MiB by
+default, accepted range 64 KiB–64 MiB). This prevents unbounded growth
+during **normal responsive supervisor operation** without restarting capture.
+The rollover is intentionally lossy: diagnostic logs are expendable, unlike
+saved captures and the SQLite sightings database. A sudden large write can
+temporarily exceed the budget before the next tick; this is not a guaranteed
+kernel-enforced byte quota.
+
+Current and old log paths are checked against symlinks and hardlinks before
+cleanup. The legacy `bettercap.log.previous` archive is reduced if it exceeds
+the configured size when the engine starts. The live status checkpoint reports
+`log_bytes`, `log_truncations`, and `log_error`; a failure to enforce the
+limit appears as a separate degraded **engine logging** Doctor finding.
+
+The baked image relies on a separately mounted REDUXCAP partition at
+`/captures`. On that production layout, the runtime now refuses to start
+if `/captures` is not mounted, *before creating any state or capture paths*.
+If the mount disappears while running, Redux terminates its owned capture
+process, does **not** hand its capture file to rootfs fallback directories,
+and makes an in-memory Doctor report with capture storage marked
+**ACTION REQUIRED**. It intentionally skips writing a checkpoint while the
+mount is missing. Any closed capture that could not be handed off remains for
+recovery on the next startup when its original partition is accessible.
+
+Remounting does not automatically resume capture in the same process:
+the prior owner lock refers to the original filesystem. After verifying the
+mount and its contents, restart `redux-live.service` to reacquire that lock.
+This protects against two capture owners writing to a newly mounted volume.
+
+```sh
+findmnt /captures
+sudo systemctl status redux-live.service --no-pager
+sudo systemctl restart redux-live.service    # only after remount/recovery
+redux live doctor
+```
+
+For development installations using directories outside `/captures`, the
+production mount requirement is not imposed; configuration still requires
+distinct, compatible active/incoming filesystems.
 
 ## Sighting data integrity and SQLite recovery
 
