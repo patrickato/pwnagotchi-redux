@@ -271,3 +271,59 @@ def test_runtime_directory_must_be_private_and_owned(tmp_path, monkeypatch, caps
         assert "Unsafe XDG_RUNTIME_DIR" in capsys.readouterr().err
     finally:
         tmp_path.chmod(old)
+
+
+def test_browser_clean_exit_does_not_restart_or_enter_crash_loop():
+    children = []
+    class Browser:
+        def wait(self, timeout=None):
+            return 0
+        def poll(self):
+            return 0
+    def spawn(*args, **kwargs):
+        children.append(Browser())
+        return children[-1]
+    assert kiosk.supervise(["/usr/bin/chromium"], spawn=spawn,
+                           sleep=lambda _: pytest.fail("unnecessary restart delay")) == 0
+    assert len(children) == 1
+
+
+def test_supervisor_signal_stops_unresponsive_browser_with_bounded_kill():
+    import signal
+    old_handler = signal.getsignal(signal.SIGTERM)
+    child_events = []
+    class Browser:
+        dead = False
+        def wait(self, timeout=None):
+            child_events.append(("wait", timeout))
+            if timeout == 0.5:
+                signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                raise kiosk.subprocess.TimeoutExpired("browser", timeout)
+            if timeout == 3:
+                raise kiosk.subprocess.TimeoutExpired("browser", timeout)
+            assert timeout == 2 and self.dead
+            return -9
+        def poll(self):
+            return -9 if self.dead else None
+        def terminate(self):
+            child_events.append(("terminate", None))
+        def kill(self):
+            child_events.append(("kill", None))
+            self.dead = True
+    assert kiosk.supervise(["/usr/bin/chromium"], spawn=lambda *_a, **_k: Browser(),
+                           sleep=lambda _: pytest.fail("no restart on signal")) == 0
+    assert ("terminate", None) in child_events
+    assert ("kill", None) in child_events
+    assert ("wait", 2) in child_events
+    assert signal.getsignal(signal.SIGTERM) is old_handler
+
+
+def test_supervisor_rejects_bad_restart_policy_and_handles_spawn_failure(capsys):
+    with pytest.raises(ValueError, match="restart policy"):
+        kiosk.supervise(["/usr/bin/chromium"], max_failures=0)
+    with pytest.raises(ValueError, match="absolute executable"):
+        kiosk.supervise(["chromium"])
+    assert kiosk.supervise(["/usr/bin/chromium"],
+                           spawn=lambda *_a, **_k: (_ for _ in ()).throw(
+                               FileNotFoundError("chromium missing"))) == 1
+    assert "kiosk spawn failed" in capsys.readouterr().err
