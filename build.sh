@@ -94,6 +94,7 @@ cp -a "$REPO_DIR/redux/." "$PI_GEN_DIR/stage-redux/00-redux/files/redux/"
 install -d "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline"
 cp "$REPO_DIR/config/pipeline.example.toml" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/pipeline.toml"
 cp "$REPO_DIR/config/live.example.toml" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/live.toml"
+cp "$REPO_DIR/scripts/redux-live-diag.sh" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/redux-live-diag.sh"
 for unit in redux-capture-ingest redux-capture-audit; do
     cp "$REPO_DIR/systemd/$unit.service" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/"
     cp "$REPO_DIR/systemd/$unit.timer" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/"
