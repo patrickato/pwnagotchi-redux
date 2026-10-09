@@ -117,6 +117,48 @@ def select_radio(radios, preferred=""):
     return None, []
 
 
+
+def choose_safe_radio(radios, preferred="", *, run=subprocess.run,
+                      allow_connected=False):
+    """Prefer the best available capture radio without stealing a live uplink.
+
+    Candidate eligibility is checked without changing an interface. If an
+    adapter's current state cannot be established, skip it and try a fallback.
+    Explicit operator opt-in allows the existing orchestrator's raw choice.
+    """
+    candidates = list(radios)
+    if allow_connected:
+        iface, _ = select_radio(candidates, preferred)
+        return iface
+    while candidates:
+        iface, _ = select_radio(candidates, preferred)
+        if iface is None:
+            return None
+        if not _IFACE.fullmatch(iface):
+            candidates = [r for r in candidates if r.iface != iface]
+            continue
+        try:
+            info = run(["iw", "dev", iface, "info"], capture_output=True,
+                       text=True, timeout=6, check=False)
+            if info.returncode == 0 and re.search(
+                r"^\s*type\s+monitor\s*$", info.stdout, re.M
+            ):
+                return iface
+            if info.returncode == 0 and re.search(
+                r"^\s*type\s+managed\s*$", info.stdout, re.M
+            ):
+                link = run(["iw", "dev", iface, "link"], capture_output=True,
+                           text=True, timeout=6, check=False)
+                if link.returncode == 0 and not re.search(
+                    r"^\s*Connected to\s+", link.stdout, re.M
+                ):
+                    return iface
+        except (OSError, subprocess.SubprocessError):
+            pass
+        candidates = [r for r in candidates if r.iface != iface]
+    return None
+
+
 def ensure_monitor(iface, *, run=subprocess.run, allow_connected=False):
     """Configure only the selected capture interface; never change uplink radios."""
     if not _IFACE.fullmatch(iface):
@@ -438,7 +480,9 @@ class LiveRuntime:
                     return self.state
                 self.augur.pump()
                 if now - self.last_probe >= self.config.probe_seconds:
-                    radio, _ = select_radio(self.radio_probe(), self.config.preferred_iface)
+                    radio, _ = (choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
+                                         run=self.executor,
+                                         allow_connected=self.config.allow_connected_capture), [])
                     if radio != self.iface:
                         raise RuntimeError("capture radio removed or reassigned")
                     self.last_probe = now
@@ -462,7 +506,9 @@ class LiveRuntime:
             try:
                 if free_bytes(self.config.active_dir) < self.config.min_free_bytes:
                     raise RuntimeError("capture partition is below free-space reserve")
-                iface, _ = select_radio(self.radio_probe(), self.config.preferred_iface)
+                iface, _ = (choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
+                                         run=self.executor,
+                                         allow_connected=self.config.allow_connected_capture), [])
                 if not iface:
                     raise RuntimeError("no monitor-capable Wi-Fi interface detected")
                 self._launch(iface)
