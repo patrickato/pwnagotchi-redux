@@ -113,6 +113,28 @@ async function deliver(request,data){
  await deliver(requests.shift(),report(20,20));
  assert.equal(elem('doctorlabel').textContent,'OK');
  assert.equal(elem('sub').textContent,'live · measured');
+ navTabs[3].onclick();
+ assert.equal(context.currentView,'doctor');
+ assert.equal(location.hash,'doctor');
+ assert.equal(panes[3].hidden,false);
+ assert.equal(panes[0].hidden,true);
+ assert.equal(navTabs[3]['aria-pressed'],'true');
+ const key={key:'ArrowRight',preventDefault(){this.prevented=true}};
+ elem('viewnav').onkeydown(key);
+ assert.equal(context.currentView,'overview','keyboard nav wraps around');
+ assert.equal(key.prevented,true);
+ assert.equal(navTabs[0].focused,true);
+ const root=elem('viewroot');
+ const start={pointerType:'touch',clientX:220,clientY:150,
+  target:{closest:()=>null}};
+ root.onpointerdown(start);
+ root.onpointerup({pointerType:'touch',clientX:218,clientY:40});
+ assert.equal(context.currentView,'overview','vertical scrolling must not switch pages');
+ root.onpointerdown(start);
+ root.onpointerup({pointerType:'touch',clientX:120,clientY:145});
+ assert.equal(context.currentView,'radio','left swipe switches to next page');
+ assert.equal(requests.length,0,'page navigation must not restart telemetry polling');
+ assert.equal(elem('capturestate').textContent,'UNKNOWN');
  const firstMap=elem('map').firstChild;
  assert.ok(firstMap,'a first real visual sample must render');
 
