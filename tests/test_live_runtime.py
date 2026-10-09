@@ -359,6 +359,40 @@ def test_bad_handoff_source_and_collision_preserve_data(tmp_path):
         runtime.close()
 
 
+def test_crash_between_queue_link_and_source_unlink_recovers(tmp_path):
+    import os
+    settings = cfg(tmp_path)
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [])
+    try:
+        source = settings.active_dir / "bettercap-interrupted.pcap"
+        queued = settings.capture_dir / source.name
+        source.write_bytes(b"test payload with durable source")
+        os.link(source, queued)  # interrupted publish before active name removed
+        assert source.stat().st_ino == queued.stat().st_ino
+        assert runtime._handoff(source) is True
+        assert not source.exists()
+        assert queued.read_bytes() == b"test payload with durable source"
+    finally:
+        runtime.close()
+
+
+def test_failed_publication_leaves_only_original_capture(tmp_path, monkeypatch):
+    settings = cfg(tmp_path)
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [])
+    try:
+        source = settings.active_dir / "bettercap-pending.pcap"
+        source.write_bytes(b"retriable capture")
+        def refuse_link(*args, **kwargs):
+            raise OSError("synthetic directory write failure")
+        monkeypatch.setattr(live.os, "link", refuse_link)
+        assert runtime._handoff(source) is False
+        assert source.read_bytes() == b"retriable capture"
+        assert not (settings.capture_dir / source.name).exists()
+        assert "handoff failed" in runtime.last_handoff_error
+    finally:
+        runtime.close()
+
+
 def test_no_radio_retries_without_spawning(tmp_path, monkeypatch):
     clock = [0]
     calls = []
