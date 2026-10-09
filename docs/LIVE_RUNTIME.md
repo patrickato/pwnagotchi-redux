@@ -18,8 +18,11 @@ Two independent systemd units now have clear, separate jobs:
 The image's writable REDUXCAP filesystem is `/captures`. The runtime stores
 its private caplet, process log, GeoDB, and status in `/captures/redux`;
 Bettercap stores its current aggregate handshake file in `/captures/active`.
-Only after that process exits is a nonempty, closed file atomically handed off to
-`/captures/incoming`. The file processor watches only the incoming directory
+Only after that process exits is a nonempty, closed file synced, hard-linked
+into `/captures/incoming` without clobbering an existing name, and removed
+from the active directory. A power interruption between the link and removal
+is safe to resume: Redux recognizes the same inode on both names.
+The file processor watches only the incoming directory
 and preserves its own database in `/captures/jobs.db`.
 
 This architecture does **not** depend on Jayofelony Pwnagotchi, and the
@@ -73,14 +76,17 @@ controlled sample of the owner's own AP.
 
 ## Recovery and limitations
 
-When there is no monitor-capable adapter, the service reports `degraded`
+When there is no safe monitor-capable adapter, the service reports `degraded`
 and retries; no phantom devices are reported. When Bettercap exits or the
 radio disappears, the child is reaped, the SQLite store is closed, and
 the supervisor retries. Each restart creates a *new* capture file so
 completed files can settle and convert. Logs are kept private; startup
 rotates the Bettercap log at 4 MiB.
 
-The service changes only the selected capture interface. By default it refuses
+The service prefers an existing monitor virtual interface on each physical
+radio and ignores PHY devices that lack a usable network interface. With
+multiple capture-capable radios, it skips an active connected uplink and uses
+a free alternative. By default it refuses
 to switch a currently connected Wi-Fi uplink into monitor mode (so SSH/internet
 connections are not unexpectedly disconnected). Operators using a dedicated
 capture device can override this behavior with `allow_connected_capture = true`
