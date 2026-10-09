@@ -408,6 +408,7 @@ def test_preparation_exports_only_redux_and_targets_pi4(prepared):
     assert live_settings.exists()
     assert "max_log_bytes = 4194304" in live_settings.read_text()
     assert "min_free_bytes = 67108864" in live_settings.read_text()
+    assert "status_sample_seconds = 5" in live_settings.read_text()
     assert (tree / "stage-redux/00-redux/files/pipeline/redux-live-diag.sh").exists()
     assert (tree / "stage-redux/00-redux/files/redux/core/live_runtime.py").exists()
     assert (tree / "stage-redux/00-redux/files/pipeline/redux-capture-ingest.service").exists()
