@@ -188,6 +188,22 @@ def test_readonly_preflight_checks_writable_partition_mount():
     assert outcome["checks"]["capture_mount"] is False
 
 
+def test_driver_refuses_rest_success_false_without_executing_recon():
+    class Rejected:
+        def run(self, command):
+            return {"success": False, "msg": "synthetic denied operation"}
+        def events(self, clear=False):
+            return []
+    from redux.engine.bettercap_driver import BettercapConfig
+    driver = live.LiveDriver(config=BettercapConfig(), transport=Rejected())
+    with pytest.raises(RuntimeError, match="interface selection"):
+        driver.set_interface("wlan1mon")
+    with pytest.raises(RuntimeError, match="capture output configuration"):
+        driver.set_handshake_file("/captures/active/synthetic.pcap")
+    with pytest.raises(RuntimeError, match="passive recon"):
+        driver.recon(True)
+
+
 def test_single_live_owner_lock(tmp_path):
     first = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [])
     try:
