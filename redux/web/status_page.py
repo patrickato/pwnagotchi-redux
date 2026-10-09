@@ -223,6 +223,12 @@ body[data-skin="plain"] .hero::before{display:none}
  .row{gap:7px}.kv{flex:1 1 92px}.v{font-size:15px}
  .leg{gap:7px;flex-wrap:wrap}.doctor-top{gap:8px}
 }
+@media(max-width:360px){
+ #sub{display:none}
+ .runtime-pill{max-width:94px}
+ .brand-mark{display:none}
+ .view-nav button{font-size:11px}
+}
 </style></head><body data-skin="rich">
 <header id="devicebar" aria-label="Device status">
  <div class="brand"><span class="brand-mark" aria-hidden="true">◈</span><h1>Augur</h1></div>
@@ -408,6 +414,7 @@ document.getElementById('skinbtn').onclick=function(){skin=(skin==='rich')?'plai
  try{localStorage.setItem('augur.skin',skin)}catch(e){}applySkin()};
 applySkin();
 function setb(id,txt,cls){var e=document.getElementById(id);e.textContent=txt;e.className='badge'+(cls?' '+cls:'')}
+var lastDoctorFindings=null;
 function renderDoctor(report){
  const d=report&&Array.isArray(report.findings)?report:null;
  const modes=['ok','attention','degraded','action','unknown'];
@@ -429,7 +436,13 @@ function renderDoctor(report){
   :gaps===null?'Doctor coverage is unverified.'
   :gaps.length?gaps.length+' unassessed area(s): '+gaps.join(', ')
   :'All reported Doctor areas assessed.';
- const list=document.getElementById('doctorlist');list.replaceChildren();
+ const list=document.getElementById('doctorlist');
+ // Preserve expanded Doctor contents and scroll focus during unchanged
+ // status polls. The severity label and coverage still update every poll.
+ const fingerprint=d?JSON.stringify(d.findings):null;
+ if(fingerprint===lastDoctorFindings)return;
+ lastDoctorFindings=fingerprint;
+ list.replaceChildren();
  if(!d)return;
  d.findings.forEach(function(f){
   const item=document.createElement('div');item.className='doctor-finding';
