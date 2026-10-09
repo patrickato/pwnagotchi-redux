@@ -404,7 +404,10 @@ def test_preparation_exports_only_redux_and_targets_pi4(prepared):
     assert (tree / "stage-redux/EXPORT_IMAGE").exists()
     assert (tree / "stage-redux/00-redux/files/redux/core/boot.py").exists()
     assert (tree / "stage-redux/00-redux/files/pipeline/pipeline.toml").exists()
-    assert (tree / "stage-redux/00-redux/files/pipeline/live.toml").exists()
+    live_settings = tree / "stage-redux/00-redux/files/pipeline/live.toml"
+    assert live_settings.exists()
+    assert "max_log_bytes = 4194304" in live_settings.read_text()
+    assert "min_free_bytes = 67108864" in live_settings.read_text()
     assert (tree / "stage-redux/00-redux/files/pipeline/redux-live-diag.sh").exists()
     assert (tree / "stage-redux/00-redux/files/redux/core/live_runtime.py").exists()
     assert (tree / "stage-redux/00-redux/files/pipeline/redux-capture-ingest.service").exists()
