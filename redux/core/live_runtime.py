@@ -314,7 +314,7 @@ class LiveRuntime:
                         raise RuntimeError("capture radio removed or reassigned")
                     self.last_probe = now
             except Exception as error:
-                self.last_error = f"live polling stopped: {type(error).__name__}"
+                self.last_error = f"live polling stopped: {str(error)[:150]}"
                 _LOG.warning("%s", self.last_error)
                 self._drop()
                 self.state = "degraded"
@@ -325,7 +325,7 @@ class LiveRuntime:
             except Exception as error:
                 # Startup grace permits REST to come up without restarting radio.
                 if now - self.started > 15:
-                    self.last_error = f"engine initialization: {type(error).__name__}"
+                    self.last_error = f"engine initialization: {str(error)[:150]}"
                     self._drop()
                     self.state = "degraded"
                     self.next_try = now + self.config.retry_seconds
@@ -336,7 +336,7 @@ class LiveRuntime:
                     raise RuntimeError("no monitor-capable Wi-Fi interface detected")
                 self._launch(iface)
             except Exception as error:
-                self.last_error = f"engine launch: {type(error).__name__}"
+                self.last_error = f"engine launch: {str(error)[:150]}"
                 _LOG.warning("%s", self.last_error)
                 self._drop()
                 self.state = "degraded"
