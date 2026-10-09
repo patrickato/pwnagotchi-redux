@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic Redux capture file ingest
+
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=20s
+AccuracySec=5s
+Persistent=true
+Unit=redux-capture-ingest.service
+
+[Install]
+WantedBy=timers.target
