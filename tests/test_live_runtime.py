@@ -615,6 +615,71 @@ def test_dashboard_binding_errors_are_reported_and_retry_is_bounded(tmp_path, mo
         runtime.close()
 
 
+def test_dashboard_thread_start_failure_cleans_socket_and_reports_issue(tmp_path, monkeypatch):
+    servers = []
+    class Server:
+        def __init__(self, *args, **kwargs):
+            self.closed = False
+            servers.append(self)
+        def server_close(self):
+            self.closed = True
+    class BrokenThread:
+        def __init__(self, **kwargs):
+            pass
+        def start(self):
+            raise RuntimeError("synthetic thread startup failure")
+    monkeypatch.setattr(live, "ThreadingHTTPServer", Server)
+    monkeypatch.setattr(live.threading, "Thread", BrokenThread)
+    runtime = live.LiveRuntime(cfg(tmp_path, enable_web=True),
+                               radio_probe=lambda: [], clock=lambda: 0)
+    try:
+        assert runtime.tick() == "degraded"
+        assert runtime.web is None
+        assert servers[0].closed
+        assert "dashboard startup failed" in runtime.web_error
+        finding = next(x for x in runtime._snapshot["doctor"]["findings"]
+                       if x["area"] == "local dashboard")
+        assert finding["status"] == "degraded"
+    finally:
+        runtime.close()
+
+
+def test_dead_dashboard_thread_is_not_reported_as_healthy(tmp_path, monkeypatch):
+    state = {"threads": []}
+    class Server:
+        def __init__(self, *args, **kwargs):
+            self.closed = False
+        def server_close(self):
+            self.closed = True
+    class FakeThread:
+        def __init__(self, **kwargs):
+            self.alive = False
+            state["threads"].append(self)
+        def start(self):
+            self.alive = True
+        def is_alive(self):
+            return self.alive
+    monkeypatch.setattr(live, "ThreadingHTTPServer", Server)
+    monkeypatch.setattr(live.threading, "Thread", FakeThread)
+    now = [0]
+    runtime = live.LiveRuntime(cfg(tmp_path, enable_web=True),
+                               radio_probe=lambda: [], clock=lambda: now[0])
+    try:
+        assert runtime.tick() == "degraded"
+        server = runtime.web
+        assert server is not None
+        state["threads"][0].alive = False
+        now[0] = 1
+        assert runtime.tick() == "degraded"
+        assert server.closed is True
+        assert runtime.web is None
+        assert "stopped unexpectedly" in runtime.web_error
+        assert runtime._snapshot["runtime"]["dashboard_active"] is False
+        assert runtime.web_next_try == 31
+    finally:
+        runtime.close()
+
+
 def test_source_tree_is_importable_and_service_opt_in(tmp_path):
     assert callable(live.main)
     live.LiveConfig.load
