@@ -190,6 +190,7 @@ class LiveRuntime:
         self.next_try = 0.0
         self.last_probe = 0.0
         self.last_saved = float("-inf")
+        self.last_recovery = float("-inf")
         self.saved_state = ""
         self.started = 0.0
         self.log_handle = None
@@ -207,6 +208,8 @@ class LiveRuntime:
         os.chmod(self.config.state_dir, 0o700)
         os.chmod(self.config.capture_dir, 0o700)
         os.chmod(self.config.active_dir, 0o700)
+        if self.config.active_dir.stat().st_dev != self.config.capture_dir.stat().st_dev:
+            raise ValueError("active and incoming captures must use the same filesystem")
         lock_path = self.config.state_dir / "owner.lock"
         if lock_path.is_symlink():
             raise ValueError("refusing runtime lock symlink")
@@ -386,6 +389,9 @@ class LiveRuntime:
 
     def tick(self):
         now = self.clock()
+        if now - self.last_recovery >= 20:
+            self._recover_abandoned()
+            self.last_recovery = now
         if self.process is not None and self.process.poll() is not None:
             self.last_error = "Bettercap exited unexpectedly"
             self._drop()
@@ -424,7 +430,6 @@ class LiveRuntime:
                     self.next_try = now + self.config.retry_seconds
         elif now >= self.next_try:
             try:
-                self._recover_abandoned()
                 iface, _ = select_radio(self.radio_probe(), self.config.preferred_iface)
                 if not iface:
                     raise RuntimeError("no monitor-capable Wi-Fi interface detected")
