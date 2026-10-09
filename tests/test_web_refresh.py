@@ -128,6 +128,9 @@ async function deliver(request,data){
  elem('palettebtn').onclick();
  assert.equal(elem('palettebtn').textContent,'Glacier');
  elem('palettebtn').onclick();
+ assert.equal(elem('palettebtn').textContent,'Quartz');
+ assert.equal(document.body.style['--acc'],'#e5a6f7');
+ elem('palettebtn').onclick();
  assert.equal(elem('palettebtn').textContent,'Signal');
  assert.equal(navTabs[0].dataset.view,'overview');
  assert.equal(navTabs[0]['aria-pressed'],'true');
