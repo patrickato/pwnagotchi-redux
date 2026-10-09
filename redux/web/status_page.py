@@ -210,8 +210,8 @@ body[data-skin="plain"] .hero::before{display:none}
  .brand{gap:4px}.brand-mark{font-size:14px}
  #sub{font-size:9px;max-width:85px}
  .runtime-pill{max-width:115px;min-height:25px;padding:3px 5px;font-size:9px}
- .health-shortcut{height:40px;min-height:40px;width:40px;min-width:40px}
- #skinbtn{min-height:40px;padding:4px 7px;font-size:10px}
+ .health-shortcut{height:44px;min-height:44px;width:44px;min-width:44px}
+ #skinbtn{min-height:44px;padding:4px 7px;font-size:10px}
  .hero-main{gap:11px;padding:8px 2px 4px}
  .hero .face{font-size:42px}.hero .creature{font-size:18px}
  .hero-overline,.hero-capture{font-size:9px}
