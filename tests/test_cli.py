@@ -201,7 +201,7 @@ def test_live_doctor_sanitizes_terminal_sequences(monkeypatch):
             "overall": "attention", "label": "ATTENTION",
             "findings": [{
                 "area": "capture", "status": "attention",
-                "summary": "Danger\\u001b[31mRED",
+                "summary": "Danger\x1b[31mRED",
                 "reason": "", "remediation": "",
             }],
             "coverage": {"reason": "partial"},
