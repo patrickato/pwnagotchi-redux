@@ -57,7 +57,7 @@ sudo env PYTHONPATH=/opt/redux python3 -m redux.crack.ingest --config /etc/redux
 curl -fsS http://127.0.0.1:8080/api/status
 ```
 
-For complete basic diagnostics, `sudo bash scripts/redux-live-diag.sh`
+For complete basic diagnostics, `sudo redux-live-diag`
 from this source tree is also provided. It intentionally does not print
 the REST password, hash material, or the private caplet.
 
