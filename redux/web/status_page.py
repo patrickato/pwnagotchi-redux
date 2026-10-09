@@ -126,7 +126,21 @@ body[data-skin="plain"] .card{border-color:#16202a}
 .doctor-details{margin-top:9px;color:var(--mut);font-size:12px}
 .doctor-details summary{cursor:pointer;min-height:44px;display:flex;align-items:center;
 touch-action:manipulation}
+[hidden]{display:none!important}
+.view-nav{width:min(900px,100%);margin:0 auto;padding:7px 12px;display:grid;
+grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;background:var(--bg)}
+.view-nav button{font-size:12px;min-width:0;white-space:nowrap;padding:5px 2px}
+.view-nav button[aria-pressed="true"]{color:var(--acc);border-color:var(--acc);
+background:#13332e;font-weight:700}
+.view-nav button:focus-visible{outline:2px solid var(--wifi);outline-offset:2px}
 @media(max-width:520px){
+ html,body{height:100%;height:100dvh}
+ body{display:flex;flex-direction:column;overflow:hidden}
+ header{flex:0 0 auto}
+ #viewnav{flex:0 0 auto;order:3;padding:4px;gap:4px;border-top:1px solid var(--line)}
+ #viewnav button{height:46px;min-height:46px;font-size:12px}
+ #viewroot{flex:1;min-height:0;width:100%;overflow-y:auto;overscroll-behavior:contain;
+ -webkit-overflow-scrolling:touch}
  main{padding:8px;gap:7px}.card{border-radius:7px;padding:8px 10px}
  header{padding:5px 9px}h1{font-size:16px}
  #map{height:174px}.aptbl{grid-template-columns:24px minmax(0,1fr) 37px 42px;
@@ -137,15 +151,21 @@ touch-action:manipulation}
 </style></head><body data-skin="rich">
 <header><h1>Augur</h1><span class="mut" id="sub">glass-box</span><span class="sp"></span>
  <button id="skinbtn" title="toggle skin">rich</button></header>
-<main>
- <div class="card"><div class="face" id="face">‹·_·›</div><div class="creature" id="creature">…</div><div class="reason" id="mood"></div></div>
- <div class="card rich"><div class="k">airspace · real GPS fixes only · moves as you move</div>
+<nav id="viewnav" class="view-nav" aria-label="Redux workspace pages">
+ <button type="button" data-view="overview" aria-pressed="true">Overview</button>
+ <button type="button" data-view="radio" aria-pressed="false">Radio</button>
+ <button type="button" data-view="captures" aria-pressed="false">Captures</button>
+ <button type="button" data-view="doctor" aria-pressed="false">Doctor</button>
+</nav>
+<main id="viewroot" tabindex="-1">
+ <div class="card" data-page="overview"><div class="face" id="face">‹·_·›</div><div class="creature" id="creature">…</div><div class="reason" id="mood"></div></div>
+ <div class="card rich" data-page="radio" hidden><div class="k">airspace · real GPS fixes only · moves as you move</div>
    <div id="wrap"><svg id="map" viewBox="0 0 400 340" preserveAspectRatio="xMidYMid meet"
      aria-label="live sighting map"></svg></div>
    <div class="leg mut"><span><i style="background:var(--me)"></i>you</span>
      <span><i style="background:var(--wifi)"></i>wifi</span>
      <span><i style="background:var(--ble)"></i>ble</span><span id="maprange" class="dim"></span></div></div>
- <section class="card" aria-label="Device Doctor">
+ <section class="card" data-page="doctor" hidden aria-label="Device Doctor">
   <div class="k">Doctor · measured device health</div>
   <div class="doctor-top" role="status" aria-live="polite">
    <span id="doctorheart" class="doctor-heart unknown" aria-hidden="true">♡</span>
@@ -155,13 +175,32 @@ touch-action:manipulation}
   <details class="doctor-details"><summary>Findings and recovery advice</summary>
    <div id="doctorlist" class="doctor-list"></div></details>
  </section>
- <section class="card" aria-label="Capture processing">
+ <section class="card" data-page="captures" hidden aria-label="Capture processing">
   <div class="k">Capture processing · worker ledger</div>
   <div id="pipelinestate" class="doctor-title unknown">UNKNOWN · not assessed</div>
   <div id="pipelinecounts" class="reason">No durable worker scan observed</div>
   <div id="pipelinereason" class="reason"></div>
  </section>
- <div class="card"><div class="row">
+ <section class="card" data-page="captures" hidden aria-label="Capture lifecycle">
+  <div class="k">Capture lifecycle · live supervisor</div>
+  <div class="row">
+   <div class="kv"><div class="k">Capture state</div><div class="v" id="capturestate">UNKNOWN</div></div>
+   <div class="kv"><div class="k">Handed off</div><div class="v" id="capturehanded">—</div></div>
+   <div class="kv"><div class="k">Pending sightings</div><div class="v" id="capturepending">—</div></div>
+  </div>
+  <div id="capturefile" class="reason">No active capture verified</div>
+  <div id="capturewarning" class="reason">Waiting for a live supervisor</div>
+ </section>
+ <section class="card" data-page="doctor" hidden aria-label="Runtime diagnostics">
+  <div class="k">Runtime diagnostics · measured state</div>
+  <div class="row">
+   <div class="kv"><div class="k">State</div><div class="v" id="runtimestate">UNKNOWN</div></div>
+   <div class="kv"><div class="k">Free storage</div><div class="v" id="runtimefree">—</div></div>
+   <div class="kv"><div class="k">Log resets</div><div class="v" id="runtimelogs">—</div></div>
+  </div>
+  <div id="runtimeerror" class="reason">Waiting for live diagnostics</div>
+ </section>
+ <div class="card" data-page="overview"><div class="row">
    <div class="kv"><div class="k">persona</div><div class="v" id="persona">—</div></div>
    <div class="kv"><div class="k">intent</div><div class="v" id="intent">—</div></div>
    <div class="kv"><div class="k">capture radio</div><div class="v" id="cap">—</div></div>
@@ -170,22 +209,22 @@ touch-action:manipulation}
    <div class="kv"><div class="k">alerts</div><div class="v" id="alerts">—</div></div>
  </div>
  <svg id="spark" class="rich" viewBox="0 0 400 40" preserveAspectRatio="none"></svg></div>
- <div class="card"><div class="k">brain recommends</div>
+ <div class="card" data-page="overview"><div class="k">brain recommends</div>
    <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div></div>
- <div class="card rich" id="sensecard" style="display:none"><div class="k">presence (CSI)</div>
+ <div class="card rich" data-page="radio" hidden id="sensecard" style="display:none"><div class="k">presence (CSI)</div>
    <div class="v"><span class="badge" id="sense">—</span> <span class="badge" id="occ">—</span></div>
    <div class="reason" id="sensewhy"></div></div>
- <div class="card" id="sentcard" style="display:none"><div class="k">sentinel</div>
+ <div class="card" data-page="radio" hidden id="sentcard" style="display:none"><div class="k">sentinel</div>
    <div class="v"><span class="badge" id="sentarm">—</span> dispatched <span id="sentd">0</span> · suppressed <span id="sents">0</span></div>
    <div class="reason" id="sentlast"></div></div>
- <div class="card rich"><div class="k">airspace · channel occupancy / RSSI distribution</div>
+ <div class="card rich" data-page="radio" hidden><div class="k">airspace · channel occupancy / RSSI distribution</div>
    <svg id="chanbars" viewBox="0 0 400 92" preserveAspectRatio="none"></svg>
    <svg id="rssibars" viewBox="0 0 400 72" preserveAspectRatio="none"></svg>
    <div class="leg mut"><span id="airnote">no channel/RSSI data yet</span></div></div>
- <div class="card"><div class="k">access points · seen in range (from the Cache · listen-only)</div>
+ <div class="card" data-page="radio" hidden><div class="k">access points · seen in range (from the Cache · listen-only)</div>
    <div class="aptbl" id="aptbl"></div>
    <div class="leg mut"><span id="apnote">no APs recorded yet</span></div></div>
- <div class="card"><div class="k">recent narration</div><ul id="narr"></ul></div>
+ <div class="card" data-page="overview"><div class="k">recent narration</div><ul id="narr"></ul></div>
 </main>
 <script>
 var TRACK=[],SPARK=[],lastSight=null,lastVisualSample=null;
