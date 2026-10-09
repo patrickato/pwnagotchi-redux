@@ -164,7 +164,7 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 591 tests, no hardware needed
+pytest                 # 807 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)

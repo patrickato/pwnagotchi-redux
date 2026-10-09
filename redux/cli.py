@@ -3,6 +3,9 @@
     redux status   [--intent I] [--onboard] [--adapter]        one-shot glass-box snapshot
     redux run      --replay events.json [--cycles N] ...        run pump cycles over a recorded session
     redux packs    --dir D list | enable NAME | disable NAME    manage Packs
+    redux survey   --iface wlan1mon [--demo]                    passive AP situational-awareness sweep (read-only)
+    redux selftest                                             on-device software battery (paste the report back)
+    redux hwtest   --iface wlan1mon [--out FILE]                validation battery: software + synthetic detection + live passive
 
 The hardware paths (live probe, a real BettercapDriver) are used when asked; the
 default/testable paths (stub radios, a replay driver) need no Pi. Everything it
