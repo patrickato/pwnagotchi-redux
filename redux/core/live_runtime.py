@@ -31,6 +31,7 @@ from ..radio.probe import probe
 from ..web.status_page import make_handler, status_payload
 from .augur import Augur
 from .boot import atomic_checkpoint
+from .live_health import describe_live_health
 from .signals import Signal
 
 _LOG = logging.getLogger("redux.live")
@@ -309,12 +310,26 @@ class LiveRuntime:
             "updated_utc": time.time(),
         }
         self._snapshot = {"runtime": metadata}
+        report = None
         if self.augur is not None:
             try:
                 self._snapshot = status_payload(self.augur)
                 self._snapshot["runtime"] = metadata
             except Exception as error:
                 _LOG.warning("status snapshot unavailable: %s", type(error).__name__)
+            try:
+                report = self.augur.doctor_report()
+            except Exception as error:
+                _LOG.warning("Doctor snapshot unavailable: %s", type(error).__name__)
+        health = describe_live_health(
+            self.state, iface=self.iface or "", free_bytes=free,
+            reserve_bytes=self.config.min_free_bytes, handoffs=self.handoffs,
+            last_error=self.last_error, handoff_error=self.last_handoff_error,
+            doctor_report=report,
+        )
+        metadata["health"] = health["overall"]
+        metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])
+        self._snapshot["doctor"] = health
         if self.state != self.saved_state or self.clock() - self.last_saved >= 5:
             try:
                 atomic_checkpoint(self.config.state_dir / "live.json", metadata)
