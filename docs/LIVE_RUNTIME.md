@@ -33,6 +33,10 @@ implementations. No stub radios are used. Existing live radio capture examples
 work by explicitly selecting an interface; the runtime now does so automatically
 and retries when the adapter appears.
 
+The generated caplet sets `wifi.txpower 0` so the passive runtime does not
+request a transmit-power change. On-device regulatory-domain checks remain a
+physical acceptance gate; Redux does not assume a country code.
+
 The Bettercap REST listener binds only to `127.0.0.1` on port 8081 with
 a randomly generated password. The caplet is private (mode 0600).
 The web dashboard binds to **localhost only**, on port 8080, and reads
