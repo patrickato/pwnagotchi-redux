@@ -43,6 +43,8 @@ def test_config_rejects_bad_paths_and_interfaces(tmp_path):
         cfg(tmp_path, bettercap_binary="sh -c").validate()
     with pytest.raises(ValueError, match="rotation"):
         cfg(tmp_path, rotation_seconds=20).validate()
+    with pytest.raises(ValueError, match="boolean"):
+        cfg(tmp_path, allow_connected_capture="yes").validate()
     cfg(tmp_path).validate()
 
 
@@ -80,11 +82,45 @@ def test_ensure_monitor_changes_only_selected_interface():
     assert live.ensure_monitor("wlan1mon", run=run) is True
     assert commands == [
         ["iw", "dev", "wlan1mon", "info"],
+        ["iw", "dev", "wlan1mon", "link"],
         ["ip", "link", "set", "wlan1mon", "down"],
         ["iw", "dev", "wlan1mon", "set", "type", "monitor"],
         ["ip", "link", "set", "wlan1mon", "up"],
         ["iw", "dev", "wlan1mon", "info"],
     ]
+
+
+
+def test_connected_wifi_uplink_does_not_get_disconnected():
+    commands = []
+    def runner(argv, **kwargs):
+        commands.append(argv)
+        if argv[-1] == "info":
+            return subprocess.CompletedProcess(argv, 0, "type managed\n", "")
+        if argv[-1] == "link":
+            return subprocess.CompletedProcess(argv, 0,
+                                               "Connected to aa:bb:cc:dd:ee:ff\n", "")
+        raise AssertionError("must never take an active uplink down")
+    with pytest.raises(RuntimeError, match="connected uplink"):
+        live.ensure_monitor("wlan0", run=runner)
+    assert commands == [
+        ["iw", "dev", "wlan0", "info"],
+        ["iw", "dev", "wlan0", "link"],
+    ]
+
+
+def test_connected_wifi_can_be_reassigned_only_with_explicit_override():
+    commands = []
+    def runner(argv, **kwargs):
+        commands.append(argv)
+        if argv == ["iw", "dev", "wlan0", "info"]:
+            infos = sum(x == argv for x in commands)
+            return subprocess.CompletedProcess(argv, 0,
+                "type managed\n" if infos == 1 else "type monitor\n", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    assert live.ensure_monitor("wlan0", run=runner, allow_connected=True) is True
+    assert ["iw", "dev", "wlan0", "link"] not in commands
+    assert ["ip", "link", "set", "wlan0", "down"] in commands
 
 
 def test_ensure_monitor_errors_on_failed_transition():
