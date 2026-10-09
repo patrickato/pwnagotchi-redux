@@ -17,6 +17,7 @@ import re
 import secrets
 import shutil
 import signal
+import sqlite3
 import stat
 import subprocess
 import threading
@@ -265,6 +266,9 @@ class LiveRuntime:
         self.capture_file = None
         self.handoffs = 0
         self.last_handoff_error = ""
+        self.telemetry_next_try = float("-inf")
+        self.sighting_loss_events = 0
+        self.last_sighting_loss_reason = ""
         self._snapshot = {"runtime": {"state": "starting"}}
         self.state = "starting"
         self.config.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -300,6 +304,12 @@ class LiveRuntime:
             free = free_bytes(self.config.active_dir)
         except OSError:
             free = None
+        pending = (len(self.augur._sighting_buffer)
+                   if self.augur is not None else None)
+        write_error = (self.augur._sighting_flush_error
+                       if self.augur is not None else "")
+        failures = (self.augur._sighting_flush_failures
+                    if self.augur is not None else 0)
         metadata = {
             "state": self.state, "iface": self.iface or "",
             "events_seen": self.created, "handshake_events": self.handshakes,
@@ -307,6 +317,11 @@ class LiveRuntime:
             "capture_file": str(self.capture_file) if self.capture_file else "",
             "handed_off": self.handoffs,
             "handoff_error": self.last_handoff_error[:120],
+            "sightings_pending": pending,
+            "sightings_write_error": write_error[:160],
+            "sightings_write_failures": failures,
+            "sightings_lost_on_restart": self.sighting_loss_events,
+            "sightings_loss_reason": self.last_sighting_loss_reason[:140],
             "dashboard_active": self.web is not None if self.config.enable_web else None,
             "dashboard_error": self.web_error[:120],
             "free_bytes": free,
@@ -333,6 +348,8 @@ class LiveRuntime:
             dashboard_enabled=self.config.enable_web,
             dashboard_active=self.web is not None,
             dashboard_error=self.web_error,
+            sighting_pending=pending, sighting_write_error=write_error,
+            sighting_lost=self.sighting_loss_events,
         )
         metadata["health"] = health["overall"]
         metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])
@@ -434,6 +451,19 @@ class LiveRuntime:
 
     def _drop(self):
         if self.augur is not None:
+            try:
+                # One last durable flush before releasing the SQLite connection.
+                # Failed data remains in memory until this final attempt. When
+                # storage truly cannot recover, report exactly how many queued
+                # observations were lost rather than pretending they were saved.
+                self.augur.flush_sightings()
+            except Exception as error:
+                pending = len(self.augur._sighting_buffer)
+                self.sighting_loss_events += pending
+                self.last_sighting_loss_reason = (
+                    f"close with {pending} uncommitted sightings: {type(error).__name__}"
+                )
+                _LOG.error("%s", self.last_sighting_loss_reason)
             try:
                 self.augur.store.close()
             except OSError as error:
@@ -585,7 +615,17 @@ class LiveRuntime:
                     self.next_try = now + 1
                     self._checkpoint()
                     return self.state
+                if self.state == "telemetry_degraded":
+                    # Retry the previously buffered batch before fetching new
+                    # Bettercap events, preventing an unbounded in-memory queue.
+                    if now < self.telemetry_next_try:
+                        self._checkpoint()
+                        return self.state
+                    self.augur.flush_sightings()
                 self.augur.pump()
+                if self.state == "telemetry_degraded":
+                    self.state = "running"
+                    self.last_error = ""
                 if now - self.last_probe >= self.config.probe_seconds:
                     radio = choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
                                               run=self.executor,
@@ -593,6 +633,16 @@ class LiveRuntime:
                     if radio != self.iface:
                         raise RuntimeError("capture radio removed or reassigned")
                     self.last_probe = now
+            except sqlite3.Error as error:
+                # Keep the Bettercap owner and uncommitted Augur queue alive:
+                # a brief SQLite lock or media hiccup need not lose telemetry.
+                self.last_error = (
+                    f"sighting persistence failed: {type(error).__name__}: "
+                    f"{str(error)[:110]}"
+                )
+                self.state = "telemetry_degraded"
+                self.telemetry_next_try = now + self.config.retry_seconds
+                _LOG.warning("%s", self.last_error)
             except Exception as error:
                 self.last_error = f"live polling stopped: {str(error)[:150]}"
                 _LOG.warning("%s", self.last_error)
