@@ -496,8 +496,9 @@ def test_opt_in_kiosk_profile_stages_chromium_x11_without_enabling_service(
     assert result.returncode == 0, result.stderr
     staged = root / "pi-gen/stage-redux/00-redux"
     pkgs = (staged / "00-packages-nr").read_text().splitlines()
-    for package in ("chromium", "xinit", "xauth", "xserver-xorg-core",
-                    "xserver-xorg-legacy", "xserver-xorg-video-fbdev",
+    for package in ("chromium", "xinit", "xauth", "x11-utils",
+                    "xserver-xorg-core", "xserver-xorg-legacy",
+                    "xserver-xorg-video-fbdev",
                     "xserver-xorg-input-libinput"):
         assert pkgs.count(package) == 1
     assert (staged / "files/kiosk-profile").read_text().startswith("manual-x11")
