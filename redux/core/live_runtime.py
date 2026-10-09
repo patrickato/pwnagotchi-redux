@@ -161,6 +161,7 @@ def caplet_text(iface, output, username, password, port):
     ):
         raise ValueError("invalid REST credential characters")
     return (f"set wifi.interface {iface}\n"
+            "set wifi.txpower 0\n"
             f"set wifi.handshakes.file {output}\n"
             "set wifi.handshakes.aggregate true\n"
             "set api.rest.address 127.0.0.1\n"
