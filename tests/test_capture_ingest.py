@@ -173,6 +173,19 @@ def test_readonly_summary_missing_and_live(tmp_path):
     assert "bssids" not in data
 
 
+def test_low_storage_pauses_without_losing_input(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    cfg = settings(tmp_path)
+    file = write_file(cfg.inputs[0] / "capture.hc22000", (REC + "\n").encode())
+    with CaptureIngestor(cfg) as worker:
+        monkeypatch.setattr(ingest, "free_bytes", lambda path: 1000)
+        result = worker.scan()
+        assert result["outcomes"] == {"paused_low_storage": 1}
+        assert worker.ingest_file(file) == "deferred_low_storage"
+        assert file.is_file()
+        assert worker.rows() == []
+
+
 def test_refuse_output_symlink(tmp_path):
     import pytest
     inp = tmp_path/"in"; inp.mkdir()
