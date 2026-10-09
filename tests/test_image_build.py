@@ -457,7 +457,10 @@ bash ./00-run.sh
     assert "systemctl enable redux.service" in chroot
     assert (root / "etc/redux/pipeline.toml").is_file()
     assert (root / "etc/redux/live.toml").is_file()
-    assert "ExecStart=/usr/bin/python3 -m redux.core.live_runtime" in (root / "etc/systemd/system/redux-live.service").read_text()
+    live_unit = (root / "etc/systemd/system/redux-live.service").read_text()
+    assert "ExecStart=/usr/bin/python3 -m redux.core.live_runtime" in live_unit
+    assert "KillMode=control-group" in live_unit
+    assert "Restart=on-failure" in live_unit
     assert "systemctl enable redux-live.service" in chroot
     assert (root / "usr/local/bin/redux-live-diag").is_file()
     assert "systemctl enable redux-capture-ingest.timer" in chroot
