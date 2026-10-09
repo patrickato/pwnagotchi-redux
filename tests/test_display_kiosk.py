@@ -396,7 +396,7 @@ def test_x11_geometry_probe_accepts_tft_and_rejects_hdmi(tmp_path):
     def runner(argv, **kwargs):
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(
-            argv, 0, "screen #0:\\n  dimensions:    480x320 pixels (120x80 millimeters)\\n", "",
+            argv, 0, "screen #0:\n  dimensions:    480x320 pixels (120x80 millimeters)\n", "",
         )
     probe = kiosk.x11_geometry_probe(
         ":0", which=lambda name: "/usr/bin/xdpyinfo", runner=runner)
