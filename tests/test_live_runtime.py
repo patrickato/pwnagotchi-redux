@@ -134,6 +134,20 @@ class Transport:
         return events
 
 
+def test_driver_rejects_failed_engine_commands():
+    class Broken:
+        def run(self, command):
+            return {"error": "simulated command error"}
+        def events(self, clear=False):
+            return []
+    from redux.engine.bettercap_driver import BettercapConfig
+    driver = live.LiveDriver(config=BettercapConfig(), transport=Broken())
+    with pytest.raises(RuntimeError, match="interface selection"):
+        driver.set_interface("wlan1mon")
+    with pytest.raises(RuntimeError, match="passive recon"):
+        driver.recon(True)
+
+
 def test_single_live_owner_lock(tmp_path):
     first = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [])
     try:
