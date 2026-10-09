@@ -495,7 +495,7 @@ def test_transient_database_error_retries_without_restarting_bettercap(tmp_path,
         started.append(child)
         return child
     def iw(args, **kwargs):
-        return subprocess.CompletedProcess(args, 0, "type monitor\\n", "")
+        return subprocess.CompletedProcess(args, 0, "type monitor\n", "")
     monkeypatch.setattr(live, "HttpTransport", Transport)
     runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [radio()],
                                executor=iw, spawn=spawn, clock=lambda: clock[0])
@@ -535,7 +535,7 @@ def test_unrecoverable_database_write_reports_uncommitted_count(tmp_path, monkey
     def spawn(*args, **kwargs):
         return Child()
     def iw(args, **kwargs):
-        return subprocess.CompletedProcess(args, 0, "type monitor\\n", "")
+        return subprocess.CompletedProcess(args, 0, "type monitor\n", "")
     monkeypatch.setattr(live, "HttpTransport", Transport)
     runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [radio()],
                                executor=iw, spawn=spawn, clock=lambda: clock[0])
