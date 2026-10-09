@@ -360,6 +360,50 @@ hardware gesture behavior, and not a replacement for an actual
 hardware framebuffer/touch validation, native deployment/browser shell
 startup, screen tuning, theme/pack extension and scoped live controls.
 
+## Compact visual system and always-visible measured status
+
+The workspace's 480×320-oriented appearance now has a dedicated
+instrument-style shell: restrained charcoal/teal surfaces, a compact
+persona/observation hero, a three-column overview metric grid, and a
+persistent upper status rail that remains visible on every page.
+The rail contains a **capture-supervisor state** indicator and a separate
+**Doctor heart** shortcut that opens the Doctor page. They are intentionally
+independent: a running capture process does **not** imply that storage,
+processing, or hardware health is OK.
+
+The engine indicator displays the actual `runtime.state` and distinguishes
+RUNNING, STARTING, ROTATING, DEGRADED, STORAGE PAUSED, and TERMINATION
+PENDING (along with other states). Missing or unrecognized states remain
+UNKNOWN. Doctor's colored heart is sourced only from the real
+`doctor.overall` and includes readable text/accessible labels so color
+is never the sole meaning:
+
+- Teal / **OK** — assessed health is good
+- Amber / **ATTENTION** — needs examination
+- Red / **DEGRADED** or **ACTION REQUIRED** — a problem is reported
+- Blue / **UNKNOWN** — not measured, unavailable, or disconnected
+
+A dead polling connection or stale supervisor updates the status rail,
+Doctor and capture-processing indicators together to UNKNOWN; previous
+green lights are never allowed to linger. The heart can be tapped from
+**any** page. Continuous motion is removed when the browser requests
+`prefers-reduced-motion: reduce`, and the smallest screen header has an
+additional <=360px fallback. Both the heart shortcut and appearance toggle
+retain at least 44px touch targets on compact screens.
+
+The Doctor's finding elements are now preserved when the actual findings
+have not changed, so frequent health polling does not repeatedly destroy
+a user's expanded diagnostic content or interaction focus. The browser
+behavior test checks healthy, critical, paused and stale indicators as
+well as this repeated-report behavior; static HTML tests check layout,
+compact breakpoints and actual status-controlled elements.
+
+This is implemented CSS/JavaScript and CI-tested **rendering logic**,
+not yet a verified screenshot from the Raspberry Pi 4 ILI9486 480×320
+SPI panel. Color calibration, touch coordinate rotation, input latency,
+chromium kiosk/full-screen packaging and physical readability are still
+future acceptance tests on a separate development SD card.
+
 ## Release gates not yet completed
 
 CI exercises the above with injected radios/transports/processes; it cannot
