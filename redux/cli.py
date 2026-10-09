@@ -1271,7 +1271,54 @@ def cmd_pipeline(args) -> int:
 
 
 def cmd_live(args) -> int:
-    """Read the actual on-device runtime snapshot without creating stub radios."""
+    """Inspect actual on-device state without creating synthetic radio records."""
+    if args.live_cmd == "doctor":
+        # Only consult the loopback dashboard owned by the running supervisor.
+        # A missing listener is UNKNOWN, not a synthetic healthy Doctor report.
+        from urllib.request import urlopen
+        from urllib.error import URLError
+        port = args.port
+        if not 1 <= port <= 65535:
+            print("live doctor: localhost port must be 1-65535")
+            return 4
+        try:
+            with urlopen(f"http://127.0.0.1:{port}/api/status", timeout=2) as response:
+                raw = response.read(65537)
+            if len(raw) > 65536:
+                raise ValueError("live health response too large")
+            snapshot = json.loads(raw)
+            report = snapshot.get("doctor") if isinstance(snapshot, dict) else None
+            if (not isinstance(report, dict) or not isinstance(report.get("findings"), list)
+                    or report.get("overall") not in
+                    {"ok", "attention", "degraded", "action", "unknown"}):
+                raise ValueError("no verified Doctor report in runtime snapshot")
+        except (OSError, URLError, ValueError, json.JSONDecodeError) as error:
+            print(f"live doctor: unavailable ({type(error).__name__}); "
+                  "check redux-live.service or use 'redux live status'")
+            return 3
+
+        def safe(value):
+            # Avoid embedding untrusted terminal control codes in diagnostics.
+            return "".join(ch if (ch.isprintable() and ch not in "\\x1b\\x7f")
+                           else "?" for ch in str(value))[:240]
+        print(f"redux live doctor: {safe(report.get('label', report['overall']))}")
+        for finding in report["findings"]:
+            if not isinstance(finding, dict):
+                continue
+            print(f"  [{safe(finding.get('status', 'unknown')).upper():8}] "
+                  f"{safe(finding.get('area', 'unknown'))}: "
+                  f"{safe(finding.get('summary', ''))}")
+            if finding.get("reason"):
+                print(f"             why: {safe(finding['reason'])}")
+            if finding.get("remediation"):
+                print(f"             do:  {safe(finding['remediation'])}")
+        coverage = report.get("coverage")
+        if isinstance(coverage, dict):
+            print(f"coverage: {safe(coverage.get('reason', 'not reported'))}")
+        else:
+            print("coverage: UNKNOWN — not reported")
+        return 0
+
     from pathlib import Path
     snapshot = Path(args.file)
     if snapshot.is_symlink() or not snapshot.is_file():
@@ -1363,6 +1410,9 @@ def build_parser() -> argparse.ArgumentParser:
     lvs = lv_sub.add_parser("status", help="read actual on-device radio/engine state")
     lvs.add_argument("--file", default="/captures/redux/live.json",
                      help="runtime checkpoint file; defaults to /captures/redux/live.json")
+    lvd = lv_sub.add_parser("doctor", help="actual live Doctor findings from localhost runtime")
+    lvd.add_argument("--port", type=int, default=8080,
+                     help="local Redux dashboard port (default 8080)")
     lv.set_defaults(func=cmd_live)
 
     cf.set_defaults(func=cmd_config)
