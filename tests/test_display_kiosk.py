@@ -47,6 +47,9 @@ def preflight(tmp_path, **changes):
         "sys_graphics": screen(tmp_path),
         "statter": device,
         "opener": status,
+        "x11_check": lambda display: {
+            "ok": display == ":0", "reason": "fixture X11 socket",
+        },
     }
     opts.update(changes)
     return kiosk.preflight("/dev/fb1", **opts)
@@ -58,6 +61,7 @@ def test_real_preflight_has_explicit_honest_boundaries(tmp_path):
     assert result["checks"]["framebuffer"]["resolution"] == [480, 320]
     assert result["checks"]["framebuffer"]["name"] == "fb_ili9486"
     assert result["checks"]["browser"]["executable"] == "/usr/bin/chromium"
+    assert result["checks"]["x11"]["ok"] is True
     assert result["touch_verified"] is False
     assert result["physical_display_verified"] is False
     assert "does not prove" in result["reason"]
@@ -338,3 +342,44 @@ def test_supervisor_rejects_bad_restart_policy_and_handles_spawn_failure(capsys)
                            spawn=lambda *_a, **_k: (_ for _ in ()).throw(
                                FileNotFoundError("chromium missing"))) == 1
     assert "kiosk spawn failed" in capsys.readouterr().err
+
+def test_x11_probe_requires_live_local_socket_and_rejects_remote_hosts(tmp_path):
+    import socket
+    for display in ("", "localhost:0", "host.example:0", "unix:0", ":abc",
+                    ":1000", ":1;evil", ":1.300"):
+        response = kiosk.x11_probe(display, socket_dir=tmp_path)
+        assert not response["ok"]
+        assert "local" in response["reason"] or "DISPLAY" in response["reason"]
+    unix = tmp_path / "X2"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+        server.bind(str(unix))
+        server.listen(2)
+        assert kiosk.x11_probe(":2", socket_dir=tmp_path)["ok"]
+        assert kiosk.x11_probe(":02.0", socket_dir=tmp_path)["ok"]
+        assert not kiosk.x11_probe(":3", socket_dir=tmp_path)["ok"]
+        link = tmp_path / "X3"
+        link.symlink_to(unix)
+        assert not kiosk.x11_probe(":3", socket_dir=tmp_path)["ok"]
+
+
+def test_x11_preflight_requires_socket_and_cannot_claim_touch_proven(tmp_path):
+    result = preflight(tmp_path, x11_check=lambda _: {
+        "ok": False, "reason": "X11 connection refused",
+    })
+    assert not result["ok"]
+    assert not result["checks"]["x11"]["ok"]
+    assert result["touch_verified"] is False
+    assert result["physical_display_verified"] is False
+
+
+def test_symlinked_xdg_runtime_dir_fails_closed(tmp_path, monkeypatch, capsys):
+    good = tmp_path / "real-runtime"
+    good.mkdir(mode=0o700)
+    shortcut = tmp_path / "linked-runtime"
+    shortcut.symlink_to(good)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(shortcut))
+    verified = {"ok": True, "checks": {"browser": {"executable": "/usr/bin/chromium"}}}
+    monkeypatch.setattr(kiosk, "preflight", lambda *a, **k: verified)
+    monkeypatch.setattr(kiosk.os, "execv", lambda *_a: pytest.fail("unsafe browser spawn"))
+    assert kiosk.main(["--launch", "--framebuffer", "/dev/fb1"]) == 2
+    assert "symlink" in capsys.readouterr().err
