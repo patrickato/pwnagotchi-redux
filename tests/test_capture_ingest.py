@@ -246,3 +246,68 @@ def test_refuse_output_symlink(tmp_path):
     cfg = Settings((inp,), out, tmp_path/"db"/"jobs.db")
     with pytest.raises(ValueError, match="symlink"):
         CaptureIngestor(cfg)
+
+def test_scan_heartbeat_survives_worker_restart_including_empty_pass(tmp_path):
+    cfg = settings(tmp_path)
+    with CaptureIngestor(cfg, clock=lambda: 1_234_567.0) as worker:
+        first = worker.scan()
+        assert first["scanned"] == 0
+        assert first["outcomes"] == {}
+        snap = read_summary(cfg.database)
+        assert snap["last_scan"] == {
+            "completed_utc": 1_234_567.0, "scanned": 0, "outcomes": {},
+        }
+    with CaptureIngestor(cfg, clock=lambda: 1_234_610.0) as worker:
+        write_file(cfg.inputs[0] / "record.hc22000", (REC + "\n").encode())
+        result = worker.scan()
+        assert result["outcomes"]["ready"] == 1
+    latest = read_summary(cfg.database)
+    assert latest["last_scan"]["completed_utc"] == 1_234_610.0
+    assert latest["last_scan"]["scanned"] == 1
+    assert latest["last_scan"]["outcomes"] == {"ready": 1}
+    assert latest["hash_records"] == 1
+
+
+def test_low_storage_scan_creates_durable_pause_heartbeat(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "do_not_delete.hc22000",
+                        (REC + "\n").encode())
+    with CaptureIngestor(cfg, clock=lambda: 42.0) as worker:
+        monkeypatch.setattr(ingest, "free_bytes", lambda path: 1024)
+        assert worker.scan()["outcomes"] == {"paused_low_storage": 1}
+        snapshot = read_summary(cfg.database)
+        assert snapshot["last_scan"] == {
+            "completed_utc": 42.0, "scanned": 0,
+            "outcomes": {"paused_low_storage": 1},
+        }
+        assert source.is_file()
+        assert worker.rows() == []
+
+
+def test_failed_processing_is_recorded_without_claiming_success(tmp_path):
+    cfg = settings(tmp_path)
+    write_file(cfg.inputs[0] / "bad.hc22000", b"not a valid converted capture\n")
+    with CaptureIngestor(cfg, clock=lambda: 200.0) as worker:
+        outcome = worker.scan()
+        assert outcome["outcomes"] == {"invalid": 1}
+    snap = read_summary(cfg.database)
+    assert snap["last_scan"]["scanned"] == 1
+    assert snap["last_scan"]["outcomes"] == {"invalid": 1}
+    assert snap["hash_records"] == 0
+
+
+def test_corrupted_scan_metadata_is_not_presented_as_healthy(tmp_path):
+    cfg = settings(tmp_path)
+    with CaptureIngestor(cfg) as worker:
+        worker.scan()
+        worker.db.execute(
+            "UPDATE pipeline_meta SET value=? WHERE key='last_scan'",
+            ('{"schema":1,"completed_utc":"yesterday","scanned":0,"outcomes":{}}',))
+        worker.db.commit()
+    scan = read_summary(cfg.database)
+    assert scan["available"] is True
+    assert scan["last_scan"] is None
+    assert scan["scan_error"] == "invalid stored scan record"
+
+
