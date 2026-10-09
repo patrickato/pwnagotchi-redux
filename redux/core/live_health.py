@@ -23,7 +23,8 @@ def _finding(area, status, summary, reason="", remediation=""):
 
 def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
                          handoffs=0, last_error="", handoff_error="",
-                         doctor_report=None):
+                         doctor_report=None, dashboard_enabled=False,
+                         dashboard_active=False, dashboard_error=""):
     """Combine Augur's real Doctor report with physical supervisor observations.
 
     Without Augur the Doctor's normal probes are UNKNOWN, *never* silently OK.
@@ -87,6 +88,21 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
         findings.append(_finding("capture handoff", "unknown",
                                  "No completed capture handoff observed yet.",
                                  "The engine may still be on its first capture session."))
+
+    if dashboard_enabled:
+        if dashboard_active:
+            findings.append(_finding("local dashboard", "ok",
+                                     "Local diagnostic dashboard is available.",
+                                     "The HTTP server is bound to loopback."))
+        elif dashboard_error:
+            findings.append(_finding("local dashboard", "degraded",
+                                     "Local diagnostic dashboard is unavailable.",
+                                     dashboard_error,
+                                     "Check port conflicts and the redux-live service logs."))
+        else:
+            findings.append(_finding("local dashboard", "attention",
+                                     "Local dashboard has not started yet.",
+                                     "No HTTP listener is currently active."))
 
     assessed = [f["area"] for f in findings if f["status"] != "unknown"]
     gaps = [f["area"] for f in findings if f["status"] == "unknown"]
