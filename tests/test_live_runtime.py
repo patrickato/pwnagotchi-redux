@@ -92,6 +92,34 @@ def test_ensure_monitor_changes_only_selected_interface():
 
 
 
+def test_safe_radio_selection_skips_connected_best_adapter():
+    devices = [radio("wlan0", bands=("2.4",)),
+               radio("wlan1", bands=("2.4", "5"))]
+    calls = []
+    def runner(args, **kwargs):
+        calls.append(args)
+        iface = args[2]
+        if args[-1] == "info":
+            return subprocess.CompletedProcess(args, 0,
+                                               "type monitor\n" if iface == "wlan0"
+                                               else "type managed\n", "")
+        if args[-1] == "link":
+            return subprocess.CompletedProcess(
+                args, 0, "Connected to aa:bb:cc:dd:ee:ff\n", "")
+        raise AssertionError("radio selection must not change modes")
+    assert live.choose_safe_radio(devices, run=runner) == "wlan0"
+    assert live.choose_safe_radio(devices, preferred="wlan1", run=runner) is None
+    assert live.choose_safe_radio(devices, run=runner,
+                                  allow_connected=True) == "wlan1"
+    assert all(x[0] == "iw" for x in calls)
+
+
+def test_safe_radio_selection_fails_closed_on_uninspectable_interface():
+    def failing(args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, "", "cannot inspect")
+    assert live.choose_safe_radio([radio()], run=failing) is None
+
+
 def test_connected_wifi_uplink_does_not_get_disconnected():
     commands = []
     def runner(argv, **kwargs):
@@ -193,6 +221,7 @@ def test_readonly_preflight_reports_real_requirements(tmp_path):
     outcome = live.preflight(
         conf, which=lambda executable: "/usr/bin/" + executable,
         radio_probe=lambda: [radio()],
+        radio_run=lambda args, **kw: subprocess.CompletedProcess(args, 0, "type monitor\\n", ""),
         available_bytes=lambda path: 256 * 1024 * 1024)
     assert outcome["ready"] is True
     assert outcome["capture_radio"] == "wlan1mon"
@@ -210,7 +239,7 @@ def test_readonly_preflight_fails_missing_tools_radio_and_storage(tmp_path):
     assert not outcome["ready"]
     assert outcome["capture_radio"] is None
     assert any("capture storage below" in e for e in outcome["errors"])
-    assert any("no monitor-capable" in e for e in outcome["errors"])
+    assert any("no safe monitor-capable" in e for e in outcome["errors"])
     assert any("bettercap executable" in e for e in outcome["errors"])
 
 
