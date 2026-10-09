@@ -1,0 +1,19 @@
+# Copy to /etc/redux/pipeline.toml only after verifying input directories.
+[pipeline]
+inputs = ["/etc/pwnagotchi/handshakes", "/var/lib/redux/captures/incoming"]
+output_dir = "/var/lib/redux/captures/ready"
+database = "/var/lib/redux/captures/jobs.db"
+settle_seconds = 4.0
+max_capture_bytes = 134217728
+max_files_per_pass = 100
+converter = "hcxpcapngtool"
+convert_timeout_seconds = 90
+
+# Disabled until owner provides controlled test scope, wordlist and a working backend.
+[audit]
+enabled = false
+wordlist = ""
+scope_file = "/etc/pwnagotchi/scope.json"
+results_dir = "/var/lib/redux/captures/audits"
+binary = "hashcat"
+max_runtime_seconds = 600
