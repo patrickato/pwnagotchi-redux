@@ -53,8 +53,8 @@ class Settings:
             data = tomllib.load(fh).get("pipeline", {})
         return cls(
             inputs=tuple(Path(p) for p in data.get("inputs", [])),
-            output_dir=Path(data.get("output_dir", "/var/lib/redux/captures/ready")),
-            database=Path(data.get("database", "/var/lib/redux/captures/jobs.db")),
+            output_dir=Path(data.get("output_dir", "/captures/ready")),
+            database=Path(data.get("database", "/captures/jobs.db")),
             settle_seconds=float(data.get("settle_seconds", 4)),
             max_capture_bytes=int(data.get("max_capture_bytes", 128 * 1024 * 1024)),
             max_files_per_pass=int(data.get("max_files_per_pass", 100)),
@@ -290,7 +290,7 @@ class CaptureIngestor:
 def read_summary(database=None):
     """Read-only stats for Augur.status()/the existing web JSON endpoint."""
     db = Path(database or os.environ.get(
-        "REDUX_CAPTURE_DB", "/var/lib/redux/captures/jobs.db"))
+        "REDUX_CAPTURE_DB", "/captures/jobs.db"))
     if not db.is_file():
         return {"available": False, "reason": "capture database not present"}
     try:
