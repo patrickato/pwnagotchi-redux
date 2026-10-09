@@ -546,11 +546,19 @@ class LiveRuntime:
         now = self.clock()
         # Bring up read-only diagnostics even without a radio or working
         # Bettercap. Broken captures should not make their own cause invisible.
+        if self.web is not None and self.web_thread is not None:
+            if not self.web_thread.is_alive():
+                self.web_error = "local dashboard thread stopped unexpectedly"
+                self.web.server_close()
+                self.web = None
+                self.web_thread = None
+                self.web_next_try = now + 30
+                _LOG.warning("%s", self.web_error)
         if self.config.enable_web and self.web is None and now >= self.web_next_try:
             try:
                 self._start_web()
-            except OSError as error:
-                self.web_error = f"local dashboard bind failed: {type(error).__name__}"
+            except (OSError, RuntimeError) as error:
+                self.web_error = f"local dashboard startup failed: {type(error).__name__}"
                 self.web_next_try = now + 30
                 _LOG.warning("%s", self.web_error)
         if now - self.last_recovery >= 20:
