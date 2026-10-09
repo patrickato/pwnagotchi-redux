@@ -72,6 +72,8 @@ class Augur:
         # single cycle sees a flood.
         self._sighting_buffer: List[Sighting] = []
         self._flush_cap = 512
+        self._sighting_flush_error = ""
+        self._sighting_flush_failures = 0
 
         # consumers subscribe to the hub
         connect_narrator(self.bus, self.narrator)
@@ -119,8 +121,19 @@ class Augur:
         Called once per pump cycle (and on checkpoint); returns rows flushed."""
         if not self._sighting_buffer:
             return 0
-        batch, self._sighting_buffer = self._sighting_buffer, []
-        self.store.insert_many(batch)
+        # The bus and the store share the pump thread. Keep ownership of the
+        # buffer until SQLite confirms the entire transaction committed.
+        # A transient disk/database error is retryable; never silently discard
+        # sightings that Bettercap has already delivered to the event bus.
+        batch = self._sighting_buffer
+        try:
+            self.store.insert_many(batch)
+        except Exception as error:
+            self._sighting_flush_error = f"{type(error).__name__}: {str(error)[:160]}"
+            self._sighting_flush_failures += 1
+            raise
+        self._sighting_buffer = []
+        self._sighting_flush_error = ""
         return len(batch)
 
     # --- drive ------------------------------------------------------------- #
@@ -507,6 +520,11 @@ class Augur:
             "recommendation": {"intent": rec.intent.value if rec.intent else None,
                                "reason": rec.reason, "confidence": rec.confidence},
             "sightings": self.store.count() if hasattr(self.store, "count") else None,
+            "sighting_queue": {
+                "pending": len(self._sighting_buffer),
+                "write_error": self._sighting_flush_error,
+                "write_failures": self._sighting_flush_failures,
+            },
             "recent_alerts": len(self.bus.history(Signal.ALERT)),
             "governor": {
                 "mode": self._gov.mode.value if self._gov else "full",
