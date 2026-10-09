@@ -404,6 +404,31 @@ SPI panel. Color calibration, touch coordinate rotation, input latency,
 chromium kiosk/full-screen packaging and physical readability are still
 future acceptance tests on a separate development SD card.
 
+## Theme tokens and extensible visual palettes
+
+The web UI now offers a theme picker alongside the existing **rich/plain**
+skin control. They are independent: skin controls presentation density, while
+themes replace validated CSS color variables without changing any measured
+data or navigation. The built-in palettes are **Signal**, **Ember**, and
+**Glacier**, and the selected name is stored in the browser's local storage
+with a safe fallback if storage is disabled or unavailable.
+
+Theme data enters through `registerTheme(name, tokens)` in the local
+self-contained browser script. It accepts a lowercase/digit/hyphen name
+(maximum 32 characters) and only known color properties with strictly
+validated six-digit hex values. No scripts, arbitrary CSS strings, imports,
+URLs, or style markup are accepted. Registration is data-only, does not
+alter capture controls, and appends to the palette list dynamically; there
+is no fixed number of pages or themes baked into the navigation logic.
+A separate packaging/asset-management API for operator-supplied external
+theme packs is **not implemented yet**.
+
+A full color palette refreshes instantly while the browser continues to
+poll its genuine `/api/status` measurements. No hardware writes are
+needed. The base image does not require Chromium for a phone or desktop
+browser viewing the existing loopback dashboard, and the optional local
+kiosk profile is documented in `docs/IMAGE_BUILD.md`.
+
 ## Release gates not yet completed
 
 CI exercises the above with injected radios/transports/processes; it cannot
