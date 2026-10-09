@@ -18,6 +18,7 @@ chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux"
 install -d "$ROOTFS_DIR/etc/redux" "$ROOTFS_DIR/captures"
 install -m 0600 files/pipeline/pipeline.toml "$ROOTFS_DIR/etc/redux/pipeline.toml"
 install -m 0600 files/pipeline/live.toml "$ROOTFS_DIR/etc/redux/live.toml"
+install -m 0755 files/pipeline/redux-live-diag.sh "$ROOTFS_DIR/usr/local/bin/redux-live-diag"
 install -m 0644 files/redux-live.service "$ROOTFS_DIR/etc/systemd/system/redux-live.service"
 for unit in redux-capture-ingest redux-capture-audit; do
     sed -e '/^\[Unit\]$/a RequiresMountsFor=/captures' \
