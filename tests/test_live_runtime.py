@@ -1,5 +1,6 @@
 """Live-radio supervisor tests run with no wireless hardware or Bettercap binary."""
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -753,6 +754,130 @@ def test_dead_dashboard_thread_is_not_reported_as_healthy(tmp_path, monkeypatch)
         assert runtime.web_next_try == 31
     finally:
         runtime.close()
+
+
+def test_live_bettercap_log_is_bounded_without_engine_restart(tmp_path, monkeypatch):
+    import fcntl
+    from redux.core import live_runtime as live
+    started = []
+    def fake_spawn(argv, **kwargs):
+        assert kwargs["stdout"] is not None
+        started.append(kwargs["stdout"])
+        return Child()
+    def monitor(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, "type monitor\n", "")
+    settings = cfg(tmp_path, max_log_bytes=65536)
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [radio()],
+                               executor=monitor, spawn=fake_spawn)
+    try:
+        assert runtime.tick() == "starting_engine"
+        assert len(started) == 1
+        assert fcntl.fcntl(runtime.log_handle.fileno(), fcntl.F_GETFL) & os.O_APPEND
+        runtime.log_handle.write(b"x" * 65536)
+        assert (settings.state_dir / "bettercap.log").stat().st_size == 65536
+        runtime._enforce_log_limit()
+        assert runtime.log_truncations == 1
+        assert (settings.state_dir / "bettercap.log").stat().st_size == 0
+        runtime.log_handle.write(b"after rollover\n")
+        assert (settings.state_dir / "bettercap.log").read_bytes() == b"after rollover\n"
+        assert runtime.process is not None
+        assert not runtime.process.terminated  # live Bettercap remains running
+        runtime._checkpoint()
+        snap = runtime._snapshot["runtime"]
+        assert snap["log_bytes"] == len(b"after rollover\n")
+        assert snap["log_truncations"] == 1
+        assert snap["log_error"] == ""
+    finally:
+        runtime.close()
+
+
+def test_live_log_symlink_and_hardlink_rejected(tmp_path):
+    import os
+    settings = cfg(tmp_path)
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [])
+    protected = tmp_path / "protected"
+    protected.write_bytes(b"do not change")
+    path = settings.state_dir / "bettercap.log"
+    archive = settings.state_dir / "bettercap.log.previous"
+    try:
+        path.symlink_to(protected)
+        with pytest.raises(OSError):
+            runtime._open_engine_log()
+        assert protected.read_bytes() == b"do not change"
+        path.unlink()
+        os.link(protected, path)
+        with pytest.raises(ValueError, match="linked"):
+            runtime._open_engine_log()
+        assert protected.read_bytes() == b"do not change"
+        path.unlink()
+        archive.symlink_to(protected)
+        with pytest.raises(ValueError, match="archive"):
+            runtime._open_engine_log()
+        assert protected.read_bytes() == b"do not change"
+    finally:
+        runtime.close()
+
+
+def test_log_size_enforcement_errors_do_not_kill_capture_owner(tmp_path, monkeypatch):
+    import os
+    spawned = []
+    def spawn(*args, **kw):
+        proc = Child()
+        spawned.append(proc)
+        return proc
+    def monitor(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, "type monitor\n", "")
+    settings = cfg(tmp_path, max_log_bytes=65536)
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [radio()],
+                               executor=monitor, spawn=spawn)
+    try:
+        assert runtime.tick() == "starting_engine"
+        runtime.log_handle.write(b"x" * 65536)
+        real_truncate = os.ftruncate
+        def refuse_truncate(fd, length):
+            if fd == runtime.log_handle.fileno():
+                raise OSError("synthetic media failure")
+            return real_truncate(fd, length)
+        monkeypatch.setattr(live.os, "ftruncate", refuse_truncate)
+        runtime._enforce_log_limit()
+        assert "enforcement failed" in runtime.log_error
+        assert runtime.process is spawned[0] and not spawned[0].terminated
+        runtime._checkpoint()
+        assert runtime._snapshot["runtime"]["log_error"]
+        finding = next(f for f in runtime._snapshot["doctor"]["findings"]
+                       if f["area"] == "engine logging")
+        assert finding["status"] == "degraded"
+        monkeypatch.setattr(live.os, "ftruncate", real_truncate)
+        runtime._enforce_log_limit()
+        assert runtime.log_error == ""
+        assert runtime.log_truncations == 1
+    finally:
+        runtime.close()
+
+
+def test_live_log_recovers_oversized_prior_image_log(tmp_path):
+    settings = cfg(tmp_path, max_log_bytes=65536)
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [])
+    path = settings.state_dir / "bettercap.log"
+    archive = settings.state_dir / "bettercap.log.previous"
+    path.write_bytes(b"x" * 100000)
+    archive.write_bytes(b"y" * 100000)
+    try:
+        handle = runtime._open_engine_log()
+        runtime.log_handle = handle
+        assert path.stat().st_size == 0
+        assert archive.stat().st_size == 0
+        assert runtime.log_truncations == 1
+        assert path.stat().st_mode & 0o077 == 0
+    finally:
+        runtime.close()
+
+
+def test_log_budget_config_enforced(tmp_path):
+    for val in (0, -1, 1024, 64 * 1024 * 1024 + 1):
+        with pytest.raises(ValueError, match="max_log_bytes"):
+            cfg(tmp_path, max_log_bytes=val).validate()
+    cfg(tmp_path, max_log_bytes=65536).validate()
 
 
 def test_source_tree_is_importable_and_service_opt_in(tmp_path):
