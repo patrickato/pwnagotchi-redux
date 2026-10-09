@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -82,10 +83,39 @@ def dashboard_probe(port: int, *, opener=urllib.request.urlopen) -> dict:
     return result
 
 
+def x11_probe(display: str, *, socket_dir: Path = Path("/tmp/.X11-unix"),
+              dial=socket.socket) -> dict:
+    """Confirm a local X11 UNIX socket accepts a connection.
+
+    This tests transport readiness, not Xauthorization, framebuffer routing
+    or touch coordinates. Never try an X11 host/TCP address.
+    """
+    result = {"ok": False, "reason": ""}
+    match = re.fullmatch(r":([0-9]{1,3})(?:\.[0-9]{1,2})?", display or "")
+    if not match:
+        result["reason"] = "DISPLAY must use a local X11 socket, e.g. :0"
+        return result
+    path = socket_dir / ("X" + str(int(match.group(1))))
+    try:
+        meta = path.lstat()  # unlike stat(), refuse links to unrelated sockets
+        if not stat.S_ISSOCK(meta.st_mode):
+            result["reason"] = "X11 socket missing, symlinked, or not a socket"
+            return result
+        with dial(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(0.5)
+            connection.connect(str(path))
+        result["ok"] = True
+        result["reason"] = "Local X11 socket accepted a connection"
+    except OSError as error:
+        result["reason"] = f"local X11 connection failed: {type(error).__name__}"
+    return result
+
+
 def preflight(framebuffer: str, port: int = 8080, *,
               environ=None, uid=None, which=shutil.which,
               sys_graphics: Path = Path("/sys/class/graphics"),
-              statter=os.stat, opener=urllib.request.urlopen) -> dict:
+              statter=os.stat, opener=urllib.request.urlopen,
+              x11_check=x11_probe) -> dict:
     env = os.environ if environ is None else environ
     effective_uid = os.geteuid() if uid is None else uid
     if not 1 <= port <= 65535:
@@ -95,6 +125,9 @@ def preflight(framebuffer: str, port: int = 8080, *,
     browser = which("chromium") or which("chromium-browser")
     browser_ok = bool(browser) and os.path.isabs(browser)
     session_ok = bool(env.get("DISPLAY")) and effective_uid != 0
+    x11 = x11_check(env.get("DISPLAY", "")) if session_ok else {
+        "ok": False, "reason": "No unprivileged local X11 session configured",
+    }
     dashboard = dashboard_probe(port, opener=opener)
     checks = {
         "framebuffer": screen,
@@ -102,8 +135,9 @@ def preflight(framebuffer: str, port: int = 8080, *,
                     "reason": "Chromium absolute executable found" if browser_ok else
                     "Chromium absent or not absolute; use the manual-x11 profile"},
         "session": {"ok": session_ok, "reason":
-                    "unprivileged X11 DISPLAY configured" if session_ok else
+                    "unprivileged DISPLAY set" if session_ok else
                     "run as a non-root user inside a working X11 display session"},
+        "x11": x11,
         "dashboard": dashboard,
     }
     return {"ok": all(item["ok"] for item in checks.values()), "checks": checks,
@@ -219,9 +253,11 @@ def main(argv=None) -> int:
         return 2
     runtime_dir = Path(runtime)
     try:
+        if runtime_dir.is_symlink():
+            raise ValueError("XDG_RUNTIME_DIR may not be a symlink")
         root = runtime_dir.resolve(strict=True)
         meta = root.stat()
-        if not root.is_dir() or root.is_symlink() or meta.st_uid != os.geteuid():
+        if not root.is_dir() or meta.st_uid != os.geteuid():
             raise ValueError("runtime directory ownership or type is unsafe")
         if meta.st_mode & 0o022:
             raise ValueError("runtime directory is group/world writable")
