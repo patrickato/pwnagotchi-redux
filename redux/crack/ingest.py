@@ -128,6 +128,12 @@ def _atomic_write(path, data):
             os.fsync(stream.fileno())
         os.replace(temporary, path)
         os.chmod(path, 0o600)
+        # Durable directory entry after a sudden power loss on the Pi.
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -216,12 +222,39 @@ class CaptureIngestor:
             return "skipped"
         if free_bytes(self.settings.output_dir) < self.settings.min_free_bytes:
             return "deferred_low_storage"
-        sha = _digest_file(source)
+        try:
+            sha = _digest_file(source)
+        except OSError:
+            # The writer could have finalized/moved the file during this scan.
+            return "deferred"
         existing = self.db.execute(
-            "SELECT status FROM artifacts WHERE source_sha=?", (sha,)
+            "SELECT status, output_sha, output_path FROM artifacts WHERE source_sha=?",
+            (sha,),
         ).fetchone()
-        if existing and existing[0] in {"ready", "duplicate", "invalid"}:
+        if existing and existing[0] == "invalid":
             return "duplicate"
+        if existing and existing[0] in {"ready", "duplicate"}:
+            prior_sha, prior_path = existing[1], existing[2]
+            if prior_sha and prior_path:
+                previous = Path(prior_path)
+                if previous.is_symlink():
+                    self._record(sha, source, "error", reason="prepared artifact became a symlink")
+                    return "error"
+                if previous.is_file():
+                    try:
+                        if _digest_file(previous) == prior_sha:
+                            return "duplicate"
+                    except OSError:
+                        return "deferred"
+                    self._record(sha, source, "error",
+                                 reason="previous prepared artifact was altered")
+                    return "error"
+                if previous.exists():
+                    self._record(sha, source, "error",
+                                 reason="prepared output path is not a regular file")
+                    return "error"
+            # The database claims success but the file vanished (for example an
+            # interrupted SD write or operator cleanup). Rebuild from source.
         try:
             if source.suffix.lower() == ".hc22000":
                 raw = source.read_bytes()
