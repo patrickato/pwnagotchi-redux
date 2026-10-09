@@ -103,6 +103,21 @@ def test_runtime_doctor_report_is_transmitted_unchanged_through_local_api():
         srv.server_close()
 
 
+def test_capture_pipeline_panel_uses_ledger_and_doctor_not_demo_data():
+    html = render_page()
+    assert 'aria-label="Capture processing"' in html
+    assert 'id="pipelinestate"' in html
+    assert 'id="pipelinecounts"' in html
+    assert 'id="pipelinereason"' in html
+    assert "renderPipeline(d)" in html
+    assert "capture_processing" in html
+    assert "No completed worker scan recorded" in html
+    # User-controlled errors, status, and worker outcomes are assigned as text.
+    assert "state.textContent=" in html
+    assert "counts.textContent=" in html
+    assert "getElementById('pipelinereason').textContent=" in html
+
+
 def test_page_has_rich_skin_toggle_and_moving_track():
     html = render_page()
     assert "skinbtn" in html and "data-skin" in html      # plain/rich skin toggle
