@@ -228,6 +228,59 @@ background:#13332e;font-weight:700}
 </main>
 <script>
 var TRACK=[],SPARK=[],lastSight=null,lastVisualSample=null;
+const viewRoot=document.getElementById('viewroot');
+const navButtons=Array.from(document.querySelectorAll('#viewnav [data-view]'));
+const viewPanels=Array.from(document.querySelectorAll('#viewroot [data-page]'));
+const pageNames=navButtons.map(function(button){return button.dataset.view});
+var currentView=null;
+function setView(name,updateHash){
+ const chosen=pageNames.includes(name)?name:pageNames[0];
+ if(!chosen)return false;
+ if(currentView===chosen)return true;
+ currentView=chosen;
+ navButtons.forEach(function(button){
+  const active=button.dataset.view===chosen;
+  button.setAttribute('aria-pressed',active?'true':'false');
+ });
+ viewPanels.forEach(function(panel){panel.hidden=panel.dataset.page!==chosen});
+ viewRoot.scrollTop=0;
+ if(updateHash!==false&&location.hash!=='#'+chosen)location.hash=chosen;
+ return true;
+}
+navButtons.forEach(function(button){
+ button.onclick=function(){setView(button.dataset.view);};
+});
+window.addEventListener('hashchange',function(){
+ setView(location.hash.slice(1),false);
+});
+document.getElementById('viewnav').onkeydown=function(event){
+ if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+ const at=pageNames.indexOf(currentView);
+ const next=event.key==='Home'?0:event.key==='End'?pageNames.length-1:
+  (at+(event.key==='ArrowRight'?1:-1)+pageNames.length)%pageNames.length;
+ event.preventDefault();
+ setView(pageNames[next]);
+ navButtons[next].focus();
+};
+// A horizontal touch swipe moves one workspace page. Vertical scroll and
+// gestures over controls/maps are left to the native browser.
+var swipeStart=null;
+viewRoot.onpointerdown=function(event){
+ if(event.pointerType!=='touch'||event.target.closest('button,summary,input,select,textarea,a,svg')){
+  swipeStart=null;return;
+ }
+ swipeStart={x:event.clientX,y:event.clientY};
+};
+viewRoot.onpointerup=function(event){
+ if(!swipeStart||event.pointerType!=='touch')return;
+ const dx=event.clientX-swipeStart.x,dy=event.clientY-swipeStart.y;
+ swipeStart=null;
+ if(Math.abs(dx)<65||Math.abs(dx)<Math.abs(dy)*1.5)return;
+ const at=pageNames.indexOf(currentView);
+ setView(pageNames[(at+(dx<0?1:-1)+pageNames.length)%pageNames.length]);
+};
+viewRoot.onpointercancel=function(){swipeStart=null};
+setView(location.hash.slice(1),false);
 var fetchPending=false,lastRuntimeVersion=null,lastVersionChanged=0;
 function markStale(why){
  document.getElementById('sub').textContent='STALE · '+why;
@@ -239,6 +292,8 @@ function markStale(why){
  const pipeline=document.getElementById('pipelinestate');
  pipeline.className='doctor-title unknown';
  pipeline.textContent='UNKNOWN · STALE';
+ document.getElementById('capturestate').textContent='UNKNOWN · STALE';
+ document.getElementById('runtimestate').textContent='UNKNOWN · STALE';
  document.getElementById('pipelinereason').textContent=
   'Latest capture-processing reading is unverified until reconnection.';
 }
@@ -306,6 +361,32 @@ function renderPipeline(d){
  document.getElementById('pipelinereason').textContent=
   finding?(finding.reason||''):(p.reason||'No verified worker status');
 }
+function renderRuntimePanels(d){
+ const runtime=d.runtime||{};
+ const connected=typeof runtime.updated_utc==='number';
+ document.getElementById('capturestate').textContent=
+  connected?String(runtime.state||'UNKNOWN'):'UNKNOWN';
+ document.getElementById('capturehanded').textContent=
+  Number.isInteger(runtime.handed_off)?String(runtime.handed_off):'—';
+ document.getElementById('capturepending').textContent=
+  Number.isInteger(runtime.sightings_pending)?String(runtime.sightings_pending):'—';
+ const path=typeof runtime.capture_file==='string'?runtime.capture_file:'';
+ document.getElementById('capturefile').textContent=
+  path?'Active file: '+path.split('/').pop():'No active capture verified';
+ document.getElementById('capturewarning').textContent=
+  runtime.handoff_error||runtime.sightings_write_error||
+  (connected?'No current capture handoff error reported':'Waiting for a live supervisor');
+ document.getElementById('runtimestate').textContent=
+  connected?String(runtime.state||'UNKNOWN'):'UNKNOWN';
+ document.getElementById('runtimefree').textContent=
+  typeof runtime.free_bytes==='number'&&Number.isFinite(runtime.free_bytes)
+   ?(runtime.free_bytes/(1024*1024)).toFixed(0)+' MiB':'—';
+ document.getElementById('runtimelogs').textContent=
+  Number.isInteger(runtime.log_truncations)?String(runtime.log_truncations):'—';
+ document.getElementById('runtimeerror').textContent=
+  runtime.last_error||runtime.log_error||
+  (connected?'No current supervisor error reported':'Waiting for live diagnostics');
+}
 async function tick(){
  if(fetchPending||document.hidden)return; // never queue overlapping polls
  fetchPending=true;
@@ -332,6 +413,7 @@ async function tick(){
 function paint(d){
  renderDoctor(d.doctor||null);
  renderPipeline(d);
+ renderRuntimePanels(d);
  var fe=document.getElementById('face'),nf=d.face||'‹·_·›';
  var base='face'+(d.face_state==='ruffle'?' crit':'')+(d.face_state==='blind'?' blinded':'');
  if(fe.textContent!==nf){fe.textContent=nf;fe.className=base;void fe.offsetWidth;fe.className=base+' pop';}
