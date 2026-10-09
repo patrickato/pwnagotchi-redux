@@ -39,17 +39,29 @@ def _freq_to_band(mhz: int) -> Optional[str]:
 
 
 def parse_iw_dev(text: str) -> dict:
-    """phy -> first netdev name, from `iw dev` output."""
+    """Map each PHY to a usable netdev; prefer an existing monitor interface.
+
+    One physical Wi-Fi chip may expose both a managed STA and a virtual
+    monitor interface. Picking the first `iw dev` entry can accidentally
+    disrupt the uplink, even when a ready monitor netdev exists.
+    """
     phy_iface: dict = {}
     cur = None
+    iface = None
     for line in text.splitlines():
         m = re.match(r"\s*phy#(\d+)", line)
         if m:
             cur = "phy" + m.group(1)
+            iface = None
             continue
-        m = re.search(r"\bInterface\s+(\S+)", line)
+        m = re.match(r"\s*Interface\s+(\S+)", line)
         if m and cur:
-            phy_iface.setdefault(cur, m.group(1))
+            iface = m.group(1)
+            phy_iface.setdefault(cur, iface)
+            continue
+        m = re.match(r"\s*type\s+monitor\s*$", line)
+        if m and cur and iface:
+            phy_iface[cur] = iface
     return phy_iface
 
 
@@ -82,10 +94,12 @@ def build_radios(iw_phy_text: str, iw_dev_text: str, phy_meta: Optional[dict] = 
     dev = parse_iw_dev(iw_dev_text)
     radios = []
     for phy, info in phys.items():
+        if phy not in dev:
+            continue  # A PHY without a netdev cannot be passed to Bettercap.
         meta = phy_meta.get(phy, {})
         driver = meta.get("driver", "")
         radios.append(Radio(
-            iface=dev.get(phy, phy),
+            iface=dev[phy],
             phy=phy,
             bands=frozenset(info["bands"] or {"2.4"}),
             monitor=info["monitor"],
