@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import secrets
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -39,6 +40,7 @@ _IFACE = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
 class LiveConfig:
     state_dir: Path = Path("/captures/redux")
     capture_dir: Path = Path("/captures/incoming")
+    active_dir: Path = Path("/captures/active")
     bettercap_binary: str = "bettercap"
     preferred_iface: str = ""
     api_port: int = 8081
@@ -54,6 +56,7 @@ class LiveConfig:
         return cls(
             state_dir=Path(values.get("state_dir", "/captures/redux")),
             capture_dir=Path(values.get("capture_dir", "/captures/incoming")),
+            active_dir=Path(values.get("active_dir", "/captures/active")),
             bettercap_binary=values.get("bettercap_binary", "bettercap"),
             preferred_iface=values.get("preferred_iface", ""),
             api_port=int(values.get("api_port", 8081)),
@@ -64,12 +67,12 @@ class LiveConfig:
         )
 
     def validate(self):
-        if not self.state_dir.is_absolute() or not self.capture_dir.is_absolute():
+        paths = (self.state_dir, self.capture_dir, self.active_dir)
+        if not all(p.is_absolute() for p in paths):
             raise ValueError("live directories must be absolute")
-        if self.state_dir == self.capture_dir or self.state_dir in self.capture_dir.parents:
-            raise ValueError("live state must not overlap capture input directory")
-        if self.capture_dir in self.state_dir.parents:
-            raise ValueError("capture input must not overlap state directory")
+        if any(a == b or a in b.parents or b in a.parents
+               for i, a in enumerate(paths) for b in paths[i+1:]):
+            raise ValueError("live directories must be distinct and not overlap")
         if self.preferred_iface and not _IFACE.fullmatch(self.preferred_iface):
             raise ValueError("invalid interface name")
         if not re.fullmatch(r"[A-Za-z0-9_.+-]+", self.bettercap_binary):
@@ -187,14 +190,19 @@ class LiveRuntime:
         self.started = 0.0
         self.log_handle = None
         self.capture_file = None
+        self.handoffs = 0
+        self.last_handoff_error = ""
         self._snapshot = {"runtime": {"state": "starting"}}
         self.state = "starting"
         self.config.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.config.capture_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.config.state_dir.is_symlink() or self.config.capture_dir.is_symlink():
+        self.config.active_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if any(p.is_symlink() for p in (self.config.state_dir,
+                                        self.config.capture_dir, self.config.active_dir)):
             raise ValueError("live directories may not be symlinks")
         os.chmod(self.config.state_dir, 0o700)
         os.chmod(self.config.capture_dir, 0o700)
+        os.chmod(self.config.active_dir, 0o700)
         lock_path = self.config.state_dir / "owner.lock"
         if lock_path.is_symlink():
             raise ValueError("refusing runtime lock symlink")
@@ -218,6 +226,8 @@ class LiveRuntime:
             "events_seen": self.created, "handshake_events": self.handshakes,
             "pid": self.process.pid if self.process is not None else None,
             "capture_file": str(self.capture_file) if self.capture_file else "",
+            "handed_off": self.handoffs,
+            "handoff_error": self.last_handoff_error[:120],
             "last_error": self.last_error[:180],
             "updated_utc": time.time(),
         }
@@ -252,7 +262,7 @@ class LiveRuntime:
             username="redux", password=credentials), timeout=1.5)
         caplet = self.config.state_dir / "bettercap-live.cap"
         # A fresh file on every engine start keeps old captures stable for ingest.
-        self.capture_file = self.config.capture_dir / (
+        self.capture_file = self.config.active_dir / (
             "bettercap-" + secrets.token_hex(8) + ".pcap")
         if caplet.is_symlink():
             raise ValueError("refusing runtime caplet symlink")
@@ -333,7 +343,42 @@ class LiveRuntime:
             self.log_handle.close()
             self.log_handle = None
         self.iface = None
+        if self.capture_file is not None:
+            self._handoff(self.capture_file)
         self.capture_file = None
+
+    def _handoff(self, source):
+        """Move a closed capture onto the ingestion queue without copying bytes."""
+        source = Path(source)
+        try:
+            st = source.lstat()
+        except FileNotFoundError:
+            return False
+        if (not stat.S_ISREG(st.st_mode) or st.st_size == 0
+                or source.parent != self.config.active_dir
+                or source.suffix != ".pcap"):
+            return False
+        destination = self.config.capture_dir / source.name
+        if destination.exists() or destination.is_symlink():
+            self.last_handoff_error = "capture destination already exists"
+            return False
+        try:
+            os.replace(source, destination)
+        except OSError as error:
+            self.last_handoff_error = f"handoff failed: {type(error).__name__}"
+            return False
+        self.handoffs += 1
+        self.last_handoff_error = ""
+        return True
+
+    def _recover_abandoned(self):
+        """Resume stale captures after abrupt power loss; never touch fresh files."""
+        for path in self.config.active_dir.iterdir():
+            if (path.suffix != ".pcap" or path == self.capture_file
+                    or path.is_symlink() or not path.is_file()):
+                continue
+            if time.time() - path.stat().st_mtime >= 60:
+                self._handoff(path)
 
     def tick(self):
         now = self.clock()
@@ -369,6 +414,7 @@ class LiveRuntime:
                     self.next_try = now + self.config.retry_seconds
         elif now >= self.next_try:
             try:
+                self._recover_abandoned()
                 iface, _ = select_radio(self.radio_probe(), self.config.preferred_iface)
                 if not iface:
                     raise RuntimeError("no monitor-capable Wi-Fi interface detected")
