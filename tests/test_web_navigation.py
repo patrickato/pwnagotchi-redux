@@ -89,3 +89,26 @@ def test_compact_touch_workspace_keeps_one_scrollable_page_and_bottom_nav():
     assert "aria-label=\"Open Doctor: health unknown\"" in page
     assert "setView('doctor')" in page
     assert "lastDoctorFindings" in page
+
+def test_theme_pack_registry_validates_palette_data_without_script_injection():
+    page = render_page()
+    for token in ("--bg", "--fg", "--acc", "--warn", "--crit",
+                  "--hero-start", "--hero-mid", "--hero-end"):
+        assert token in page
+    assert "themeRegistry=Object.create(null)" in page
+    assert "registerTheme(name,tokens)" in page
+    assert "THEME_KEYS.includes(key)" in page
+    assert "/^#[0-9a-fA-F]{6}$/" in page
+    assert "document.body.style.setProperty(key,tokens[key])" in page
+    assert "document.body.style.removeProperty(key)" in page
+    assert "Object.prototype.hasOwnProperty.call(themeRegistry,name)" in page
+    assert "localStorage.setItem('augur.theme',next)" in page
+    assert "applySkin()" in page
+    assert 'id="palettebtn"' in page
+    assert "data-theme" in page
+    assert "registerTheme('signal'" in page
+    assert "registerTheme('ember'" in page
+    assert "registerTheme('glacier'" in page
+    assert "eval(" not in page
+
+
