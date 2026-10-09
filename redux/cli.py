@@ -1239,6 +1239,29 @@ def cmd_scope(args) -> int:
     return 0
 
 
+def cmd_pipeline(args) -> int:
+    """Run or inspect the independent capture artifact workflow."""
+    from .crack.ingest import Settings, CaptureIngestor, read_summary
+    if args.pipeline_cmd == "status":
+        print(json.dumps(read_summary(Settings.load(args.config).database), indent=2))
+        return 0
+    if args.pipeline_cmd == "ingest":
+        with CaptureIngestor(Settings.load(args.config)) as worker:
+            print(json.dumps(worker.scan(), indent=2))
+        return 0
+    if args.pipeline_cmd == "audit":
+        from .crack.audit import AuditSettings, AuditWorker
+        from .core.scope import Scope
+        cfg = AuditSettings.load(args.config)
+        if not cfg.enabled:
+            print(json.dumps({"status": "disabled", "reason": "audit opt-in is off"}))
+            return 0
+        with AuditWorker(cfg, Scope.load(str(cfg.scope_file))) as worker:
+            print(json.dumps(worker.once(), indent=2))
+        return 0
+    raise ValueError("unknown pipeline command")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="redux", description="redux field-OS control")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1308,6 +1331,15 @@ def build_parser() -> argparse.ArgumentParser:
     cc = cfsub.add_parser("check", help="validate a config and list problems")
     cc.add_argument("--config", default=None, help="config path to validate")
     cf.set_defaults(func=cmd_config)
+
+    pl = sub.add_parser("pipeline", help="local capture processing and audit jobs")
+    pl.add_argument("--config", default="/etc/redux/pipeline.toml",
+                    help="pipeline TOML file (default /etc/redux/pipeline.toml)")
+    plc = pl.add_subparsers(dest="pipeline_cmd", required=True)
+    plc.add_parser("status", help="read capture conversion and audit statistics")
+    plc.add_parser("ingest", help="process one bounded pass of saved captures")
+    plc.add_parser("audit", help="run one opt-in scope-checked local audit job")
+    pl.set_defaults(func=cmd_pipeline)
 
     ini = sub.add_parser("init", help="first-run setup: write config + swarm key + operator checklist")
     ini.add_argument("--dir", default="/etc/redux", help="config directory (default /etc/redux)")
