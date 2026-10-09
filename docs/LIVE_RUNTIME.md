@@ -17,8 +17,9 @@ Two independent systemd units now have clear, separate jobs:
 
 The image's writable REDUXCAP filesystem is `/captures`. The runtime stores
 its private caplet, process log, GeoDB, and status in `/captures/redux`;
-Bettercap stores a new aggregate handshake file for each engine session in
-`/captures/incoming`. The file processor watches that directory by default
+Bettercap stores its current aggregate handshake file in `/captures/active`.
+Only after that process exits is a nonempty, closed file atomically handed off to
+`/captures/incoming`. The file processor watches only the incoming directory
 and preserves its own database in `/captures/jobs.db`.
 
 This architecture does **not** depend on Jayofelony Pwnagotchi, and the
