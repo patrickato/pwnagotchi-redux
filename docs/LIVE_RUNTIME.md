@@ -1,4 +1,4 @@
-# Live passive Redux runtime (integration branch)
+# Live passive Redux runtime (active Redux workbench)
 
 ## What starts on a built image
 
@@ -44,6 +44,19 @@ The Bettercap REST listener binds only to `127.0.0.1` on port 8081 with
 a randomly generated password. The caplet is private (mode 0600).
 The web dashboard binds to **localhost only**, on port 8080, and reads
 cached Augur snapshots without touching SQLite from its HTTP thread.
+**It starts independently of Bettercap/radio readiness**: a missing Wi-Fi
+adapter or failed Bettercap session no longer makes the local diagnostic
+dashboard disappear. If port 8080 is in use, Redux reports a dashboard error
+while keeping the radio runtime running and retries the listener at a bounded
+30-second cadence; it also detects a dead dashboard server thread.
+
+The dashboard now includes a read-only **Doctor** panel with severity,
+coverage gaps and actionable remediation drawn from real Augur state plus
+the live process, storage, capture-handoff and listener observations.
+A missing hardware reading is shown as **UNKNOWN**, never silently passed.
+The local JSON route `/api/status` exposes that same Doctor report.
+`/captures/redux/live.json` stores a small checkpoint with health severity,
+unassessed-area count and dashboard availability, not fictitious telemetry.
 
 This does not yet offer authenticated LAN access to the dashboard.
 Do not expose the Bettercap REST port or share its caplet or private files.
@@ -77,7 +90,10 @@ controlled sample of the owner's own AP.
 ## Recovery and limitations
 
 When there is no safe monitor-capable adapter, the service reports `degraded`
-and retries; no phantom devices are reported. When Bettercap exits or the
+and retries; no phantom devices are reported. Recovery scanning tolerates
+intermittent directory-enumeration and per-file I/O faults without terminating
+the radio supervisor; failed handoffs remain visible in Doctor and the status
+snapshot. No automatic capture deletion occurs. When Bettercap exits or the
 radio disappears, the child is reaped, the SQLite store is closed, and
 the supervisor retries. Each restart creates a *new* capture file so
 completed files can settle and convert. Logs are kept private; startup
