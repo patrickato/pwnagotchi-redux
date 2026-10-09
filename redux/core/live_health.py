@@ -5,6 +5,9 @@ or guess about unobserved hardware. Every finding has an operator-facing reason.
 """
 from __future__ import annotations
 
+import math
+import time
+
 from .doctor import Doctor, DoctorInputs, Status
 
 _RANK = {"ok": 0, "attention": 1, "degraded": 2, "action": 3}
@@ -27,7 +30,8 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
                          dashboard_active=False, dashboard_error="",
                          sighting_pending=None, sighting_write_error="",
                          sighting_lost=0, engine_log_error="",
-                         capture_mount_ok=None):
+                         capture_mount_ok=None, processing_report=None,
+                         processing_now_utc=None, processing_stale_seconds=180):
     """Combine Augur's real Doctor report with physical supervisor observations.
 
     Without Augur the Doctor's normal probes are UNKNOWN, *never* silently OK.
@@ -128,6 +132,72 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
                                  "Engine diagnostic logging cannot be bounded.",
                                  engine_log_error,
                                  "Inspect capture storage permissions and free space."))
+
+    # Ingest results from the worker's own durable SQLite ledger, not from
+    # radio activity or a fabricated "conversion OK" sample. A recent empty
+    # scan proves the worker ran, but does not prove a handshake was collected.
+    processing = processing_report or {"available": False,
+                                       "reason": "processing not yet observed"}
+    if not processing.get("available"):
+        reason = str(processing.get("reason", "processing unavailable"))[:180]
+        unhealthy = "not present" not in reason and "not yet" not in reason
+        findings.append(_finding("capture processing",
+                                 "degraded" if unhealthy else "unknown",
+                                 "Capture worker is unavailable." if unhealthy
+                                 else "Capture worker has not been observed yet.",
+                                 reason, "Inspect redux-capture-ingest.timer and jobs.db."))
+    elif processing.get("scan_error"):
+        findings.append(_finding("capture processing", "degraded",
+                                 "Capture worker heartbeat is invalid.",
+                                 str(processing["scan_error"])[:180],
+                                 "Inspect capture ledger integrity and timer logs."))
+    elif not isinstance(processing.get("last_scan"), dict):
+        findings.append(_finding("capture processing", "unknown",
+                                 "No completed capture-processing pass recorded.",
+                                 "The ledger may predate scan tracking or the worker has not run.",
+                                 "Check redux-capture-ingest.timer and the /captures mount."))
+    else:
+        recent = processing["last_scan"]
+        finished = recent.get("completed_utc")
+        scanned = recent.get("scanned")
+        outcomes = recent.get("outcomes")
+        now = time.time() if processing_now_utc is None else processing_now_utc
+        valid = (type(finished) in (int, float) and math.isfinite(finished)
+                 and type(now) in (int, float) and math.isfinite(now)
+                 and type(scanned) is int and scanned >= 0
+                 and isinstance(outcomes, dict))
+        if not valid or finished > now + 30:
+            findings.append(_finding("capture processing", "attention",
+                                     "Capture worker timing cannot be verified.",
+                                     "The scan timestamp is invalid or ahead of the device clock.",
+                                     "Check system time and the ingestion worker."))
+        elif now - finished > processing_stale_seconds:
+            findings.append(_finding("capture processing", "degraded",
+                                     "Capture-processing worker is overdue.",
+                                     f"No completed scan for {int(now-finished)} seconds; "
+                                     f"limit is {processing_stale_seconds} seconds.",
+                                     "Check redux-capture-ingest.timer, service logs and disk health."))
+        elif outcomes.get("paused_low_storage", 0):
+            findings.append(_finding("capture processing", "action",
+                                     "Capture conversion paused for low storage.",
+                                     "The last completed worker pass reported its storage reserve.",
+                                     "Free or expand /captures before retrying ingestion."))
+        elif outcomes.get("error", 0) or outcomes.get("storage_error", 0):
+            findings.append(_finding("capture processing", "degraded",
+                                     "Recent capture conversion reported errors.",
+                                     f"Last scan outcomes: {str(outcomes)[:160]}.",
+                                     "Inspect converter availability and worker service logs."))
+        elif processing.get("by_status", {}).get("error", 0):
+            findings.append(_finding("capture processing", "attention",
+                                     "Capture-processing ledger contains earlier errors.",
+                                     f"{processing['by_status']['error']} artifact(s) "
+                                     "still marked error; last scan completed.",
+                                     "Review failed artifacts and run the ingestion worker again."))
+        else:
+            findings.append(_finding("capture processing", "ok",
+                                     "Capture-processing worker recently completed a scan.",
+                                     f"Last scan examined {scanned} file(s); "
+                                     "this does not prove conversion or handshake validity."))
 
     if dashboard_enabled:
         if dashboard_active:
