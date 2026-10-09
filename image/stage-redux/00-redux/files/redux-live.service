@@ -15,6 +15,10 @@ UMask=0077
 ExecStart=/usr/bin/python3 -m redux.core.live_runtime --config /etc/redux/live.toml
 Restart=on-failure
 RestartSec=5
+# Keep any detached Bettercap session inside the service's cgroup cleanup.
+# The Python supervisor never declares a capture closed before reaping it.
+KillMode=control-group
+RestartKillSignal=SIGTERM
 TimeoutStopSec=15
 NoNewPrivileges=true
 ProtectSystem=strict
