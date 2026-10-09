@@ -51,6 +51,7 @@ class LiveConfig:
     probe_seconds: int = 30
     rotation_seconds: int = 300
     min_free_bytes: int = 64 * 1024 * 1024
+    allow_connected_capture: bool = False
 
     @classmethod
     def load(cls, path):
@@ -69,6 +70,7 @@ class LiveConfig:
             probe_seconds=int(values.get("probe_seconds", 30)),
             rotation_seconds=int(values.get("rotation_seconds", 300)),
             min_free_bytes=int(values.get("min_free_bytes", 64 * 1024 * 1024)),
+            allow_connected_capture=values.get("allow_connected_capture", False),
         )
 
     def validate(self):
@@ -94,6 +96,8 @@ class LiveConfig:
             raise ValueError("capture minimum free bytes must be >=1 MiB")
         if self.enable_web is not True and self.enable_web is not False:
             raise ValueError("enable_web must be a boolean")
+        if type(self.allow_connected_capture) is not bool:
+            raise ValueError("allow_connected_capture must be a boolean")
 
 
 def free_bytes(path):
@@ -113,7 +117,7 @@ def select_radio(radios, preferred=""):
     return None, []
 
 
-def ensure_monitor(iface, *, run=subprocess.run):
+def ensure_monitor(iface, *, run=subprocess.run, allow_connected=False):
     """Configure only the selected capture interface; never change uplink radios."""
     if not _IFACE.fullmatch(iface):
         raise ValueError("invalid radio interface")
@@ -123,6 +127,11 @@ def ensure_monitor(iface, *, run=subprocess.run):
         raise RuntimeError(f"iw cannot inspect capture interface {iface}")
     if re.search(r"^\s*type\s+monitor\s*$", info.stdout, re.M):
         return False
+    if not allow_connected:
+        link = run(["iw", "dev", iface, "link"], capture_output=True,
+                   text=True, timeout=6, check=False)
+        if link.returncode == 0 and re.search(r"^\s*Connected to\s+", link.stdout, re.M):
+            raise RuntimeError(f"{iface} is a connected uplink; refusing to switch it to monitor mode")
     commands = [
         ["ip", "link", "set", iface, "down"],
         ["iw", "dev", iface, "set", "type", "monitor"],
@@ -276,7 +285,8 @@ class LiveRuntime:
         self.web_thread.start()
 
     def _launch(self, iface):
-        ensure_monitor(iface, run=self.executor)
+        ensure_monitor(iface, run=self.executor,
+                       allow_connected=self.config.allow_connected_capture)
         credentials = secrets.token_hex(24)
         self.transport = HttpTransport(BettercapConfig(
             host="127.0.0.1", port=self.config.api_port,
