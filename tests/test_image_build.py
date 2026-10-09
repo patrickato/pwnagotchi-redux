@@ -438,6 +438,10 @@ bash ./00-run.sh
     assert result.returncode == 0, result.stderr
     unit = (root / "etc/systemd/system/redux.service").read_text()
     assert "ExecStart=/usr/bin/python3 -m redux.core.boot" in unit
+    launcher = root / "usr/local/bin/redux"
+    assert launcher.is_file()
+    assert "PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.cli" in launcher.read_text()
+    assert launcher.stat().st_mode & 0o111
     assert "User=redux" in unit
     assert "ExecStartPre=+/usr/bin/install -d -o redux -g redux -m 0700 /captures/boot" in unit
     assert "WantedBy=multi-user.target" in unit
