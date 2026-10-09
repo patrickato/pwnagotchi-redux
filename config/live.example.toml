@@ -2,6 +2,7 @@
 [live]
 state_dir = "/captures/redux"
 capture_dir = "/captures/incoming"
+active_dir = "/captures/active" # Bettercap writes here; never watched by converter
 bettercap_binary = "bettercap"
 preferred_iface = "" # Auto-select real monitor-capable radio. Example: wlan1mon
 api_port = 8081
