@@ -193,12 +193,13 @@ class HttpTransport:
     def events(self, clear: bool = False) -> list:
         path = "/events"
         out = self._request("GET", path)
+        if not isinstance(out, list):
+            raise BettercapUnavailable("bettercap event endpoint returned an unexpected payload")
         if clear:
-            try:
-                self._request("DELETE", "/events")
-            except BettercapUnavailable:
-                pass
-        return out if isinstance(out, list) else []
+            # Failing to clear means the next poll would replay stale events
+            # as though they were new observations. Do not silently continue.
+            self._request("DELETE", "/events")
+        return out
 
 
 class ReplayTransport:
