@@ -98,6 +98,13 @@ def test_missing_or_noncharacter_framebuffer_fails_closed(tmp_path):
     assert not missing["ok"]
 
 
+def test_preflight_rejects_relative_browser_path(tmp_path):
+    report = preflight(tmp_path, which=lambda name: "chromium" if name == "chromium" else None)
+    assert not report["ok"]
+    assert not report["checks"]["browser"]["ok"]
+    assert report["checks"]["browser"]["executable"] is None
+
+
 def test_runtime_sessions_and_browser_are_required(tmp_path):
     assert not preflight(tmp_path, uid=0)["ok"]
     assert not preflight(tmp_path, environ={})["ok"]
@@ -111,6 +118,10 @@ def test_runtime_sessions_and_browser_are_required(tmp_path):
 @pytest.mark.parametrize("data", [
     b"{}", b"[]", b"not json",
     b'{"state":"running"}', b'x' * (65536 + 1),
+    b'{"doctor":null,"runtime":{}}',
+    b'{"doctor":{"overall":"ok"}}',
+    b'{"runtime":{},"doctor":{"overall":"totally fine"}}',
+    b'{"runtime":{},"doctor":"ok"}',
 ])
 def test_kiosk_rejects_nonredux_or_oversized_local_dashboard(tmp_path, data):
     result = preflight(tmp_path, opener=lambda *_a, **_k: FakeResponse(data))
