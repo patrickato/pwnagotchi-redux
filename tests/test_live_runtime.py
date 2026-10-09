@@ -52,6 +52,7 @@ def test_caplet_contains_only_passive_and_local_api(tmp_path):
     text = live.caplet_text("wlan1mon", tmp_path / "captures.pcap", "redux",
                             "abcd123456", 8081)
     assert "set wifi.handshakes.file" in text
+    assert "set wifi.txpower 0" in text
     assert "set wifi.handshakes.aggregate true" in text
     assert "api.rest on" in text
     assert "127.0.0.1" in text
