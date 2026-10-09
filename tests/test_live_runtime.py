@@ -558,6 +558,38 @@ def test_unrecoverable_database_write_reports_uncommitted_count(tmp_path, monkey
     assert area["status"] == "action"
 
 
+def test_live_status_reuses_one_processing_ledger_read(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    def spawn(*args, **kwargs):
+        return Child()
+    def monitor(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, "type monitor\\n", "")
+    monkeypatch.setattr(live, "HttpTransport", Transport)
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [radio()],
+                               executor=monitor, spawn=spawn)
+    try:
+        assert runtime.tick() == "starting_engine"
+        assert runtime.tick() == "running"
+        expected = {"available": True, "artifacts": 12, "hash_records": 3,
+                    "by_status": {"ready": 3}, "last_scan": {
+                        "completed_utc": 1000.0, "scanned": 2,
+                        "outcomes": {"ready": 1}}}
+        calls = []
+        def only_ledger_read(path):
+            calls.append(path)
+            return expected
+        monkeypatch.setattr(live, "read_summary", only_ledger_read)
+        monkeypatch.setattr(ingest, "read_summary",
+                            lambda *a, **k: (_ for _ in ()).throw(
+                                AssertionError("Augur duplicated the processing DB read")))
+        runtime._checkpoint()
+        assert len(calls) == 1
+        assert calls[0] == runtime.config.capture_dir.parent / "jobs.db"
+        assert runtime._snapshot["capture_processing"] is expected
+    finally:
+        runtime.close()
+
+
 def test_capture_rotation_closes_and_delivers_session(tmp_path, monkeypatch):
     clock = [50.0]
     children = []
