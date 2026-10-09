@@ -26,7 +26,10 @@ const nodes=new Map();
 class Element {
  constructor() {
   this.children=[];
-  this.style={};
+  this.style={
+   setProperty:(key,value)=>{this.style[key]=value},
+   removeProperty:(key)=>{delete this.style[key]},
+  };
   this.textContent='';
   this.className='';
   this.innerHTML='';
@@ -107,6 +110,16 @@ async function deliver(request,data){
 }
 (async()=>{
  assert.equal(context.currentView,'overview','startup displays overview');
+ assert.equal(elem('palettebtn').textContent,'Signal');
+ assert.equal(document.body.style['--acc'],'#4ec9b0');
+ elem('palettebtn').onclick();
+ assert.equal(elem('palettebtn').textContent,'Ember');
+ assert.equal(document.body.style['--acc'],'#ffa36f');
+ assert.equal(context.currentTheme,'ember');
+ elem('palettebtn').onclick();
+ assert.equal(elem('palettebtn').textContent,'Glacier');
+ elem('palettebtn').onclick();
+ assert.equal(elem('palettebtn').textContent,'Signal');
  assert.equal(navTabs[0].dataset.view,'overview');
  assert.equal(navTabs[0]['aria-pressed'],'true');
  assert.equal(panes[0].hidden,false);
