@@ -77,7 +77,8 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Augur</title><style>
 :root{--bg:#0a0e13;--fg:#e6edf3;--mut:#8b98a5;--dim:#5a7187;--acc:#4ec9b0;--warn:#e3b341;
 --crit:#f85149;--card:#121922;--line:#1f2a35;--wifi:#5aa0ff;--ble:#9a7bff;--me:#4ec9b0;
---mono:ui-monospace,Menlo,Consolas,monospace}
+--mono:ui-monospace,Menlo,Consolas,monospace;
+--halo:#11202e;--hero-start:#10272c;--hero-mid:#111a27;--hero-end:#1d2430}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--mono)}
 header{position:sticky;top:0;z-index:2;background:var(--bg);padding:8px 12px;
 border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center}
@@ -135,7 +136,7 @@ background:#13332e;font-weight:700}
 .view-nav button:focus-visible{outline:2px solid var(--wifi);outline-offset:2px}
 /* Device shell: health and engine truth remain visible on every page. */
 :root{--info:#67b7e5;--card-hi:#172331;--ink-sub:#a5b5c5}
-body{background:radial-gradient(ellipse at 15% 0%,#11202e 0%,var(--bg) 53%);
+body{background:radial-gradient(ellipse at 15% 0%,var(--halo) 0%,var(--bg) 53%);
  -webkit-font-smoothing:antialiased}
 #devicebar{min-width:0;min-height:47px;box-shadow:0 3px 16px #0007;
  border-bottom:1px solid #324252}
@@ -164,7 +165,7 @@ body{background:radial-gradient(ellipse at 15% 0%,#11202e 0%,var(--bg) 53%);
 @keyframes health-glow{0%,100%{opacity:.65}50%{opacity:1;text-shadow:0 0 10px currentColor}}
 @keyframes health-alert{0%,100%{opacity:.5}50%{opacity:1;transform:scale(1.12)}}
 .hero{position:relative;overflow:hidden;border-color:#254e55;
- background:linear-gradient(127deg,#10272c 0%,#111a27 58%,#1d2430 100%)}
+ background:linear-gradient(127deg,var(--hero-start) 0%,var(--hero-mid) 58%,var(--hero-end) 100%)}
 .hero::before{content:"";position:absolute;width:110px;height:110px;
  right:-42px;top:-53px;border:1px solid #4ec9b040;border-radius:50%;
  box-shadow:0 0 0 18px #4ec9b008,0 0 0 35px #4ec9b008;pointer-events:none}
@@ -183,6 +184,9 @@ body{background:radial-gradient(ellipse at 15% 0%,#11202e 0%,var(--bg) 53%);
 .overview-metrics .kv{min-width:0;overflow-wrap:anywhere}
 .overview-metrics .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .overview-advice{border-left:3px solid var(--acc)}
+.theme-selector{display:flex;align-items:center;justify-content:space-between;
+ gap:9px;margin-top:8px;padding-top:7px;border-top:1px solid var(--line)}
+.theme-selector button{min-width:90px}
 .card{box-shadow:0 4px 16px #0002}
 .k{color:var(--ink-sub)}
 .doctor-heart.unknown,.doctor-title.unknown{color:var(--info)}
@@ -308,7 +312,10 @@ body[data-skin="plain"] .hero::before{display:none}
  </div>
  <svg id="spark" class="rich" viewBox="0 0 400 40" preserveAspectRatio="none"></svg></div>
  <div class="card overview-advice" data-page="overview"><div class="k">brain recommends</div>
-   <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div></div>
+   <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div>
+   <div class="theme-selector"><span class="k">Theme</span>
+    <button type="button" id="palettebtn" aria-label="Switch visual theme">Signal</button>
+   </div></div>
  <div class="card rich" data-page="radio" hidden id="sensecard" style="display:none"><div class="k">presence (CSI)</div>
    <div class="v"><span class="badge" id="sense">—</span> <span class="badge" id="occ">—</span></div>
    <div class="reason" id="sensewhy"></div></div>
@@ -413,6 +420,62 @@ function applySkin(){document.body.setAttribute('data-skin',skin);
 document.getElementById('skinbtn').onclick=function(){skin=(skin==='rich')?'plain':'rich';
  try{localStorage.setItem('augur.skin',skin)}catch(e){}applySkin()};
 applySkin();
+// Validated palette data only: no CSS text, URLs, scripts, or arbitrary keys.
+// Additional theme packs can register palettes without altering page routing.
+const THEME_KEYS=[
+ '--bg','--fg','--mut','--dim','--acc','--warn','--crit','--card',
+ '--line','--wifi','--ble','--me','--info','--ink-sub',
+ '--halo','--hero-start','--hero-mid','--hero-end'
+];
+const themeRegistry=Object.create(null);
+const themeOrder=[];
+function registerTheme(name,tokens){
+ if(typeof name!=='string'||!/^[a-z][a-z0-9-]{0,31}$/.test(name)||
+   Object.prototype.hasOwnProperty.call(themeRegistry,name)||!tokens||
+   typeof tokens!=='object'||Array.isArray(tokens))return false;
+ const keys=Object.keys(tokens);
+ if(!keys.length||keys.some(function(key){
+  return !THEME_KEYS.includes(key)||typeof tokens[key]!=='string'||
+   !/^#[0-9a-fA-F]{6}$/.test(tokens[key]);
+ }))return false;
+ themeRegistry[name]=Object.freeze(Object.assign(Object.create(null),tokens));
+ themeOrder.push(name);
+ return true;
+}
+registerTheme('signal',{'--acc':'#4ec9b0','--wifi':'#5aa0ff',
+ '--hero-start':'#10272c','--halo':'#11202e'});
+registerTheme('ember',{'--acc':'#ffa36f','--wifi':'#ffce8d',
+ '--info':'#85b9db','--hero-start':'#322016','--hero-mid':'#241d20',
+ '--hero-end':'#302329','--halo':'#2a1b1c'});
+registerTheme('glacier',{'--acc':'#7cd4f5','--wifi':'#9cbcff',
+ '--info':'#85b9db','--hero-start':'#112b3b','--hero-mid':'#142033',
+ '--hero-end':'#192b3d','--halo':'#122736'});
+var currentTheme=null;
+function applyTheme(name){
+ if(!Object.prototype.hasOwnProperty.call(themeRegistry,name))name=themeOrder[0];
+ if(!name)return false;
+ const tokens=themeRegistry[name];
+ THEME_KEYS.forEach(function(key){
+  if(Object.prototype.hasOwnProperty.call(tokens,key))
+   document.body.style.setProperty(key,tokens[key]);
+  else document.body.style.removeProperty(key);
+ });
+ currentTheme=name;
+ document.body.setAttribute('data-theme',name);
+ const button=document.getElementById('palettebtn');
+ button.textContent=name.charAt(0).toUpperCase()+name.slice(1);
+ button.setAttribute('aria-label','Switch visual theme, currently '+name);
+ return true;
+}
+document.getElementById('palettebtn').onclick=function(){
+ const index=themeOrder.indexOf(currentTheme);
+ const next=themeOrder[(index+1)%themeOrder.length];
+ applyTheme(next);
+ try{localStorage.setItem('augur.theme',next)}catch(e){}
+};
+var savedTheme=(function(){try{return localStorage.getItem('augur.theme')}
+ catch(e){return null}})();
+applyTheme(savedTheme);
 function setb(id,txt,cls){var e=document.getElementById(id);e.textContent=txt;e.className='badge'+(cls?' '+cls:'')}
 var lastDoctorFindings=null;
 function renderDoctor(report){
