@@ -17,10 +17,19 @@ nothing transmitted.
   template+validate, vault seal/open roundtrip, captap pipeline (synthetic cross-MAC
   re-id + `deauth_flood` fired), sighting store. Board read as Pi 4 Model B.
 - **Radios enumerated:** `wlan0mon, wlan0, wlan1mon`. Capture engine: `bettercap` present.
-- **Live passive capture (the real test):** `wlan1mon` parsed **703 real frames** → **2 APs**
-  (ch6) and **3 device identities**, `0 re-id`, `alerts=none` — correct for a short, quiet,
-  attack-free capture. Confirms the AF_PACKET monitor source → radiotap/dot11 parse → survey +
-  fingerprint chain works against a real radio and real airspace.
+- **Radio capability probe (live `iw`):** onboard (brcmfmac) → 2.4/5 GHz, monitor, **no inject**;
+  the MT7612U adapter (mt76x2u) → 2.4/5 GHz, monitor, **inject** — each chipset's capabilities
+  read correctly, not guessed (Phase-1 gate 1.2).
+- **Live passive capture (the real test):** `wlan1mon` parsed **~700+ real frames** per 30s sweep
+  → **2 APs** (ch6, the lab's own networks) and **3–4 device identities**, `0 re-id`,
+  `alerts=none` — correct for a short, quiet, attack-free capture. Confirms the AF_PACKET monitor
+  source → radiotap/dot11 parse → survey + fingerprint chain works against a real radio and real
+  airspace. Reproduced across several runs.
+- **boot-POST / self-diagnosis:** folded into `hwtest`, but run against a throwaway core with no
+  live bettercap driver or GPS wired in — so their `degraded` / "no capture engine" / "no
+  location" are harness-context artifacts, not hardware faults (`bettercap` is present above,
+  empty scope is by design). The real on-device verdict comes from `redux post` / `redux doctor`
+  under the full service.
 - **SKIP (expected):** CSI — needs the `nexmon_csi` build.
 
 **Still pending (not yet validated):** live-attack detection against a real stimulus
