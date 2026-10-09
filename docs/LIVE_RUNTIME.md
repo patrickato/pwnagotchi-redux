@@ -319,6 +319,47 @@ improvement, **not** a claim that the final 480×320 SPI TFT or its touch
 controller has been qualified. All runtime values remain genuine
 measurements; an unassessed area remains UNKNOWN.
 
+## First interactive 480×320 workspace shell
+
+The self-contained Augur dashboard now has **four operational, read-only
+pages** instead of one tall collection of unrelated cards. On browser
+viewports up to 520 pixels wide (including the target 480×320), the
+navigation bar sits at the bottom with four 46px touch targets while only
+the active page scrolls. Pages are:
+
+- **Overview:** actual Augur face/persona, radio assignment and current
+  recommendation, sightings/alerts and live narration
+- **Radio:** measured location/airspace visualizations, channel/RSSI
+  distributions, observed AP inventory and optional capability panels
+- **Captures:** live capture lifecycle, the durable ingestion worker ledger,
+  handoff count, pending sightings, and explicit handoff/error messages
+- **Doctor:** health coverage, assessed findings, recovery advice and
+  supervisor state/free space/log rotations/current error
+
+The user can tap a navigation button, use left/right/Home/End keys while
+the navigation bar is focused, or swipe horizontally on non-interactive
+screen areas; vertical scroll gestures and swipes starting on buttons,
+inputs or the map are left to the browser. The current page appears as a
+shareable URL fragment (`#doctor` etc.) and is restored on refresh.
+The page layout does not hardcode a fixed number of pages in its
+JavaScript: new navigation buttons with `data-view="<id>"` and panels
+with `data-page="<id>"` join the same registered navigation system.
+
+All operational values come from the existing **read-only** live
+`/api/status` payload. The interface does not pretend to start, stop
+or reconfigure capture until an authenticated, scoped write API is
+designed and tested. Missing status stays UNKNOWN; disconnected/stale
+data loses any formerly healthy classification. Browser interaction
+tests exercise keyboard/touch gestures, non-overlapping status requests,
+visual sampling, and reconnection behavior using the shipped JS itself.
+
+This is the first **functional touch-first navigation and information
+architecture milestone**, not final art direction, not verified XPT2046
+hardware gesture behavior, and not a replacement for an actual
+480×320 rendered-image review on a physical Pi. The next gates remain
+hardware framebuffer/touch validation, native deployment/browser shell
+startup, screen tuning, theme/pack extension and scoped live controls.
+
 ## Release gates not yet completed
 
 CI exercises the above with injected radios/transports/processes; it cannot
