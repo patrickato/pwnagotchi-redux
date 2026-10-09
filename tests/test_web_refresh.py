@@ -59,6 +59,10 @@ const document={
  hidden:false,
  body:new Element(),
  getElementById:elem,
+ querySelector:(selector)=>{
+  if(selector==='.doctor-primary')return elem('doctor-primary');
+  throw Error('unknown selector '+selector);
+ },
  querySelectorAll:(selector)=>{
   if(selector==='#viewnav [data-view]')return navTabs;
   if(selector==='#viewroot [data-page]')return panes;
@@ -112,7 +116,15 @@ async function deliver(request,data){
  assert.equal(requests.length,1,'pending polls must never overlap');
  await deliver(requests.shift(),report(20,20));
  assert.equal(elem('doctorlabel').textContent,'OK');
+ assert.equal(elem('healthjump').className,'health-shortcut ok');
+ assert.equal(elem('engineindicator').textContent,'NO SESSION',
+  'absent runtime state must never appear running');
+ assert.equal(elem('engineindicator').className,'runtime-pill unknown');
+ assert.equal(elem('herocapture').textContent,'CAPTURE UNKNOWN');
  assert.equal(elem('sub').textContent,'live · measured');
+ elem('healthjump').onclick();
+ assert.equal(context.currentView,'doctor');
+ assert.equal(elem('healthjump')['aria-label'],'Open Doctor: OK');
  navTabs[3].onclick();
  assert.equal(context.currentView,'doctor');
  assert.equal(location.hash,'doctor');
@@ -155,6 +167,9 @@ async function deliver(request,data){
  context.tick();
  await deliver(requests.shift(),report(22,22));
  assert.equal(elem('doctorlabel').textContent,'UNKNOWN · STALE');
+ assert.equal(elem('healthjump').className,'health-shortcut unknown');
+ assert.equal(elem('engineindicator').textContent,'STALE');
+ assert.equal(elem('herocapture').textContent,'CAPTURE UNVERIFIED');
  assert.equal(elem('pipelinestate').textContent,'UNKNOWN · STALE');
  assert.match(elem('sub').textContent,/STALE/);
 
@@ -179,6 +194,7 @@ async function deliver(request,data){
  await deliver(requests.shift(),report(23,23));
  assert.equal(elem('doctorlabel').textContent,'OK',
   'fresh runtime data restores actual Doctor status');
+ assert.equal(elem('healthjump').className,'health-shortcut ok');
  assert.equal(elem('sub').textContent,'live · measured');
  console.log('browser polling contract passed');
 })().catch(error=>{console.error(error);process.exitCode=1});
