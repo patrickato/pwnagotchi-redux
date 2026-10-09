@@ -41,18 +41,37 @@ function elem(id){
  if(!nodes.has(id))nodes.set(id,new Element());
  return nodes.get(id);
 }
+const routes=['overview','radio','captures','doctor'];
+const navTabs=routes.map(name=>{
+ const tab=new Element();
+ tab.dataset={view:name};
+ tab.focus=function(){tab.focused=true};
+ return tab;
+});
+const panes=routes.map(name=>{
+ const panel=new Element();
+ panel.dataset={page:name};
+ return panel;
+});
 const timers=new Map();
 let timerId=0;
 const document={
  hidden:false,
  body:new Element(),
  getElementById:elem,
+ querySelectorAll:(selector)=>{
+  if(selector==='#viewnav [data-view]')return navTabs;
+  if(selector==='#viewroot [data-page]')return panes;
+  throw Error('unknown selector '+selector);
+ },
  createElement:()=>new Element(),
  createElementNS:()=>new Element(),
  addEventListener:()=>{},
 };
+const location={hash:''};
 const context={
- document,
+ document,location,
+ window:{addEventListener:()=>{}},
  localStorage:{getItem:()=>null,setItem:()=>{}},
  performance:{now:()=>now},
  setTimeout:(fn,delay)=>{const id=++timerId;timers.set(id,fn);return id},
@@ -83,6 +102,11 @@ async function deliver(request,data){
  await flush();await flush();
 }
 (async()=>{
+ assert.equal(context.currentView,'overview','startup displays overview');
+ assert.equal(navTabs[0].dataset.view,'overview');
+ assert.equal(navTabs[0]['aria-pressed'],'true');
+ assert.equal(panes[0].hidden,false);
+ assert.equal(panes[1].hidden,true);
  assert.equal(requests.length,1,'first poll must start immediately');
  context.tick();context.tick();
  assert.equal(requests.length,1,'pending polls must never overlap');
