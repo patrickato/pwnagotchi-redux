@@ -84,3 +84,74 @@ def test_live_runtime_checkpoint_exposes_doctor_to_api_and_file(tmp_path):
         assert saved["health_unknown_areas"] > 0
     finally:
         runtime.close()
+
+def test_capture_processing_requires_a_confirmed_scan_before_green():
+    report = {"available": True, "hash_records": 7,
+              "by_status": {"ready": 7}, "last_scan": None}
+    result = describe_live_health("running", iface="wlan1mon",
+                                  processing_report=report,
+                                  processing_now_utc=5000)
+    assert finding(result, "capture processing")["status"] == "unknown"
+    assert "capture processing" in result["coverage"]["not_assessed"]
+
+
+def test_processing_health_distinguishes_current_empty_work_from_bad_conversion():
+    report = {"available": True, "by_status": {}, "hash_records": 0,
+              "last_scan": {"completed_utc": 1000, "scanned": 0,
+                            "outcomes": {}}}
+    current = describe_live_health("running", iface="wlan1mon",
+                                   processing_report=report,
+                                   processing_now_utc=1040)
+    assert finding(current, "capture processing")["status"] == "ok"
+    assert "does not prove" in finding(current, "capture processing")["reason"]
+    report["last_scan"]["outcomes"] = {"error": 2}
+    failed = describe_live_health("running", iface="wlan1mon",
+                                  processing_report=report,
+                                  processing_now_utc=1040)
+    assert finding(failed, "capture processing")["status"] == "degraded"
+    report["last_scan"]["outcomes"] = {"invalid": 2}
+    invalid = describe_live_health("running", iface="wlan1mon",
+                                   processing_report=report,
+                                   processing_now_utc=1040)
+    assert finding(invalid, "capture processing")["status"] == "ok"
+    assert invalid["overall"] == "ok"  # invalid handshakes are not worker faults
+
+
+def test_processing_health_flags_stale_storage_pause_and_corrupt_scan():
+    base = {"available": True, "by_status": {}, "last_scan": {
+        "completed_utc": 1000, "scanned": 5, "outcomes": {"ready": 2},
+    }}
+    stale = describe_live_health("running", iface="wlan1mon",
+                                 processing_report=base,
+                                 processing_now_utc=1200,
+                                 processing_stale_seconds=180)
+    assert finding(stale, "capture processing")["status"] == "degraded"
+    assert "overdue" in finding(stale, "capture processing")["summary"]
+    base["last_scan"]["completed_utc"] = 1190
+    base["last_scan"]["outcomes"] = {"paused_low_storage": 1}
+    paused = describe_live_health("running", iface="wlan1mon",
+                                  processing_report=base, processing_now_utc=1200)
+    assert finding(paused, "capture processing")["status"] == "action"
+    base["scan_error"] = "invalid stored scan record"
+    invalid = describe_live_health("running", iface="wlan1mon",
+                                   processing_report=base, processing_now_utc=1200)
+    assert finding(invalid, "capture processing")["status"] == "degraded"
+
+
+def test_processing_health_missing_database_and_clock_skew_not_green():
+    missing = describe_live_health(
+        "degraded",
+        processing_report={"available": False, "reason": "capture database not present"})
+    assert finding(missing, "capture processing")["status"] == "unknown"
+    broken = describe_live_health(
+        "running", iface="wlan1mon",
+        processing_report={"available": False, "reason": "database unavailable: DatabaseError"})
+    assert finding(broken, "capture processing")["status"] == "degraded"
+    skewed = describe_live_health(
+        "running", iface="wlan1mon",
+        processing_report={"available": True, "last_scan": {
+            "completed_utc": 9999, "scanned": 0, "outcomes": {}}},
+        processing_now_utc=1000)
+    assert finding(skewed, "capture processing")["status"] == "attention"
+
+
