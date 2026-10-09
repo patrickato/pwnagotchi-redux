@@ -13,3 +13,4 @@ retry_seconds = 10
 probe_seconds = 30
 rotation_seconds = 300 # Close each session and hand off its completed capture
 min_free_bytes = 67108864 # Pause capture if /captures has less than 64 MiB free
+max_log_bytes = 4194304 # Limit Bettercap diagnostic log to 4 MiB; checked each runtime tick
