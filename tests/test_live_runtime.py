@@ -880,6 +880,80 @@ def test_log_budget_config_enforced(tmp_path):
     cfg(tmp_path, max_log_bytes=65536).validate()
 
 
+def test_missing_production_capture_mount_rejected_before_any_directory_creation(monkeypatch):
+    from pathlib import Path
+    requested = []
+    def forbidden_mkdir(self, *args, **kwargs):
+        requested.append(str(self))
+        raise AssertionError("must not create rootfs fallback capture directories")
+    monkeypatch.setattr(live.os.path, "ismount", lambda path: False)
+    monkeypatch.setattr(Path, "mkdir", forbidden_mkdir)
+    settings = live.LiveConfig(
+        state_dir=Path("/captures/redux"),
+        capture_dir=Path("/captures/incoming"),
+        active_dir=Path("/captures/active"),
+    )
+    with pytest.raises(RuntimeError, match="not mounted"):
+        live.LiveRuntime(settings, radio_probe=lambda: [])
+    assert requested == []
+
+
+def test_runtime_mount_loss_stops_capture_without_rootfs_fallback_or_auto_resume(
+    tmp_path, monkeypatch
+):
+    children = []
+    def spawn(*args, **kwargs):
+        child = Child()
+        children.append(child)
+        return child
+    def monitor(args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, "type monitor\n", "")
+    from redux.core import live_runtime as live
+    settings = cfg(tmp_path)
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [radio()],
+                               executor=monitor, spawn=spawn)
+    mounted = [True]
+    runtime.capture_mount_required = True
+    runtime._capture_mount_ok = lambda: mounted[0]
+    try:
+        assert runtime.tick() == "starting_engine"
+        assert len(children) == 1
+        capture_path = runtime.capture_file
+        capture_path.write_bytes(b"preserve stale capture while partition is offline")
+        saved_before = (settings.state_dir / "live.json").read_bytes()
+        mounted[0] = False
+        assert runtime.tick() == "storage_paused"
+        assert children[0].terminated
+        assert runtime.process is None
+        assert capture_path.exists()  # handoff must not write to an unmounted rootfs
+        assert not list(settings.capture_dir.glob("*.pcap"))
+        snap = runtime._snapshot["runtime"]
+        assert snap["capture_mount"] is False
+        assert snap["free_bytes"] is None
+        assert snap["health"] == "action"
+        assert "restart" in snap["last_error"]
+        assert (settings.state_dir / "live.json").read_bytes() == saved_before
+        assert "REDUXCAP" in runtime.last_handoff_error
+
+        mounted[0] = True
+        assert runtime.tick() == "storage_paused"
+        assert len(children) == 1  # original flock no longer proves ownership
+    finally:
+        runtime.close()
+
+
+def test_doctor_marks_missing_capture_mount_action_not_unknown():
+    from redux.core.live_health import describe_live_health
+    report = describe_live_health("storage_paused", capture_mount_ok=False,
+                                  free_bytes=None)
+    mount = next(f for f in report["findings"]
+                 if f["area"] == "capture storage")
+    assert mount["status"] == "action"
+    assert "REDUXCAP" in mount["summary"]
+    assert "restart" in mount["remediation"]
+    assert report["overall"] == "action"
+
+
 def test_source_tree_is_importable_and_service_opt_in(tmp_path):
     assert callable(live.main)
     live.LiveConfig.load
