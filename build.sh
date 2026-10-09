@@ -143,4 +143,17 @@ if [[ $PREPARE_ONLY == 1 ]]; then
 fi
 cd "$PI_GEN_DIR"
 ./build.sh
-echo "Image and build logs: $PI_GEN_DIR/deploy"
+# Refuse to publish a missing, ambiguous, corrupt or undersized image.
+# Verification does not claim the Pi actually booted.
+shopt -s nullglob
+release_images=( "$PI_GEN_DIR"/deploy/*.img.xz )
+[[ ${#release_images[@]} -eq 1 ]] || {
+    echo "Expected exactly one compressed disk image in $PI_GEN_DIR/deploy; found ${#release_images[@]}." >&2
+    exit 1
+}
+python3 "$REPO_DIR/image/release_manifest.py" "${release_images[0]}" \
+    --revision "$(git -C "$REPO_DIR" rev-parse HEAD)" \
+    --pi-gen-revision "$PI_GEN_REV" \
+    --nexmon-revision "$NEXMON_REV"
+echo "Image, SHA256 and provenance manifest: $PI_GEN_DIR/deploy"
+echo "Physical ARM64 boot, radio and capture validation remain REQUIRED."
