@@ -456,6 +456,8 @@ bash ./00-run.sh
     assert "redux.display.kiosk" in kiosk.read_text()
     assert kiosk.stat().st_mode & 0o111
     assert not (root / "usr/share/redux/kiosk-profile").exists()
+    assert not (root / "usr/lib/systemd/user/redux-kiosk.service").exists()
+    assert not (root / "usr/share/redux/kiosk.example.env").exists()
     assert "User=redux" in unit
     assert "Type=notify" in unit
     assert "NotifyAccess=main" in unit
@@ -499,10 +501,31 @@ def test_opt_in_kiosk_profile_stages_chromium_x11_without_enabling_service(
                     "xserver-xorg-input-libinput"):
         assert pkgs.count(package) == 1
     assert (staged / "files/kiosk-profile").read_text().startswith("manual-x11")
-    assert not any("redux-kiosk.service" in p.name
-                   for p in (staged / "files").iterdir())
-    assert "systemctl enable redux-kiosk" not in (
-        staged / "00-run.sh").read_text()
+    service = (staged / "files/redux-kiosk.service")
+    assert service.is_file()
+    unit_text = service.read_text()
+    assert "EnvironmentFile=%h/.config/redux/kiosk.env" in unit_text
+    assert "ExecStartPre=/usr/local/bin/redux-kiosk --check" in unit_text
+    assert "ExecStart=/usr/local/bin/redux-kiosk --supervise" in unit_text
+    assert "KillMode=control-group" in unit_text
+    assert "Restart=on-failure" in unit_text
+    assert "StartLimitBurst=3" in unit_text
+    assert "ConditionPathExists=%h/.config/redux/kiosk.env" in unit_text
+    assert "REDUX_FRAMEBUFFER=/dev/fbN" in (staged / "files/kiosk.example.env").read_text()
+    assert "systemctl enable redux-kiosk" not in (staged / "00-run.sh").read_text()
+    fsroot = tmp_path / "opt-in-rootfs"
+    (fsroot / "boot/firmware").mkdir(parents=True)
+    (fsroot / "boot/firmware/config.txt").write_text("[all]\\n")
+    stage_env = dict(env, ROOTFS_DIR=str(fsroot))
+    run = invoke(["bash", "-c",
+                  "on_chroot() { cat >/dev/null; }; export -f on_chroot; bash ./00-run.sh"],
+                 cwd=staged, env=stage_env)
+    assert run.returncode == 0, run.stderr
+    deployed = fsroot / "usr/lib/systemd/user/redux-kiosk.service"
+    assert deployed.read_text() == unit_text
+    assert (fsroot / "usr/share/redux/kiosk.example.env").is_file()
+    assert not (fsroot / "etc/systemd/system/redux-kiosk.service").exists()
+    assert not (fsroot / "etc/systemd/user/graphical-session.target.wants/redux-kiosk.service").exists()
 
 
 def test_unsupported_kiosk_profile_refused(prepared, tmp_path):
