@@ -5,7 +5,16 @@ import lzma
 from pathlib import Path
 
 import pytest
-from image.release_manifest import inspect_image, publish
+import importlib.util
+
+# Image-build helpers are deliberately standalone scripts, outside the installed
+# redux package; load by file path just as the real build.sh does.
+SOURCE = Path(__file__).resolve().parents[1] / "image" / "release_manifest.py"
+SPEC = importlib.util.spec_from_file_location("redux_release_manifest", SOURCE)
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+inspect_image = MODULE.inspect_image
+publish = MODULE.publish
 
 REV = "a" * 40
 PI_GEN_REV = "b" * 40
