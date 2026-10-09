@@ -48,6 +48,7 @@ Jayofelony installation.
 
 ```bash
 sudo systemctl status redux.service redux-live.service redux-capture-ingest.timer --no-pager
+sudo env PYTHONPATH=/opt/redux python3 -m redux.core.live_runtime --config /etc/redux/live.toml --check
 sudo journalctl -u redux-live.service -n 80 --no-pager
 sudo cat /captures/redux/live.json
 iw dev
