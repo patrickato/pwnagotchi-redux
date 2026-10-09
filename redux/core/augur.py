@@ -505,8 +505,12 @@ class Augur:
             })
         return out
 
-    def status(self) -> dict:
-        """A glass-box snapshot for a TFT / web view / log."""
+    def status(self, *, processing_report=None) -> dict:
+        """A glass-box snapshot for a TFT / web view / log.
+
+        The live supervisor can inject its one read-only pipeline snapshot
+        instead of querying SQLite a second time on every status tick.
+        """
         rec = self.recommend()
         p = self.persona()
         status = {
@@ -537,8 +541,10 @@ class Augur:
         if self.sentinel() is not None:
             status["sentinel"] = self.sentinel_status()
         status["capture_engine"] = self.capture_plan().get("selected_engine")
-        from ..crack.ingest import read_summary
-        status["capture_processing"] = read_summary()
+        if processing_report is None:
+            from ..crack.ingest import read_summary
+            processing_report = read_summary()
+        status["capture_processing"] = processing_report
         # Augur's face: derived from the snapshot above, so the expression always
         # traces to real state (glass-box). Both glyph sets travel so the TFT can
         # pick ascii and the web can show the nice one.
