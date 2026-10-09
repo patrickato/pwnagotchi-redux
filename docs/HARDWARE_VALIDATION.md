@@ -25,6 +25,11 @@ nothing transmitted.
   `alerts=none` — correct for a short, quiet, attack-free capture. Confirms the AF_PACKET monitor
   source → radiotap/dot11 parse → survey + fingerprint chain works against a real radio and real
   airspace. Reproduced across several runs.
+- **Live fox-hunt (`hunt live`):** on `wlan1mon`, the radiotap RSSI parser pulled real dBm signal
+  (≈ −15 to −41) from the MT7612U and fed the warmer/colder gradient live — the trend tracked real
+  signal changes correctly (rising → `warmer`, falling → `colder`). The proximity band stayed
+  "on top of it" throughout because the run stayed in close range; stepping through the band tiers
+  needs a wider distance spread. `rssi_from_radiotap` confirmed on real hardware; listen-only.
 - **boot-POST / self-diagnosis:** folded into `hwtest`, but run against a throwaway core with no
   live bettercap driver or GPS wired in — so their `degraded` / "no capture engine" / "no
   location" are harness-context artifacts, not hardware faults (`bettercap` is present above,
