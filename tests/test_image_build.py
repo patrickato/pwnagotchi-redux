@@ -443,6 +443,9 @@ bash ./00-run.sh
     assert "PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.cli" in launcher.read_text()
     assert launcher.stat().st_mode & 0o111
     assert "User=redux" in unit
+    assert "Type=notify" in unit
+    assert "NotifyAccess=main" in unit
+    assert "WatchdogSec=15s" in unit
     assert "ExecStartPre=+/usr/bin/install -d -o redux -g redux -m 0700 /captures/boot" in unit
     assert "WantedBy=multi-user.target" in unit
     assert "arm_64bit=1" in (root / "boot/firmware/config.txt").read_text()
