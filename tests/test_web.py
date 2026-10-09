@@ -110,6 +110,21 @@ def test_page_has_rich_skin_toggle_and_moving_track():
     assert "src=" not in html and "cdn" not in html.lower()  # still self-contained
 
 
+def test_dashboard_browser_script_parses_with_node_when_available():
+    import shutil
+    import subprocess
+    import pytest
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js unavailable for browser JavaScript syntax validation")
+    html = render_page()
+    assert "<script>" in html and "</script>" in html
+    script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+    parsed = subprocess.run([node, "--check"], input=script,
+                            text=True, capture_output=True, timeout=10)
+    assert parsed.returncode == 0, parsed.stderr
+
+
 def test_page_is_self_contained_html():
     html = render_page()
     assert html.lstrip().startswith("<!doctype html>")
