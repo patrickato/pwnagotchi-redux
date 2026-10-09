@@ -76,6 +76,8 @@ mount | grep ' /captures '
 find /captures/incoming -maxdepth 1 -type f -name '*.pcap' -printf '%f %s bytes\n'
 sudo env PYTHONPATH=/opt/redux python3 -m redux.crack.ingest --config /etc/redux/pipeline.toml --once
 curl -fsS http://127.0.0.1:8080/api/status
+redux live status   # compact, durable checkpoint on /captures
+redux live doctor   # full, measured Doctor findings from localhost:8080
 ```
 
 For complete basic diagnostics, `sudo redux-live-diag`
@@ -124,6 +126,10 @@ not continue fetching new event batches while the previously received records
 cannot be persisted, avoiding unbounded accumulation in Python. When the
 database recovers, the saved batch is committed before normal pumping resumes.
 
+The full set of real-time findings is also available through
+`redux live doctor [--port 8080]`; it reads **only the loopback runtime**
+and refuses to substitute an empty/synthetic Doctor if the listener is down.
+Use `redux live status` to inspect the last durable checkpoint while offline.
 The live `/api/status` snapshot and the localhost Doctor page report:
 - `runtime.sightings_pending`: observations still awaiting a database commit;
 - `runtime.sightings_write_failures` / `sightings_write_error`: observed
