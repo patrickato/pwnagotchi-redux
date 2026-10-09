@@ -32,8 +32,10 @@ mounts from a failed pi-gen run must be unmounted before removing any build tree
 
 Output: `build/image/pi-gen/deploy/*.img.xz` with a matching
 `.img.xz.sha256` checksum and `.img.xz.release.json` provenance manifest.
-The wrapper streams and verifies the complete xz payload, confirms the disk
-boot-sector marker, and records the exact Redux, pi-gen, and Nexmon source
+The wrapper streams and verifies the complete xz payload, checks all
+three MBR partitions for valid non-overlapping extents, verifies the capture
+partition's ext4 superblock magic and `REDUXCAP` filesystem label without
+mounting the image, and records the exact Redux, pi-gen, and Nexmon source
 revisions. It **explicitly records `hardware_tested: false`**; file-integrity
 verification is not Pi boot verification. A missing, truncated, undersized, or
 ambiguous image causes release publication to fail.
