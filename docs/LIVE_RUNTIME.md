@@ -192,6 +192,44 @@ quietly repaired. The database's existing `prune` operations are now atomic;
 this work does **not** enable automatic sighting pruning or remove observations
 behind the operator's back.
 
+## Capture-processing heartbeat and freshness
+
+The periodic `redux-capture-ingest.timer` worker now writes one small
+`pipeline_meta.last_scan` record **inside its existing `/captures/jobs.db`**
+when a bounded pass finishes. The record includes a real completion timestamp,
+number of examined files and that pass's outcome counts. It is also written for
+empty passes and low-storage pauses. No extra daemon or independent polling
+write process is introduced.
+
+`redux-live.service` observes that ledger **read-only** and supplies the
+result to both `/api/status` and the dashboard's **Capture processing** panel.
+Doctor distinguishes:
+
+- **UNKNOWN:** the ledger is missing or predates scan heartbeats; no
+  completed worker scan has been verified
+- **OK:** a scan was completed within the freshness budget, without a reported
+  worker failure; this only confirms the worker executed, **not** that a
+  handshake was found or that any hash was cryptographically verified
+- **ATTENTION:** an invalid/future timestamp or earlier failed artifacts that
+  remain on record
+- **DEGRADED:** no completed scan inside the configured freshness budget,
+  an invalid ledger record, or conversion errors in the latest scan
+- **ACTION REQUIRED:** the latest worker pass paused to protect the storage
+  free-space reserve
+
+The live configuration defaults to `pipeline_database = "/captures/jobs.db"`
+on the image (or a sibling `jobs.db` next to the configured incoming directory
+for a source checkout). The default `pipeline_stale_seconds = 180` deliberately
+allows for the timer's startup delay and processing time rather than making
+the worker appear stalled immediately after boot. The live process never
+starts a converter, edits worker records, or deletes raw capture files.
+
+Use `redux live doctor` for the reason behind a processing alert,
+`redux pipeline status` to inspect artifact counts, and
+`journalctl -u redux-capture-ingest.service` to investigate a failed pass.
+A crashed scan may leave no new heartbeat; its previously recorded timestamp
+will eventually become overdue. No data is invented to cover that interval.
+
 ## Release gates not yet completed
 
 CI exercises the above with injected radios/transports/processes; it cannot
