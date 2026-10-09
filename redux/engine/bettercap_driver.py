@@ -21,7 +21,9 @@ Target platform: arm64 Raspberry Pi 4 / Pi 5, jayofelony bettercap base.
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 import json
+import math
 import time
 import urllib.error
 import urllib.request
@@ -140,9 +142,19 @@ def normalize_event(raw: dict) -> Event:
 
 
 def _parse_time(t) -> float:
-    if isinstance(t, (int, float)):
-        return float(t)
-    # bettercap emits RFC3339 strings; fall back to now if unparseable (don't crash)
+    """Normalize Bettercap's RFC3339-with-nanoseconds event clock to Unix seconds."""
+    if isinstance(t, (int, float)) and not isinstance(t, bool):
+        candidate = float(t)
+        if math.isfinite(candidate):
+            return candidate
+    if isinstance(t, str):
+        try:
+            parsed = datetime.fromisoformat(t.strip().replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                return parsed.timestamp()
+        except (ValueError, OverflowError):
+            pass
+    # Malformed/unavailable source clock: use local receive time rather than crash.
     return time.time()
 
 
