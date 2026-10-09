@@ -112,6 +112,15 @@ async function deliver(request,data){
  assert.equal(context.currentView,'overview','startup displays overview');
  assert.equal(elem('palettebtn').textContent,'Signal');
  assert.equal(document.body.style['--acc'],'#4ec9b0');
+ assert.equal(context.registerTheme('__proto__',{'--acc':'#ffffff'}),false);
+ assert.equal(context.registerTheme('unsafe',{'--acc':'url(javascript:evil)'}),false);
+ assert.equal(context.registerTheme('badkey',{'--fake':'#abcdef'}),false);
+ assert.equal(context.registerTheme('signal',{'--acc':'#abcdef'}),false);
+ assert.equal(context.registerTheme('quartz',{'--acc':'#e5a6f7'}),true);
+ assert.equal(context.applyTheme('quartz'),true);
+ assert.equal(document.body.style['--acc'],'#e5a6f7');
+ assert.equal(context.applyTheme('unknown-id'),true);
+ assert.equal(elem('palettebtn').textContent,'Signal');
  elem('palettebtn').onclick();
  assert.equal(elem('palettebtn').textContent,'Ember');
  assert.equal(document.body.style['--acc'],'#ffa36f');
