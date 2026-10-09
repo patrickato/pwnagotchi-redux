@@ -327,6 +327,38 @@ def test_stale_capture_recovered_without_running_radio(tmp_path):
         runtime.close()
 
 
+def test_abandoned_capture_directory_failure_is_retryable(tmp_path, monkeypatch):
+    import os
+    import time
+    conf = cfg(tmp_path)
+    source = conf.active_dir / "bettercap-recovery.pcap"
+    conf.active_dir.mkdir(parents=True)
+    source.write_bytes(b"old finished capture")
+    old = time.time() - 120
+    os.utime(source, (old, old))
+    now = [0]
+    runtime = live.LiveRuntime(conf, radio_probe=lambda: [], clock=lambda: now[0])
+    original_iterdir = Path.iterdir
+
+    def intermittent_scan(path):
+        if path == conf.active_dir:
+            raise OSError("synthetic SD directory I/O error")
+        return original_iterdir(path)
+
+    try:
+        monkeypatch.setattr(Path, "iterdir", intermittent_scan)
+        assert runtime.tick() == "degraded"
+        assert source.is_file()
+        assert "recovery scan failed" in runtime.last_handoff_error
+        monkeypatch.setattr(Path, "iterdir", original_iterdir)
+        now[0] += 20
+        runtime.tick()
+        assert not source.exists()
+        assert (conf.capture_dir / source.name).read_bytes() == b"old finished capture"
+    finally:
+        runtime.close()
+
+
 def test_fresh_active_capture_never_ingested_early(tmp_path):
     settings = cfg(tmp_path)
     settings.active_dir.mkdir(parents=True)
