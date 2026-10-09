@@ -111,6 +111,16 @@ ul{margin:6px 0 0;padding-left:16px}li{color:var(--mut);font-size:12px}
 body[data-skin="plain"] .rich{display:none}
 body[data-skin="plain"]{--card:#0d1319}
 body[data-skin="plain"] .card{border-color:#16202a}
+.doctor-top{display:flex;align-items:center;gap:12px}
+.doctor-heart{font-size:32px;color:var(--dim)}
+.doctor-heart.ok,.doctor-title.ok{color:var(--acc)}
+.doctor-heart.attention,.doctor-title.attention{color:var(--warn)}
+.doctor-heart.degraded,.doctor-heart.action,.doctor-title.degraded,.doctor-title.action{color:var(--crit)}
+.doctor-label{font-weight:bold}.doctor-list{display:grid;gap:7px;margin-top:9px}
+.doctor-finding{border-top:1px solid var(--line);padding-top:7px;font-size:12px}
+.doctor-title{font-weight:bold}.doctor-remedy{color:var(--fg);margin-top:2px}
+.doctor-details{margin-top:9px;color:var(--mut);font-size:12px}
+.doctor-details summary{cursor:pointer}
 </style></head><body data-skin="rich">
 <header><h1>Augur</h1><span class="mut" id="sub">glass-box</span><span class="sp"></span>
  <button id="skinbtn" title="toggle skin">rich</button></header>
@@ -122,6 +132,16 @@ body[data-skin="plain"] .card{border-color:#16202a}
    <div class="leg mut"><span><i style="background:var(--me)"></i>you</span>
      <span><i style="background:var(--wifi)"></i>wifi</span>
      <span><i style="background:var(--ble)"></i>ble</span><span id="maprange" class="dim"></span></div></div>
+ <section class="card" aria-label="Device Doctor">
+  <div class="k">Doctor · measured device health</div>
+  <div class="doctor-top" role="status" aria-live="polite">
+   <span id="doctorheart" class="doctor-heart unknown" aria-hidden="true">♡</span>
+   <div><div id="doctorlabel" class="doctor-label">UNKNOWN</div>
+    <div id="doctorcoverage" class="reason">Waiting for health data</div></div>
+  </div>
+  <details class="doctor-details"><summary>Findings and recovery advice</summary>
+   <div id="doctorlist" class="doctor-list"></div></details>
+ </section>
  <div class="card"><div class="row">
    <div class="kv"><div class="k">persona</div><div class="v" id="persona">—</div></div>
    <div class="kv"><div class="k">intent</div><div class="v" id="intent">—</div></div>
@@ -157,10 +177,45 @@ document.getElementById('skinbtn').onclick=function(){skin=(skin==='rich')?'plai
  try{localStorage.setItem('augur.skin',skin)}catch(e){}applySkin()};
 applySkin();
 function setb(id,txt,cls){var e=document.getElementById(id);e.textContent=txt;e.className='badge'+(cls?' '+cls:'')}
+function renderDoctor(report){
+ const d=report&&Array.isArray(report.findings)?report:null;
+ const modes=['ok','attention','degraded','action','unknown'];
+ const mode=d&&modes.includes(d.overall)?d.overall:'unknown';
+ const labels={ok:'OK',attention:'ATTENTION',degraded:'DEGRADED',
+  action:'ACTION REQUIRED',unknown:'UNKNOWN'};
+ const heart=document.getElementById('doctorheart');
+ heart.className='doctor-heart '+mode;heart.textContent=mode==='ok'?'♥':'♡';
+ document.getElementById('doctorlabel').textContent=labels[mode];
+ const gaps=d&&d.coverage&&Array.isArray(d.coverage.not_assessed)
+  ?d.coverage.not_assessed:null;
+ document.getElementById('doctorcoverage').textContent=
+  !d?'Doctor snapshot unavailable — health has not been assessed.'
+  :gaps===null?'Doctor coverage is unverified.'
+  :gaps.length?gaps.length+' unassessed area(s): '+gaps.join(', ')
+  :'All reported Doctor areas assessed.';
+ const list=document.getElementById('doctorlist');list.replaceChildren();
+ if(!d)return;
+ d.findings.forEach(function(f){
+  const item=document.createElement('div');item.className='doctor-finding';
+  const severity=modes.includes(f.status)?f.status:'unknown';
+  const header=document.createElement('div');
+  header.className='doctor-title '+severity;
+  header.textContent=(f.area||'Unknown area')+' · '+severity.toUpperCase();
+  item.appendChild(header);
+  const reason=document.createElement('div');
+  reason.textContent=(f.summary||'')+(f.reason?' — '+f.reason:'');
+  item.appendChild(reason);
+  if(f.remediation){const remedy=document.createElement('div');
+   remedy.className='doctor-remedy';remedy.textContent='Action: '+f.remediation;
+   item.appendChild(remedy);}
+  list.appendChild(item);
+ });
+}
 async function tick(){try{const r=await fetch('/api/status');const d=await r.json();
  document.getElementById('sub').textContent='glass-box';paint(d);
 }catch(e){document.getElementById('sub').textContent='disconnected'}}
 function paint(d){
+ renderDoctor(d.doctor||null);
  var fe=document.getElementById('face'),nf=d.face||'‹·_·›';
  var base='face'+(d.face_state==='ruffle'?' crit':'')+(d.face_state==='blind'?' blinded':'');
  if(fe.textContent!==nf){fe.textContent=nf;fe.className=base;void fe.offsetWidth;fe.className=base+' pop';}
