@@ -605,7 +605,7 @@ def test_dashboard_binding_errors_are_reported_and_retry_is_bounded(tmp_path, mo
         finding = next(x for x in runtime._snapshot["doctor"]["findings"]
                        if x["area"] == "local dashboard")
         assert finding["status"] == "degraded"
-        assert "bind failed" in finding["reason"]
+        assert "startup failed" in finding["reason"]
         assert runtime.tick() == "degraded"
         assert len(attempts) == 1  # no log storm on every supervisor tick
         now[0] = 30.0
@@ -621,6 +621,8 @@ def test_dashboard_thread_start_failure_cleans_socket_and_reports_issue(tmp_path
         def __init__(self, *args, **kwargs):
             self.closed = False
             servers.append(self)
+        def serve_forever(self):
+            pass
         def server_close(self):
             self.closed = True
     class BrokenThread:
@@ -649,6 +651,8 @@ def test_dead_dashboard_thread_is_not_reported_as_healthy(tmp_path, monkeypatch)
     class Server:
         def __init__(self, *args, **kwargs):
             self.closed = False
+        def serve_forever(self):
+            pass
         def server_close(self):
             self.closed = True
     class FakeThread:
