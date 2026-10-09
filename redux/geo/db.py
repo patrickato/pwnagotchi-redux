@@ -100,10 +100,17 @@ class SightingStore:
         self.close()
 
     def insert(self, sighting: Sighting) -> Sighting:
-        """Insert or merge one sighting, committing immediately. Returns the
-        stored row state. For a batch, prefer insert_many (one transaction)."""
-        self._apply(sighting)
-        self._conn.commit()
+        """Insert or merge a sighting atomically.
+
+        If a write, commit, or validation fails, reset the transaction so the
+        next ingest attempt does not inherit a half-applied batch.
+        """
+        try:
+            self._apply(sighting)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
         return self.get(sighting.kind, sighting.mac)  # type: ignore[return-value]
 
     def _apply(self, sighting: Sighting) -> None:
@@ -202,9 +209,15 @@ class SightingStore:
         """Insert/merge a batch in ONE transaction — one commit, one fsync, not
         N. This is the SD-friendly write path for coalesced sighting flushes."""
         items = list(sightings)
-        for s in items:
-            self._apply(s)
-        self._conn.commit()
+        try:
+            for s in items:
+                self._apply(s)
+            self._conn.commit()
+        except Exception:
+            # The same SQLite connection persists across live pump cycles.
+            # A failed batch must not leak writes into the next successful one.
+            self._conn.rollback()
+            raise
         return [self.get(s.kind, s.mac) for s in items]  # type: ignore[list-item]
 
     def get(self, kind: str, mac: str) -> Optional[Sighting]:
