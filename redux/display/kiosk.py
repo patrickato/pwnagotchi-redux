@@ -68,8 +68,12 @@ def dashboard_probe(port: int, *, opener=urllib.request.urlopen) -> dict:
             if len(data) > 65536:
                 raise ValueError("status payload exceeds 64 KiB")
             decoded = json.loads(data)
-            if not isinstance(decoded, dict) or "doctor" not in decoded:
-                raise ValueError("not a Redux dashboard response")
+            if (not isinstance(decoded, dict)
+                    or not isinstance(decoded.get("runtime"), dict)
+                    or not isinstance(decoded.get("doctor"), dict)
+                    or decoded["doctor"].get("overall") not in
+                    ("ok", "attention", "degraded", "action", "unknown")):
+                raise ValueError("not a Redux live dashboard response")
             result["ok"] = True
             result["reason"] = "Redux status endpoint responded on loopback"
     except (OSError, ValueError, UnicodeError, urllib.error.HTTPError,
@@ -89,13 +93,14 @@ def preflight(framebuffer: str, port: int = 8080, *,
     screen = framebuffer_probe(framebuffer, sys_graphics=sys_graphics,
                                statter=statter)
     browser = which("chromium") or which("chromium-browser")
+    browser_ok = bool(browser) and os.path.isabs(browser)
     session_ok = bool(env.get("DISPLAY")) and effective_uid != 0
     dashboard = dashboard_probe(port, opener=opener)
     checks = {
         "framebuffer": screen,
-        "browser": {"ok": bool(browser), "executable": browser,
-                    "reason": "Chromium executable found" if browser else
-                    "Chromium not installed; opt into the manual-x11 image profile"},
+        "browser": {"ok": browser_ok, "executable": browser if browser_ok else None,
+                    "reason": "Chromium absolute executable found" if browser_ok else
+                    "Chromium absent or not absolute; use the manual-x11 profile"},
         "session": {"ok": session_ok, "reason":
                     "unprivileged X11 DISPLAY configured" if session_ok else
                     "run as a non-root user inside a working X11 display session"},
