@@ -385,6 +385,7 @@ class LiveRuntime:
             self._cached_processing = None
         elif (self._cached_processing is None
               or not self._cached_processing.get("available")
+              or now < self._processing_sampled_at
               or now - self._processing_sampled_at >= self.config.status_sample_seconds):
             processing = read_summary(pipeline_path)
             self._cached_processing = processing
@@ -396,7 +397,7 @@ class LiveRuntime:
         snapshot = {"runtime": metadata, "capture_processing": processing}
         report = None
         if self.augur is not None:
-            if (self._cached_visual is None
+            if (self._cached_visual is None or now < self._visual_sampled_at
                     or now - self._visual_sampled_at >= self.config.status_sample_seconds):
                 try:
                     visual = status_payload(self.augur, processing_report=processing)
