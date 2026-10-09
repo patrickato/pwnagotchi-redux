@@ -8,6 +8,7 @@ max_capture_bytes = 134217728
 max_files_per_pass = 100
 converter = "hcxpcapngtool"
 convert_timeout_seconds = 90
+min_free_bytes = 67108864 # Keep reserve for runtime/SQLite; report pause when low
 
 # Disabled until owner provides controlled test scope, wordlist and a working backend.
 [audit]
