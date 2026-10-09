@@ -1,3 +1,4 @@
+import pytest
 from redux.core import Augur, Signal
 from redux.radio import Radio, Intent
 from redux.detect import DetectEngine, RogueAPDetector, TrustedNetwork
@@ -120,3 +121,49 @@ def test_governor_decision_surfaces_in_status():
     assert st["governor"]["mode"] == "survival"
     assert st["governor"]["interval_scale"] == 2.5
     assert "cpu_temp" in st["governor"]["reason"]
+
+def test_failed_augur_flush_keeps_uncommitted_sightings_for_retry():
+    import sqlite3
+    from redux.geo import SightingStore
+
+    class FlakyStore(SightingStore):
+        def __init__(self):
+            super().__init__(":memory:")
+            self.attempts = 0
+        def insert_many(self, sightings):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise sqlite3.OperationalError("synthetic transient database lock")
+            return super().insert_many(sightings)
+
+    event = _evs([{"tag": "wifi.ap.new", "time": 7.0,
+                   "data": {"mac": "12:34:56:78:90:ab", "essid": "Lab"}}])
+    store = FlakyStore()
+    augur = Augur([ONBOARD], driver=FakeDriver(event), store=store)
+    with pytest.raises(sqlite3.OperationalError, match="transient"):
+        augur.pump()
+    assert store.count() == 0
+    assert len(augur._sighting_buffer) == 1
+    assert augur._sighting_flush_failures == 1
+    assert "OperationalError" in augur._sighting_flush_error
+
+    assert augur.flush_sightings() == 1
+    assert augur.flush_sightings() == 0
+    assert store.count() == 1
+    assert augur._sighting_buffer == []
+    assert augur._sighting_flush_error == ""
+    assert augur.status()["sighting_queue"]["pending"] == 0
+    assert augur.status()["sighting_queue"]["write_failures"] == 1
+
+
+def test_failed_batch_does_not_commit_first_valid_sighting():
+    from redux.geo import Sighting, SightingStore
+    db = SightingStore(":memory:")
+    good = Sighting("wifi", "aa:aa:aa:aa:aa:aa", provenance="test synthetic", ts=17.0)
+    bad = Sighting("wifi", "bb:bb:bb:bb:bb:bb", provenance="", ts=18.0)
+    with pytest.raises(ValueError, match="provenance"):
+        db.insert_many([good, bad])
+    assert db.count() == 0  # rollback first write too
+    db.insert_many([good])
+    assert db.count() == 1  # connection did not inherit a failed transaction
+    db.close()
