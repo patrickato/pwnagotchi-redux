@@ -9,14 +9,18 @@ pwnagotchi, not a fork. (We deliberately drop the "lesser" boards; see `docs/PLA
 *true* — every decision carries a real, human-readable reason, and it never claims a sense it
 doesn't have. Identity, voice, and the creature face: `docs/AUGUR.md`.
 
-> **Status: feature-complete in the sandbox; not yet hardware-validated.**
+> **Status: feature-complete in the sandbox; first hardware pass underway on a Pi 4.**
 > The full platform — image stack, supervisor spine (signals/brain/actions), capability graph,
 > central Scope, resource Governor, Doctor, boot-POST, personas, radio orchestrator, bettercap
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
 > record/ghost, packs, plugin-compat shim, CLI, passive survey, and web dashboard —
-> is built and green under the test suite (805 tests, no hardware required). **No part has had a
-> real-hardware pass on a physical Pi yet** (see *Verification status*). Sandbox-green ≠ done.
+> is built and green under the test suite (807 tests, no hardware required). The **passive
+> detection / capture / survey / framework spine now has a first real-hardware pass on a Pi 4**
+> (via `redux hwtest`: software battery green on-device, radios enumerated, a live passive
+> capture parsing 703 real frames into 2 APs / 3 identities). The rest — live-attack detection,
+> handshake capture, CSI, TFT/UPS/OTA, and the full Pi 5 pass — is still sandbox-only (see
+> *Verification status*). Sandbox-green ≠ done.
 
 ## What it is
 
@@ -103,13 +107,17 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 591 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 807 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
+- **Hardware-verified (Pi 4, 2026-10-08):** the passive detection/capture/survey/framework spine,
+  via `redux hwtest` on a Pi 4 Model B — software battery green on-device, radios enumerated,
+  bettercap present, and a live **passive** monitor capture parsing 703 real frames into 2 APs and
+  3 device identities. Details in `docs/HARDWARE_VALIDATION.md → Recorded results`.
 - **Not yet verified (needs a real Pi):** booting the image on hardware; bettercap capturing a real
-  handshake with zero pwnagotchi in the path; the orchestrator driving actual monitor-mode and
-  hotplug on physical adapters; TFT rendering; UPS/OTA on-device. Nothing graduates until it passes
-  a real-hardware pass on an actual Pi 4 / Pi 5. The step-by-step on-device checklist is
+  handshake; live-attack detection against a real deauth/surveillance stimulus; the fox-hunt RSSI
+  walk; monitor-mode hotplug on physical adapters; CSI (nexmon build); TFT; UPS/OTA; and the full
+  pass on Pi 5. Nothing graduates until it passes on actual Pi 4 and Pi 5 hardware. Checklist:
   `docs/HARDWARE_VALIDATION.md`.
 
 ## Layout

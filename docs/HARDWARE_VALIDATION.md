@@ -5,6 +5,28 @@ Everything in `main` is **sandbox-verified** (merged + `pytest` green, no hardwa
 checklist for that pass: boot the image, run each check, record the real output, and flip the
 matching `TASKS.md` row from `done (sandbox)` to `done`. Sandbox-green ≠ done.
 
+## Recorded results
+
+### Pi 4 Model B — 2026-10-08 · cleared detection/survey/framework lane (`redux hwtest`)
+
+First real-hardware pass of the cleared lane, via
+`redux hwtest --iface wlan1mon --seconds 30` on a Pi 4 Model B Rev 1.5. Listen-only;
+nothing transmitted.
+
+- **Software battery — all green on-device:** detect engine (13 detectors), config
+  template+validate, vault seal/open roundtrip, captap pipeline (synthetic cross-MAC
+  re-id + `deauth_flood` fired), sighting store. Board read as Pi 4 Model B.
+- **Radios enumerated:** `wlan0mon, wlan0, wlan1mon`. Capture engine: `bettercap` present.
+- **Live passive capture (the real test):** `wlan1mon` parsed **703 real frames** → **2 APs**
+  (ch6) and **3 device identities**, `0 re-id`, `alerts=none` — correct for a short, quiet,
+  attack-free capture. Confirms the AF_PACKET monitor source → radiotap/dot11 parse → survey +
+  fingerprint chain works against a real radio and real airspace.
+- **SKIP (expected):** CSI — needs the `nexmon_csi` build.
+
+**Still pending (not yet validated):** live-attack detection against a real stimulus
+(deauth-flood / surveillance-sweep — a short burst on your own AP), a real handshake capture,
+the fox-hunt RSSI walk, TFT / UPS / OTA, and the full pass on Pi 5.
+
 ## Scope / authorization (read first)
 
 Every capture/handshake check below is run **only against your own AP and your own client
