@@ -556,7 +556,7 @@ def test_captures_layout_adds_separate_partition_before_loop_attachment():
         layout_module().captures_layout(result)
 
 
-@pytest.mark.parametrize("size", [0, 63, 32769, "512"])
+@pytest.mark.parametrize("size", [0, 63, 262145, "512"])
 def test_capture_size_rejects_unbounded_or_invalid_inputs(size):
     with pytest.raises(ValueError, match="partition"):
         layout_module().captures_layout("", size)
