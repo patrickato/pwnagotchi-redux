@@ -207,3 +207,67 @@ def test_check_flag_does_not_exec_browser_even_when_all_probes_pass(
     monkeypatch.setattr(kiosk.os, "execv", lambda *a: pytest.fail("unwanted exec"))
     assert kiosk.main(["--check", "--framebuffer", "/dev/fb1"]) == 0
     assert json.loads(capsys.readouterr().out) == verified
+
+def test_supervisor_restarts_bounded_number_of_times(monkeypatch):
+    import signal
+    spawned = []
+    class Child:
+        def __init__(self):
+            self.pid = 100 + len(spawned)
+        def wait(self, timeout=None):
+            return 1
+        def poll(self):
+            return 1
+    def spawn(command, **kwargs):
+        assert command == ["/usr/bin/chromium", "--kiosk"]
+        child = Child()
+        spawned.append(child)
+        return child
+    sleeps = []
+    assert kiosk.supervise(["/usr/bin/chromium", "--kiosk"],
+                           spawn=spawn, sleep=sleeps.append,
+                           max_failures=3, restart_delay=2) == 1
+    assert len(spawned) == 3
+    assert sleeps == [2, 2]
+
+
+def test_supervised_kiosk_requires_preflight_and_secure_runtime(tmp_path, monkeypatch, capsys):
+    verified = {
+        "ok": True, "checks": {"browser": {"executable": "/usr/bin/chromium"}},
+        "physical_display_verified": False, "touch_verified": False,
+    }
+    monkeypatch.setattr(kiosk, "preflight", lambda *a, **k: verified)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    calls = []
+    monkeypatch.setattr(kiosk, "supervise", lambda args: calls.append(args) or 1)
+    assert kiosk.main(["--supervise", "--framebuffer", "/dev/fb1"]) == 1
+    assert len(calls) == 1
+    assert calls[0][-1] == "http://127.0.0.1:8080/"
+    calls.clear()
+    (tmp_path / "redux-chromium").symlink_to(tmp_path)
+    assert kiosk.main(["--supervise", "--framebuffer", "/dev/fb1"]) == 2
+    assert not calls
+    assert "symlinked" in capsys.readouterr().err
+
+
+def test_supervisor_does_not_run_if_dashboard_preflight_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(kiosk, "preflight", lambda *a, **k: {
+        "ok": False, "checks": {}, "touch_verified": False,
+        "physical_display_verified": False,
+    })
+    monkeypatch.setattr(kiosk, "supervise", lambda args: pytest.fail("unexpected browser"))
+    assert kiosk.main(["--supervise", "--framebuffer", "/dev/fb1"]) == 2
+
+
+def test_runtime_directory_must_be_private_and_owned(tmp_path, monkeypatch, capsys):
+    verified = {"ok": True, "checks": {"browser": {"executable": "/usr/bin/chromium"}}}
+    monkeypatch.setattr(kiosk, "preflight", lambda *a, **k: verified)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(kiosk.os, "execv", lambda *args: pytest.fail("unsafe exec"))
+    old = tmp_path.stat().st_mode
+    try:
+        tmp_path.chmod(0o777)
+        assert kiosk.main(["--launch", "--framebuffer", "/dev/fb1"]) == 2
+        assert "Unsafe XDG_RUNTIME_DIR" in capsys.readouterr().err
+    finally:
+        tmp_path.chmod(old)
