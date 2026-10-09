@@ -110,6 +110,38 @@ in `/etc/redux/live.toml`; the override explicitly permits disconnecting that
 interface. Network managers that independently own the same interface may
 still interfere and will require configuration based on the physical Pi.
 
+## Sighting data integrity and SQLite recovery
+
+Augur batches passive radio observations before writing to the SQLite spatial
+database. A batch is now removed from memory **only after the entire SQLite
+transaction commits**. SQLite rolls back a failed batch, including validation
+errors midway through that batch, so later retries do not inherit partial writes.
+
+If an on-device SQLite operation temporarily fails, the live supervisor enters
+`telemetry_degraded`, leaves the Bettercap child running, and holds the
+uncommitted observations for a bounded retry after `retry_seconds`. It does
+not continue fetching new event batches while the previously received records
+cannot be persisted, avoiding unbounded accumulation in Python. When the
+database recovers, the saved batch is committed before normal pumping resumes.
+
+The live `/api/status` snapshot and the localhost Doctor page report:
+- `runtime.sightings_pending`: observations still awaiting a database commit;
+- `runtime.sightings_write_failures` / `sightings_write_error`: observed
+  failures, not assumptions that the database is healthy;
+- `runtime.sightings_lost_on_restart`: explicit count of buffered records that
+  could not be saved even on the final shutdown/rotation flush;
+- Doctor's **sighting persistence** finding, with a severity and suggested
+  operator action. A connected engine is not proof its SQLite writes succeeded.
+
+This does **not** promise lossless recording during long storage failures.
+Bettercap has its own finite event retention, and abrupt power loss can destroy
+uncommitted RAM buffers. The original queued capture files are not automatically
+deleted or treated as a full event replay. Always treat nonzero
+`sightings_lost_on_restart` as a real loss indication, not something Redux
+quietly repaired. The database's existing `prune` operations are now atomic;
+this work does **not** enable automatic sighting pruning or remove observations
+behind the operator's back.
+
 ## Release gates not yet completed
 
 CI exercises the above with injected radios/transports/processes; it cannot
