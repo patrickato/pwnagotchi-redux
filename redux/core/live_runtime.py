@@ -534,7 +534,8 @@ class LiveRuntime:
 
 
 def preflight(config, *, which=shutil.which, radio_probe=probe,
-              is_mount=os.path.ismount, available_bytes=free_bytes):
+              radio_run=subprocess.run, is_mount=os.path.ismount,
+              available_bytes=free_bytes):
     """Read-only hardware/OS readiness check. Never changes a network interface."""
     errors, warnings = [], []
     try:
@@ -575,10 +576,13 @@ def preflight(config, *, which=shutil.which, radio_probe=probe,
         checks["free_bytes"] = None
         errors.append(f"capture free-space probe failed: {type(error).__name__}")
     try:
-        iface, matches = select_radio(radio_probe(), config.preferred_iface)
+        ifaces = list(radio_probe())
+        iface = choose_safe_radio(ifaces, config.preferred_iface,
+                                  run=radio_run,
+                                  allow_connected=config.allow_connected_capture)
         checks["capture_interface_found"] = bool(iface)
         if not iface:
-            errors.append("no monitor-capable capture radio detected")
+            errors.append("no safe monitor-capable capture radio detected (connected or unavailable)")
     except (OSError, RuntimeError, ValueError) as error:
         iface = None
         checks["capture_interface_found"] = False
