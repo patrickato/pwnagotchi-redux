@@ -221,7 +221,7 @@ def test_readonly_preflight_reports_real_requirements(tmp_path):
     outcome = live.preflight(
         conf, which=lambda executable: "/usr/bin/" + executable,
         radio_probe=lambda: [radio()],
-        radio_run=lambda args, **kw: subprocess.CompletedProcess(args, 0, "type monitor\\n", ""),
+        radio_run=lambda args, **kw: subprocess.CompletedProcess(args, 0, "type monitor\n", ""),
         available_bytes=lambda path: 256 * 1024 * 1024)
     assert outcome["ready"] is True
     assert outcome["capture_radio"] == "wlan1mon"
@@ -247,6 +247,7 @@ def test_readonly_preflight_checks_writable_partition_mount():
     conf = live.LiveConfig()
     outcome = live.preflight(
         conf, which=lambda tool: tool, radio_probe=lambda: [radio()],
+        radio_run=lambda args, **kw: subprocess.CompletedProcess(args, 0, "type monitor\n", ""),
         is_mount=lambda path: False,
         available_bytes=lambda path: 512 * 1024 * 1024)
     assert not outcome["ready"]
