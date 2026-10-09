@@ -300,6 +300,7 @@ class LiveRuntime:
         self.last_sighting_loss_reason = ""
         self._snapshot = {"runtime": {"state": "starting"}}
         self._cached_visual = None
+        self._visual_dirty = True
         self._visual_sampled_at = float("-inf")
         self._visual_sampled_utc = None
         self._visual_revision = 0
@@ -334,9 +335,10 @@ class LiveRuntime:
 
     def _observe(self, emission):
         event = emission.payload.get("event")
-        # New observed data invalidates the expensive visual cache now,
-        # without forcing idle devices to query their cache every second.
-        self._cached_visual = None
+        # Accumulate events without triggering an expensive full-table visual
+        # query on every tick during busy radio activity. The next bounded
+        # visual sample will include all committed events seen so far.
+        self._visual_dirty = True
         self.created += 1
         if getattr(event, "type", None) == "handshake":
             self.handshakes += 1
@@ -398,14 +400,18 @@ class LiveRuntime:
         snapshot = {"runtime": metadata, "capture_processing": processing}
         report = None
         if self.augur is not None:
-            if (self._cached_visual is None or now < self._visual_sampled_at
-                    or now - self._visual_sampled_at >= self.config.status_sample_seconds):
+            elapsed = now - self._visual_sampled_at
+            event_min = min(2, self.config.status_sample_seconds)
+            if (self._cached_visual is None or elapsed < 0
+                    or elapsed >= self.config.status_sample_seconds
+                    or (self._visual_dirty and elapsed >= event_min)):
                 try:
                     visual = status_payload(self.augur, processing_report=processing)
                     self._cached_visual = visual
                     self._visual_sampled_at = now
                     self._visual_sampled_utc = time.time()
                     self._visual_revision += 1
+                    self._visual_dirty = False
                 except Exception as error:
                     self._cached_visual = None
                     self._visual_sampled_utc = None
@@ -589,6 +595,7 @@ class LiveRuntime:
         self.driver = driver
         self.augur = agent
         self._cached_visual = None
+        self._visual_dirty = True
         self._visual_sampled_utc = None
         self._cached_processing = None
         self.state = "running"
