@@ -30,9 +30,9 @@ fi
 command -v systemctl >/dev/null || { echo "systemd required" >&2; exit 1; }
 
 install -d -m 0755 "$APP" /etc/redux
-install -d -m 0700 /var/lib/redux/captures
+install -d -m 0700 /captures
 for name in incoming ready audits; do
-  install -d -m 0700 "/var/lib/redux/captures/$name"
+  install -d -m 0700 "/captures/$name"
 done
 rm -rf "$APP/redux"
 cp -a "$ROOT/redux" "$APP/redux"
