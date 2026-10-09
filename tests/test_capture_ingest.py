@@ -258,7 +258,8 @@ def test_scan_heartbeat_survives_worker_restart_including_empty_pass(tmp_path):
             "completed_utc": 1_234_567.0, "scanned": 0, "outcomes": {},
         }
     with CaptureIngestor(cfg, clock=lambda: 1_234_610.0) as worker:
-        write_file(cfg.inputs[0] / "record.hc22000", (REC + "\n").encode())
+        source = write_file(cfg.inputs[0] / "record.hc22000", (REC + "\n").encode())
+        os.utime(source, (1000, 1000))  # file predates injected worker clock
         result = worker.scan()
         assert result["outcomes"]["ready"] == 1
     latest = read_summary(cfg.database)
@@ -287,7 +288,8 @@ def test_low_storage_scan_creates_durable_pause_heartbeat(tmp_path, monkeypatch)
 
 def test_failed_processing_is_recorded_without_claiming_success(tmp_path):
     cfg = settings(tmp_path)
-    write_file(cfg.inputs[0] / "bad.hc22000", b"not a valid converted capture\n")
+    source = write_file(cfg.inputs[0] / "bad.hc22000", b"not a valid converted capture\n")
+    os.utime(source, (100, 100))
     with CaptureIngestor(cfg, clock=lambda: 200.0) as worker:
         outcome = worker.scan()
         assert outcome["outcomes"] == {"invalid": 1}
