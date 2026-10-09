@@ -24,7 +24,9 @@ def _finding(area, status, summary, reason="", remediation=""):
 def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
                          handoffs=0, last_error="", handoff_error="",
                          doctor_report=None, dashboard_enabled=False,
-                         dashboard_active=False, dashboard_error=""):
+                         dashboard_active=False, dashboard_error="",
+                         sighting_pending=None, sighting_write_error="",
+                         sighting_lost=0):
     """Combine Augur's real Doctor report with physical supervisor observations.
 
     Without Augur the Doctor's normal probes are UNKNOWN, *never* silently OK.
@@ -88,6 +90,31 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
         findings.append(_finding("capture handoff", "unknown",
                                  "No completed capture handoff observed yet.",
                                  "The engine may still be on its first capture session."))
+
+    # Persistence is assessed separately from a healthy engine process:
+    # being online is not proof the sightings were committed.
+    if sighting_lost > 0:
+        findings.append(_finding("sighting persistence", "action",
+                                 "Uncommitted observations were lost during a restart.",
+                                 f"{sighting_lost} observed record(s) could not be committed.",
+                                 "Inspect SQLite/storage faults; retain source captures for analysis."))
+    elif sighting_write_error:
+        findings.append(_finding("sighting persistence", "degraded",
+                                 "Sighting database writes are failing; retry pending.",
+                                 sighting_write_error,
+                                 "Check /captures free space and SQLite database health."))
+    elif sighting_pending is None:
+        findings.append(_finding("sighting persistence", "unknown",
+                                 "No sighting persistence measurements available.",
+                                 "Live Augur has not connected to its database yet."))
+    elif sighting_pending > 0:
+        findings.append(_finding("sighting persistence", "attention",
+                                 "Observed sightings are waiting for commit.",
+                                 f"{sighting_pending} record(s) buffered in memory."))
+    else:
+        findings.append(_finding("sighting persistence", "ok",
+                                 "Sighting persistence queue is clear.",
+                                 "No unsaved sightings remain in the in-memory queue."))
 
     if dashboard_enabled:
         if dashboard_active:
