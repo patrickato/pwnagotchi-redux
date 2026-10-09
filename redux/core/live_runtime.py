@@ -25,6 +25,7 @@ import time
 import tomllib
 from http.server import ThreadingHTTPServer
 
+from ..crack.ingest import read_summary
 from ..engine.bettercap_driver import BettercapConfig, BettercapDriver, HttpTransport
 from ..geo import SightingStore
 from ..radio import Intent, Role, decide
@@ -54,6 +55,8 @@ class LiveConfig:
     rotation_seconds: int = 300
     min_free_bytes: int = 64 * 1024 * 1024
     max_log_bytes: int = 4 * 1024 * 1024
+    pipeline_database: Path | None = None
+    pipeline_stale_seconds: int = 180
     allow_connected_capture: bool = False
 
     @classmethod
@@ -74,6 +77,9 @@ class LiveConfig:
             rotation_seconds=int(values.get("rotation_seconds", 300)),
             min_free_bytes=int(values.get("min_free_bytes", 64 * 1024 * 1024)),
             max_log_bytes=int(values.get("max_log_bytes", 4 * 1024 * 1024)),
+            pipeline_database=(Path(values["pipeline_database"])
+                               if values.get("pipeline_database") else None),
+            pipeline_stale_seconds=int(values.get("pipeline_stale_seconds", 180)),
             allow_connected_capture=values.get("allow_connected_capture", False),
         )
 
@@ -100,6 +106,10 @@ class LiveConfig:
             raise ValueError("capture minimum free bytes must be >=1 MiB")
         if not 65536 <= self.max_log_bytes <= 64 * 1024 * 1024:
             raise ValueError("max_log_bytes must be between 64 KiB and 64 MiB")
+        if self.pipeline_database is not None and not self.pipeline_database.is_absolute():
+            raise ValueError("pipeline_database must be absolute")
+        if not 60 <= self.pipeline_stale_seconds <= 3600:
+            raise ValueError("pipeline_stale_seconds must be 60-3600 seconds")
         if self.enable_web is not True and self.enable_web is not False:
             raise ValueError("enable_web must be a boolean")
         if type(self.allow_connected_capture) is not bool:
@@ -355,12 +365,19 @@ class LiveRuntime:
             "last_error": self.last_error[:180],
             "updated_utc": time.time(),
         }
-        self._snapshot = {"runtime": metadata}
+        pipeline_path = (self.config.pipeline_database
+                         or self.config.capture_dir.parent / "jobs.db")
+        processing = (read_summary(pipeline_path) if mount_ok
+                      else {"available": False, "reason": "REDUXCAP mount unavailable"})
+        self._snapshot = {"runtime": metadata, "capture_processing": processing}
         report = None
         if self.augur is not None:
             try:
                 self._snapshot = status_payload(self.augur)
                 self._snapshot["runtime"] = metadata
+                # The live worker's configured ledger is authoritative. Augur
+                # status may consult a generic/default DB, not this instance.
+                self._snapshot["capture_processing"] = processing
             except Exception as error:
                 _LOG.warning("status snapshot unavailable: %s", type(error).__name__)
             try:
@@ -379,6 +396,8 @@ class LiveRuntime:
             sighting_lost=self.sighting_loss_events,
             engine_log_error=self.log_error,
             capture_mount_ok=(mount_ok if self.capture_mount_required else None),
+            processing_report=processing,
+            processing_stale_seconds=self.config.pipeline_stale_seconds,
         )
         metadata["health"] = health["overall"]
         metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])
