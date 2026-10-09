@@ -300,14 +300,31 @@ class CaptureIngestor:
                          reason=f"{type(error).__name__}: {str(error)[:160]}")
             return "error"
 
+    def _completed_scan(self, scanned, outcomes):
+        """Commit a durable worker heartbeat, including empty and paused passes.
+
+        It proves the scan returned successfully, NOT that a captured handshake
+        was valid. The existing database transaction also persists the cursor.
+        """
+        heartbeat = {
+            "schema": 1, "completed_utc": self.clock(), "scanned": scanned,
+            "outcomes": dict(outcomes),
+        }
+        self.db.execute(
+            "INSERT OR REPLACE INTO pipeline_meta(key,value) VALUES('last_scan',?)",
+            (json.dumps(heartbeat, separators=(",", ":"), sort_keys=True),),
+        )
+        self.db.commit()
+        return {"scanned": scanned, "outcomes": dict(outcomes),
+                "summary": self.summary()}
+
     def scan(self):
-        if free_bytes(self.settings.output_dir) < self.settings.min_free_bytes:
-            return {"scanned": 0, "outcomes": {"paused_low_storage": 1},
-                    "summary": self.summary()}
         lock = self.settings.database.with_suffix(".lock")
         with lock.open("a+b") as handle:
             os.fchmod(handle.fileno(), 0o600)
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            if free_bytes(self.settings.output_dir) < self.settings.min_free_bytes:
+                return self._completed_scan(0, {"paused_low_storage": 1})
             files = []
             for directory in self.settings.inputs:
                 if directory.is_dir() and not directory.is_symlink():
@@ -316,7 +333,7 @@ class CaptureIngestor:
                                  and not p.is_symlink())
             files.sort(key=str)
             if not files:
-                return {"scanned": 0, "outcomes": {}, "summary": self.summary()}
+                return self._completed_scan(0, {})
             row = self.db.execute(
                 "SELECT value FROM pipeline_meta WHERE key='cursor'").fetchone()
             start = int(row[0]) % len(files) if row else 0
@@ -329,9 +346,7 @@ class CaptureIngestor:
                 outcome[state] = outcome.get(state, 0) + 1
             self.db.execute("INSERT OR REPLACE INTO pipeline_meta(key,value) VALUES('cursor',?)",
                             (str((start + len(selected)) % len(files)),))
-            self.db.commit()
-            return {"scanned": len(selected), "outcomes": outcome,
-                    "summary": self.summary()}
+            return self._completed_scan(len(selected), outcome)
 
 
 def read_summary(database=None):
@@ -354,9 +369,40 @@ def read_summary(database=None):
             audits = (dict(conn.execute(
                 "SELECT status,COUNT(*) FROM audit_runs GROUP BY status"))
                 if present else {})
+            scan = None
+            scan_error = ""
+            row = conn.execute(
+                "SELECT value FROM pipeline_meta WHERE key='last_scan'"
+            ).fetchone()
+            if row is not None:
+                try:
+                    raw = row[0]
+                    if not isinstance(raw, str) or len(raw) > 4096:
+                        raise ValueError("heartbeat exceeds permitted length")
+                    scan = json.loads(raw)
+                    if (not isinstance(scan, dict)
+                            or type(scan.get("schema")) is not int
+                            or scan["schema"] != 1
+                            or type(scan.get("completed_utc")) not in (int, float)
+                            or type(scan.get("scanned")) is not int
+                            or scan["scanned"] < 0
+                            or not isinstance(scan.get("outcomes"), dict)
+                            or any(not isinstance(k, str) or len(k) > 80
+                                   or type(v) is not int or v < 0
+                                   for k, v in scan["outcomes"].items())):
+                        raise ValueError("invalid scan record")
+                    scan = {
+                        "completed_utc": scan["completed_utc"],
+                        "scanned": scan["scanned"],
+                        "outcomes": scan["outcomes"],
+                    }
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    scan = None
+                    scan_error = "invalid stored scan record"
             return {"available": True, "artifacts": sum(grouped.values()),
                     "by_status": grouped, "hash_records": count,
-                    "audits": audits}
+                    "audits": audits, "last_scan": scan,
+                    "scan_error": scan_error}
     except (OSError, sqlite3.Error) as error:
         return {"available": False,
                 "reason": f"database unavailable: {type(error).__name__}"}
