@@ -35,10 +35,13 @@ _SCOPE_HOST = {
 }
 
 
-def status_payload(augur) -> Dict:
+def status_payload(augur, *, processing_report=None) -> Dict:
     """The snapshot the dashboard renders: Augur.status() + recent narration +
-    located sightings + this device's own position (for the moving map)."""
-    data = dict(augur.status())
+    located sightings + this device's own position (for the moving map).
+
+    A live runtime may supply its already-read capture-processing report.
+    """
+    data = dict(augur.status(processing_report=processing_report))
     data["narration"] = [l.text for l in augur.narrator.lines(12)]
     data["located"] = (
         augur.located_sightings() if hasattr(augur, "located_sightings") else []
