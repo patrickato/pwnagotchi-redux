@@ -111,7 +111,7 @@ sudo REDUX_KIOSK_PROFILE=manual-x11 REDUX_BUILD_DIR="$PWD/build/image-kiosk" ./b
 ```
 
 `manual-x11` adds Debian Bookworm ARM64 Chromium, Xorg/fbdev,
-xinit, Xauthority and libinput packages. The profile is recorded in
+xinit, Xauthority, `x11-utils` (`xdpyinfo`) and libinput packages. The profile is recorded in
 `/usr/share/redux/kiosk-profile`; the exact installed package versions
 remain in the image's `/usr/share/redux/packages.tsv`. Chromium is
 substantial (the browser package alone occupies hundreds of MiB, before
@@ -145,7 +145,13 @@ supervisor remains untouched.
    `redux-kiosk --check --framebuffer /dev/fbN` (replace fbN with
    the actual device). This prints a structured JSON report and exits
    nonzero if the framebuffer, 480×320/320×480 mode, browser, unprivileged
-   graphical environment or local dashboard cannot be verified.
+   graphical environment or local dashboard cannot be verified. The
+   preflight additionally requires an accepting **local X11 UNIX socket**
+   (`DISPLAY=:0`, `:1`, etc.) and invokes `xdpyinfo` through the actual
+   logged-in X11 authorization to confirm the X11 root window itself is
+   480×320 or 320×480. An existing 480×320 framebuffer with a separate
+   1920×1080 HDMI desktop now fails preflight instead of opening the kiosk
+   on the wrong screen.
 5. Only after a passing check, run
    `redux-kiosk --launch --framebuffer /dev/fbN`.
    It replaces itself with sandboxed Chromium in kiosk mode at
@@ -205,7 +211,10 @@ capture controls. The systemd service uses control-group cleanup to
 stop Chromium descendants if normal shutdown cannot reap them.
 
 The preflight intentionally reports `touch_verified: false` and
-`physical_display_verified: false` even when software checks pass.
+`physical_display_verified: false` even when software checks pass. A
+matching X11 root resolution still does **not** prove that Xorg is driving
+the specific SPI framebuffer, or that the touch input device is mapped,
+rotated and calibrated; the operator must confirm those physically.
 The active Xorg seat, framebuffer mapping, SPI performance, touch
 coordinates/rotation, screen visibility, and reboot behavior are
 separate hardware acceptance gates. In particular, Xorg or Chromium
