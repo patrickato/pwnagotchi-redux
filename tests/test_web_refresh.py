@@ -196,6 +196,32 @@ async function deliver(request,data){
   'fresh runtime data restores actual Doctor status');
  assert.equal(elem('healthjump').className,'health-shortcut ok');
  assert.equal(elem('sub').textContent,'live · measured');
+ const critical=report(24,24);
+ critical.runtime.state='running';
+ critical.doctor.overall='action';
+ critical.doctor.findings=[{
+  area:'capture storage',status:'action',summary:'REDUXCAP missing',
+  reason:'No mounted partition',remediation:'Restore mount before restart',
+ }];
+ context.paint(critical);
+ assert.equal(elem('healthjump').className,'health-shortcut action');
+ assert.equal(elem('healthjump')['aria-label'],'Open Doctor: ACTION REQUIRED');
+ assert.equal(elem('engineindicator').className,'runtime-pill ok');
+ assert.equal(elem('engineindicator').textContent,'RUNNING');
+ assert.equal(elem('herocapture').textContent,'ENGINE RUNNING');
+ const originalFinding=elem('doctorlist').firstChild;
+ assert.ok(originalFinding,'actual Doctor findings render in the dedicated pane');
+ context.paint(critical);
+ assert.strictEqual(elem('doctorlist').firstChild,originalFinding,
+  'same findings must retain their DOM rather than destroying focus on each poll');
+ const paused=report(25,25);
+ paused.runtime.state='storage_paused';
+ paused.doctor.overall='degraded';
+ context.paint(paused);
+ assert.equal(elem('engineindicator').textContent,'STORAGE PAUSED');
+ assert.equal(elem('engineindicator').className,'runtime-pill action');
+ assert.equal(elem('healthjump').className,'health-shortcut degraded');
+ assert.equal(elem('doctor-primary').className,'card doctor-primary degraded');
  console.log('browser polling contract passed');
 })().catch(error=>{console.error(error);process.exitCode=1});
 """
