@@ -6,6 +6,7 @@ and the conversion ledger are always preserved.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 import fcntl
 import hashlib
 import os
@@ -100,12 +101,12 @@ def retention_report(settings: Settings, *, apply=False, older_than_days=30,
         return report
     cutoff = clock() - older_than_days * 86400
     lock_path = settings.database.with_suffix(".lock")
-    # The lock exists after normal ingestion. For a dry run do not create it.
-    if not lock_path.is_file() and not apply:
-        return report
-    with lock_path.open("a+b") as lock:
-        os.fchmod(lock.fileno(), 0o600)
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    # A new dry run must not create a file. Existing workers share their flock.
+    locking = lock_path.open("a+b") if (apply or lock_path.is_file()) else nullcontext(None)
+    with locking as lock:
+        if lock is not None:
+            os.fchmod(lock.fileno(), 0o600)
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         conn = sqlite3.connect(settings.database.as_uri() + "?mode=ro",
                                uri=True, timeout=5)
         try:
