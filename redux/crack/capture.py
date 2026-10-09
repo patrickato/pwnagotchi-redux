@@ -89,16 +89,16 @@ class AngryOxideProvider:
     def plan(self, scope, *, active: bool = True, iface: str = "") -> CapturePlan:
         iface = iface or self.config.iface
         targets = _armed_wifi_targets(scope)
-        if not targets:
+        passive = not active
+        if not targets and active:
             return CapturePlan(
-                "angryoxide", runnable=False, passive=not active, targets=[], argv=[], outputs={},
+                "angryoxide", runnable=False, passive=False, targets=[], argv=[], outputs={},
                 reason=("scope has no armed Wi-Fi targets — AngryOxide will NOT run a broad/unaimed "
                         "attack; arm a BSSID/SSID first (redux scope add / arm-lab)"))
-        passive = not active
         argv = [self.config.binary, "-i", iface, "--headless", "--notar", "-o", self.config.out_dir]
-        if self.config.autoexit:
+        if self.config.autoexit and targets:
             argv.append("--autoexit")
-        if self.config.autohunt:
+        if self.config.autohunt and not passive:
             argv.append("--autohunt")
         if self.config.channels:
             argv += ["-c", ",".join(str(c) for c in self.config.channels)]
