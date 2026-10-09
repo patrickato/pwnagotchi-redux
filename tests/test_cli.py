@@ -21,6 +21,22 @@ def test_status_prints_snapshot():
     assert "reason" in data["recommendation"]
 
 
+def test_hwtest_runs_software_and_synthetic_battery(tmp_path):
+    # no --iface: software self-test + synthetic detection check, no radio needed.
+    rc, out = _run(["hwtest"])
+    assert rc == 0                                   # all software + synthetic checks pass
+    assert "software self-test" in out
+    assert "detection pipeline" in out and "deauth_flood=fired" in out
+    assert "[SKIP] no --iface" in out                # honest about the radio step
+
+
+def test_hwtest_writes_report_file(tmp_path):
+    rpt = tmp_path / "hw_report.txt"
+    rc, out = _run(["hwtest", "--out", str(rpt)])
+    assert rc == 0 and rpt.exists()
+    assert "end report" in rpt.read_text()
+
+
 def test_run_over_replayed_events(tmp_path):
     evs = [
         {"tag": "wifi.ap.new", "time": 1.0, "data": {"mac": "aa:bb:cc:dd:ee:01", "essid": "Home", "channel": 6}},

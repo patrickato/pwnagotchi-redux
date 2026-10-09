@@ -232,6 +232,86 @@ def cmd_selftest(args) -> int:
     return 1 if nfail else 0
 
 
+def cmd_hwtest(args) -> int:
+    """One-command on-device validation battery (cleared/detection lane). Runs the
+    software self-test and a synthetic end-to-end detection check with no radio, then
+    — with --iface — a live PASSIVE survey + monitor capture. Emits one structured
+    report you can paste back or commit. Listen-only: it never transmits anything.
+    The physical-stimulus tests (trigger a burst on your own AP, fox-hunt walk) are
+    listed as manual steps — they need a human in the RF, not this harness."""
+    import time
+    from .selftest import run_selftest
+    from .captap import live_source, capture_run, build_probe_req, build_deauth
+    from .detect.engine import DetectEngine
+
+    lines: List[str] = []
+
+    def out(s: str = "") -> None:
+        print(s)
+        lines.append(s)
+
+    out("=== redux hwtest — validation battery (cleared/detection lane, listen-only) ===")
+    out(f"time: {time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+
+    out("\n[1] software self-test")
+    checks = run_selftest()
+    for c in checks:
+        out(f"  [{c.status:4}] {c.name:24} {c.detail}")
+    nfail = sum(c.status == "FAIL" for c in checks)
+
+    out("\n[2] detection pipeline — synthetic frames, no radio (proves the chain)")
+    det_ok = False
+    try:
+        ies = [(1, b"\x82\x84\x0b\x16"), (45, b"\x2d\x40\x00")]
+        src = []
+        for mac in ("a2:11:11:11:11:11", "de:22:22:22:22:22"):
+            for ssid in ("HomeLab", "Cafe"):
+                src.append((build_probe_req(mac, ssid, ies=ies), 10.0))
+        for i in range(22):
+            src.append((build_deauth("de:ad:00:00:00:01", "ff:ff:ff:ff:ff:ff", "11:22:33:44:55:66"),
+                        20.0 + i * 0.1))
+        tap, alerts = capture_run(iter(src), engine=DetectEngine())
+        reid = tap.link().summary()["reidentified"]
+        fired = "deauth_flood" in {a.kind.value for a in alerts}
+        det_ok = reid >= 1 and fired
+        out(f"  [{'PASS' if det_ok else 'FAIL'}] cross-MAC re-id={reid}, "
+            f"deauth_flood={'fired' if fired else 'MISSING'}")
+    except Exception as e:  # noqa: BLE001
+        out(f"  [FAIL] {e!r}")
+
+    out("\n[3] live radio — passive survey + capture")
+    if not args.iface:
+        out("  [SKIP] no --iface; on the Pi re-run: redux hwtest --iface <monitor iface> --seconds 30")
+    else:
+        try:
+            tap, alerts = capture_run(live_source(args.iface), seconds=args.seconds,
+                                      engine=DetectEngine())
+            aps = tap.access_points()
+            s = tap.link().summary()
+            kinds = sorted({a.kind.value for a in alerts})
+            out(f"  [PASS] {args.iface}: frames={tap.frames_seen}, APs={len(aps)}, "
+                f"identities={s['identities']} ({s['reidentified']} re-id), alerts={kinds or 'none'}")
+            for a in aps[:10]:
+                ch = a.channel if a.channel is not None else "-"
+                out(f"        ch{ch} {a.bssid} x{a.frames} {a.ssid or '<hidden>'}")
+        except RuntimeError as e:
+            out(f"  [SKIP] live capture unavailable: {e}")
+
+    out("\n[manual] physical-stimulus tests (a human in the RF, not this harness):")
+    out("  - handshake capture on YOUR OWN AP · a short deauth burst on YOUR OWN AP for the flood detector")
+    out("  - fox-hunt walk (RSSI gradient) · see docs/HARDWARE_VALIDATION.md")
+    out("\n=== end report ===")
+
+    if args.out:
+        try:
+            with open(args.out, "w") as f:
+                f.write("\n".join(lines) + "\n")
+            print(f"(report written to {args.out})")
+        except OSError as e:
+            print(f"(could not write {args.out}: {e})")
+    return 1 if nfail or not det_ok else 0
+
+
 def cmd_config(args) -> int:
     from pathlib import Path as _P
     import json as _json
@@ -1142,6 +1222,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     st = sub.add_parser("selftest", help="on-device software battery + environment probe (paste the report back)")
     st.set_defaults(func=cmd_selftest)
+
+    hw = sub.add_parser("hwtest", help="one-command validation battery: software + synthetic detection + optional live passive radio")
+    hw.add_argument("--iface", default=None, help="monitor interface for the live passive steps (e.g. wlan1mon)")
+    hw.add_argument("--seconds", type=float, default=20.0, help="live capture duration (default 20)")
+    hw.add_argument("--out", default=None, help="also write the report to this file (e.g. hw_report.txt)")
+    hw.set_defaults(func=cmd_hwtest)
 
     pk = sub.add_parser("packs", help="manage Packs")
     pk.add_argument("--dir", required=True, help="packs directory")
