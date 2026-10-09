@@ -737,6 +737,60 @@ def cmd_tft(args) -> int:
 
 
 def cmd_hunt(args) -> int:
+    if getattr(args, "hunt_cmd", "demo") == "live":
+        return _hunt_live(args)
+    return _hunt_demo(args)
+
+
+def _hunt_live(args) -> int:
+    """Live fox-hunt: park on the target's channel, capture passively, and feed the
+    real dBm signal of frames from/to the target BSSID into the warmer/colder
+    gradient as you move. Listen-only — transmits nothing. Needs monitor mode + root."""
+    import subprocess
+    import time as _t
+    from .captap import live_source, parse_dot11, rssi_from_radiotap
+    from .hunt import FoxHunt, HuntObservation
+
+    target = args.target.lower()
+    if args.channel:
+        try:
+            subprocess.run(["iw", "dev", args.iface, "set", "channel", str(args.channel)],
+                           capture_output=True, text=True, timeout=5)
+        except Exception:
+            pass  # best-effort; if it can't tune you'll just hear nothing and we say so
+    fh = FoxHunt(target=target)
+    print(f"redux hunt live — tracking {target} on {args.iface}"
+          + (f" ch{args.channel}" if args.channel else "")
+          + f" (walk toward/away; ≤{args.seconds:.0f}s, listen-only)")
+    heard = 0
+    t0 = _t.time()
+    try:
+        for raw, ts, rt in live_source(args.iface):
+            if _t.time() - t0 >= args.seconds:
+                break
+            f = parse_dot11(raw, radiotap=rt, ts=ts)
+            if f is None:
+                continue
+            if target not in (f.bssid.lower(), f.src.lower(), f.dst.lower()):
+                continue
+            rssi = rssi_from_radiotap(raw) if rt else None
+            if rssi is None:
+                continue
+            st = fh.observe(HuntObservation(rssi=rssi))
+            heard += 1
+            print(f"  rssi {rssi:>4}  → {st.trend:7} [{st.band}]")
+    except RuntimeError as e:
+        print(f"  unavailable: {e}")
+        return 3
+    except KeyboardInterrupt:
+        pass
+    if not heard:
+        print("  heard nothing from that target — wrong channel, out of range, "
+              "or the radio's radiotap carries no signal field")
+    return 0
+
+
+def _hunt_demo(args) -> int:
     """Fox-hunt demo: a SIMULATED approach then retreat, showing warmer/colder, the
     proximity band, and (with GPS-tagged samples) a position estimate + bearing."""
     from .hunt import FoxHunt, HuntObservation
@@ -1326,6 +1380,11 @@ def build_parser() -> argparse.ArgumentParser:
     husub = hu.add_subparsers(dest="hunt_cmd", required=True)
     hud = husub.add_parser("demo", help="simulated approach/retreat to a target")
     hud.add_argument("--target", help="target BSSID/SSID to hunt")
+    hul = husub.add_parser("live", help="live fox-hunt: real RSSI gradient to a target (needs monitor mode + root)")
+    hul.add_argument("--iface", required=True, help="monitor-mode interface (e.g. wlan1mon)")
+    hul.add_argument("--target", required=True, help="target BSSID to hunt (your own gear)")
+    hul.add_argument("--channel", type=int, default=None, help="park on the target's channel")
+    hul.add_argument("--seconds", type=float, default=60.0, help="run for N seconds (default 60)")
     hu.set_defaults(func=cmd_hunt)
 
     me = sub.add_parser("mesh", help="off-grid swarm — authenticated distributed Scope sync")

@@ -33,6 +33,47 @@ def parse_radiotap_len(buf: bytes) -> int:
     return struct.unpack_from("<H", buf, 2)[0]
 
 
+# radiotap field (align, size) for the bits that can precede dBm antenna-signal (bit 5)
+_RT_FIELDS = {0: (8, 8), 1: (1, 1), 2: (1, 1), 3: (2, 4), 4: (2, 2), 5: (1, 1)}
+
+
+def rssi_from_radiotap(buf: bytes) -> Optional[int]:
+    """Best-effort dBm antenna-signal (bit 5) from a radiotap header — the passive
+    signal strength the fox-hunt needs. Returns None if the field is absent, the
+    header is too short, or it can't be parsed — never a guessed value. Handles
+    extended present-flag words and the common fields (TSFT/Flags/Rate/Channel/FHSS)
+    that precede the signal field; a vendor layout it doesn't model yields None,
+    not a wrong number."""
+    if len(buf) < 8 or buf[0] != 0:
+        return None
+    it_len = struct.unpack_from("<H", buf, 2)[0]
+    off = 4
+    first = None
+    while off + 4 <= len(buf):
+        word = struct.unpack_from("<I", buf, off)[0]
+        if first is None:
+            first = word
+        off += 4
+        if not (word & 0x80000000):   # bit 31 clear → no further present words
+            break
+    else:
+        return None
+    if first is None or not (first & (1 << 5)):
+        return None                   # no dBm-antsignal field advertised
+    pos = off
+    for bit in range(6):
+        if not (first & (1 << bit)):
+            continue
+        align, size = _RT_FIELDS[bit]
+        pos = (pos + align - 1) & ~(align - 1)   # radiotap fields align to the header start
+        if bit == 5:
+            if pos < it_len and pos < len(buf):
+                return struct.unpack_from("<b", buf, pos)[0]   # signed dBm
+            return None
+        pos += size
+    return None
+
+
 @dataclass(frozen=True)
 class Dot11Frame:
     kind: str                       # deauth | disassoc | probe_req | beacon | probe_resp | other

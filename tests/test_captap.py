@@ -2,8 +2,8 @@
 import struct
 
 from redux.captap import (
-    parse_dot11, parse_radiotap_len, build_probe_req, build_deauth, build_beacon,
-    CaptureTap, AccessPoint, to_frame, capture_run, live_source,
+    parse_dot11, parse_radiotap_len, rssi_from_radiotap, build_probe_req, build_deauth,
+    build_beacon, CaptureTap, AccessPoint, to_frame, capture_run, live_source,
 )
 from redux.detect.engine import DetectEngine
 from redux.captap.dot11 import Dot11Frame
@@ -199,6 +199,25 @@ def test_beacons_are_passive_only_no_detector_frames_or_deauths():
         tap.feed(build_beacon("aa:bb:cc:11:22:33", "HomeLab", 6), ts=1.0)
     assert tap.detect_frames() == [] and tap.deauths == []
     assert tap.frames_seen == 10 and len(tap.access_points()) == 1
+
+
+# --- radiotap RSSI (the fox-hunt signal) ------------------------------------ #
+
+def test_rssi_from_radiotap_reads_signed_dbm():
+    present = (1 << 1) | (1 << 2) | (1 << 3) | (1 << 5)   # Flags, Rate, Channel, AntSignal
+    hdr = (b"\x00\x00" + struct.pack("<H", 15) + struct.pack("<I", present)
+           + bytes([0x00, 0x02]) + struct.pack("<HH", 2412, 0) + struct.pack("<b", -42))
+    assert rssi_from_radiotap(hdr) == -42
+    # and a full monitor frame (radiotap + 802.11) still yields the signal
+    frame = hdr + build_deauth("aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66", "11:22:33:44:55:66")
+    assert rssi_from_radiotap(frame) == -42
+
+
+def test_rssi_from_radiotap_absent_or_short_is_none():
+    # present word without the antsignal bit → None, never a guess
+    hdr = b"\x00\x00" + struct.pack("<H", 10) + struct.pack("<I", (1 << 1) | (1 << 2)) + bytes([0, 2])
+    assert rssi_from_radiotap(hdr) is None
+    assert rssi_from_radiotap(b"\x00\x00") is None        # too short
 
 
 # --- regression: live monitor frames carry a radiotap header (hardware-found) --- #
