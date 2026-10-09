@@ -353,6 +353,10 @@ def read_summary(database=None):
     """Read-only stats for Augur.status()/the existing web JSON endpoint."""
     db = Path(database or os.environ.get(
         "REDUX_CAPTURE_DB", "/captures/jobs.db"))
+    # Do not follow a replaced ledger symlink from a writable field partition.
+    # A missing ledger remains UNKNOWN until the first worker creates it.
+    if db.is_symlink():
+        return {"available": False, "reason": "capture ledger symlink refused"}
     if not db.is_file():
         return {"available": False, "reason": "capture database not present"}
     try:
