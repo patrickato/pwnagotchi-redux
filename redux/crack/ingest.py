@@ -163,6 +163,11 @@ class CaptureIngestor:
     def __exit__(self, *_):
         self.db.close()
 
+    def rows(self):
+        columns = [row[1] for row in self.db.execute("PRAGMA table_info(artifacts)")]
+        return [dict(zip(columns, row)) for row in self.db.execute(
+            "SELECT * FROM artifacts ORDER BY created_at")]
+
     def summary(self):
         grouped = dict(self.db.execute(
             "SELECT status, COUNT(*) FROM artifacts GROUP BY status"))
