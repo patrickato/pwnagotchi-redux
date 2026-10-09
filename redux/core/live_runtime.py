@@ -302,6 +302,7 @@ class LiveRuntime:
         self._cached_visual = None
         self._visual_sampled_at = float("-inf")
         self._visual_sampled_utc = None
+        self._visual_revision = 0
         self._cached_processing = None
         self._processing_sampled_at = float("-inf")
         self.state = "starting"
@@ -404,6 +405,7 @@ class LiveRuntime:
                     self._cached_visual = visual
                     self._visual_sampled_at = now
                     self._visual_sampled_utc = time.time()
+                    self._visual_revision += 1
                 except Exception as error:
                     self._cached_visual = None
                     self._visual_sampled_utc = None
@@ -417,6 +419,7 @@ class LiveRuntime:
             except Exception as error:
                 _LOG.warning("Doctor snapshot unavailable: %s", type(error).__name__)
         metadata["visual_sampled_utc"] = self._visual_sampled_utc if self.augur else None
+        metadata["visual_revision"] = self._visual_revision if self.augur else None
         health = describe_live_health(
             self.state, iface=self.iface or "", free_bytes=free,
             reserve_bytes=self.config.min_free_bytes, handoffs=self.handoffs,
