@@ -2,10 +2,12 @@
 
 `./build.sh` creates a new Pi OS Lite Bookworm arm64 image using pinned official
 pi-gen stages 0–2 and `stage-redux`. It includes bettercap, patched BCM43455c0
-nexmon firmware, nexutil, and `redux.service` (`python -m redux.core.boot`).
-No pwnagotchi image or Python runtime is reused. The service currently logs its
-bootstrap state and waits for shutdown; live integration belongs to the lead.
-The stock bettercap unit is masked so installation cannot start an engine session.
+nexmon firmware, nexutil, the bootstrap `redux.service`, and the standalone
+passive `redux-live.service` with an independent capture-ingest timer.
+No pwnagotchi image or Python runtime is reused. The original Bettercap unit
+is masked so only the Redux-owned supervisor can start the capture engine.
+These services are source/CI integrated; actual boot and capture remain
+physical acceptance gates.
 
 ## Linux host
 
