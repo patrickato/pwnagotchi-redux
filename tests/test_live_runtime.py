@@ -41,6 +41,8 @@ def test_config_rejects_bad_paths_and_interfaces(tmp_path):
         cfg(tmp_path, state_dir=tmp_path / "captures" / "state").validate()
     with pytest.raises(ValueError, match="execut"):
         cfg(tmp_path, bettercap_binary="sh -c").validate()
+    with pytest.raises(ValueError, match="rotation"):
+        cfg(tmp_path, rotation_seconds=20).validate()
     cfg(tmp_path).validate()
 
 
@@ -281,6 +283,38 @@ def test_engine_launch_augur_event_pump_restart_and_private_caplet(tmp_path, mon
     finally:
         runtime.close()
     assert children[-1].terminated
+
+
+def test_capture_rotation_closes_and_delivers_session(tmp_path, monkeypatch):
+    clock = [50.0]
+    children = []
+    monkeypatch.setattr(live, "HttpTransport", Transport)
+    settings = cfg(tmp_path, rotation_seconds=30)
+    def fake_spawn(*args, **kwargs):
+        child = Child()
+        children.append(child)
+        return child
+    def monitor(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, "type monitor\n", "")
+    runtime = live.LiveRuntime(
+        settings, radio_probe=lambda: [radio()],
+        executor=monitor, spawn=fake_spawn, clock=lambda: clock[0])
+    try:
+        assert runtime.tick() == "starting_engine"
+        opened = runtime.capture_file
+        opened.write_bytes(b"synthetic aggregate capture 123")
+        assert runtime.tick() == "running"
+        clock[0] += 30
+        assert runtime.tick() == "rotating"
+        assert children[0].terminated
+        assert not opened.exists()
+        assert (settings.capture_dir / opened.name).read_bytes() == b"synthetic aggregate capture 123"
+        assert runtime.handoffs == 1
+        clock[0] += 1
+        assert runtime.tick() == "starting_engine"
+        assert runtime.capture_file != opened
+    finally:
+        runtime.close()
 
 
 def test_source_tree_is_importable_and_service_opt_in(tmp_path):
