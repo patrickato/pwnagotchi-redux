@@ -49,6 +49,7 @@ class LiveConfig:
     retry_seconds: int = 10
     probe_seconds: int = 30
     rotation_seconds: int = 300
+    min_free_bytes: int = 64 * 1024 * 1024
 
     @classmethod
     def load(cls, path):
@@ -66,6 +67,7 @@ class LiveConfig:
             retry_seconds=int(values.get("retry_seconds", 10)),
             probe_seconds=int(values.get("probe_seconds", 30)),
             rotation_seconds=int(values.get("rotation_seconds", 300)),
+            min_free_bytes=int(values.get("min_free_bytes", 64 * 1024 * 1024)),
         )
 
     def validate(self):
@@ -87,8 +89,15 @@ class LiveConfig:
             raise ValueError("invalid retry/probe cadence")
         if not 30 <= self.rotation_seconds <= 86400:
             raise ValueError("capture rotation must be 30-86400 seconds")
+        if self.min_free_bytes < 1024 * 1024:
+            raise ValueError("capture minimum free bytes must be >=1 MiB")
         if self.enable_web is not True and self.enable_web is not False:
             raise ValueError("enable_web must be a boolean")
+
+
+def free_bytes(path):
+    stats = os.statvfs(path)
+    return stats.f_bavail * stats.f_frsize
 
 
 def select_radio(radios, preferred=""):
@@ -235,6 +244,7 @@ class LiveRuntime:
             "capture_file": str(self.capture_file) if self.capture_file else "",
             "handed_off": self.handoffs,
             "handoff_error": self.last_handoff_error[:120],
+            "free_bytes": free_bytes(self.config.active_dir),
             "last_error": self.last_error[:180],
             "updated_utc": time.time(),
         }
@@ -400,6 +410,13 @@ class LiveRuntime:
 
         if self.augur is not None:
             try:
+                if free_bytes(self.config.active_dir) < self.config.min_free_bytes:
+                    self._drop()
+                    self.state = "storage_paused"
+                    self.last_error = "capture partition is below free-space reserve"
+                    self.next_try = now + self.config.retry_seconds
+                    self._checkpoint()
+                    return self.state
                 if now - self.started >= self.config.rotation_seconds:
                     self._drop()
                     self.state = "rotating"
@@ -430,6 +447,8 @@ class LiveRuntime:
                     self.next_try = now + self.config.retry_seconds
         elif now >= self.next_try:
             try:
+                if free_bytes(self.config.active_dir) < self.config.min_free_bytes:
+                    raise RuntimeError("capture partition is below free-space reserve")
                 iface, _ = select_radio(self.radio_probe(), self.config.preferred_iface)
                 if not iface:
                     raise RuntimeError("no monitor-capable Wi-Fi interface detected")
