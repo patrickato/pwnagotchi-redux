@@ -82,6 +82,8 @@ def test_compact_touch_workspace_keeps_one_scrollable_page_and_bottom_nav():
     assert ".hero-main{gap:11px" in page
     assert ".overview-metrics .row{grid-template-columns:repeat(3" in page
     assert "@media(max-width:360px)" in page
+    assert ".health-shortcut{height:44px;min-height:44px" in page
+    assert "#skinbtn{min-height:44px" in page
     assert "@media(prefers-reduced-motion:reduce)" in page
     assert "health-glow" in page and "health-alert" in page
     assert "aria-label=\"Open Doctor: health unknown\"" in page
