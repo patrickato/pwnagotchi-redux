@@ -167,3 +167,19 @@ def test_failed_batch_does_not_commit_first_valid_sighting():
     db.insert_many([good])
     assert db.count() == 1  # connection did not inherit a failed transaction
     db.close()
+
+def test_dashboard_reuses_one_supplied_pipeline_snapshot(monkeypatch):
+    from redux.crack import ingest
+    from redux.web.status_page import status_payload
+
+    def duplicate_database_read(*args, **kwargs):
+        raise AssertionError("live pipeline SQLite must only be queried once")
+    monkeypatch.setattr(ingest, "read_summary", duplicate_database_read)
+    report = {"available": True, "artifacts": 1, "last_scan": {
+        "completed_utc": 100, "scanned": 1, "outcomes": {"ready": 1},
+    }}
+    augur = Augur([ONBOARD])
+    assert augur.status(processing_report=report)["capture_processing"] is report
+    assert status_payload(augur, processing_report=report)["capture_processing"] is report
+
+
