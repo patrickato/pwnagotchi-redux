@@ -142,6 +142,12 @@ body[data-skin="plain"] .card{border-color:#16202a}
   <details class="doctor-details"><summary>Findings and recovery advice</summary>
    <div id="doctorlist" class="doctor-list"></div></details>
  </section>
+ <section class="card" aria-label="Capture processing">
+  <div class="k">Capture processing · worker ledger</div>
+  <div id="pipelinestate" class="doctor-title unknown">UNKNOWN · not assessed</div>
+  <div id="pipelinecounts" class="reason">No durable worker scan observed</div>
+  <div id="pipelinereason" class="reason"></div>
+ </section>
  <div class="card"><div class="row">
    <div class="kv"><div class="k">persona</div><div class="v" id="persona">—</div></div>
    <div class="kv"><div class="k">intent</div><div class="v" id="intent">—</div></div>
@@ -211,11 +217,35 @@ function renderDoctor(report){
   list.appendChild(item);
  });
 }
+function renderPipeline(d){
+ const p=d.capture_processing||{},doctor=d.doctor||{};
+ const checks=Array.isArray(doctor.findings)?doctor.findings:[];
+ const finding=checks.find(function(x){return x.area==='capture processing'})||null;
+ const status=finding&&typeof finding.status==='string'?finding.status:'unknown';
+ const state=document.getElementById('pipelinestate');
+ state.className='doctor-title '+status;
+ state.textContent=status.toUpperCase()+' · '+(finding?finding.summary:'Not assessed');
+ const counts=document.getElementById('pipelinecounts');
+ const recent=p.last_scan;
+ if(recent&&typeof recent.scanned==='number'&&recent.outcomes){
+  const outcome=Object.entries(recent.outcomes).map(function(pair){
+   return pair[0]+': '+pair[1];
+  }).join(' · ');
+  counts.textContent='Last pass: '+recent.scanned+' file(s) · '+
+   (outcome||'no processing outcomes');
+ }else{
+  counts.textContent=p.available?'No completed worker scan recorded':
+   'Processing ledger unavailable';
+ }
+ document.getElementById('pipelinereason').textContent=
+  finding?(finding.reason||''):(p.reason||'No verified worker status');
+}
 async function tick(){try{const r=await fetch('/api/status');const d=await r.json();
  document.getElementById('sub').textContent='glass-box';paint(d);
 }catch(e){document.getElementById('sub').textContent='disconnected'}}
 function paint(d){
  renderDoctor(d.doctor||null);
+ renderPipeline(d);
  var fe=document.getElementById('face'),nf=d.face||'‹·_·›';
  var base='face'+(d.face_state==='ruffle'?' crit':'')+(d.face_state==='blind'?' blinded':'');
  if(fe.textContent!==nf){fe.textContent=nf;fe.className=base;void fe.offsetWidth;fe.className=base+' pop';}
