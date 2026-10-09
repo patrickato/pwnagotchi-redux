@@ -590,6 +590,129 @@ def test_live_status_reuses_one_processing_ledger_read(tmp_path, monkeypatch):
         runtime.close()
 
 
+def test_stuck_child_cannot_publish_capture_or_start_second_engine(tmp_path):
+    clock = [10.0]
+    class FlakyChild(Child):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+        def terminate(self):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise PermissionError("synthetic signal refused")
+            return super().terminate()
+
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [],
+                               clock=lambda: clock[0])
+    child = FlakyChild()
+    runtime.process = child
+    runtime.state = "running"
+    original = runtime.config.active_dir / "capture-running.pcap"
+    original.write_bytes(b"synthetic raw unfinished capture")
+    runtime.capture_file = original
+    try:
+        assert runtime._drop() is False
+        assert runtime.state == "termination_pending"
+        assert runtime.process is child
+        assert original.is_file()
+        assert not list(runtime.config.capture_dir.glob("*.pcap"))
+        assert "termination not confirmed" in runtime.last_error
+        assert runtime.tick() == "degraded"
+        assert child.dead is True
+        assert child.attempts == 2
+        assert runtime.process is None
+        assert not original.exists()
+        assert (runtime.config.capture_dir / original.name).read_bytes() == (
+            b"synthetic raw unfinished capture"
+        )
+        assert runtime.tick() == "degraded"  # bounded retry, no new radio yet
+    finally:
+        runtime.close()
+
+
+def test_child_wait_timeout_escalates_to_kill_before_capture_handoff(tmp_path):
+    class IgnoresTerm(Child):
+        def __init__(self):
+            super().__init__()
+            self.kill_called = False
+        def terminate(self):
+            self.terminated = True
+        def wait(self, timeout=None):
+            if not self.dead:
+                raise subprocess.TimeoutExpired("bettercap", timeout)
+            return 0
+        def kill(self):
+            self.kill_called = True
+            self.dead = True
+
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [])
+    child = IgnoresTerm()
+    runtime.process = child
+    original = runtime.config.active_dir / "not-ready.pcap"
+    original.write_bytes(b"captured sample")
+    runtime.capture_file = original
+    try:
+        assert runtime._drop() is True
+        assert child.terminated and child.kill_called
+        assert (runtime.config.capture_dir / original.name).read_bytes() == (
+            b"captured sample"
+        )
+    finally:
+        runtime.close()
+
+
+def test_unreapable_child_fails_supervisor_shutdown_without_handoff(tmp_path):
+    class StubbornChild(Child):
+        def terminate(self):
+            self.terminated = True  # pretend TERM was delivered but child survives
+        def wait(self, timeout=None):
+            raise subprocess.TimeoutExpired("bettercap", timeout)
+        def kill(self):
+            self.dead = False  # simulated SIGKILL failed to confirm exit
+
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [])
+    child = StubbornChild()
+    runtime.process = child
+    original = runtime.config.active_dir / "still-writing.pcap"
+    original.write_bytes(b"unfinished")
+    runtime.capture_file = original
+    with pytest.raises(RuntimeError, match="remained alive"):
+        runtime.close()
+    assert runtime.process is child
+    assert runtime.state == "termination_pending"
+    assert original.read_bytes() == b"unfinished"
+    assert not list(runtime.config.capture_dir.glob("*.pcap"))
+    # The per-process owner lock must have been released on service exit.
+    reopened = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [])
+    reopened.close()
+
+
+def test_terminated_child_is_reaped_before_capture_publication(tmp_path):
+    class ExitedChild(Child):
+        def __init__(self):
+            super().__init__()
+            self.dead = True
+            self.wait_calls = []
+        def wait(self, timeout=None):
+            self.wait_calls.append(timeout)
+            return 17
+        def terminate(self):
+            raise AssertionError("already-exited process must not be signalled")
+
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [])
+    child = ExitedChild()
+    runtime.process = child
+    source = runtime.config.active_dir / "already-done.pcap"
+    source.write_bytes(b"closed")
+    runtime.capture_file = source
+    try:
+        assert runtime._drop() is True
+        assert child.wait_calls == [0]
+        assert (runtime.config.capture_dir / source.name).read_bytes() == b"closed"
+    finally:
+        runtime.close()
+
+
 def test_capture_rotation_closes_and_delivers_session(tmp_path, monkeypatch):
     clock = [50.0]
     children = []
