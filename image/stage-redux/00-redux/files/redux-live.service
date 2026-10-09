@@ -1,0 +1,31 @@
+[Unit]
+Description=Redux passive live Wi-Fi supervisor (single Bettercap owner)
+After=local-fs.target redux.service
+RequiresMountsFor=/captures
+ConditionPathExists=/etc/redux/live.toml
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/redux
+Environment=PYTHONPATH=/opt/redux
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+ExecStart=/usr/bin/python3 -m redux.core.live_runtime --config /etc/redux/live.toml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/captures
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=false
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+LockPersonality=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
