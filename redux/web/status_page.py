@@ -321,7 +321,8 @@ function paint(d){
  if(d.position&&d.position.lat!=null){var p=TRACK[TRACK.length-1];
   if(!p||p.lat!==d.position.lat||p.lon!==d.position.lon){TRACK.push({lat:d.position.lat,lon:d.position.lon});if(TRACK.length>400)TRACK.shift()}}
  if(typeof d.sightings==='number'){if(lastSight!==null)SPARK.push(Math.max(0,d.sightings-lastSight));lastSight=d.sightings;if(SPARK.length>120)SPARK.shift()}
- const sample=d.runtime&&d.runtime.visual_sampled_utc;
+ const sample=d.runtime&&(typeof d.runtime.visual_revision==='number'
+  ?d.runtime.visual_revision:d.runtime.visual_sampled_utc);
  const changed=typeof sample!=='number'||sample!==lastVisualSample;
  if(changed){
   lastVisualSample=typeof sample==='number'?sample:null;
