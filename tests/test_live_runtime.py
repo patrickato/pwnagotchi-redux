@@ -317,6 +317,23 @@ def test_capture_rotation_closes_and_delivers_session(tmp_path, monkeypatch):
         runtime.close()
 
 
+def test_live_cli_reads_real_snapshot_without_stub_radios(tmp_path, capsys):
+    from redux.cli import main
+    file = tmp_path / "live.json"
+    data = {"state": "running", "iface": "wlan1mon", "handshake_events": 3}
+    file.write_text(json.dumps(data))
+    assert main(["live", "status", "--file", str(file)]) == 0
+    stdout = capsys.readouterr().out
+    assert json.loads(stdout) == data
+    file.unlink()
+    assert main(["live", "status", "--file", str(file)]) == 3
+    file.symlink_to(tmp_path / "secret")
+    assert main(["live", "status", "--file", str(file)]) == 3
+    file.unlink()
+    file.write_text("invalid json")
+    assert main(["live", "status", "--file", str(file)]) == 4
+
+
 def test_source_tree_is_importable_and_service_opt_in(tmp_path):
     assert callable(live.main)
     live.LiveConfig.load
