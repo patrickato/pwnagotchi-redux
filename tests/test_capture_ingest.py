@@ -123,6 +123,58 @@ def test_persistent_resume(tmp_path):
         assert ing.summary()["by_status"]["ready"] == 1
 
 
+def test_missing_prepared_artifact_regenerated_from_source(tmp_path):
+    cfg = settings(tmp_path)
+    original = write_file(cfg.inputs[0] / "recover.hc22000", (REC + "\n").encode())
+    with CaptureIngestor(cfg) as ing:
+        assert ing.ingest_file(original) == "ready"
+        artifact = Path(ing.rows()[0]["output_path"])
+        artifact.unlink()
+        assert ing.ingest_file(original) == "ready"
+        assert artifact.read_text() == REC + "\n"
+        assert len(ing.rows()) == 1
+        assert ing.rows()[0]["status"] == "ready"
+
+
+def test_tampered_prepared_artifact_is_not_silently_replaced(tmp_path):
+    cfg = settings(tmp_path)
+    original = write_file(cfg.inputs[0] / "tamper.hc22000", (REC + "\n").encode())
+    with CaptureIngestor(cfg) as ing:
+        assert ing.ingest_file(original) == "ready"
+        artifact = Path(ing.rows()[0]["output_path"])
+        artifact.write_bytes(b"tampered artifact contents")
+        assert ing.ingest_file(original) == "error"
+        assert artifact.read_bytes() == b"tampered artifact contents"
+        assert "altered" in ing.rows()[0]["reason"]
+
+
+def test_replaced_artifact_with_symlink_refused(tmp_path):
+    cfg = settings(tmp_path)
+    original = write_file(cfg.inputs[0] / "symlink.hc22000", (REC + "\n").encode())
+    elsewhere = tmp_path / "outside"
+    elsewhere.write_bytes(b"do not touch me")
+    with CaptureIngestor(cfg) as ing:
+        assert ing.ingest_file(original) == "ready"
+        artifact = Path(ing.rows()[0]["output_path"])
+        artifact.unlink()
+        artifact.symlink_to(elsewhere)
+        assert ing.ingest_file(original) == "error"
+        assert elsewhere.read_bytes() == b"do not touch me"
+        assert ing.rows()[0]["status"] == "error"
+
+
+def test_input_disappears_during_digest_is_deferred(tmp_path, monkeypatch):
+    from redux.crack import ingest as module
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "race.hc22000", (REC + "\n").encode())
+    def disappearing(path):
+        raise FileNotFoundError("file moved by writer")
+    monkeypatch.setattr(module, "_digest_file", disappearing)
+    with CaptureIngestor(cfg) as ing:
+        assert ing.ingest_file(source) == "deferred"
+        assert ing.rows() == []
+
+
 def test_changed_capture_creates_new_record(tmp_path):
     cfg = settings(tmp_path)
     p = write_file(cfg.inputs[0] / "a.hc22000", (REC+"\n").encode())
