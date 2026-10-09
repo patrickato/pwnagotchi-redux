@@ -564,6 +564,57 @@ def test_live_cli_reads_real_snapshot_without_stub_radios(tmp_path, capsys):
     assert main(["live", "status", "--file", str(file)]) == 4
 
 
+def test_local_doctor_dashboard_starts_even_when_capture_radio_is_missing(tmp_path):
+    import socket
+    import urllib.request
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    settings = cfg(tmp_path, enable_web=True, web_port=port)
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [])
+    try:
+        assert runtime.tick() == "degraded"
+        assert runtime.web is not None
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status",
+                                    timeout=3) as reply:
+            snapshot = json.load(reply)
+        assert snapshot["runtime"]["state"] == "degraded"
+        assert snapshot["runtime"]["dashboard_active"] is True
+        assert snapshot["doctor"]["overall"] == "degraded"
+        display = next(x for x in snapshot["doctor"]["findings"]
+                       if x["area"] == "local dashboard")
+        assert display["status"] == "ok"
+        assert "capture radio" in snapshot["doctor"]["coverage"]["not_assessed"]
+    finally:
+        runtime.close()
+
+
+def test_dashboard_binding_errors_are_reported_and_retry_is_bounded(tmp_path, monkeypatch):
+    now = [0.0]
+    attempts = []
+    def occupied(*args, **kwargs):
+        attempts.append(args)
+        raise OSError("port already in use")
+    monkeypatch.setattr(live, "ThreadingHTTPServer", occupied)
+    settings = cfg(tmp_path, enable_web=True)
+    runtime = live.LiveRuntime(settings, radio_probe=lambda: [], clock=lambda: now[0])
+    try:
+        assert runtime.tick() == "degraded"
+        assert len(attempts) == 1
+        assert runtime._snapshot["runtime"]["dashboard_active"] is False
+        finding = next(x for x in runtime._snapshot["doctor"]["findings"]
+                       if x["area"] == "local dashboard")
+        assert finding["status"] == "degraded"
+        assert "bind failed" in finding["reason"]
+        assert runtime.tick() == "degraded"
+        assert len(attempts) == 1  # no log storm on every supervisor tick
+        now[0] = 30.0
+        assert runtime.tick() == "degraded"
+        assert len(attempts) == 2
+    finally:
+        runtime.close()
+
+
 def test_source_tree_is_importable_and_service_opt_in(tmp_path):
     assert callable(live.main)
     live.LiveConfig.load
