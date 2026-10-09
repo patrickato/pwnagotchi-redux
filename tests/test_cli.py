@@ -148,3 +148,70 @@ def test_init_scope_path_matches_firing_default(tmp_path, monkeypatch):
     # the path init tells the operator to arm is the one the firing tools read
     from redux.cli import _DEFAULT_SCOPE_PATH
     assert rc == 0 and _DEFAULT_SCOPE_PATH in out
+
+def test_live_doctor_uses_local_actual_health_not_synthetic_augmentations(monkeypatch):
+    import urllib.request
+    served = []
+    report = {
+        "doctor": {
+            "overall": "degraded", "label": "DEGRADED",
+            "coverage": {"reason": "storage unknown; no fabricated pass"},
+            "findings": [{
+                "area": "sighting persistence", "status": "degraded",
+                "summary": "Database writes deferred.",
+                "reason": "synthetic read-only SQLite disk",
+                "remediation": "Check capture storage.",
+            }],
+        }
+    }
+    def response(url, timeout):
+        served.append((url, timeout))
+        return io.BytesIO(json.dumps(report).encode())
+    monkeypatch.setattr(urllib.request, "urlopen", response)
+    code, output = _run(["live", "doctor", "--port", "8085"])
+    assert code == 0
+    assert served == [("http://127.0.0.1:8085/api/status", 2)]
+    assert "DEGRADED" in output
+    assert "sighting persistence" in output
+    assert "storage unknown" in output
+    assert "Check capture storage." in output
+
+
+def test_live_doctor_refuses_unavailable_or_unverified_dashboard(monkeypatch):
+    import urllib.request
+    def unavailable(*args, **kwargs):
+        raise OSError("synthetic disconnected service")
+    monkeypatch.setattr(urllib.request, "urlopen", unavailable)
+    rc, output = _run(["live", "doctor"])
+    assert rc == 3
+    assert "unavailable" in output and "check redux-live.service" in output
+    assert "OK" not in output
+
+    def bogus(*args, **kwargs):
+        return io.BytesIO(json.dumps({"creature": "demo"}).encode())
+    monkeypatch.setattr(urllib.request, "urlopen", bogus)
+    rc, output = _run(["live", "doctor"])
+    assert rc == 3 and "unavailable" in output
+
+
+def test_live_doctor_sanitizes_terminal_sequences(monkeypatch):
+    import urllib.request
+    report = {
+        "doctor": {
+            "overall": "attention", "label": "ATTENTION",
+            "findings": [{
+                "area": "capture", "status": "attention",
+                "summary": "Danger\\u001b[31mRED",
+                "reason": "", "remediation": "",
+            }],
+            "coverage": {"reason": "partial"},
+        }
+    }
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: io.BytesIO(json.dumps(report).encode()))
+    rc, output = _run(["live", "doctor"])
+    assert rc == 0
+    assert "\\x1b" not in output
+    assert "Danger" in output and "RED" in output
+
+
