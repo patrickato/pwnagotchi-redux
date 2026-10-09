@@ -76,9 +76,13 @@ the supervisor retries. Each restart creates a *new* capture file so
 completed files can settle and convert. Logs are kept private; startup
 rotates the Bettercap log at 4 MiB.
 
-The service only changes the mode of the selected monitor interface. Network
-managers that independently own the same interface may interfere and will
-require configuration based on the physical Pi.
+The service changes only the selected capture interface. By default it refuses
+to switch a currently connected Wi-Fi uplink into monitor mode (so SSH/internet
+connections are not unexpectedly disconnected). Operators using a dedicated
+capture device can override this behavior with `allow_connected_capture = true`
+in `/etc/redux/live.toml`; the override explicitly permits disconnecting that
+interface. Network managers that independently own the same interface may
+still interfere and will require configuration based on the physical Pi.
 
 ## Release gates not yet completed
 
