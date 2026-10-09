@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import sqlite3
 import time
 from dataclasses import dataclass, asdict
@@ -276,20 +277,33 @@ class SightingStore:
         Both may be combined. Returns rows deleted; commits once (SD-friendly).
         Does not VACUUM — reclaiming pages rewrites the whole DB, the opposite of
         SD-friendly; call the separate vacuum() method sparingly after a big prune."""
+        if older_than is not None:
+            if not math.isfinite(float(older_than)) or float(older_than) < 0:
+                raise ValueError("sighting retention age must be finite and non-negative")
+        if max_rows is not None and (
+            type(max_rows) is not int or max_rows < 0
+        ):
+            raise ValueError("sighting max_rows must be a non-negative integer")
         now = time.time() if now is None else now
         deleted = 0
-        if older_than is not None:
-            cutoff = now - float(older_than)
-            c = self._conn.execute("DELETE FROM sightings WHERE ts < ?", (cutoff,))
-            deleted += c.rowcount or 0
-        if max_rows is not None and max_rows >= 0:
-            c = self._conn.execute(
-                "DELETE FROM sightings WHERE id NOT IN "
-                "(SELECT id FROM sightings ORDER BY ts DESC, id DESC LIMIT ?)",
-                (int(max_rows),),
-            )
-            deleted += c.rowcount or 0
-        self._conn.commit()
+        try:
+            if older_than is not None:
+                cutoff = now - float(older_than)
+                c = self._conn.execute("DELETE FROM sightings WHERE ts < ?", (cutoff,))
+                deleted += c.rowcount or 0
+            if max_rows is not None:
+                c = self._conn.execute(
+                    "DELETE FROM sightings WHERE id NOT IN "
+                    "(SELECT id FROM sightings ORDER BY ts DESC, id DESC LIMIT ?)",
+                    (max_rows,),
+                )
+                deleted += c.rowcount or 0
+            self._conn.commit()
+        except Exception:
+            # Either all retention filters commit or none do. In particular, a
+            # failed second DELETE must not silently commit the first one later.
+            self._conn.rollback()
+            raise
         return deleted
 
     def vacuum(self) -> None:
