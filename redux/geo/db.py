@@ -267,6 +267,39 @@ class SightingStore:
             ).fetchone()
         return int(row["n"]) if row else 0
 
+    def channel_distribution(self, kind: Optional[str] = None) -> dict[int, int]:
+        """Aggregate channel occupancy in SQLite, not Python sighting objects.
+
+        Long-running field caches can hold thousands of observations; live
+        dashboard calls must not materialize every row each refresh.
+        """
+        sql = ("SELECT channel, COUNT(*) FROM sightings "
+               "WHERE channel IS NOT NULL")
+        params: list[object] = []
+        if kind is not None:
+            sql += " AND kind = ?"
+            params.append(kind.lower())
+        sql += " GROUP BY channel"
+        return {int(ch): int(count) for ch, count in self._conn.execute(sql, params)}
+
+    def rssi_distribution(self, bucket: int = 10,
+                          kind: Optional[str] = None) -> dict[str, int]:
+        """RSSI bins computed by SQLite with correct negative floor rounding."""
+        if type(bucket) is not int or bucket <= 0:
+            raise ValueError("bucket must be a positive integer")
+        # SQLite remainder retains the sign of negative RSSI; normalize it
+        # before subtracting so -81 falls into -90 for a 10 dBm bucket.
+        expression = "(rssi - (((rssi % ?) + ?) % ?))"
+        sql = ("SELECT " + expression + " AS band, COUNT(*) "
+               "FROM sightings WHERE rssi IS NOT NULL")
+        params: list[object] = [bucket, bucket, bucket]
+        if kind is not None:
+            sql += " AND kind = ?"
+            params.append(kind.lower())
+        sql += " GROUP BY band ORDER BY band"
+        return {str(int(band)): int(count)
+                for band, count in self._conn.execute(sql, params)}
+
     # --- data lifecycle (a field device runs for days; bound the growth) ----- #
 
     def prune(self, *, older_than: Optional[float] = None,
