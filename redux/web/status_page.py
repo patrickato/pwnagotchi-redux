@@ -133,6 +133,71 @@ grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;background:var(--bg)}
 .view-nav button[aria-pressed="true"]{color:var(--acc);border-color:var(--acc);
 background:#13332e;font-weight:700}
 .view-nav button:focus-visible{outline:2px solid var(--wifi);outline-offset:2px}
+/* Device shell: health and engine truth remain visible on every page. */
+:root{--info:#67b7e5;--card-hi:#172331;--ink-sub:#a5b5c5}
+body{background:radial-gradient(ellipse at 15% 0%,#11202e 0%,var(--bg) 53%);
+ -webkit-font-smoothing:antialiased}
+#devicebar{min-width:0;min-height:47px;box-shadow:0 3px 16px #0007;
+ border-bottom:1px solid #324252}
+.brand{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.brand-mark{color:var(--acc);font-size:18px}
+#sub{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:22ch}
+.runtime-pill{display:inline-flex;align-items:center;justify-content:center;
+ min-height:24px;max-width:125px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+ padding:3px 8px;border-radius:6px;border:1px solid var(--line);
+ font-size:10px;letter-spacing:.4px;font-weight:700}
+.runtime-pill::before{content:"";display:inline-block;width:6px;height:6px;
+ flex:0 0 6px;border-radius:50%;background:currentColor;margin-right:6px}
+.runtime-pill.ok{color:var(--acc);border-color:#1f584d}
+.runtime-pill.attention{color:var(--warn);border-color:#72571d}
+.runtime-pill.degraded,.runtime-pill.action{color:var(--crit);border-color:#762626}
+.runtime-pill.unknown{color:var(--info);border-color:#295675}
+.health-shortcut{display:grid;place-items:center;font-size:22px;font-weight:800;
+ width:44px;min-width:44px;padding:0;border-radius:10px;border:1px solid #354552}
+.health-shortcut.ok{color:var(--acc)}.health-shortcut.attention{color:var(--warn)}
+.health-shortcut.degraded,.health-shortcut.action{color:var(--crit)}
+.health-shortcut.unknown{color:var(--info)}
+.health-shortcut.ok #healthglyph{animation:health-glow 2.8s ease-in-out infinite}
+.health-shortcut.attention #healthglyph{animation:health-glow 1.5s ease-in-out infinite}
+.health-shortcut.degraded #healthglyph,.health-shortcut.action #healthglyph{
+ animation:health-alert .9s ease-in-out infinite}
+@keyframes health-glow{0%,100%{opacity:.65}50%{opacity:1;text-shadow:0 0 10px currentColor}}
+@keyframes health-alert{0%,100%{opacity:.5}50%{opacity:1;transform:scale(1.12)}}
+.hero{position:relative;overflow:hidden;border-color:#254e55;
+ background:linear-gradient(127deg,#10272c 0%,#111a27 58%,#1d2430 100%)}
+.hero::before{content:"";position:absolute;width:110px;height:110px;
+ right:-42px;top:-53px;border:1px solid #4ec9b040;border-radius:50%;
+ box-shadow:0 0 0 18px #4ec9b008,0 0 0 35px #4ec9b008;pointer-events:none}
+.hero-top{display:flex;justify-content:space-between;gap:8px;color:var(--ink-sub);
+ font-size:10px;font-weight:700;letter-spacing:.7px}
+.hero-capture{color:var(--info);white-space:nowrap;text-transform:uppercase}
+.hero-capture.ok{color:var(--acc)}
+.hero-capture.attention{color:var(--warn)}
+.hero-capture.degraded,.hero-capture.action{color:var(--crit)}
+.hero-main{display:flex;align-items:center;gap:20px;padding:10px 4px 7px}
+.hero .face{font-size:52px;text-shadow:0 0 23px #4ec9b040;flex-shrink:0}
+.hero-identity{min-width:0}
+.hero .creature{font-size:21px;font-weight:700}
+.hero .reason{margin-top:1px}
+.overview-metrics .row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.overview-metrics .kv{min-width:0;overflow-wrap:anywhere}
+.overview-metrics .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.overview-advice{border-left:3px solid var(--acc)}
+.card{box-shadow:0 4px 16px #0002}
+.k{color:var(--ink-sub)}
+.doctor-heart.unknown,.doctor-title.unknown{color:var(--info)}
+.doctor-primary{border-top:3px solid var(--acc)}
+.doctor-primary:has(.doctor-heart.action){border-color:var(--crit)}
+.doctor-primary:has(.doctor-heart.degraded){border-color:var(--crit)}
+.doctor-primary:has(.doctor-heart.attention){border-color:var(--warn)}
+.doctor-primary:has(.doctor-heart.unknown){border-color:var(--info)}
+.capture-primary{border-top:3px solid #345f80}
+body[data-skin="plain"] .hero{background:var(--card)}
+body[data-skin="plain"] .hero::before{display:none}
+@media(prefers-reduced-motion:reduce){
+ *,*::before,*::after{animation:none!important;transition:none!important}
+}
+
 @media(max-width:520px){
  html,body{height:100%;height:100dvh}
  body{display:flex;flex-direction:column;overflow:hidden}
@@ -142,15 +207,37 @@ background:#13332e;font-weight:700}
  #viewroot{flex:1;min-height:0;width:100%;overflow-y:auto;overscroll-behavior:contain;
  -webkit-overflow-scrolling:touch}
  main{padding:8px;gap:7px}.card{border-radius:7px;padding:8px 10px}
- header{padding:5px 9px}h1{font-size:16px}
+ header{padding:4px 7px;gap:6px}h1{font-size:15px}
+ .brand{gap:4px}.brand-mark{font-size:14px}
+ #sub{font-size:9px;max-width:85px}
+ .runtime-pill{max-width:115px;min-height:25px;padding:3px 5px;font-size:9px}
+ .health-shortcut{height:40px;min-height:40px;width:40px;min-width:40px}
+ #skinbtn{min-height:40px;padding:4px 7px;font-size:10px}
+ .hero-main{gap:11px;padding:8px 2px 4px}
+ .hero .face{font-size:42px}.hero .creature{font-size:18px}
+ .hero-overline,.hero-capture{font-size:9px}
+ .overview-metrics .row{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .overview-metrics .k{font-size:9px}.overview-metrics .v{font-size:14px}
+ .card{box-shadow:none}
  #map{height:174px}.aptbl{grid-template-columns:24px minmax(0,1fr) 37px 42px;
  gap:2px 4px;font-size:11px;overflow-wrap:anywhere}
  .row{gap:7px}.kv{flex:1 1 92px}.v{font-size:15px}
  .leg{gap:7px;flex-wrap:wrap}.doctor-top{gap:8px}
 }
 </style></head><body data-skin="rich">
-<header><h1>Augur</h1><span class="mut" id="sub">glass-box</span><span class="sp"></span>
- <button id="skinbtn" title="toggle skin">rich</button></header>
+<header id="devicebar" aria-label="Device status">
+ <div class="brand"><span class="brand-mark" aria-hidden="true">◈</span><h1>Augur</h1></div>
+ <span class="mut" id="sub" role="status" aria-live="polite">glass-box</span>
+ <span class="sp"></span>
+ <span class="runtime-pill unknown" id="engineindicator" role="status"
+  aria-label="Capture supervisor: unknown">NO SESSION</span>
+ <button type="button" id="healthjump" class="health-shortcut unknown"
+  aria-label="Open Doctor: health unknown" title="Open Doctor">
+  <span aria-hidden="true" id="healthglyph">♡</span>
+ </button>
+ <button type="button" id="skinbtn" aria-label="Switch between rich and plain appearance"
+  title="Switch appearance">rich</button>
+</header>
 <nav id="viewnav" class="view-nav" aria-label="Redux workspace pages">
  <button type="button" data-view="overview" aria-pressed="true">Overview</button>
  <button type="button" data-view="radio" aria-pressed="false">Radio</button>
@@ -158,14 +245,20 @@ background:#13332e;font-weight:700}
  <button type="button" data-view="doctor" aria-pressed="false">Doctor</button>
 </nav>
 <main id="viewroot" tabindex="-1">
- <div class="card" data-page="overview"><div class="face" id="face">‹·_·›</div><div class="creature" id="creature">…</div><div class="reason" id="mood"></div></div>
- <div class="card rich" data-page="radio" hidden><div class="k">airspace · real GPS fixes only · moves as you move</div>
+ <div class="card hero" data-page="overview" aria-label="Live Augur persona">
+  <div class="hero-top"><span class="hero-overline">AUGUR / LIVE OBSERVATIONS</span>
+   <span id="herocapture" class="hero-capture">CAPTURE UNKNOWN</span></div>
+  <div class="hero-main"><div class="face" id="face">‹·_·›</div>
+   <div class="hero-identity"><div class="creature" id="creature">…</div>
+    <div class="reason" id="mood">Waiting for the first actual report</div></div></div>
+ </div>
+ <div class="card rich radio-map" data-page="radio" hidden><div class="k">airspace · real GPS fixes only · moves as you move</div>
    <div id="wrap"><svg id="map" viewBox="0 0 400 340" preserveAspectRatio="xMidYMid meet"
      aria-label="live sighting map"></svg></div>
    <div class="leg mut"><span><i style="background:var(--me)"></i>you</span>
      <span><i style="background:var(--wifi)"></i>wifi</span>
      <span><i style="background:var(--ble)"></i>ble</span><span id="maprange" class="dim"></span></div></div>
- <section class="card" data-page="doctor" hidden aria-label="Device Doctor">
+ <section class="card doctor-primary" data-page="doctor" hidden aria-label="Device Doctor">
   <div class="k">Doctor · measured device health</div>
   <div class="doctor-top" role="status" aria-live="polite">
    <span id="doctorheart" class="doctor-heart unknown" aria-hidden="true">♡</span>
@@ -181,7 +274,7 @@ background:#13332e;font-weight:700}
   <div id="pipelinecounts" class="reason">No durable worker scan observed</div>
   <div id="pipelinereason" class="reason"></div>
  </section>
- <section class="card" data-page="captures" hidden aria-label="Capture lifecycle">
+ <section class="card capture-primary" data-page="captures" hidden aria-label="Capture lifecycle">
   <div class="k">Capture lifecycle · live supervisor</div>
   <div class="row">
    <div class="kv"><div class="k">Capture state</div><div class="v" id="capturestate">UNKNOWN</div></div>
@@ -200,7 +293,7 @@ background:#13332e;font-weight:700}
   </div>
   <div id="runtimeerror" class="reason">Waiting for live diagnostics</div>
  </section>
- <div class="card" data-page="overview"><div class="row">
+ <div class="card overview-metrics" data-page="overview"><div class="row">
    <div class="kv"><div class="k">persona</div><div class="v" id="persona">—</div></div>
    <div class="kv"><div class="k">intent</div><div class="v" id="intent">—</div></div>
    <div class="kv"><div class="k">capture radio</div><div class="v" id="cap">—</div></div>
@@ -209,7 +302,7 @@ background:#13332e;font-weight:700}
    <div class="kv"><div class="k">alerts</div><div class="v" id="alerts">—</div></div>
  </div>
  <svg id="spark" class="rich" viewBox="0 0 400 40" preserveAspectRatio="none"></svg></div>
- <div class="card" data-page="overview"><div class="k">brain recommends</div>
+ <div class="card overview-advice" data-page="overview"><div class="k">brain recommends</div>
    <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div></div>
  <div class="card rich" data-page="radio" hidden id="sensecard" style="display:none"><div class="k">presence (CSI)</div>
    <div class="v"><span class="badge" id="sense">—</span> <span class="badge" id="occ">—</span></div>
