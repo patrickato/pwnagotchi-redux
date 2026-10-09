@@ -141,7 +141,27 @@ def main(argv=None) -> int:
         print("XDG_RUNTIME_DIR is missing or unwritable; refusing browser launch",
               file=sys.stderr)
         return 2
-    profile = Path(runtime) / "redux-chromium"
+    runtime_dir = Path(runtime)
+    try:
+        root = runtime_dir.resolve(strict=True)
+        meta = root.stat()
+        if not root.is_dir() or root.is_symlink() or meta.st_uid != os.geteuid():
+            raise ValueError("runtime directory ownership or type is unsafe")
+        if meta.st_mode & 0o022:
+            raise ValueError("runtime directory is group/world writable")
+    except (OSError, ValueError) as error:
+        print(f"Unsafe XDG_RUNTIME_DIR: {error}", file=sys.stderr)
+        return 2
+    profile = root / "redux-chromium"
+    if profile.is_symlink():
+        print("Refusing symlinked browser profile", file=sys.stderr)
+        return 2
+    if profile.exists():
+        meta = profile.stat()
+        if (not profile.is_dir() or meta.st_uid != os.geteuid()
+                or meta.st_mode & 0o022):
+            print("Refusing unsafe existing browser profile", file=sys.stderr)
+            return 2
     args = chromium_argv(result["checks"]["browser"]["executable"],
                          parsed.port, profile=profile)
     os.execv(args[0], args)
