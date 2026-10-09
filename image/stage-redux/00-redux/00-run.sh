@@ -22,6 +22,12 @@ chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-kiosk"
 # Never enable a desktop autostart unit or claim the TFT has passed acceptance.
 if [[ -f files/kiosk-profile ]]; then
     install -m 0644 files/kiosk-profile "$ROOTFS_DIR/usr/share/redux/kiosk-profile"
+    # Inactive user-scoped unit only; never start root Chromium or guess a TFT.
+    install -d "$ROOTFS_DIR/usr/lib/systemd/user"
+    install -m 0644 files/redux-kiosk.service \
+        "$ROOTFS_DIR/usr/lib/systemd/user/redux-kiosk.service"
+    install -m 0644 files/kiosk.example.env \
+        "$ROOTFS_DIR/usr/share/redux/kiosk.example.env"
 fi
 # Preinstall processing workers into the standalone image. The read-only root
 # stores code/config; jobs/results live on the dedicated writable /captures.
