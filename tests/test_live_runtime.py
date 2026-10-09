@@ -563,7 +563,7 @@ def test_live_status_reuses_one_processing_ledger_read(tmp_path, monkeypatch):
     def spawn(*args, **kwargs):
         return Child()
     def monitor(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, "type monitor\\n", "")
+        return subprocess.CompletedProcess(argv, 0, "type monitor\n", "")
     monkeypatch.setattr(live, "HttpTransport", Transport)
     runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [radio()],
                                executor=monitor, spawn=spawn)
