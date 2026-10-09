@@ -3,7 +3,9 @@ Description=redux image bootstrap (live supervisor wiring pending)
 After=local-fs.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+WatchdogSec=15s
 User=redux
 Group=redux
 WorkingDirectory=/opt/redux
