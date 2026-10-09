@@ -25,6 +25,21 @@ arch-test arm64
 sudo ./build.sh
 ```
 
+The `REDUXCAP` partition defaults to 512 MiB for compatibility. For sustained
+passive capture on a larger SD card, explicitly choose an image capacity that
+fits both the card and the build host, for example:
+
+```sh
+sudo REDUX_CAPTURES_MIB=8192 REDUX_BUILD_DIR="$PWD/build/image-8g" ./build.sh
+```
+
+The supported build setting is 64–262144 MiB, subject to the underlying image
+size and filesystem capacity. It sizes the third ext4 partition at image-build
+time; it does **not** auto-expand a flashed card, erase existing capture
+data, or affect a running installation. Use a disposable SD card and allow
+sufficient scratch space for the uncompressed image. The original default
+is maintained unless this variable is supplied.
+
 The wrapper refuses existing build directories. Choose a fresh path for another
 run with `sudo REDUX_BUILD_DIR="$PWD/build/image-next" ./build.sh`. Filesystem
 mounts from a failed pi-gen run must be unmounted before removing any build tree.
@@ -126,7 +141,8 @@ No physical success or sub-15-second boot claim is inferred from QEMU tests.
 
 `overlayroot` from Debian is configured as `tmpfs:recurse=0`: the lower root is
 read-only and the upper root is RAM. Recursion is disabled so `/captures` remains
-writable. The export patch adds a third, 512 MiB ext4 partition labeled REDUXCAP
+writable. The export patch adds a third, 512 MiB by default (operator-resizable at build
+time) ext4 partition labeled REDUXCAP
 before loop attachment, formats it, and creates `/captures/redux` owned by the
 service account with mode 0700. The private live engine later uses this directory; the
 unprivileged watchdog/bootstrap stores its own checkpoint in `/captures/boot`.
