@@ -356,7 +356,7 @@ def invoke(args, **kwargs):
 def prepared(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    for name in ("build.sh", "image", "redux", "boot", "config", "systemd"):
+    for name in ("build.sh", "image", "redux", "boot", "config", "systemd", "scripts"):
         source = REPO / name
         if source.is_dir():
             shutil.copytree(source, repo / name)
