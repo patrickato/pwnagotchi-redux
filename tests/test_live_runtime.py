@@ -713,6 +713,56 @@ def test_terminated_child_is_reaped_before_capture_publication(tmp_path):
         runtime.close()
 
 
+def test_rotation_retries_child_stop_without_publishing_or_duplicate_engine(
+    tmp_path, monkeypatch
+):
+    clock = [50.0]
+    children = []
+    class TemporarilyUnstoppable(Child):
+        def __init__(self):
+            super().__init__()
+            self.stop_calls = 0
+        def terminate(self):
+            self.stop_calls += 1
+            if self.stop_calls == 1:
+                raise PermissionError("synthetic transient SIGTERM failure")
+            return super().terminate()
+    def spawn(*args, **kwargs):
+        child = TemporarilyUnstoppable()
+        children.append(child)
+        return child
+    def monitor(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, "type monitor\n", "")
+    monkeypatch.setattr(live, "HttpTransport", Transport)
+    runtime = live.LiveRuntime(
+        cfg(tmp_path, rotation_seconds=30), radio_probe=lambda: [radio()],
+        executor=monitor, spawn=spawn, clock=lambda: clock[0],
+    )
+    try:
+        assert runtime.tick() == "starting_engine"
+        assert runtime.tick() == "running"
+        source = runtime.capture_file
+        source.write_bytes(b"capture writer must exit first")
+        clock[0] += 30
+        assert runtime.tick() == "termination_pending"
+        assert runtime.process is children[0]
+        assert source.exists()
+        assert not list(runtime.config.capture_dir.glob("*.pcap"))
+        assert len(children) == 1
+        clock[0] += 1
+        assert runtime.tick() == "degraded"
+        assert children[0].dead is True
+        assert (runtime.config.capture_dir / source.name).read_bytes() == (
+            b"capture writer must exit first"
+        )
+        assert len(children) == 1
+        clock[0] += runtime.config.retry_seconds
+        assert runtime.tick() == "starting_engine"
+        assert len(children) == 2
+    finally:
+        runtime.close()
+
+
 def test_capture_rotation_closes_and_delivers_session(tmp_path, monkeypatch):
     clock = [50.0]
     children = []
