@@ -62,8 +62,8 @@ Inspect `/captures` mount, check both services are healthy, verify no
 duplicate Bettercap process, then use:
 
 ```bash
-sudo bash scripts/redux-live-diag.sh
-redux live status
+sudo redux-live-diag
+sudo redux live status
 sudo journalctl -u redux-live.service -n 60 --no-pager
 sudo journalctl -u redux-capture-ingest.service -n 60 --no-pager
 ```
