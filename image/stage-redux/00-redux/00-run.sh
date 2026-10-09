@@ -5,6 +5,16 @@ cp -a files/redux "$ROOTFS_DIR/opt/redux/"
 cp -a files/nexmon "$ROOTFS_DIR/usr/local/src/"
 install -m 0644 files/sources.sh files/redux-revision "$ROOTFS_DIR/usr/share/redux/"
 install -m 0644 files/redux.service "$ROOTFS_DIR/etc/systemd/system/redux.service"
+# Preinstall processing workers into the standalone image. The read-only root
+# stores code/config; jobs/results live on the dedicated writable /captures.
+install -d "$ROOTFS_DIR/etc/redux" "$ROOTFS_DIR/captures"
+install -m 0600 files/pipeline/pipeline.toml "$ROOTFS_DIR/etc/redux/pipeline.toml"
+for unit in redux-capture-ingest redux-capture-audit; do
+    sed -e '/^\[Unit\]$/a RequiresMountsFor=/captures' \
+        -e '/^\[Service\]$/a Environment=PYTHONPATH=/opt/redux' \
+        files/pipeline/$unit.service > "$ROOTFS_DIR/etc/systemd/system/$unit.service"
+    install -m 0644 files/pipeline/$unit.timer "$ROOTFS_DIR/etc/systemd/system/$unit.timer"
+done
 install -m 0755 files/install-nexmon.sh "$ROOTFS_DIR/usr/local/src/install-nexmon.sh"
 install -m 0644 files/target-kernel.sh "$ROOTFS_DIR/usr/local/src/target-kernel.sh"
 install -m 0644 files/patch-nexmon-driver.py "$ROOTFS_DIR/usr/local/src/patch-nexmon-driver.py"
@@ -14,6 +24,11 @@ useradd --system --home-dir /var/lib/redux --shell /usr/sbin/nologin redux
 chown -R root:root /opt/redux
 python3 -m compileall -q /opt/redux/redux
 systemctl enable redux.service
+# hcx conversion is bundled; Hashcat compute backend remains hardware-gated.
+apt-get install -y --no-install-recommends hcxtools
+# Timers are shipped, but left disabled until output paths and writable
+# mounts pass device acceptance checks.
+systemctl disable redux-capture-ingest.timer redux-capture-audit.timer 2>/dev/null || true
 # The engine ships as a binary only. No stock unit may start an unscoped session.
 systemctl mask bettercap.service
 # Keep the image lean; compile tools belong on the build host, not in the field.
