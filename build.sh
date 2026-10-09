@@ -93,6 +93,7 @@ cp -a "$REPO_DIR/redux/." "$PI_GEN_DIR/stage-redux/00-redux/files/redux/"
 # Stage the exact same capture configuration and unit templates as the source checkout.
 install -d "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline"
 cp "$REPO_DIR/config/pipeline.example.toml" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/pipeline.toml"
+cp "$REPO_DIR/config/live.example.toml" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/live.toml"
 for unit in redux-capture-ingest redux-capture-audit; do
     cp "$REPO_DIR/systemd/$unit.service" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/"
     cp "$REPO_DIR/systemd/$unit.timer" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/"
