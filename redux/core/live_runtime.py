@@ -7,6 +7,7 @@ The existing Redux capture-ingest timer processes files independently.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import fcntl
 import argparse
 import json
 import logging
@@ -179,6 +180,16 @@ class LiveRuntime:
             raise ValueError("live directories may not be symlinks")
         os.chmod(self.config.state_dir, 0o700)
         os.chmod(self.config.capture_dir, 0o700)
+        lock_path = self.config.state_dir / "owner.lock"
+        if lock_path.is_symlink():
+            raise ValueError("refusing runtime lock symlink")
+        self._lock = lock_path.open("a+b")
+        os.fchmod(self._lock.fileno(), 0o600)
+        try:
+            fcntl.flock(self._lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self._lock.close()
+            raise RuntimeError("another Redux live runtime already owns the radio")
 
     def _observe(self, emission):
         event = emission.payload.get("event")
@@ -364,6 +375,8 @@ class LiveRuntime:
             self.web = None
         self.state = "stopped"
         self._checkpoint()
+        fcntl.flock(self._lock.fileno(), fcntl.LOCK_UN)
+        self._lock.close()
 
 
 def run_forever(config, *, stop=None, runtime_factory=LiveRuntime, interval=1.0):
