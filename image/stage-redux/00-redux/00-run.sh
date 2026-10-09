@@ -5,6 +5,14 @@ cp -a files/redux "$ROOTFS_DIR/opt/redux/"
 cp -a files/nexmon "$ROOTFS_DIR/usr/local/src/"
 install -m 0644 files/sources.sh files/redux-revision "$ROOTFS_DIR/usr/share/redux/"
 install -m 0644 files/redux.service "$ROOTFS_DIR/etc/systemd/system/redux.service"
+# The image copies Python sources directly; expose the same Redux CLI without
+# relying on pip or a writable root filesystem after boot.
+install -d "$ROOTFS_DIR/usr/local/bin"
+cat > "$ROOTFS_DIR/usr/local/bin/redux" <<'REDUX_LAUNCHER'
+#!/bin/sh
+PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.cli "$@"
+REDUX_LAUNCHER
+chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux"
 # Preinstall processing workers into the standalone image. The read-only root
 # stores code/config; jobs/results live on the dedicated writable /captures.
 install -d "$ROOTFS_DIR/etc/redux" "$ROOTFS_DIR/captures"
