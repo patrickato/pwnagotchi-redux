@@ -555,7 +555,46 @@ class LiveRuntime:
         self.last_error = ""
         _LOG.info("live passive capture started on %s", self.iface)
 
+    def _stop_engine_child(self):
+        """Confirm that Bettercap has stopped before publishing its capture.
+
+        A failed signal or second wait timeout does not authorize handing off a
+        still-open .pcap or starting a second engine on the same radio.
+        """
+        child = self.process
+        if child is None:
+            return True
+        try:
+            if child.poll() is None:
+                try:
+                    child.terminate()
+                except ProcessLookupError:
+                    pass  # child died between poll and terminate; still reap it
+                try:
+                    child.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    try:
+                        child.kill()
+                    except ProcessLookupError:
+                        pass
+                    child.wait(timeout=2)
+            else:
+                child.wait(timeout=0)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            self.state = "termination_pending"
+            self.last_error = (
+                f"Bettercap termination not confirmed: {type(error).__name__}"
+            )
+            _LOG.error("%s", self.last_error)
+            return False
+        self.process = None
+        return True
+
     def _drop(self):
+        # Stop the writer FIRST. Until it has exited, do not close the
+        # logger/SQLite resources, publish a .pcap, or forget its PID.
+        if not self._stop_engine_child():
+            return False
         if self.augur is not None:
             try:
                 # One last durable flush before releasing the SQLite connection.
@@ -578,15 +617,6 @@ class LiveRuntime:
                 _LOG.error("sighting store close failed: %s", type(error).__name__)
         self.augur = None
         self.driver = None
-        if self.process is not None:
-            if self.process.poll() is None:
-                self.process.terminate()
-                try:
-                    self.process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                    self.process.wait(timeout=2)
-            self.process = None
         if self.log_handle is not None:
             self.log_handle.close()
             self.log_handle = None
@@ -594,6 +624,7 @@ class LiveRuntime:
         if self.capture_file is not None:
             self._handoff(self.capture_file)
         self.capture_file = None
+        return True
 
     def _handoff(self, source):
         """Durably queue a closed capture without overwriting existing captures.
