@@ -63,6 +63,46 @@ def test_page_has_access_points_panel():
     assert "renderAPs" in html and "aptbl" in html and "access_points" in html
 
 
+def test_doctor_health_panel_uses_real_status_not_demo_values():
+    html = render_page()
+    assert 'aria-label="Device Doctor"' in html
+    assert 'id="doctorheart"' in html
+    assert 'id="doctorcoverage"' in html
+    assert 'id="doctorlist"' in html
+    assert "renderDoctor(d.doctor||null)" in html
+    assert "All reported Doctor areas assessed." in html
+    assert "Doctor snapshot unavailable" in html
+    # No runtime data interpolated as HTML: escaping happens via DOM textContent.
+    assert "header.textContent=" in html
+    assert "reason.textContent=" in html
+    assert "remedy.textContent=" in html
+
+
+def test_runtime_doctor_report_is_transmitted_unchanged_through_local_api():
+    snapshot = {
+        "runtime": {"state": "degraded"},
+        "doctor": {
+            "overall": "degraded",
+            "coverage": {"assessed": ["live engine"],
+                         "not_assessed": ["thermal/power"]},
+            "findings": [{
+                "area": "live engine", "status": "degraded",
+                "summary": "Capture unavailable", "reason": "real probe",
+                "remediation": "Inspect device", "detail": {},
+            }],
+        },
+    }
+    srv, port = _serve(make_handler(lambda: snapshot))
+    try:
+        status, body = _get(port, "/api/status")
+        assert status == 200
+        report = json.loads(body)["doctor"]
+        assert report == snapshot["doctor"]
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_page_has_rich_skin_toggle_and_moving_track():
     html = render_page()
     assert "skinbtn" in html and "data-skin" in html      # plain/rich skin toggle
