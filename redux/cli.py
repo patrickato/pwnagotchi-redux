@@ -1262,6 +1262,26 @@ def cmd_pipeline(args) -> int:
     raise ValueError("unknown pipeline command")
 
 
+def cmd_live(args) -> int:
+    """Read the actual on-device runtime snapshot without creating stub radios."""
+    from pathlib import Path
+    snapshot = Path(args.file)
+    if snapshot.is_symlink() or not snapshot.is_file():
+        print(f"live: no verified runtime snapshot at {snapshot}")
+        return 3
+    try:
+        if snapshot.stat().st_size > 65536:
+            raise ValueError("runtime snapshot exceeds expected maximum")
+        data = json.loads(snapshot.read_text())
+        if not isinstance(data, dict) or not isinstance(data.get("state"), str):
+            raise ValueError("runtime snapshot is not a status record")
+    except (OSError, ValueError) as error:
+        print(f"live: unable to parse runtime snapshot: {error}")
+        return 4
+    print(json.dumps(data, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="redux", description="redux field-OS control")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1330,6 +1350,13 @@ def build_parser() -> argparse.ArgumentParser:
     cs.add_argument("--config", default=None, help="config path (default: built-in defaults)")
     cc = cfsub.add_parser("check", help="validate a config and list problems")
     cc.add_argument("--config", default=None, help="config path to validate")
+    lv = sub.add_parser("live", help="real standalone runtime status (no stub radios)")
+    lv_sub = lv.add_subparsers(dest="live_cmd", required=True)
+    lvs = lv_sub.add_parser("status", help="read actual on-device radio/engine state")
+    lvs.add_argument("--file", default="/captures/redux/live.json",
+                     help="runtime checkpoint file; defaults to /captures/redux/live.json")
+    lv.set_defaults(func=cmd_live)
+
     cf.set_defaults(func=cmd_config)
 
     pl = sub.add_parser("pipeline", help="local capture processing and audit jobs")
