@@ -57,6 +57,7 @@ class LiveConfig:
     max_log_bytes: int = 4 * 1024 * 1024
     pipeline_database: Path | None = None
     pipeline_stale_seconds: int = 180
+    status_sample_seconds: int = 5
     allow_connected_capture: bool = False
 
     @classmethod
@@ -80,6 +81,7 @@ class LiveConfig:
             pipeline_database=(Path(values["pipeline_database"])
                                if values.get("pipeline_database") else None),
             pipeline_stale_seconds=int(values.get("pipeline_stale_seconds", 180)),
+            status_sample_seconds=int(values.get("status_sample_seconds", 5)),
             allow_connected_capture=values.get("allow_connected_capture", False),
         )
 
@@ -110,6 +112,8 @@ class LiveConfig:
             raise ValueError("pipeline_database must be absolute")
         if not 60 <= self.pipeline_stale_seconds <= 3600:
             raise ValueError("pipeline_stale_seconds must be 60-3600 seconds")
+        if not 1 <= self.status_sample_seconds <= 30:
+            raise ValueError("status_sample_seconds must be 1-30 seconds")
         if self.enable_web is not True and self.enable_web is not False:
             raise ValueError("enable_web must be a boolean")
         if type(self.allow_connected_capture) is not bool:
@@ -295,6 +299,11 @@ class LiveRuntime:
         self.sighting_loss_events = 0
         self.last_sighting_loss_reason = ""
         self._snapshot = {"runtime": {"state": "starting"}}
+        self._cached_visual = None
+        self._visual_sampled_at = float("-inf")
+        self._visual_sampled_utc = None
+        self._cached_processing = None
+        self._processing_sampled_at = float("-inf")
         self.state = "starting"
         self.config.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.config.capture_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -324,6 +333,9 @@ class LiveRuntime:
 
     def _observe(self, emission):
         event = emission.payload.get("event")
+        # New observed data invalidates the expensive visual cache now,
+        # without forcing idle devices to query their cache every second.
+        self._cached_visual = None
         self.created += 1
         if getattr(event, "type", None) == "handshake":
             self.handshakes += 1
@@ -365,25 +377,45 @@ class LiveRuntime:
             "last_error": self.last_error[:180],
             "updated_utc": time.time(),
         }
+        now = self.clock()
         pipeline_path = (self.config.pipeline_database
                          or self.config.capture_dir.parent / "jobs.db")
-        processing = (read_summary(pipeline_path) if mount_ok
-                      else {"available": False, "reason": "REDUXCAP mount unavailable"})
-        self._snapshot = {"runtime": metadata, "capture_processing": processing}
+        if not mount_ok:
+            processing = {"available": False, "reason": "REDUXCAP mount unavailable"}
+            self._cached_processing = None
+        elif (self._cached_processing is None
+              or not self._cached_processing.get("available")
+              or now - self._processing_sampled_at >= self.config.status_sample_seconds):
+            processing = read_summary(pipeline_path)
+            self._cached_processing = processing
+            self._processing_sampled_at = now
+        else:
+            processing = self._cached_processing
+        # Assemble a complete local copy, then publish it in one assignment.
+        # The read-only HTTP thread must never see a partially written report.
+        snapshot = {"runtime": metadata, "capture_processing": processing}
         report = None
         if self.augur is not None:
-            try:
-                self._snapshot = status_payload(self.augur, processing_report=processing)
-                self._snapshot["runtime"] = metadata
-                # The live worker's configured ledger is authoritative. Augur
-                # status may consult a generic/default DB, not this instance.
-                self._snapshot["capture_processing"] = processing
-            except Exception as error:
-                _LOG.warning("status snapshot unavailable: %s", type(error).__name__)
+            if (self._cached_visual is None
+                    or now - self._visual_sampled_at >= self.config.status_sample_seconds):
+                try:
+                    visual = status_payload(self.augur, processing_report=processing)
+                    self._cached_visual = visual
+                    self._visual_sampled_at = now
+                    self._visual_sampled_utc = time.time()
+                except Exception as error:
+                    self._cached_visual = None
+                    self._visual_sampled_utc = None
+                    _LOG.warning("status snapshot unavailable: %s", type(error).__name__)
+            if self._cached_visual is not None:
+                snapshot = dict(self._cached_visual)
+                snapshot["runtime"] = metadata
+                snapshot["capture_processing"] = processing
             try:
                 report = self.augur.doctor_report()
             except Exception as error:
                 _LOG.warning("Doctor snapshot unavailable: %s", type(error).__name__)
+        metadata["visual_sampled_utc"] = self._visual_sampled_utc if self.augur else None
         health = describe_live_health(
             self.state, iface=self.iface or "", free_bytes=free,
             reserve_bytes=self.config.min_free_bytes, handoffs=self.handoffs,
@@ -401,7 +433,8 @@ class LiveRuntime:
         )
         metadata["health"] = health["overall"]
         metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])
-        self._snapshot["doctor"] = health
+        snapshot["doctor"] = health
+        self._snapshot = snapshot
         if mount_ok and (self.state != self.saved_state or self.clock() - self.last_saved >= 5):
             try:
                 atomic_checkpoint(self.config.state_dir / "live.json", metadata)
@@ -551,6 +584,9 @@ class LiveRuntime:
         agent.bus.on(Signal.EVENT, self._observe)
         self.driver = driver
         self.augur = agent
+        self._cached_visual = None
+        self._visual_sampled_utc = None
+        self._cached_processing = None
         self.state = "running"
         self.last_error = ""
         _LOG.info("live passive capture started on %s", self.iface)
@@ -617,6 +653,9 @@ class LiveRuntime:
                 _LOG.error("sighting store close failed: %s", type(error).__name__)
         self.augur = None
         self.driver = None
+        self._cached_visual = None
+        self._visual_sampled_utc = None
+        self._cached_processing = None
         if self.log_handle is not None:
             self.log_handle.close()
             self.log_handle = None
