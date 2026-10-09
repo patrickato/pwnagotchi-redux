@@ -23,7 +23,7 @@ class FakeResponse:
 
 def screen(tmp_path, name="fb_ili9486", size="480,320"):
     folder = tmp_path / "fb1"
-    folder.mkdir()
+    folder.mkdir(exist_ok=True)
     (folder / "name").write_text(name)
     (folder / "virtual_size").write_text(size)
     return tmp_path
