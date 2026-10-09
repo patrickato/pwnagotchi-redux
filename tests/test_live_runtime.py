@@ -728,7 +728,9 @@ def test_rotation_retries_child_stop_without_publishing_or_duplicate_engine(
                 raise PermissionError("synthetic transient SIGTERM failure")
             return super().terminate()
     def spawn(*args, **kwargs):
-        child = TemporarilyUnstoppable()
+        # Only the first engine simulates a transient stop fault. The newly
+        # started engine must remain normally stoppable by fixture teardown.
+        child = TemporarilyUnstoppable() if not children else Child()
         children.append(child)
         return child
     def monitor(argv, **kwargs):
