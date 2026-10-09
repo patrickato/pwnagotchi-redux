@@ -144,6 +144,21 @@ def caplet_text(iface, output, username, password, port):
             "api.rest on\n")
 
 
+class LiveDriver(BettercapDriver):
+    """Treat Bettercap REST command errors as startup/recovery failures."""
+
+    def _checked(self, result, action):
+        if isinstance(result, dict) and result.get("error"):
+            raise RuntimeError(f"Bettercap rejected {action}")
+        return result
+
+    def set_interface(self, iface):
+        return self._checked(super().set_interface(iface), "interface selection")
+
+    def recon(self, on=True):
+        return self._checked(super().recon(on), "passive recon")
+
+
 class LiveRuntime:
     """Owner of one Bettercap subprocess, its Augur event loop, and local UI."""
 
@@ -275,7 +290,7 @@ class LiveRuntime:
 
     def _connect(self):
         self.transport.session()  # authenticated readiness probe
-        driver = BettercapDriver(config=self.transport.config, transport=self.transport)
+        driver = LiveDriver(config=self.transport.config, transport=self.transport)
         result = driver.set_handshake_file(str(self.capture_file))
         if isinstance(result, dict) and result.get("error"):
             raise RuntimeError("Bettercap rejected capture output configuration")
