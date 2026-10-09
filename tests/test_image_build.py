@@ -556,6 +556,17 @@ def test_captures_layout_adds_separate_partition_before_loop_attachment():
         layout_module().captures_layout(result)
 
 
+def test_capture_size_uses_explicit_capacity_instead_of_fixed_partition():
+    source = (
+        'IMG_SIZE=$((BOOT_PART_START + BOOT_PART_SIZE + ROOT_PART_SIZE))\n'
+        'echo "Creating loop device..."\n'
+        'ROOT_DEV="${LOOP_DEV}p2"\n'
+    )
+    text = layout_module().captures_layout(source, size_mib=8192)
+    assert "8192 * 1024 * 1024" in text
+    assert "CAPTURE_DEV=" in text
+
+
 @pytest.mark.parametrize("size", [0, 63, 262145, "512"])
 def test_capture_size_rejects_unbounded_or_invalid_inputs(size):
     with pytest.raises(ValueError, match="partition"):
