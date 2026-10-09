@@ -187,10 +187,9 @@ body{background:radial-gradient(ellipse at 15% 0%,#11202e 0%,var(--bg) 53%);
 .k{color:var(--ink-sub)}
 .doctor-heart.unknown,.doctor-title.unknown{color:var(--info)}
 .doctor-primary{border-top:3px solid var(--acc)}
-.doctor-primary:has(.doctor-heart.action){border-color:var(--crit)}
-.doctor-primary:has(.doctor-heart.degraded){border-color:var(--crit)}
-.doctor-primary:has(.doctor-heart.attention){border-color:var(--warn)}
-.doctor-primary:has(.doctor-heart.unknown){border-color:var(--info)}
+.doctor-primary.action,.doctor-primary.degraded{border-color:var(--crit)}
+.doctor-primary.attention{border-color:var(--warn)}
+.doctor-primary.unknown{border-color:var(--info)}
 .capture-primary{border-top:3px solid #345f80}
 body[data-skin="plain"] .hero{background:var(--card)}
 body[data-skin="plain"] .hero::before{display:none}
@@ -346,6 +345,7 @@ navButtons.forEach(function(button){
 window.addEventListener('hashchange',function(){
  setView(location.hash.slice(1),false);
 });
+document.getElementById('healthjump').onclick=function(){setView('doctor')};
 document.getElementById('viewnav').onkeydown=function(event){
  if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
  const at=pageNames.indexOf(currentView);
@@ -379,6 +379,17 @@ function markStale(why){
  document.getElementById('sub').textContent='STALE · '+why;
  document.getElementById('doctorheart').className='doctor-heart unknown';
  document.getElementById('doctorheart').textContent='♡';
+ const shortcut=document.getElementById('healthjump');
+ shortcut.className='health-shortcut unknown';
+ shortcut.setAttribute('aria-label','Open Doctor: stale health data');
+ document.getElementById('healthglyph').textContent='♡';
+ document.querySelector('.doctor-primary').className='card doctor-primary unknown';
+ document.getElementById('engineindicator').className='runtime-pill unknown';
+ document.getElementById('engineindicator').textContent='STALE';
+ document.getElementById('engineindicator').setAttribute(
+  'aria-label','Capture supervisor: stale data');
+ document.getElementById('herocapture').className='hero-capture unknown';
+ document.getElementById('herocapture').textContent='CAPTURE UNVERIFIED';
  document.getElementById('doctorlabel').textContent='UNKNOWN · STALE';
  document.getElementById('doctorcoverage').textContent=
   'Live health cannot be verified. Last known findings may be out of date.';
@@ -406,6 +417,11 @@ function renderDoctor(report){
  const heart=document.getElementById('doctorheart');
  heart.className='doctor-heart '+mode;heart.textContent=mode==='ok'?'♥':'♡';
  document.getElementById('doctorlabel').textContent=labels[mode];
+ const shortcut=document.getElementById('healthjump');
+ shortcut.className='health-shortcut '+mode;
+ shortcut.setAttribute('aria-label','Open Doctor: '+labels[mode]);
+ document.getElementById('healthglyph').textContent=mode==='unknown'?'♡':'♥';
+ document.querySelector('.doctor-primary').className='card doctor-primary '+mode;
  const gaps=d&&d.coverage&&Array.isArray(d.coverage.not_assessed)
   ?d.coverage.not_assessed:null;
  document.getElementById('doctorcoverage').textContent=
@@ -457,6 +473,21 @@ function renderPipeline(d){
 function renderRuntimePanels(d){
  const runtime=d.runtime||{};
  const connected=typeof runtime.updated_utc==='number';
+ const state=connected&&typeof runtime.state==='string'?runtime.state:'';
+ const statuses={running:'ok',starting:'attention',
+  starting_engine:'attention',rotating:'attention',
+  telemetry_degraded:'degraded',degraded:'degraded',
+  storage_paused:'action',termination_pending:'action',stopped:'attention'};
+ const condition=Object.prototype.hasOwnProperty.call(statuses,state)?
+  statuses[state]:'unknown';
+ const pill=document.getElementById('engineindicator');
+ pill.className='runtime-pill '+condition;
+ pill.textContent=state?state.replaceAll('_',' ').toUpperCase():'NO SESSION';
+ pill.setAttribute('aria-label','Capture supervisor: '+(state||'unknown'));
+ const capture=document.getElementById('herocapture');
+ capture.className='hero-capture '+condition;
+ capture.textContent=state?'ENGINE '+state.replaceAll('_',' ').toUpperCase():
+  'CAPTURE UNKNOWN';
  document.getElementById('capturestate').textContent=
   connected?String(runtime.state||'UNKNOWN'):'UNKNOWN';
  document.getElementById('capturehanded').textContent=
