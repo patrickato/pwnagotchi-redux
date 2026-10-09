@@ -40,8 +40,8 @@ class AuditSettings:
             enabled=opts.get("enabled") is True,
             wordlist=Path(opts.get("wordlist") or "/nonexistent/redux-wordlist"),
             scope_file=Path(opts.get("scope_file") or "/etc/pwnagotchi/scope.json"),
-            results_dir=Path(opts.get("results_dir") or "/var/lib/redux/captures/audits"),
-            database=Path(pipeline.get("database") or "/var/lib/redux/captures/jobs.db"),
+            results_dir=Path(opts.get("results_dir") or "/captures/audits"),
+            database=Path(pipeline.get("database") or "/captures/jobs.db"),
             binary=str(opts.get("binary") or "hashcat"),
             max_runtime_seconds=int(opts.get("max_runtime_seconds") or 600),
         )
