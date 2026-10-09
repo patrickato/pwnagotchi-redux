@@ -649,10 +649,57 @@ def test_heavy_snapshot_is_sampled_at_bounded_cadence_but_doctor_stays_live(
         runtime._observe(SimpleNamespace(payload={"event": None}))
         clock[0] = 105.1
         runtime._checkpoint()
+        assert len(sampled) == 2  # event acknowledged, full view coalesced
+        assert runtime._snapshot["runtime"]["events_seen"] == 1
+        clock[0] = 107.0
+        runtime._checkpoint()
         assert len(sampled) == 3 and len(ledgers) == 2
         assert runtime._snapshot["runtime"]["visual_revision"] == 3
         assert runtime._snapshot["runtime"]["events_seen"] == 1
-        assert agent.doctor_calls == 5
+        assert agent.doctor_calls == 6
+    finally:
+        runtime.close()
+
+
+def test_busy_event_stream_does_not_force_full_visual_query_each_tick(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    now = [10.0]
+    runtime = live.LiveRuntime(cfg(tmp_path, status_sample_seconds=5),
+                               radio_probe=lambda: [], clock=lambda: now[0])
+    snapshots = []
+    ledgers = []
+    class FakeAugur:
+        _sighting_buffer = []
+        _sighting_flush_error = ""
+        _sighting_flush_failures = 0
+        store = SimpleNamespace(close=lambda: None)
+        def doctor_report(self):
+            return {"findings": []}
+        def flush_sightings(self):
+            return 0
+    runtime.augur = FakeAugur()
+    monkeypatch.setattr(live, "read_summary", lambda path: (
+        ledgers.append(now[0]) or {
+            "available": True, "by_status": {}, "last_scan": None,
+        }
+    ))
+    monkeypatch.setattr(live, "status_payload",
+                        lambda agent, processing_report=None: (
+                            snapshots.append(now[0]) or {"sightings": len(snapshots)}
+                        ))
+    try:
+        for second in range(10, 20):
+            now[0] = float(second)
+            for _ in range(200):
+                runtime._observe(SimpleNamespace(payload={"event": None}))
+            runtime._checkpoint()
+            assert runtime._snapshot["runtime"]["events_seen"] == 200*(second-9)
+        assert snapshots == [10.0, 12.0, 14.0, 16.0, 18.0]
+        assert ledgers == [10.0, 15.0]
+        assert runtime._snapshot["runtime"]["visual_revision"] == 5
+        assert runtime.created == 2000
     finally:
         runtime.close()
 
