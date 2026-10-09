@@ -519,6 +519,8 @@ class Augur:
         if self.sentinel() is not None:
             status["sentinel"] = self.sentinel_status()
         status["capture_engine"] = self.capture_plan().get("selected_engine")
+        from ..crack.ingest import read_summary
+        status["capture_processing"] = read_summary()
         # Augur's face: derived from the snapshot above, so the expression always
         # traces to real state (glass-box). Both glyph sets travel so the TFT can
         # pick ascii and the web can show the nice one.
