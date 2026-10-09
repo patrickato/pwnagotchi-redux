@@ -109,12 +109,19 @@ async function deliver(request,data){
  context.tick();
  await deliver(requests.shift(),report(22,22));
  assert.equal(elem('doctorlabel').textContent,'UNKNOWN · STALE');
+ assert.equal(elem('pipelinestate').textContent,'UNKNOWN · STALE');
  assert.match(elem('sub').textContent,/STALE/);
 
  now=18000;
  context.tick();
  assert.equal(requests.length,1);
  const failed=requests.shift();
+ assert.equal(failed.opts.signal.aborted,false);
+ const deadline=[...timers.values()][0];
+ assert.equal(typeof deadline,'function');
+ deadline(); // simulate the five-second browser deadline
+ assert.equal(failed.opts.signal.aborted,true,
+  'timeout must actually abort the in-flight HTTP request');
  failed.reject({name:'AbortError'});
  await flush();await flush();
  assert.match(elem('sub').textContent,/request timed out/);
