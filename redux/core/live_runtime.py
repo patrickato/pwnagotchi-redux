@@ -355,9 +355,15 @@ class LiveRuntime:
             ("127.0.0.1", self.config.web_port),
             make_handler(lambda: self._snapshot, token=None),
         )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        try:
+            thread.start()
+        except Exception:
+            server.server_close()
+            raise
+        # Only mark the listener active *after* its server thread launched.
         self.web = server
-        self.web_thread = threading.Thread(target=server.serve_forever, daemon=True)
-        self.web_thread.start()
+        self.web_thread = thread
         self.web_error = ""
 
     def _launch(self, iface):
