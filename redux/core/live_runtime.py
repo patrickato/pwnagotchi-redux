@@ -166,6 +166,8 @@ class LiveRuntime:
         self.last_error = ""
         self.next_try = 0.0
         self.last_probe = 0.0
+        self.last_saved = float("-inf")
+        self.saved_state = ""
         self.started = 0.0
         self.log_handle = None
         self._snapshot = {"runtime": {"state": "starting"}}
@@ -198,7 +200,10 @@ class LiveRuntime:
                 self._snapshot["runtime"] = metadata
             except Exception as error:
                 _LOG.warning("status snapshot unavailable: %s", type(error).__name__)
-        atomic_checkpoint(self.config.state_dir / "live.json", metadata)
+        if self.state != self.saved_state or self.clock() - self.last_saved >= 5:
+            atomic_checkpoint(self.config.state_dir / "live.json", metadata)
+            self.last_saved = self.clock()
+            self.saved_state = self.state
 
     def _start_web(self):
         if not self.config.enable_web or self.web is not None:
@@ -220,7 +225,6 @@ class LiveRuntime:
         caplet = self.config.state_dir / "bettercap-live.cap"
         if caplet.is_symlink():
             raise ValueError("refusing runtime caplet symlink")
-        from .boot import atomic_checkpoint as _atomic
         # Caplet is not JSON: stage atomically with private file permissions.
         import tempfile
         fd, name = tempfile.mkstemp(dir=self.config.state_dir, prefix=".caplet-")
@@ -250,7 +254,9 @@ class LiveRuntime:
     def _connect(self):
         self.transport.session()  # authenticated readiness probe
         driver = BettercapDriver(config=self.transport.config, transport=self.transport)
-        driver.set_handshake_file(str(self.config.capture_dir / "bettercap-wifi-handshakes.pcap"))
+        result = driver.set_handshake_file(str(self.config.capture_dir / "bettercap-wifi-handshakes.pcap"))
+        if isinstance(result, dict) and result.get("error"):
+            raise RuntimeError("Bettercap rejected capture output configuration")
         radios = [r for r in self.radio_probe() if r.iface == self.iface]
         if not radios:
             raise RuntimeError("capture radio disappeared during startup")
@@ -264,7 +270,10 @@ class LiveRuntime:
         agent.bus.on(Signal.EVENT, self._observe)
         self.driver = driver
         self.augur = agent
-        self._start_web()
+        try:
+            self._start_web()
+        except OSError as error:
+            _LOG.warning("local web dashboard unavailable: %s", type(error).__name__)
         self.state = "running"
         self.last_error = ""
         _LOG.info("live passive capture started on %s", self.iface)
