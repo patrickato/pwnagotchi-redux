@@ -127,6 +127,13 @@ def test_end_to_end_close_convert_and_status(tmp_path, monkeypatch):
         assert status["runtime"]["state"] == "running"
         assert status["capture_processing"]["available"] is True
         assert status["capture_processing"]["hash_records"] == 1
+        assert status["capture_processing"]["last_scan"]["scanned"] == 1
+        assert status["capture_processing"]["last_scan"]["outcomes"]["ready"] == 1
+        worker_finding = next(
+            f for f in status["doctor"]["findings"]
+            if f["area"] == "capture processing")
+        assert worker_finding["status"] == "ok"
+        assert "does not prove" in worker_finding["reason"]
         assert read_summary(ing_conf.database)["hash_records"] == 1
     finally:
         runtime.close()
