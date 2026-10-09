@@ -7,6 +7,7 @@ Type=simple
 User=redux
 Group=redux
 WorkingDirectory=/opt/redux
+ExecStartPre=+/usr/bin/install -d -o redux -g redux -m 0700 /captures/boot
 ExecStart=/usr/bin/python3 -m redux.core.boot
 Environment=PYTHONUNBUFFERED=1
 Restart=on-failure
