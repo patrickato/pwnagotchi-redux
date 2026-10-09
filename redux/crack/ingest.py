@@ -10,6 +10,7 @@ from contextlib import closing
 from dataclasses import dataclass
 import fcntl
 import hashlib
+import heapq
 import json
 import os
 from pathlib import Path
@@ -300,7 +301,7 @@ class CaptureIngestor:
                          reason=f"{type(error).__name__}: {str(error)[:160]}")
             return "error"
 
-    def _completed_scan(self, scanned, outcomes):
+    def _completed_scan(self, scanned, outcomes, *, cursor_path=None):
         """Commit a durable worker heartbeat, including empty and paused passes.
 
         It proves the scan returned successfully, NOT that a captured handshake
@@ -314,9 +315,52 @@ class CaptureIngestor:
             "INSERT OR REPLACE INTO pipeline_meta(key,value) VALUES('last_scan',?)",
             (json.dumps(heartbeat, separators=(",", ":"), sort_keys=True),),
         )
+        if cursor_path is not None:
+            # Cursor and heartbeat are committed together, so a crashed pass
+            # can retry safely without claiming it completed.
+            self.db.execute(
+                "INSERT OR REPLACE INTO pipeline_meta(key,value) "
+                "VALUES('cursor_path',?)", (cursor_path,),
+            )
         self.db.commit()
         return {"scanned": scanned, "outcomes": dict(outcomes),
                 "summary": self.summary()}
+
+    def _candidates(self):
+        """Yield eligible immediate children without buffering a directory.
+
+        Never recurse into raw captures or follow an incoming-file symlink.
+        Concurrent file changes are handled by ingest_file's settle/hash checks.
+        """
+        for directory in self.settings.inputs:
+            if directory.is_dir() and not directory.is_symlink():
+                for path in directory.iterdir():
+                    if path.suffix.lower() in SUFFIXES and not path.is_symlink():
+                        yield path
+
+    def _select_batch(self):
+        """Lexical round-robin selection using O(max_files_per_pass) RAM.
+
+        Heap selection still examines each directory entry (O(N log K) CPU),
+        but cannot materialize an unbounded path list on a small Pi. On wrap,
+        a second streaming pass fills the remaining slots from the beginning.
+        """
+        row = self.db.execute(
+            "SELECT value FROM pipeline_meta WHERE key='cursor_path'"
+        ).fetchone()
+        cursor = row[0] if row and isinstance(row[0], str) else ""
+        limit = self.settings.max_files_per_pass
+        selected = heapq.nsmallest(
+            limit, (p for p in self._candidates() if str(p) > cursor),
+            key=str,
+        )
+        if cursor and len(selected) < limit:
+            selected.extend(heapq.nsmallest(
+                limit - len(selected),
+                (p for p in self._candidates() if str(p) <= cursor),
+                key=str,
+            ))
+        return selected
 
     def scan(self):
         lock = self.settings.database.with_suffix(".lock")
@@ -325,28 +369,16 @@ class CaptureIngestor:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             if free_bytes(self.settings.output_dir) < self.settings.min_free_bytes:
                 return self._completed_scan(0, {"paused_low_storage": 1})
-            files = []
-            for directory in self.settings.inputs:
-                if directory.is_dir() and not directory.is_symlink():
-                    files.extend(p for p in directory.iterdir()
-                                 if p.suffix.lower() in SUFFIXES
-                                 and not p.is_symlink())
-            files.sort(key=str)
-            if not files:
+            selected = self._select_batch()
+            if not selected:
                 return self._completed_scan(0, {})
-            row = self.db.execute(
-                "SELECT value FROM pipeline_meta WHERE key='cursor'").fetchone()
-            start = int(row[0]) % len(files) if row else 0
-            selected = [files[(start + j) % len(files)]
-                        for j in range(min(len(files),
-                                           self.settings.max_files_per_pass))]
             outcome = {}
             for path in selected:
                 state = self.ingest_file(path)
                 outcome[state] = outcome.get(state, 0) + 1
-            self.db.execute("INSERT OR REPLACE INTO pipeline_meta(key,value) VALUES('cursor',?)",
-                            (str((start + len(selected)) % len(files)),))
-            return self._completed_scan(len(selected), outcome)
+            return self._completed_scan(
+                len(selected), outcome, cursor_path=str(selected[-1]),
+            )
 
 
 def read_summary(database=None):
