@@ -70,7 +70,8 @@ vm.createContext(context);
 vm.runInContext(source,context);
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const report=(version,sample)=>({
- runtime:{updated_utc:version,visual_sampled_utc:sample},
+ runtime:{updated_utc:version,visual_sampled_utc:sample,
+  visual_revision:sample},
  doctor:{overall:'ok',findings:[],
   coverage:{assessed:['live engine'],not_assessed:[]}},
  capture_processing:{available:false,reason:'not observed'},
