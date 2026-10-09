@@ -356,7 +356,7 @@ def invoke(args, **kwargs):
 def prepared(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    for name in ("build.sh", "image", "redux", "boot"):
+    for name in ("build.sh", "image", "redux", "boot", "config", "systemd"):
         source = REPO / name
         if source.is_dir():
             shutil.copytree(source, repo / name)
@@ -403,6 +403,8 @@ def test_preparation_exports_only_redux_and_targets_pi4(prepared):
     assert (tree / "stage2/SKIP_IMAGES").exists()
     assert (tree / "stage-redux/EXPORT_IMAGE").exists()
     assert (tree / "stage-redux/00-redux/files/redux/core/boot.py").exists()
+    assert (tree / "stage-redux/00-redux/files/pipeline/pipeline.toml").exists()
+    assert (tree / "stage-redux/00-redux/files/pipeline/redux-capture-ingest.service").exists()
     config = invoke(["bash", "-c", 'source "$1"; printf "%s|%s|%s" "$RELEASE" "$STAGE_LIST" "$ENABLE_SSH"', "bash", str(tree / "config")], env=env)
     assert config.stdout == "bookworm|stage0 stage1 stage2 stage-redux|0"
     country = invoke(["bash", "-c", 'source "$1"; [[ ! -v WPA_COUNTRY ]]', "bash", str(tree / "config")], env=env)
@@ -439,6 +441,13 @@ bash ./00-run.sh
     assert "arm_64bit=1" in (root / "boot/firmware/config.txt").read_text()
     chroot = Path(env["CHROOT_INPUT"]).read_text()
     assert "systemctl enable redux.service" in chroot
+    assert (root / "etc/redux/pipeline.toml").is_file()
+    assert "/captures/jobs.db" in (root / "etc/redux/pipeline.toml").read_text()
+    pipeline_unit = (root / "etc/systemd/system/redux-capture-ingest.service").read_text()
+    assert "Environment=PYTHONPATH=/opt/redux" in pipeline_unit
+    assert "RequiresMountsFor=/captures" in pipeline_unit
+    assert "hcx" in chroot
+    assert "systemctl disable redux-capture-ingest.timer" in chroot
     assert "systemctl mask bettercap.service" in chroot
 
 
