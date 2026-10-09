@@ -30,7 +30,13 @@ run with `sudo REDUX_BUILD_DIR="$PWD/build/image-next" ./build.sh`. Filesystem
 mounts from a failed pi-gen run must be unmounted before removing any build tree.
 `--prepare-only` stages sources without root or image creation; it is not a build.
 
-Output: `build/image/pi-gen/deploy/image_*-pwnagotchi-redux-pi4-pi5-arm64.img.xz`.
+Output: `build/image/pi-gen/deploy/*.img.xz` with a matching
+`.img.xz.sha256` checksum and `.img.xz.release.json` provenance manifest.
+The wrapper streams and verifies the complete xz payload, confirms the disk
+boot-sector marker, and records the exact Redux, pi-gen, and Nexmon source
+revisions. It **explicitly records `hardware_tested: false`**; file-integrity
+verification is not Pi boot verification. A missing, truncated, undersized, or
+ambiguous image causes release publication to fail.
 Only the redux stage exports an image; there is no desktop stage.
 
 For local login, country, locale or timezone provisioning, pass a private shell
