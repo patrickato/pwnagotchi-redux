@@ -486,6 +486,77 @@ def test_engine_launch_augur_event_pump_restart_and_private_caplet(tmp_path, mon
     assert children[-1].terminated
 
 
+def test_transient_database_error_retries_without_restarting_bettercap(tmp_path, monkeypatch):
+    import sqlite3
+    clock = [100.0]
+    started = []
+    def spawn(*args, **kwargs):
+        child = Child()
+        started.append(child)
+        return child
+    def iw(args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, "type monitor\\n", "")
+    monkeypatch.setattr(live, "HttpTransport", Transport)
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [radio()],
+                               executor=iw, spawn=spawn, clock=lambda: clock[0])
+    try:
+        assert runtime.tick() == "starting_engine"
+        assert runtime.tick() == "running"
+        real_insert = runtime.augur.store.insert_many
+        attempts = [0]
+        def intermittent(batch):
+            attempts[0] += 1
+            if attempts[0] == 1:
+                raise sqlite3.OperationalError("synthetic database temporarily busy")
+            return real_insert(batch)
+        runtime.augur.store.insert_many = intermittent
+        assert runtime.tick() == "telemetry_degraded"
+        assert len(started) == 1 and not started[0].terminated
+        assert len(runtime.augur._sighting_buffer) == 1
+        assert runtime._snapshot["runtime"]["sightings_pending"] == 1
+        assert runtime._snapshot["doctor"]["overall"] == "degraded"
+        clock[0] += 1
+        assert runtime.tick() == "telemetry_degraded"
+        assert attempts[0] == 1  # no repeated rapid failed commits
+        clock[0] += runtime.config.retry_seconds
+        assert runtime.tick() == "running"
+        assert attempts[0] >= 2
+        assert runtime.augur.store.count() == 1
+        assert runtime.augur._sighting_buffer == []
+        assert runtime.sighting_loss_events == 0
+        assert len(started) == 1 and not started[0].terminated
+    finally:
+        runtime.close()
+
+
+def test_unrecoverable_database_write_reports_uncommitted_count(tmp_path, monkeypatch):
+    import sqlite3
+    clock = [110.0]
+    def spawn(*args, **kwargs):
+        return Child()
+    def iw(args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, "type monitor\\n", "")
+    monkeypatch.setattr(live, "HttpTransport", Transport)
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [radio()],
+                               executor=iw, spawn=spawn, clock=lambda: clock[0])
+    try:
+        runtime.tick()
+        assert runtime.tick() == "running"
+        def cannot_write(batch):
+            raise sqlite3.OperationalError("synthetic read-only database")
+        runtime.augur.store.insert_many = cannot_write
+        assert runtime.tick() == "telemetry_degraded"
+        assert len(runtime.augur._sighting_buffer) == 1
+    finally:
+        runtime.close()
+    assert runtime.sighting_loss_events == 1
+    assert runtime._snapshot["runtime"]["sightings_lost_on_restart"] == 1
+    assert runtime._snapshot["doctor"]["overall"] == "action"
+    area = next(item for item in runtime._snapshot["doctor"]["findings"]
+                if item["area"] == "sighting persistence")
+    assert area["status"] == "action"
+
+
 def test_capture_rotation_closes_and_delivers_session(tmp_path, monkeypatch):
     clock = [50.0]
     children = []
