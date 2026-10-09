@@ -116,8 +116,12 @@ xinit, Xauthority and libinput packages. The profile is recorded in
 remain in the image's `/usr/share/redux/packages.tsv`. Chromium is
 substantial (the browser package alone occupies hundreds of MiB, before
 dependencies), so account for the larger root filesystem and RAM use.
-An unsupported profile fails the image build. No new systemd service
-is enabled, and Redux's existing capture supervisor remains independent.
+An unsupported profile fails the image build. The profile also installs
+an **inactive user-scoped** `redux-kiosk.service` into
+`/usr/lib/systemd/user/`, plus a deliberately invalid framebuffer template
+in `/usr/share/redux/kiosk.example.env`. Neither a system service nor a
+user service is enabled automatically. Redux's independent capture
+supervisor remains untouched.
 
 **On the separate development SD card, after confirming the actual TFT:**
 
@@ -149,6 +153,56 @@ is enabled, and Redux's existing capture supervisor remains independent.
    the session's temporary runtime directory. It does not enable
    `--no-sandbox`, download web assets, open a remote address or
    start a web server.
+
+### Optional supervised browser after a verified X11 session
+
+`redux-kiosk --supervise --framebuffer /dev/fbN` runs the same preflight as
+`--launch`, then restarts Chromium after an unexpected exit, with at most
+five attempts per supervisor instance and a three-second delay. A normal
+Chromium exit (code 0) stops cleanly. SIGINT/SIGTERM are relayed through a
+bounded child-reaping path: if the browser ignores graceful termination,
+the supervisor escalates to a kill rather than hanging indefinitely.
+The command remains unprivileged, uses the current real X11 session, and
+does **not** create an Xorg server.
+
+Only after the TFT, framebuffer, touch orientation, browser sandbox and
+Xorg session work, an operator may start the *inactive* user service.
+Run the following as the same local, logged-in graphical user (not root):
+
+```sh
+mkdir -p "$HOME/.config/redux"
+chmod 700 "$HOME/.config/redux"
+cp /usr/share/redux/kiosk.example.env "$HOME/.config/redux/kiosk.env"
+chmod 600 "$HOME/.config/redux/kiosk.env"
+# Edit REDUX_FRAMEBUFFER=/dev/fbN to YOUR verified device.
+${EDITOR:-vi} "$HOME/.config/redux/kiosk.env"
+# Ensure the user service manager sees your actual X11 authorization/session.
+systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR
+systemctl --user daemon-reload
+systemctl --user start redux-kiosk.service
+systemctl --user status redux-kiosk.service
+```
+
+The mandatory `~/.config/redux/kiosk.env` must contain
+`REDUX_FRAMEBUFFER=/dev/fb<actual_number>` and
+`REDUX_DASHBOARD_PORT=8080`. The committed example uses **invalid**
+`/dev/fbN` deliberately. A missing or incorrect framebuffer, missing
+dashboard, missing X11 session, or insecure browser profile prevents
+browser launch. The user service performs the same preflight as
+`ExecStartPre` and has a short bounded restart/start-limit policy to avoid
+an endless browser crash loop. Stop it at any time with
+`systemctl --user stop redux-kiosk.service`; if it hits the start limit,
+diagnose the real underlying problem using
+`journalctl --user -u redux-kiosk.service` before using
+`systemctl --user reset-failed redux-kiosk.service`.
+
+Do **not** `enable` this unit for automatic graphical-session startup
+until repeated physical boot/display/touch tests have passed. It is not
+a graphical-session manager: the operator must bring up the correct
+Xorg/fbdev environment first. It runs only in the user's existing
+X11 environment and does not access Bettercap REST or other privileged
+capture controls. The systemd service uses control-group cleanup to
+stop Chromium descendants if normal shutdown cannot reap them.
 
 The preflight intentionally reports `touch_verified: false` and
 `physical_display_verified: false` even when software checks pass.
