@@ -50,6 +50,10 @@ def preflight(tmp_path, **changes):
         "x11_check": lambda display: {
             "ok": display == ":0", "reason": "fixture X11 socket",
         },
+        "x11_geometry_check": lambda display: {
+            "ok": display == ":0", "resolution": [480, 320],
+            "reason": "fixture X11 root geometry",
+        },
     }
     opts.update(changes)
     return kiosk.preflight("/dev/fb1", **opts)
@@ -62,6 +66,8 @@ def test_real_preflight_has_explicit_honest_boundaries(tmp_path):
     assert result["checks"]["framebuffer"]["name"] == "fb_ili9486"
     assert result["checks"]["browser"]["executable"] == "/usr/bin/chromium"
     assert result["checks"]["x11"]["ok"] is True
+    assert result["checks"]["x11_geometry"]["ok"] is True
+    assert result["checks"]["x11_geometry"]["resolution"] == [480, 320]
     assert result["touch_verified"] is False
     assert result["physical_display_verified"] is False
     assert "does not prove" in result["reason"]
@@ -383,3 +389,56 @@ def test_symlinked_xdg_runtime_dir_fails_closed(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(kiosk.os, "execv", lambda *_a: pytest.fail("unsafe browser spawn"))
     assert kiosk.main(["--launch", "--framebuffer", "/dev/fb1"]) == 2
     assert "symlink" in capsys.readouterr().err
+
+def test_x11_geometry_probe_accepts_tft_and_rejects_hdmi(tmp_path):
+    import subprocess
+    calls = []
+    def runner(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(
+            argv, 0, "screen #0:\\n  dimensions:    480x320 pixels (120x80 millimeters)\\n", "",
+        )
+    probe = kiosk.x11_geometry_probe(
+        ":0", which=lambda name: "/usr/bin/xdpyinfo", runner=runner)
+    assert probe["ok"]
+    assert probe["resolution"] == [480, 320]
+    assert calls[0][0] == ["/usr/bin/xdpyinfo", "-display", ":0"]
+    assert calls[0][1]["timeout"] == 3
+    assert calls[0][1]["capture_output"] is True
+    bad = kiosk.x11_geometry_probe(
+        ":0", which=lambda _: "/usr/bin/xdpyinfo",
+        runner=lambda argv, **kw: subprocess.CompletedProcess(
+            argv, 0, "  dimensions: 1920x1080 pixels", ""),
+    )
+    assert not bad["ok"]
+    assert bad["resolution"] == [1920, 1080]
+    assert "not 480x320" in bad["reason"]
+
+
+def test_x11_geometry_probe_requires_auth_and_installed_tool():
+    import subprocess
+    noauth = kiosk.x11_geometry_probe(
+        ":0", which=lambda _: "/usr/bin/xdpyinfo",
+        runner=lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", "auth denied"),
+    )
+    assert not noauth["ok"]
+    assert "could not read" in noauth["reason"]
+    no_tool = kiosk.x11_geometry_probe(":0", which=lambda _: None)
+    assert not no_tool["ok"]
+    assert "xdpyinfo" in no_tool["reason"]
+    remote = kiosk.x11_geometry_probe(
+        "remote:0", which=lambda _: "/usr/bin/xdpyinfo",
+        runner=lambda *_a, **_k: pytest.fail("must not contact a remote X server"),
+    )
+    assert not remote["ok"]
+
+
+def test_kiosk_preflight_rejects_hdmi_sized_x11_even_with_valid_fb(tmp_path):
+    bad = preflight(tmp_path, x11_geometry_check=lambda display: {
+        "ok": False, "resolution": [1920, 1080], "reason": "HDMI desktop",
+    })
+    assert not bad["ok"]
+    assert bad["checks"]["framebuffer"]["ok"]
+    assert bad["checks"]["x11"]["ok"]
+    assert not bad["checks"]["x11_geometry"]["ok"]
+    assert not bad["physical_display_verified"]
