@@ -6,6 +6,12 @@ heading() { printf '\n== %s ==\n' "$1"; }
 heading "System and mounts"
 uname -a
 mount | grep ' /captures ' || echo "REDUXCAP not mounted"
+heading "Read-only Redux preflight"
+if [[ -f /etc/redux/live.toml && -f /opt/redux/redux/core/live_runtime.py ]]; then
+  env PYTHONPATH=/opt/redux /usr/bin/python3 -m redux.core.live_runtime --config /etc/redux/live.toml --check || true
+else
+  echo "Baked Redux live runtime not present"
+fi
 heading "Radio inventory (no packet collection)"
 if command -v iw >/dev/null 2>&1; then iw dev; else echo "iw missing"; fi
 heading "Service status"
