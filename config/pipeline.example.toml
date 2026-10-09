@@ -1,6 +1,6 @@
 # Copy to /etc/redux/pipeline.toml only after verifying input directories.
 [pipeline]
-inputs = ["/etc/pwnagotchi/handshakes", "/captures/incoming"]
+inputs = ["/captures/incoming"]
 output_dir = "/captures/ready"
 database = "/captures/jobs.db"
 settle_seconds = 4.0
