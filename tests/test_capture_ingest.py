@@ -196,6 +196,120 @@ def test_scan_cursor_progresses_when_more_than_limit(tmp_path):
         assert len(ing.rows()) == 5
 
 
+def test_lexical_capture_cursor_survives_restart_and_directory_churn(tmp_path):
+    cfg = settings(tmp_path, max_files_per_pass=2)
+    inp = cfg.inputs[0]
+    for name in ("00", "02", "04", "06", "08"):
+        write_file(inp / f"{name}.hc22000", (REC + f"\nsource-{name}\n").encode())
+    with CaptureIngestor(cfg) as worker:
+        assert [p.name for p in worker._select_batch()] == [
+            "00.hc22000", "02.hc22000"
+        ]
+        assert worker.scan()["scanned"] == 2
+        assert worker.db.execute(
+            "SELECT value FROM pipeline_meta WHERE key='cursor_path'"
+        ).fetchone()[0].endswith("/02.hc22000")
+
+    # A new entry between scanned names must be picked up, while a deleted
+    # entry must not strand the persisted cursor at a numeric position.
+    write_file(inp / "03.hc22000", (REC + "\nsource-03\n").encode())
+    (inp / "04.hc22000").unlink()
+    with CaptureIngestor(cfg) as worker:
+        assert [p.name for p in worker._select_batch()] == [
+            "03.hc22000", "06.hc22000"
+        ]
+        assert worker.scan()["scanned"] == 2
+        assert [p.name for p in worker._select_batch()] == [
+            "08.hc22000", "00.hc22000"
+        ]
+        assert worker.scan()["scanned"] == 2
+        assert worker.scan()["scanned"] == 2
+        assert worker.db.execute(
+            "SELECT value FROM pipeline_meta WHERE key='cursor_path'"
+        ).fetchone()[0].endswith("/06.hc22000")
+
+
+def test_capture_batch_selection_is_streaming_and_bounded(tmp_path, monkeypatch):
+    cfg = settings(tmp_path, max_files_per_pass=5)
+    with CaptureIngestor(cfg) as worker:
+        seen = [0]
+        def candidates():
+            for index in range(12000):
+                seen[0] += 1
+                yield f"/captures/incoming/{index:05d}.pcap"
+        monkeypatch.setattr(worker, "_candidates", candidates)
+        assert worker._select_batch() == [
+            f"/captures/incoming/{i:05d}.pcap" for i in range(5)
+        ]
+        assert seen[0] == 12000
+        worker.db.execute(
+            "INSERT OR REPLACE INTO pipeline_meta(key,value) "
+            "VALUES('cursor_path',?)",
+            ("/captures/incoming/11997.pcap",),
+        )
+        worker.db.commit()
+        seen[0] = 0
+        assert worker._select_batch() == [
+            "/captures/incoming/11998.pcap",
+            "/captures/incoming/11999.pcap",
+            "/captures/incoming/00000.pcap",
+            "/captures/incoming/00001.pcap",
+            "/captures/incoming/00002.pcap",
+        ]
+        # A wrap may stream entries twice, but never needs 12000 path objects
+        # resident at the same time; K stays capped at max_files_per_pass.
+        assert seen[0] == 24000
+
+
+def test_old_numeric_cursor_migrates_without_error_or_deleting_data(tmp_path):
+    cfg = settings(tmp_path, max_files_per_pass=1)
+    for index in range(3):
+        write_file(cfg.inputs[0] / f"{index}.hc22000",
+                   (REC + f"\nfixture-{index}\n").encode())
+    with CaptureIngestor(cfg) as worker:
+        worker.db.execute(
+            "INSERT OR REPLACE INTO pipeline_meta(key,value) VALUES('cursor','2')"
+        )
+        worker.db.commit()
+        assert [p.name for p in worker._select_batch()] == ["0.hc22000"]
+        assert worker.scan()["scanned"] == 1
+        cursor = worker.db.execute(
+            "SELECT value FROM pipeline_meta WHERE key='cursor_path'"
+        ).fetchone()[0]
+        assert cursor.endswith("/0.hc22000")
+        assert worker.scan()["scanned"] == 1
+
+
+def test_failed_worker_pass_does_not_advance_lexical_cursor(tmp_path, monkeypatch):
+    import pytest
+    cfg = settings(tmp_path, max_files_per_pass=2)
+    for index in range(3):
+        write_file(cfg.inputs[0] / f"{index}.hc22000",
+                   (REC + f"\nfile-{index}\n").encode())
+    with CaptureIngestor(cfg) as worker:
+        processed = [0]
+        real = worker.ingest_file
+        def crash_on_second(path):
+            processed[0] += 1
+            if processed[0] == 2:
+                raise RuntimeError("synthetic unexpected worker failure")
+            return real(path)
+        monkeypatch.setattr(worker, "ingest_file", crash_on_second)
+        with pytest.raises(RuntimeError, match="synthetic"):
+            worker.scan()
+        assert worker.db.execute(
+            "SELECT value FROM pipeline_meta WHERE key='cursor_path'"
+        ).fetchone() is None
+        assert worker.db.execute(
+            "SELECT value FROM pipeline_meta WHERE key='last_scan'"
+        ).fetchone() is None
+        monkeypatch.setattr(worker, "ingest_file", real)
+        assert [p.name for p in worker._select_batch()] == [
+            "0.hc22000", "1.hc22000"
+        ]
+        assert worker.scan()["scanned"] == 2
+
+
 def test_no_input_no_crash(tmp_path):
     cfg = Settings((tmp_path / "missing",), tmp_path / "out", tmp_path / "db" / "state.db")
     with CaptureIngestor(cfg) as ing:
