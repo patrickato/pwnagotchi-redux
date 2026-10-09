@@ -86,3 +86,77 @@ def test_allowlist_add_and_permits():
     assert al.permits(ssid="MyLab")
     assert al.permits(bssid="de:ad:be:ef:00:01")
     assert not al.permits(bssid="de:ad:be:ef:00:02")
+
+
+def test_http_transport_uses_documented_api_routes_and_auth(monkeypatch):
+    """Smoke-test real URL construction, not a replay-only Transport double."""
+    import base64
+    import json
+    from redux.engine.bettercap_driver import HttpTransport
+    from urllib import request as urllib_request
+    seen = []
+
+    class Reply:
+        def __init__(self, data):
+            self.data = data
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            return False
+        def read(self):
+            return self.data
+
+    def open_fake(req, timeout=None):
+        seen.append((req.full_url, req.get_method(),
+                     req.get_header("Authorization"), req.data))
+        if req.full_url.endswith("/events") and req.get_method() == "GET":
+            return Reply(b'[{"tag":"wifi.ap.new","data":{"mac":"aa:bb:cc:dd:ee:ff"}}]')
+        if req.get_method() == "POST":
+            return Reply(b'{"success":true,"msg":""}')
+        return Reply(b'{}')
+
+    monkeypatch.setattr(urllib_request, "urlopen", open_fake)
+    transport = HttpTransport(BettercapConfig(
+        host="127.0.0.1", port=8081, username="redux", password="synthetic"
+    ))
+    assert transport.run("wifi.recon on")["success"] is True
+    assert transport.session() == {}
+    assert len(transport.events(clear=True)) == 1
+    assert [(url, method) for url, method, _, _ in seen] == [
+        ("http://127.0.0.1:8081/api/session", "POST"),
+        ("http://127.0.0.1:8081/api/session", "GET"),
+        ("http://127.0.0.1:8081/api/events", "GET"),
+        ("http://127.0.0.1:8081/api/events", "DELETE"),
+    ]
+    expected = "Basic " + base64.b64encode(b"redux:synthetic").decode()
+    assert all(auth == expected for _, _, auth, _ in seen)
+    assert json.loads(seen[0][3]) == {"cmd": "wifi.recon on"}
+
+
+def test_http_transport_event_clear_failure_is_not_hidden(monkeypatch):
+    from urllib.error import URLError
+    from redux.engine.bettercap_driver import HttpTransport, BettercapUnavailable
+    transport = HttpTransport(BettercapConfig())
+    calls = []
+    def fake(method, path, body=None):
+        calls.append((method, path))
+        if method == "DELETE":
+            raise BettercapUnavailable("synthetic offline DELETE failure")
+        return [{"tag": "wifi.ap.new", "data": {"mac": "aa:bb:cc:dd:ee:ff"}}]
+    monkeypatch.setattr(transport, "_request", fake)
+    with pytest.raises(BettercapUnavailable, match="DELETE failure"):
+        transport.events(clear=True)
+    assert calls == [("GET", "/events"), ("DELETE", "/events")]
+
+
+def test_http_transport_rejects_invalid_event_payload(monkeypatch):
+    from redux.engine.bettercap_driver import HttpTransport, BettercapUnavailable
+    transport = HttpTransport(BettercapConfig())
+    calls = []
+    def fake(method, path, body=None):
+        calls.append(method)
+        return {"error": "unexpected response"}
+    monkeypatch.setattr(transport, "_request", fake)
+    with pytest.raises(BettercapUnavailable, match="unexpected payload"):
+        transport.events(clear=True)
+    assert calls == ["GET"]
