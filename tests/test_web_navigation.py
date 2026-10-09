@@ -45,6 +45,8 @@ def test_every_touch_navigation_page_has_real_content():
         "capturepending", "capturefile", "capturewarning", "runtimestate",
         "runtimefree", "runtimelogs", "runtimeerror", "pipelinestate",
         "doctorheart", "doctorlist", "map", "aptbl",
+        "devicebar", "engineindicator", "healthjump", "healthglyph",
+        "herocapture", "face", "creature", "mood",
     }
     assert required <= parser.ids
     assert page.count('id="viewroot"') == 1
@@ -77,3 +79,11 @@ def test_compact_touch_workspace_keeps_one_scrollable_page_and_bottom_nav():
     assert "overscroll-behavior:contain" in page
     assert "touch-action:manipulation" in page
     assert "document.addEventListener('visibilitychange'" in page
+    assert ".hero-main{gap:11px" in page
+    assert ".overview-metrics .row{grid-template-columns:repeat(3" in page
+    assert "@media(max-width:360px)" in page
+    assert "@media(prefers-reduced-motion:reduce)" in page
+    assert "health-glow" in page and "health-alert" in page
+    assert "aria-label=\"Open Doctor: health unknown\"" in page
+    assert "setView('doctor')" in page
+    assert "lastDoctorFindings" in page
