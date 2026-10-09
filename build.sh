@@ -125,7 +125,9 @@ linux-headers-rpi-v8
 linux-headers-rpi-2712
 EOF
 chmod +x "$PI_GEN_DIR/stage-redux/prerun.sh" "$PI_GEN_DIR/stage-redux/00-redux/00-run.sh"
-python3 "$REPO_DIR/image/export_layout.py" "$PI_GEN_DIR/export-image/prerun.sh"
+# Optional per-card capture capacity; the exporter validates 64 MiB–256 GiB.
+python3 "$REPO_DIR/image/export_layout.py" "$PI_GEN_DIR/export-image/prerun.sh" \
+    --captures-mib "${REDUX_CAPTURES_MIB:-512}"
 if [[ -n ${REDUX_OTA_CERT:-} ]]; then
     python3 "$REPO_DIR/image/prepare_ota.py" "$REPO_DIR/image" "$PI_GEN_DIR"
 fi
