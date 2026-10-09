@@ -96,6 +96,69 @@ default. The wrapper fixes the release and stage list; arm64 is fixed by pi-gen.
 Pinned upstream references: [pi-gen arm64 Bookworm](https://github.com/RPi-Distro/pi-gen/tree/816f458a9931e216ecf8969e13b4d0ca39947d1f),
 [maintained nexmon](https://github.com/jayofelony/nexmon/tree/1654e1857766df92086dbfbed5ffd288efc9bd8c).
 
+## Optional 480×320 graphical kiosk profile (manual X11)
+
+The base image remains **Pi OS Lite**, not a full desktop. It always ships
+`/usr/local/bin/redux-kiosk`, a Python standard-library preflight/launcher,
+but deliberately does **not** install Chromium/X11 or auto-start a browser.
+This avoids turning every passive capture appliance into a heavy desktop,
+and prevents a guessed framebuffer from blanking a working HDMI console.
+
+To stage the **opt-in** browser stack, build a fresh image with:
+
+```sh
+sudo REDUX_KIOSK_PROFILE=manual-x11 REDUX_BUILD_DIR="$PWD/build/image-kiosk" ./build.sh
+```
+
+`manual-x11` adds Debian Bookworm ARM64 Chromium, Xorg/fbdev,
+xinit, Xauthority and libinput packages. The profile is recorded in
+`/usr/share/redux/kiosk-profile`; the exact installed package versions
+remain in the image's `/usr/share/redux/packages.tsv`. Chromium is
+substantial (the browser package alone occupies hundreds of MiB, before
+dependencies), so account for the larger root filesystem and RAM use.
+An unsupported profile fails the image build. No new systemd service
+is enabled, and Redux's existing capture supervisor remains independent.
+
+**On the separate development SD card, after confirming the actual TFT:**
+
+1. Identify the GPIO SPI framebuffer from
+   `cat /proc/fb`, `cat /sys/class/graphics/fb*/name`, and
+   `cat /sys/class/graphics/fb*/virtual_size`. Do **not** assume fb1.
+   Confirm ILI9486 versus the actual panel board; the existing
+   `REDUX_TFT_PROFILE=mpi3501` is **not** a universal Waveshare/XPT2046
+   driver and does not include proven touch calibration.
+2. Confirm `redux-live.service` is running and
+   `curl --fail http://127.0.0.1:8080/api/status` returns a real
+   Doctor JSON report. The browser does not start the radio.
+3. Start an actual X11 session **locally as a non-root console user**.
+   Configure the Xorg `fbdev` driver for the verified framebuffer;
+   for example, the device section must use your observed
+   `Option "fbdev" "/dev/fbN"`, not a copied `fb1` value.
+   Test Xorg, the framebuffer orientation and the XPT2046 input
+   mapping separately. Session setup and permissions vary by image
+   and must be validated before enabling any boot automation.
+4. Inside that X11 session with a writable `XDG_RUNTIME_DIR`, use
+   `redux-kiosk --check --framebuffer /dev/fbN` (replace fbN with
+   the actual device). This prints a structured JSON report and exits
+   nonzero if the framebuffer, 480×320/320×480 mode, browser, unprivileged
+   graphical environment or local dashboard cannot be verified.
+5. Only after a passing check, run
+   `redux-kiosk --launch --framebuffer /dev/fbN`.
+   It replaces itself with sandboxed Chromium in kiosk mode at
+   **http://127.0.0.1:8080/**, with a private browser profile under
+   the session's temporary runtime directory. It does not enable
+   `--no-sandbox`, download web assets, open a remote address or
+   start a web server.
+
+The preflight intentionally reports `touch_verified: false` and
+`physical_display_verified: false` even when software checks pass.
+The active Xorg seat, framebuffer mapping, SPI performance, touch
+coordinates/rotation, screen visibility, and reboot behavior are
+separate hardware acceptance gates. In particular, Xorg or Chromium
+may fail to use a legacy SPI fbdev node on a given target kernel.
+Do not call this profile plug-and-play or mark the physical TFT tested
+until the actual device proves it.
+
 ## Verification
 
 ```sh
