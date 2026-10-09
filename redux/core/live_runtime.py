@@ -293,6 +293,10 @@ class LiveRuntime:
             self.handshakes += 1
 
     def _checkpoint(self):
+        try:
+            free = free_bytes(self.config.active_dir)
+        except OSError:
+            free = None
         metadata = {
             "state": self.state, "iface": self.iface or "",
             "events_seen": self.created, "handshake_events": self.handshakes,
@@ -300,7 +304,7 @@ class LiveRuntime:
             "capture_file": str(self.capture_file) if self.capture_file else "",
             "handed_off": self.handoffs,
             "handoff_error": self.last_handoff_error[:120],
-            "free_bytes": free_bytes(self.config.active_dir),
+            "free_bytes": free,
             "last_error": self.last_error[:180],
             "updated_utc": time.time(),
         }
@@ -312,7 +316,13 @@ class LiveRuntime:
             except Exception as error:
                 _LOG.warning("status snapshot unavailable: %s", type(error).__name__)
         if self.state != self.saved_state or self.clock() - self.last_saved >= 5:
-            atomic_checkpoint(self.config.state_dir / "live.json", metadata)
+            try:
+                atomic_checkpoint(self.config.state_dir / "live.json", metadata)
+            except OSError as error:
+                # Storage becoming read-only must not abandon a running child
+                # or spin systemd restart loops. Keep the live snapshot usable.
+                self.last_error = f"status persistence failed: {type(error).__name__}"
+                _LOG.error("%s", self.last_error)
             self.last_saved = self.clock()
             self.saved_state = self.state
 
@@ -399,7 +409,12 @@ class LiveRuntime:
 
     def _drop(self):
         if self.augur is not None:
-            self.augur.store.close()
+            try:
+                self.augur.store.close()
+            except OSError as error:
+                _LOG.error("sighting store close failed: %s", type(error).__name__)
+            except Exception as error:
+                _LOG.error("sighting store close failed: %s", type(error).__name__)
         self.augur = None
         self.driver = None
         if self.process is not None:
@@ -485,8 +500,12 @@ class LiveRuntime:
             if (path.suffix != ".pcap" or path == self.capture_file
                     or path.is_symlink() or not path.is_file()):
                 continue
-            if time.time() - path.stat().st_mtime >= 60:
-                self._handoff(path)
+            try:
+                if time.time() - path.stat().st_mtime >= 60:
+                    self._handoff(path)
+            except OSError:
+                # A concurrent rename/removal or media I/O error is retryable.
+                continue
 
     def tick(self):
         now = self.clock()
