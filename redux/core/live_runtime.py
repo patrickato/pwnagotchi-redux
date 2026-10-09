@@ -480,9 +480,9 @@ class LiveRuntime:
                     return self.state
                 self.augur.pump()
                 if now - self.last_probe >= self.config.probe_seconds:
-                    radio, _ = (choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
-                                         run=self.executor,
-                                         allow_connected=self.config.allow_connected_capture), [])
+                    radio = choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
+                                              run=self.executor,
+                                              allow_connected=self.config.allow_connected_capture)
                     if radio != self.iface:
                         raise RuntimeError("capture radio removed or reassigned")
                     self.last_probe = now
@@ -506,9 +506,9 @@ class LiveRuntime:
             try:
                 if free_bytes(self.config.active_dir) < self.config.min_free_bytes:
                     raise RuntimeError("capture partition is below free-space reserve")
-                iface, _ = (choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
-                                         run=self.executor,
-                                         allow_connected=self.config.allow_connected_capture), [])
+                iface = choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
+                                               run=self.executor,
+                                               allow_connected=self.config.allow_connected_capture)
                 if not iface:
                     raise RuntimeError("no monitor-capable Wi-Fi interface detected")
                 self._launch(iface)
