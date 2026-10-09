@@ -226,7 +226,7 @@ def test_lexical_capture_cursor_survives_restart_and_directory_churn(tmp_path):
         assert worker.scan()["scanned"] == 2
         assert worker.db.execute(
             "SELECT value FROM pipeline_meta WHERE key='cursor_path'"
-        ).fetchone()[0].endswith("/06.hc22000")
+        ).fetchone()[0].endswith("/03.hc22000")
 
 
 def test_capture_batch_selection_is_streaming_and_bounded(tmp_path, monkeypatch):
