@@ -12,6 +12,7 @@ from redux.radio import Radio
 
 def cfg(tmp_path, **changes):
     values = dict(state_dir=tmp_path / "state", capture_dir=tmp_path / "captures",
+                  active_dir=tmp_path / "active",
                   enable_web=False, retry_seconds=3, probe_seconds=30)
     values.update(changes)
     return live.LiveConfig(**values)
@@ -204,7 +205,9 @@ def test_engine_launch_augur_event_pump_restart_and_private_caplet(tmp_path, mon
         assert commands and commands[0][0] == "bettercap"
         assert "-caplet" in commands[0]
         initial_capture = runtime.capture_file
-        assert initial_capture.parent == tmp_path / "captures"
+        assert initial_capture.parent == tmp_path / "active"
+        initial_capture.write_bytes(b"synthetic closed capture bytes")
+        assert not list((tmp_path / "captures").glob("*.pcap"))
         caplet = tmp_path / "state/bettercap-live.cap"
         assert caplet.is_file() and not (caplet.stat().st_mode & 0o077)
         assert "set api.rest.password" in caplet.read_text()
@@ -218,6 +221,8 @@ def test_engine_launch_augur_event_pump_restart_and_private_caplet(tmp_path, mon
         children[0].dead = True
         clock[0] += 1
         assert runtime.tick() == "degraded"
+        assert (tmp_path / "captures" / initial_capture.name).read_bytes() == b"synthetic closed capture bytes"
+        assert not initial_capture.exists()
         clock[0] += 3
         assert runtime.tick() == "starting_engine"
         assert len(children) == 2
