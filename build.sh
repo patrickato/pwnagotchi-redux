@@ -90,6 +90,13 @@ case ${REDUX_TFT_PROFILE:-none} in
 esac
 mkdir -p "$PI_GEN_DIR/stage-redux/00-redux/files/redux"
 cp -a "$REPO_DIR/redux/." "$PI_GEN_DIR/stage-redux/00-redux/files/redux/"
+# Stage the exact same capture configuration and unit templates as the source checkout.
+install -d "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline"
+cp "$REPO_DIR/config/pipeline.example.toml" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/pipeline.toml"
+for unit in redux-capture-ingest redux-capture-audit; do
+    cp "$REPO_DIR/systemd/$unit.service" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/"
+    cp "$REPO_DIR/systemd/$unit.timer" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/"
+done
 # Do not ship development bytecode or require pip/network access at boot.
 find "$PI_GEN_DIR/stage-redux/00-redux/files/redux" -name '__pycache__' -type d -exec rm -r -- {} +
 mv "$NEXMON_DIR" "$PI_GEN_DIR/stage-redux/00-redux/files/nexmon"
