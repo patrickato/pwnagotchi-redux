@@ -49,9 +49,10 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
                                  last_error or "Capture storage is low.",
                                  "Free storage or move old captures to another device."))
     elif state == "stopped":
-        findings.append(_finding("live engine", "unknown",
-                                 "Live runtime has stopped.",
-                                 "No current engine activity to assess."))
+        findings.append(_finding("live engine", "attention",
+                                 "Live runtime is stopped, not capturing.",
+                                 "No running engine exists to assess.",
+                                 "Start redux-live.service when passive capture is wanted."))
     else:
         findings.append(_finding("live engine", "degraded",
                                  "Capture engine is not operational.",
