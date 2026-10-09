@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import signal
 import stat
 import subprocess
@@ -474,6 +475,60 @@ class LiveRuntime:
         self._lock.close()
 
 
+def preflight(config, *, which=shutil.which, radio_probe=probe,
+              is_mount=os.path.ismount, available_bytes=free_bytes):
+    """Read-only hardware/OS readiness check. Never changes a network interface."""
+    errors, warnings = [], []
+    try:
+        config.validate()
+    except (ValueError, TypeError) as exc:
+        return {"ready": False, "errors": [str(exc)], "warnings": [],
+                "capture_radio": None, "checks": {}}
+    checks = {}
+    checks["bettercap"] = bool(which(config.bettercap_binary))
+    checks["iw"] = bool(which("iw"))
+    checks["ip"] = bool(which("ip"))
+    checks["converter"] = bool(which("hcxpcapngtool"))
+    for key in ("bettercap", "iw", "ip", "converter"):
+        if not checks[key]:
+            errors.append(f"{key} executable unavailable")
+    capture_mount = Path("/captures")
+    # On the baked standalone image /captures is a separate ext4 filesystem;
+    # on a source checkout this is useful diagnostic information only.
+    if str(config.active_dir).startswith("/captures/"):
+        checks["capture_mount"] = bool(is_mount(capture_mount))
+        if not checks["capture_mount"]:
+            errors.append("writable REDUXCAP partition is not mounted at /captures")
+    else:
+        checks["capture_mount"] = None
+    checks["storage_paths"] = all(
+        p.is_dir() and not p.is_symlink()
+        for p in (config.state_dir, config.active_dir, config.capture_dir)
+    )
+    if not checks["storage_paths"]:
+        warnings.append("capture/state directories not all provisioned")
+    try:
+        free = available_bytes(config.active_dir if config.active_dir.exists()
+                               else config.active_dir.parent)
+        checks["free_bytes"] = free
+        if free < config.min_free_bytes:
+            errors.append("capture storage below configured free-space reserve")
+    except OSError as error:
+        checks["free_bytes"] = None
+        errors.append(f"capture free-space probe failed: {type(error).__name__}")
+    try:
+        iface, matches = select_radio(radio_probe(), config.preferred_iface)
+        checks["capture_interface_found"] = bool(iface)
+        if not iface:
+            errors.append("no monitor-capable capture radio detected")
+    except (OSError, RuntimeError, ValueError) as error:
+        iface = None
+        checks["capture_interface_found"] = False
+        errors.append(f"radio probe failed: {type(error).__name__}")
+    return {"ready": not errors, "errors": errors, "warnings": warnings,
+            "capture_radio": iface, "checks": checks}
+
+
 def run_forever(config, *, stop=None, runtime_factory=LiveRuntime, interval=1.0):
     from threading import Event
     signal_stop = stop or Event()
@@ -491,8 +546,15 @@ def run_forever(config, *, stop=None, runtime_factory=LiveRuntime, interval=1.0)
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Redux live passive radio supervisor")
     parser.add_argument("--config", default="/etc/redux/live.toml")
+    parser.add_argument("--check", action="store_true",
+                        help="read-only hardware and image preflight (no RF changes)")
     opts = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    config = LiveConfig.load(opts.config)
+    if opts.check:
+        outcome = preflight(config)
+        print(json.dumps(outcome, indent=2, sort_keys=True))
+        return 0 if outcome["ready"] else 2
     shutdown = threading.Event()
 
     def stop(signum, frame):
@@ -500,7 +562,7 @@ def main(argv=None):
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    run_forever(LiveConfig.load(opts.config), stop=shutdown)
+    run_forever(config, stop=shutdown)
 
 
 if __name__ == "__main__":
