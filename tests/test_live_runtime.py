@@ -486,6 +486,35 @@ def test_capture_rotation_closes_and_delivers_session(tmp_path, monkeypatch):
         runtime.close()
 
 
+def test_status_disk_write_error_does_not_kill_runtime(tmp_path, monkeypatch):
+    conf = cfg(tmp_path)
+    runtime = live.LiveRuntime(conf, radio_probe=lambda: [], clock=lambda: 1)
+    try:
+        def disk_failed(*args, **kwargs):
+            raise OSError("synthetic read-only SD card")
+        monkeypatch.setattr(live, "atomic_checkpoint", disk_failed)
+        assert runtime.tick() == "degraded"
+        assert "persistence failed" in runtime.last_error
+        assert runtime._snapshot["runtime"]["state"] == "degraded"
+        assert runtime.tick() == "degraded"
+    finally:
+        runtime.close()
+
+
+def test_metrics_storage_probe_failure_preserves_degraded_status(tmp_path, monkeypatch):
+    conf = cfg(tmp_path)
+    runtime = live.LiveRuntime(conf, radio_probe=lambda: [], clock=lambda: 0)
+    try:
+        def missing_storage(*args, **kwargs):
+            raise OSError("synthetic ejected storage")
+        monkeypatch.setattr(live, "free_bytes", missing_storage)
+        assert runtime.tick() == "degraded"
+        assert runtime._snapshot["runtime"]["free_bytes"] is None
+        assert "synthetic ejected storage" in runtime.last_error
+    finally:
+        runtime.close()
+
+
 def test_live_cli_reads_real_snapshot_without_stub_radios(tmp_path, capsys):
     from redux.cli import main
     file = tmp_path / "live.json"
