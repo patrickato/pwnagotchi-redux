@@ -510,17 +510,27 @@ class LiveRuntime:
             os.close(fd)
 
     def _recover_abandoned(self):
-        """Resume stale captures after abrupt power loss; never touch fresh files."""
-        for path in self.config.active_dir.iterdir():
-            if (path.suffix != ".pcap" or path == self.capture_file
-                    or path.is_symlink() or not path.is_file()):
-                continue
-            try:
-                if time.time() - path.stat().st_mtime >= 60:
-                    self._handoff(path)
-            except OSError:
-                # A concurrent rename/removal or media I/O error is retryable.
-                continue
+        """Resume stale captures after abrupt power loss; never touch fresh files.
+
+        Filesystem faults can interrupt directory enumeration itself, not just
+        individual stat calls. Do not allow that to kill the radio supervisor.
+        """
+        try:
+            for path in self.config.active_dir.iterdir():
+                try:
+                    if (path.suffix != ".pcap" or path == self.capture_file
+                            or path.is_symlink() or not path.is_file()):
+                        continue
+                    if time.time() - path.stat().st_mtime >= 60:
+                        self._handoff(path)
+                except OSError:
+                    # Concurrent deletion or a bad inode is retryable.
+                    continue
+        except OSError as error:
+            self.last_handoff_error = (
+                f"capture recovery scan failed: {type(error).__name__}"
+            )
+            _LOG.warning("%s", self.last_handoff_error)
 
     def tick(self):
         now = self.clock()
