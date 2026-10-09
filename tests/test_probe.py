@@ -71,3 +71,34 @@ def test_build_radios_onboard_vs_injector():
     assert alfa.high_draw is True
     assert alfa.usb_gen == 3
     assert alfa.bands == frozenset({"2.4", "5"})
+
+def test_multi_interface_phy_prefers_existing_monitor_vif():
+    iw_dev = """phy#0
+    Interface wlan0
+        ifindex 3
+        type managed
+    Interface wlan0mon
+        ifindex 7
+        type monitor
+    """
+    selected = parse_iw_dev(iw_dev)
+    assert selected == {"phy0": "wlan0mon"}
+    radios = build_radios(IW_PHY, iw_dev, META)
+    assert [r.iface for r in radios] == ["wlan0mon"]
+    assert radios[0].phy == "phy0"
+
+
+def test_multi_interface_phy_preserves_monitor_when_managed_follows():
+    iw_dev = """phy#1
+    Interface wlan1mon
+        type monitor
+    Interface wlan1
+        type managed
+    """
+    assert parse_iw_dev(iw_dev) == {"phy1": "wlan1mon"}
+
+
+def test_phy_without_netdev_is_not_reported_as_radio():
+    assert build_radios(IW_PHY, "phy#0\nphy#1\n", META) == []
+    partial = build_radios(IW_PHY, "phy#1\nInterface wlan1\n    type managed\n", META)
+    assert len(partial) == 1 and partial[0].iface == "wlan1"
