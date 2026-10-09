@@ -281,6 +281,44 @@ the duplicate processing-DB read while preserving the same on-screen facts.
 These optimizations change query cost, not the number or authenticity of
 observations saved.
 
+## Responsive live telemetry and touch-first browser behavior
+
+The supervisor always computes its process, storage, handoff and Doctor
+diagnostics as live state, but now samples the heavier Augur visual/GeoDB
+queries at a bounded cadence. `status_sample_seconds = 5` in
+`/etc/redux/live.toml` is the default (supported range 1–30 seconds).
+During a quiet interval, channel counts, RSSI bars, recent APs and mapped
+sightings reuse the latest measured view. A new passive event makes that
+view eligible for refresh after a **minimum two-second spacing**, rather
+than recomputing thousands of stored observations on every high-rate event.
+If the configured interval is shorter than two seconds, that shorter
+interval is respected. Event counters and Doctor findings still refresh at
+the normal supervisor checkpoint cadence.
+
+`runtime.visual_sampled_utc` records the actual time of the successful
+visual query, separate from `runtime.updated_utc` (the most recent live
+supervisor checkpoint). `runtime.visual_revision` increases only when
+a new visual sample has been computed. The dashboard redraws expensive
+charts/maps only when that revision changes. This avoids falsely claiming
+that unchanged visual telemetry is newly measured each second.
+
+The browser never starts an overlapping `/api/status` request; each
+request has a five-second abort deadline. On connection loss, HTTP errors
+or a supervisor checkpoint that stops advancing for over 12 seconds, the
+visible Doctor and capture-processing statuses change to **UNKNOWN · STALE**
+rather than retaining old green readings. The previous details remain on
+screen for troubleshooting but are explicitly labeled unverified.
+When a fresh status arrives, severity and recovery advice are restored from
+the actual runtime. A hidden browser tab suspends polling until visible,
+reducing needless Pi and client work.
+
+The browser has a narrower touch-oriented layout at widths up to 520px,
+including shorter map presentation, responsive AP columns and larger tap
+targets for essential controls. This is a code-level/browser behavioral
+improvement, **not** a claim that the final 480×320 SPI TFT or its touch
+controller has been qualified. All runtime values remain genuine
+measurements; an unassessed area remains UNKNOWN.
+
 ## Release gates not yet completed
 
 CI exercises the above with injected radios/transports/processes; it cannot
