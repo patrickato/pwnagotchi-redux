@@ -151,6 +151,43 @@ def test_driver_rejects_failed_engine_commands():
         driver.recon(True)
 
 
+def test_readonly_preflight_reports_real_requirements(tmp_path):
+    conf = cfg(tmp_path)
+    outcome = live.preflight(
+        conf, which=lambda executable: "/usr/bin/" + executable,
+        radio_probe=lambda: [radio()],
+        available_bytes=lambda path: 256 * 1024 * 1024)
+    assert outcome["ready"] is True
+    assert outcome["capture_radio"] == "wlan1mon"
+    assert outcome["checks"]["converter"] is True
+    # It only observes directories; it never creates or modifies them.
+    assert not conf.active_dir.exists()
+    assert not conf.state_dir.exists()
+
+
+def test_readonly_preflight_fails_missing_tools_radio_and_storage(tmp_path):
+    conf = cfg(tmp_path)
+    outcome = live.preflight(
+        conf, which=lambda executable: None, radio_probe=lambda: [],
+        available_bytes=lambda path: 1024)
+    assert not outcome["ready"]
+    assert outcome["capture_radio"] is None
+    assert any("capture storage below" in e for e in outcome["errors"])
+    assert any("no monitor-capable" in e for e in outcome["errors"])
+    assert any("bettercap executable" in e for e in outcome["errors"])
+
+
+def test_readonly_preflight_checks_writable_partition_mount():
+    conf = live.LiveConfig()
+    outcome = live.preflight(
+        conf, which=lambda tool: tool, radio_probe=lambda: [radio()],
+        is_mount=lambda path: False,
+        available_bytes=lambda path: 512 * 1024 * 1024)
+    assert not outcome["ready"]
+    assert any("REDUXCAP" in e for e in outcome["errors"])
+    assert outcome["checks"]["capture_mount"] is False
+
+
 def test_single_live_owner_lock(tmp_path):
     first = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [])
     try:
