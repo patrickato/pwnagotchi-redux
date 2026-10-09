@@ -248,6 +248,8 @@ class LiveRuntime:
         self.driver = None
         self.web = None
         self.web_thread = None
+        self.web_next_try = float("-inf")
+        self.web_error = ""
         self.iface = None
         self.transport = None
         self.created = 0
@@ -305,6 +307,8 @@ class LiveRuntime:
             "capture_file": str(self.capture_file) if self.capture_file else "",
             "handed_off": self.handoffs,
             "handoff_error": self.last_handoff_error[:120],
+            "dashboard_active": self.web is not None if self.config.enable_web else None,
+            "dashboard_error": self.web_error[:120],
             "free_bytes": free,
             "last_error": self.last_error[:180],
             "updated_utc": time.time(),
@@ -326,6 +330,9 @@ class LiveRuntime:
             reserve_bytes=self.config.min_free_bytes, handoffs=self.handoffs,
             last_error=self.last_error, handoff_error=self.last_handoff_error,
             doctor_report=report,
+            dashboard_enabled=self.config.enable_web,
+            dashboard_active=self.web is not None,
+            dashboard_error=self.web_error,
         )
         metadata["health"] = health["overall"]
         metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])
@@ -351,6 +358,7 @@ class LiveRuntime:
         self.web = server
         self.web_thread = threading.Thread(target=server.serve_forever, daemon=True)
         self.web_thread.start()
+        self.web_error = ""
 
     def _launch(self, iface):
         ensure_monitor(iface, run=self.executor,
@@ -414,10 +422,6 @@ class LiveRuntime:
         agent.bus.on(Signal.EVENT, self._observe)
         self.driver = driver
         self.augur = agent
-        try:
-            self._start_web()
-        except OSError as error:
-            _LOG.warning("local web dashboard unavailable: %s", type(error).__name__)
         self.state = "running"
         self.last_error = ""
         _LOG.info("live passive capture started on %s", self.iface)
@@ -534,6 +538,15 @@ class LiveRuntime:
 
     def tick(self):
         now = self.clock()
+        # Bring up read-only diagnostics even without a radio or working
+        # Bettercap. Broken captures should not make their own cause invisible.
+        if self.config.enable_web and self.web is None and now >= self.web_next_try:
+            try:
+                self._start_web()
+            except OSError as error:
+                self.web_error = f"local dashboard bind failed: {type(error).__name__}"
+                self.web_next_try = now + 30
+                _LOG.warning("%s", self.web_error)
         if now - self.last_recovery >= 20:
             self._recover_abandoned()
             self.last_recovery = now
