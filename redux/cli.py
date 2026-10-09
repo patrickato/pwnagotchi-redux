@@ -237,9 +237,9 @@ def cmd_selftest(args) -> int:
 
 def cmd_hwtest(args) -> int:
     """One-command on-device validation battery (cleared/detection lane). Runs the
-    software self-test and a synthetic end-to-end detection check with no radio, then
-    — with --iface — a live PASSIVE survey + monitor capture. Emits one structured
-    report you can paste back or commit. Listen-only: it never transmits anything.
+    software self-test, a synthetic end-to-end detection check, a live radio probe,
+    boot-POST and self-diagnosis, and — with --iface — a live PASSIVE survey + monitor
+    capture. Emits one structured report you can paste back or commit. Listen-only.
     The physical-stimulus tests (trigger a burst on your own AP, fox-hunt walk) are
     listed as manual steps — they need a human in the RF, not this harness."""
     import time
@@ -299,6 +299,44 @@ def cmd_hwtest(args) -> int:
                 out(f"        ch{ch} {a.bssid} x{a.frames} {a.ssid or '<hidden>'}")
         except RuntimeError as e:
             out(f"  [SKIP] live capture unavailable: {e}")
+
+    # [4]-[6]: the rest of the on-device cleared checks, folded in so one run covers them.
+    try:
+        from .radio import probe as _probe
+        live_radios = _probe()
+    except Exception:  # noqa: BLE001
+        live_radios = []
+    out("\n[4] radio probe — live iw enumeration")
+    if live_radios:
+        for r in live_radios:
+            out(f"  [PASS] {r.iface}: bands={sorted(r.bands)} monitor={r.monitor} "
+                f"inject={r.inject} driver={r.driver or '?'}")
+    else:
+        out("  [SKIP] no radios enumerated (needs iw + a real adapter)")
+
+    try:
+        bc = Augur(radios=live_radios or _radios(args), intent=Intent.RECON)
+    except Exception as e:  # noqa: BLE001
+        bc = None
+        out(f"\n[5/6] framework diagnosis — [SKIP] could not build core: {e!r}")
+
+    if bc is not None:
+        out("\n[5] boot-POST")
+        try:
+            from .core.post import PowerOnSelfTest
+            pst = PowerOnSelfTest.standard(bc._doctor_inputs())
+            out(f"  verdict: {pst.verdict(pst.results()).value}")
+        except Exception as e:  # noqa: BLE001
+            out(f"  [SKIP] {e!r}")
+
+        out("\n[6] self-diagnosis (doctor)")
+        try:
+            rep = bc.doctor_report()
+            out(f"  {rep['label']} · coverage: {rep['coverage']['reason']}")
+            for f in rep["findings"]:
+                out(f"    [{f['status'].upper()}] {f['area']}: {f['summary']}")
+        except Exception as e:  # noqa: BLE001
+            out(f"  [SKIP] {e!r}")
 
     out("\n[manual] physical-stimulus tests (a human in the RF, not this harness):")
     out("  - handshake capture on YOUR OWN AP · a short deauth burst on YOUR OWN AP for the flood detector")
