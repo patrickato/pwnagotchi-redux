@@ -16,3 +16,4 @@ min_free_bytes = 67108864 # Pause capture if /captures has less than 64 MiB free
 max_log_bytes = 4194304 # Limit Bettercap diagnostic log to 4 MiB; checked each runtime tick
 pipeline_database = "/captures/jobs.db" # Processing worker ledger; read-only from live runtime
 pipeline_stale_seconds = 180 # Timer normally runs every 20 seconds after boot
+status_sample_seconds = 5 # Heavy dashboard queries no more than every 5s at idle; busy events coalesce to >=2s
