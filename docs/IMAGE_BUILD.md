@@ -118,12 +118,15 @@ No physical success or sub-15-second boot claim is inferred from QEMU tests.
 read-only and the upper root is RAM. Recursion is disabled so `/captures` remains
 writable. The export patch adds a third, 512 MiB ext4 partition labeled REDUXCAP
 before loop attachment, formats it, and creates `/captures/redux` owned by the
-service account with mode 0700. Unsupported upstream layout changes fail closed.
+service account with mode 0700. The private live engine later uses this directory; the
+unprivileged watchdog/bootstrap stores its own checkpoint in `/captures/boot`.
+Unsupported upstream layout changes fail closed.
 The root and captures sizes are separate; captures can be recovered independently.
 
 Boot firmware mounts read-only. Swap is masked, the journal is volatile and capped
-at 16 MiB, and redux requires the captures mount before starting. Service state
-belongs in `/captures/redux`, never the ephemeral root. Captures uses ext4's journal;
+at 16 MiB, and redux requires the captures mount before starting. Persistent service state belongs under `/captures` (`/captures/boot` for the
+unprivileged bootstrap and `/captures/redux` for live engine data), never the
+ephemeral root. Captures uses ext4's journal;
 yanking power may still lose unsynced captures or damage an SD controller. This
 protects root writes, not every possible storage failure.
 
@@ -172,7 +175,7 @@ A stalled loop therefore cannot keep itself alive through a separate timer threa
 This checks the bootstrap loop; it does not claim health coverage for RF workers
 that the lead has not connected to this entrypoint.
 
-`/captures/redux/boot.json` records real UTC startup/shutdown times and whether the
+`/captures/boot/boot.json` records real UTC startup/shutdown times and whether the
 previous shutdown was committed. Replacement syncs the temporary file and parent
 directory. Missing or corrupt records have explicit reasons; unclean restart
 resumes the passive bootstrap and never replays radio actions. Storage failure
