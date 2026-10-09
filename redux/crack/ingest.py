@@ -36,6 +36,7 @@ class Settings:
     max_files_per_pass: int = 100
     converter: str = "hcxpcapngtool"
     convert_timeout_seconds: int = 90
+    min_free_bytes: int = 64 * 1024 * 1024
 
     def __post_init__(self):
         if not self.inputs or not all(p.is_absolute() for p in self.inputs):
@@ -44,6 +45,8 @@ class Settings:
             raise ValueError("database/output paths must be absolute")
         if self.settle_seconds < 0 or self.max_capture_bytes < 1024:
             raise ValueError("invalid settling/size limit")
+        if self.min_free_bytes < 1024 * 1024:
+            raise ValueError("min_free_bytes must be at least 1 MiB")
         if self.max_files_per_pass < 1 or not 1 <= self.convert_timeout_seconds <= 3600:
             raise ValueError("invalid scan/timeout limits")
 
@@ -60,6 +63,7 @@ class Settings:
             max_files_per_pass=int(data.get("max_files_per_pass", 100)),
             converter=str(data.get("converter", "hcxpcapngtool")),
             convert_timeout_seconds=int(data.get("convert_timeout_seconds", 90)),
+            min_free_bytes=int(data.get("min_free_bytes", 64 * 1024 * 1024)),
         )
 
 
@@ -99,6 +103,11 @@ def normalize_22000(data: bytes):
                            [v.lower() for v in fields[2:]])] = None
             bssids.add(fields[3].lower())
     return list(lines), sorted(bssids)
+
+
+def free_bytes(path):
+    stats = os.statvfs(path)
+    return stats.f_bavail * stats.f_frsize
 
 
 def _digest_file(path):
@@ -205,6 +214,8 @@ class CaptureIngestor:
             return "deferred"
         if st.st_size > self.settings.max_capture_bytes:
             return "skipped"
+        if free_bytes(self.settings.output_dir) < self.settings.min_free_bytes:
+            return "deferred_low_storage"
         sha = _digest_file(source)
         existing = self.db.execute(
             "SELECT status FROM artifacts WHERE source_sha=?", (sha,)
@@ -257,6 +268,9 @@ class CaptureIngestor:
             return "error"
 
     def scan(self):
+        if free_bytes(self.settings.output_dir) < self.settings.min_free_bytes:
+            return {"scanned": 0, "outcomes": {"paused_low_storage": 1},
+                    "summary": self.summary()}
         lock = self.settings.database.with_suffix(".lock")
         with lock.open("a+b") as handle:
             os.fchmod(handle.fileno(), 0o600)
