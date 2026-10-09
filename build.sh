@@ -65,6 +65,25 @@ git -C "$NEXMON_DIR" checkout -q --detach FETCH_HEAD
 
 PI_GEN_DIR="$BUILD_DIR/pi-gen"
 cp -a "$REPO_DIR/image/stage-redux" "$PI_GEN_DIR/stage-redux"
+# Desktop packages consume significant space and must remain an explicit
+# operator selection. A browser alone does not guarantee SPI fbdev or touch.
+case ${REDUX_KIOSK_PROFILE:-none} in
+    none) ;;
+    manual-x11)
+        cat >> "$PI_GEN_DIR/stage-redux/00-redux/00-packages-nr" <<'KIOSK_PACKAGES'
+chromium
+xinit
+xauth
+xserver-xorg-core
+xserver-xorg-legacy
+xserver-xorg-video-fbdev
+xserver-xorg-input-libinput
+KIOSK_PACKAGES
+        printf '%s\n' 'manual-x11 (operator-started, hardware-unverified)' > \
+            "$PI_GEN_DIR/stage-redux/00-redux/files/kiosk-profile"
+        ;;
+    *) echo 'Unsupported REDUX_KIOSK_PROFILE: choose none or manual-x11.' >&2; exit 1 ;;
+esac
 mkdir -p "$PI_GEN_DIR/stage-redux/20-boot-budget/files"
 cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/20-boot-budget/files/boot"
 mkdir -p "$PI_GEN_DIR/stage-redux/40-power/files"
