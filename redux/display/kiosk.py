@@ -13,8 +13,11 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import stat
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -116,6 +119,56 @@ def chromium_argv(browser: str, port: int, *, profile: Path) -> list[str]:
     ]
 
 
+def supervise(command: list[str], *, spawn=subprocess.Popen,
+              sleep=time.sleep, max_failures=5, restart_delay=3) -> int:
+    """Bound crash loops and ensure a kiosk child is reaped on exit.
+
+    The operator must opt in and supply a passing framebuffer/browser/session
+    preflight before this function is reached. An exited browser is restarted
+    a limited number of times; repeated crashes fail the unit rather than spin.
+    """
+    failures = 0
+    stopping = False
+    child = None
+    previous = {}
+    def request_stop(signum, frame):
+        nonlocal stopping
+        stopping = True
+        if child is not None and child.poll() is None:
+            child.terminate()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        previous[sig] = signal.getsignal(sig)
+        signal.signal(sig, request_stop)
+    try:
+        while not stopping and failures < max_failures:
+            child = spawn(command, start_new_session=False)
+            try:
+                code = child.wait()
+            except KeyboardInterrupt:
+                stopping = True
+                if child.poll() is None:
+                    child.terminate()
+                child.wait()
+                break
+            if stopping:
+                break
+            failures += 1
+            if failures >= max_failures:
+                break
+            sleep(restart_delay)
+        return 0 if stopping else 1
+    finally:
+        for sig, old in previous.items():
+            signal.signal(sig, old)
+        if child is not None and child.poll() is None:
+            child.terminate()
+            try:
+                child.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=2)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Redux optional 480x320 kiosk launcher")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -123,6 +176,8 @@ def main(argv=None) -> int:
                        help="print real preflight report, without starting a browser")
     group.add_argument("--launch", action="store_true",
                        help="run Chromium only after a passing preflight")
+    group.add_argument("--supervise", action="store_true",
+                       help="opt-in bounded Chromium restart loop after preflight")
     parser.add_argument("--framebuffer", required=True,
                         help="verified /dev/fbN TFT device, never assumed")
     parser.add_argument("--port", type=int, default=8080)
@@ -164,6 +219,8 @@ def main(argv=None) -> int:
             return 2
     args = chromium_argv(result["checks"]["browser"]["executable"],
                          parsed.port, profile=profile)
+    if parsed.supervise:
+        return supervise(args)
     os.execv(args[0], args)
     return 1  # unreachable unless an injected/mock exec returns
 
