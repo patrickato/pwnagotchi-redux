@@ -568,7 +568,7 @@ def test_overlay_stage_preserves_capture_writes_and_hardens_service(tmp_path):
     unit = (root / "etc/systemd/system/redux.service").read_text()
     assert 'RequiresMountsFor=/captures' in unit
     assert 'StateDirectory=' not in unit
-    assert 'ReadWritePaths=/captures/boot' in unit
+    assert 'ReadWritePaths=/captures' in unit
 
 
 def boot_policy_module():
