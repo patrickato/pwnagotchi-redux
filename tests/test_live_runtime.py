@@ -134,6 +134,28 @@ class Transport:
         return events
 
 
+def test_single_live_owner_lock(tmp_path):
+    first = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [])
+    try:
+        with pytest.raises(RuntimeError, match="already owns"):
+            live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [])
+    finally:
+        first.close()
+    with live_runtime_after_release(cfg(tmp_path)) as second:
+        assert second.state == "starting"
+
+
+class live_runtime_after_release:
+    def __init__(self, config):
+        self.config = config
+        self.instance = None
+    def __enter__(self):
+        self.instance = live.LiveRuntime(self.config, radio_probe=lambda: [])
+        return self.instance
+    def __exit__(self, *_):
+        self.instance.close()
+
+
 def test_no_radio_retries_without_spawning(tmp_path, monkeypatch):
     clock = [0]
     calls = []
