@@ -429,6 +429,40 @@ needed. The base image does not require Chromium for a phone or desktop
 browser viewing the existing loopback dashboard, and the optional local
 kiosk profile is documented in `docs/IMAGE_BUILD.md`.
 
+## Opt-in kiosk browser supervision (not auto-enabled)
+
+The standalone image retains the **Lite/headless** default. Chromium and X11
+remain optional through `REDUX_KIOSK_PROFILE=manual-x11` at image preparation.
+No service is enabled automatically and no framebuffer mapping is assumed.
+On a separately prepared development SD card, after checking the actual
+screen framebuffer and installing/starting an unprivileged X11 session:
+
+```sh
+redux-kiosk --check --framebuffer /dev/fb1
+redux-kiosk --supervise --framebuffer /dev/fb1
+```
+
+The framebuffer argument is **illustrative**, not a default: use the actual
+`/dev/fbN` device confirmed on that specific Pi. A passing preflight checks
+the visible framebuffer geometry, local API availability, Chromium executable,
+non-root identity and X11 DISPLAY. It does not prove touch alignment,
+display controller initialization or physical readability.
+
+`--launch` still replaces the launcher with Chromium for conventional
+external process supervision. `--supervise` instead monitors the child and
+restarts it after exit at a bounded three-second interval, stopping after
+five consecutive exits rather than allowing an endless crash loop. SIGTERM
+is forwarded and the browser is reaped when the supervisor shuts down.
+Both modes use a private, user-owned XDG runtime directory and refuse
+symlinked, incorrectly owned, or group/world-writable browser profile
+locations. The browser opens only the local Redux dashboard and never uses
+`--no-sandbox`.
+
+This is deliberately operator-started until the specific SPI TFT, touch
+events, X11 framebuffer driver and kiosk rendering have been verified
+together. Enabling a boot-time graphical target before those checks could
+leave an otherwise working capture appliance with an unusable screen.
+
 ## Release gates not yet completed
 
 CI exercises the above with injected radios/transports/processes; it cannot
