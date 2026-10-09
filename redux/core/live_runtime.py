@@ -244,6 +244,15 @@ class LiveRuntime:
                  spawn=subprocess.Popen, clock=time.monotonic):
         config.validate()
         self.config = config
+        self.capture_mount_required = any(
+            Path("/captures") == path or Path("/captures") in path.parents
+            for path in (config.state_dir, config.capture_dir, config.active_dir)
+        )
+        self.capture_mount_lost = False
+        # Refuse to create /captures/... on the root filesystem when REDUXCAP
+        # is missing. This precedes *all* mkdir, chmod and lock operations.
+        if not self._capture_mount_ok():
+            raise RuntimeError("REDUXCAP partition is not mounted at /captures")
         self.radio_probe = radio_probe
         self.executor = executor
         self.spawn = spawn
@@ -299,6 +308,10 @@ class LiveRuntime:
             self._lock.close()
             raise RuntimeError("another Redux live runtime already owns the radio")
 
+    def _capture_mount_ok(self):
+        return (not self.capture_mount_required
+                or os.path.ismount("/captures"))
+
     def _observe(self, emission):
         event = emission.payload.get("event")
         self.created += 1
@@ -306,9 +319,13 @@ class LiveRuntime:
             self.handshakes += 1
 
     def _checkpoint(self):
-        try:
-            free = free_bytes(self.config.active_dir)
-        except OSError:
+        mount_ok = self._capture_mount_ok() and not self.capture_mount_lost
+        if mount_ok:
+            try:
+                free = free_bytes(self.config.active_dir)
+            except OSError:
+                free = None
+        else:
             free = None
         pending = (len(self.augur._sighting_buffer)
                    if self.augur is not None else None)
@@ -334,6 +351,7 @@ class LiveRuntime:
             "log_truncations": self.log_truncations,
             "log_error": self.log_error[:120],
             "free_bytes": free,
+            "capture_mount": (mount_ok if self.capture_mount_required else None),
             "last_error": self.last_error[:180],
             "updated_utc": time.time(),
         }
@@ -360,11 +378,12 @@ class LiveRuntime:
             sighting_pending=pending, sighting_write_error=write_error,
             sighting_lost=self.sighting_loss_events,
             engine_log_error=self.log_error,
+            capture_mount_ok=(mount_ok if self.capture_mount_required else None),
         )
         metadata["health"] = health["overall"]
         metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])
         self._snapshot["doctor"] = health
-        if self.state != self.saved_state or self.clock() - self.last_saved >= 5:
+        if mount_ok and (self.state != self.saved_state or self.clock() - self.last_saved >= 5):
             try:
                 atomic_checkpoint(self.config.state_dir / "live.json", metadata)
             except OSError as error:
@@ -565,6 +584,9 @@ class LiveRuntime:
         recovery pass recognizes and completes that harmless intermediate state.
         """
         source = Path(source)
+        if not self._capture_mount_ok() or self.capture_mount_lost:
+            self.last_handoff_error = "REDUXCAP unavailable; capture handoff deferred"
+            return False
         try:
             st = source.lstat()
         except FileNotFoundError:
@@ -642,6 +664,21 @@ class LiveRuntime:
 
     def tick(self):
         now = self.clock()
+        # A forced/lazy unmount invalidates the original flock/partition
+        # identity. Never resume on a newly mounted filesystem under a stale
+        # lock: a service restart must re-establish exclusive ownership.
+        if not self._capture_mount_ok():
+            self.capture_mount_lost = True
+        if self.capture_mount_lost:
+            if self.process is not None or self.augur is not None:
+                self._drop()
+            self.state = "storage_paused"
+            self.last_error = (
+                "REDUXCAP partition unavailable; restart redux-live.service "
+                "after remount to reacquire the ownership lock"
+            )
+            self._checkpoint()  # in-memory only; never create a rootfs fallback
+            return self.state
         self._enforce_log_limit()
         # Bring up read-only diagnostics even without a radio or working
         # Bettercap. Broken captures should not make their own cause invisible.
