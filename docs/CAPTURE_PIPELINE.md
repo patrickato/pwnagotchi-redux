@@ -1,7 +1,7 @@
 # Native Redux capture processing (development branch)
 
 This module is **part of the Redux source tree** on branch
-`feature/redux-capture-pipeline-integration`. No changes to `main` are needed.
+`human/redux-capture-pipeline-integration`. No changes to `main` are needed.
 
 ## Architecture
 
@@ -29,13 +29,14 @@ oneshot/timer units into its root filesystem. `hcxtools` is installed during
 image creation; the Hashcat compute backend is **not** presumed available.
 The image's `REDUXCAP` partition mounts at **`/captures`**; all processing
 state and prepared output are kept there, not under the read-only root.
-The systemd units request this mount and are left disabled at build time.
-The stock Bettercap unit remains masked while live driver ownership is
-being engineered and physically qualified.
+The systemd units require this mount. The *passive ingestion* timer and
+`redux-live.service` are enabled in the development image; the audit timer
+remains disabled. A dedicated Redux live process owns the Bettercap child.
+The stock Bettercap service remains masked to prevent duplicate radio ownership.
 
 On a future successfully booted **development image**, inspect
 `mount | grep ' /captures '` and `systemctl cat redux-capture-ingest.service`
-before activating `redux-capture-ingest.timer`. Do **not** run the source
+to confirm the already-enabled ingestion timer is healthy. Do **not** run the source
 installer on a baked image unless you intentionally want a second, separate
 copy of Redux under `/opt/redux-pipeline`.
 
@@ -99,8 +100,8 @@ exist without being usable; the complete test requires real Pi verification.
 
 This integration still requires verified on-device capture paths/event schemas,
 controlled sample WPA2 captures, a real converter, Hashcat backend capability,
-end-to-end Pi restart/SD-full tests, production radio service ownership,
-TFT/interactive UI controls, and a reproducible image build.
+end-to-end Pi restart/SD-full tests, real live-runtime and exclusive-radio verification,
+TFT/interactive UI controls, and a fully built and boot-tested ARM64 image.
 
 `redux campaign demo` still uses test executors and is not a production autonomous
 campaign. Active deauthentication and password-audit targeting policies are not
