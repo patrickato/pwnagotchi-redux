@@ -411,6 +411,10 @@ def test_preparation_exports_only_redux_and_targets_pi4(prepared):
     assert "status_sample_seconds = 5" in live_settings.read_text()
     assert (tree / "stage-redux/00-redux/files/pipeline/redux-live-diag.sh").exists()
     assert (tree / "stage-redux/00-redux/files/redux/core/live_runtime.py").exists()
+    assert (tree / "stage-redux/00-redux/files/redux/display/kiosk.py").exists()
+    assert not (tree / "stage-redux/00-redux/files/kiosk-profile").exists()
+    base_pkgs = (tree / "stage-redux/00-redux/00-packages-nr").read_text().splitlines()
+    assert "chromium" not in base_pkgs and "xinit" not in base_pkgs
     assert (tree / "stage-redux/00-redux/files/pipeline/redux-capture-ingest.service").exists()
     config = invoke(["bash", "-c", 'source "$1"; printf "%s|%s|%s" "$RELEASE" "$STAGE_LIST" "$ENABLE_SSH"', "bash", str(tree / "config")], env=env)
     assert config.stdout == "bookworm|stage0 stage1 stage2 stage-redux|0"
@@ -447,6 +451,11 @@ bash ./00-run.sh
     assert launcher.is_file()
     assert "PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.cli" in launcher.read_text()
     assert launcher.stat().st_mode & 0o111
+    kiosk = root / "usr/local/bin/redux-kiosk"
+    assert kiosk.is_file()
+    assert "redux.display.kiosk" in kiosk.read_text()
+    assert kiosk.stat().st_mode & 0o111
+    assert not (root / "usr/share/redux/kiosk-profile").exists()
     assert "User=redux" in unit
     assert "Type=notify" in unit
     assert "NotifyAccess=main" in unit
@@ -472,6 +481,37 @@ bash ./00-run.sh
     assert "hcx" in chroot
     assert "systemctl disable redux-capture-audit.timer" in chroot
     assert "systemctl mask bettercap.service" in chroot
+
+
+def test_opt_in_kiosk_profile_stages_chromium_x11_without_enabling_service(
+    prepared, tmp_path
+):
+    repo, env = prepared
+    root = tmp_path / "kiosk-profile-build"
+    env = dict(env, REDUX_KIOSK_PROFILE="manual-x11",
+               REDUX_BUILD_DIR=str(root))
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode == 0, result.stderr
+    staged = root / "pi-gen/stage-redux/00-redux"
+    pkgs = (staged / "00-packages-nr").read_text().splitlines()
+    for package in ("chromium", "xinit", "xauth", "xserver-xorg-core",
+                    "xserver-xorg-legacy", "xserver-xorg-video-fbdev",
+                    "xserver-xorg-input-libinput"):
+        assert pkgs.count(package) == 1
+    assert (staged / "files/kiosk-profile").read_text().startswith("manual-x11")
+    assert not any("redux-kiosk.service" in p.name
+                   for p in (staged / "files").iterdir())
+    assert "systemctl enable redux-kiosk" not in (
+        staged / "00-run.sh").read_text()
+
+
+def test_unsupported_kiosk_profile_refused(prepared, tmp_path):
+    repo, env = prepared
+    env = dict(env, REDUX_KIOSK_PROFILE="unsafe-autostart",
+               REDUX_BUILD_DIR=str(tmp_path / "invalid-profile"))
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode != 0
+    assert "Unsupported REDUX_KIOSK_PROFILE" in result.stderr
 
 
 def test_untracked_runtime_code_marks_image_provenance_dirty(prepared, tmp_path):
