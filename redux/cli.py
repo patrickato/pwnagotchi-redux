@@ -1299,7 +1299,7 @@ def cmd_live(args) -> int:
 
         def safe(value):
             # Avoid embedding untrusted terminal control codes in diagnostics.
-            return "".join(ch if (ch.isprintable() and ch not in "\\x1b\\x7f")
+            return "".join(ch if ch.isprintable()
                            else "?" for ch in str(value))[:240]
         print(f"redux live doctor: {safe(report.get('label', report['overall']))}")
         for finding in report["findings"]:
