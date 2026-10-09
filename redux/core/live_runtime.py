@@ -170,6 +170,7 @@ class LiveRuntime:
         self.saved_state = ""
         self.started = 0.0
         self.log_handle = None
+        self.capture_file = None
         self._snapshot = {"runtime": {"state": "starting"}}
         self.state = "starting"
         self.config.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -190,6 +191,7 @@ class LiveRuntime:
             "state": self.state, "iface": self.iface or "",
             "events_seen": self.created, "handshake_events": self.handshakes,
             "pid": self.process.pid if self.process is not None else None,
+            "capture_file": str(self.capture_file) if self.capture_file else "",
             "last_error": self.last_error[:180],
             "updated_utc": time.time(),
         }
@@ -223,6 +225,9 @@ class LiveRuntime:
             host="127.0.0.1", port=self.config.api_port,
             username="redux", password=credentials), timeout=1.5)
         caplet = self.config.state_dir / "bettercap-live.cap"
+        # A fresh file on every engine start keeps old captures stable for ingest.
+        self.capture_file = self.config.capture_dir / (
+            "bettercap-" + secrets.token_hex(8) + ".pcap")
         if caplet.is_symlink():
             raise ValueError("refusing runtime caplet symlink")
         # Caplet is not JSON: stage atomically with private file permissions.
@@ -231,7 +236,7 @@ class LiveRuntime:
         try:
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w") as out:
-                out.write(caplet_text(iface, self.config.capture_dir / "bettercap-wifi-handshakes.pcap",
+                out.write(caplet_text(iface, self.capture_file,
                                       "redux", credentials, self.config.api_port))
                 out.flush()
                 os.fsync(out.fileno())
@@ -239,11 +244,17 @@ class LiveRuntime:
         finally:
             if os.path.exists(name):
                 os.unlink(name)
-        self.log_handle = (self.config.state_dir / "bettercap.log").open("ab", buffering=0)
+        # A bounded previous log is retained across restarts; secrets stay private.
+        log_path = self.config.state_dir / "bettercap.log"
+        if log_path.is_symlink():
+            raise ValueError("refusing engine log symlink")
+        if log_path.is_file() and log_path.stat().st_size > 4 * 1024 * 1024:
+            log_path.replace(self.config.state_dir / "bettercap.log.previous")
+        self.log_handle = log_path.open("ab", buffering=0)
         os.chmod(self.config.state_dir / "bettercap.log", 0o600)
         self.process = self.spawn(
             [self.config.bettercap_binary, "-iface", iface, "-caplet", str(caplet),
-             "-no-history", "-env-file", "", "-no-colors"],
+             "-no-history", "-env-file", "", "-no-colors", "-silent"],
             stdin=subprocess.DEVNULL, stdout=self.log_handle, stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -254,7 +265,7 @@ class LiveRuntime:
     def _connect(self):
         self.transport.session()  # authenticated readiness probe
         driver = BettercapDriver(config=self.transport.config, transport=self.transport)
-        result = driver.set_handshake_file(str(self.config.capture_dir / "bettercap-wifi-handshakes.pcap"))
+        result = driver.set_handshake_file(str(self.capture_file))
         if isinstance(result, dict) and result.get("error"):
             raise RuntimeError("Bettercap rejected capture output configuration")
         radios = [r for r in self.radio_probe() if r.iface == self.iface]
@@ -296,6 +307,7 @@ class LiveRuntime:
             self.log_handle.close()
             self.log_handle = None
         self.iface = None
+        self.capture_file = None
 
     def tick(self):
         now = self.clock()
