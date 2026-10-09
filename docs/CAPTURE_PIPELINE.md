@@ -22,6 +22,23 @@ This module is **part of the Redux source tree** on branch
   publish hashes or recovered credentials.
 - Independent systemd oneshots/timers avoid blocking the radio event loop or web UI.
 
+## In the standalone pi-gen image
+
+The image-build stage now copies the same Redux code, pipeline TOML, and
+oneshot/timer units into its root filesystem. `hcxtools` is installed during
+image creation; the Hashcat compute backend is **not** presumed available.
+The image's `REDUXCAP` partition mounts at **`/captures`**; all processing
+state and prepared output are kept there, not under the read-only root.
+The systemd units request this mount and are left disabled at build time.
+The stock Bettercap unit remains masked while live driver ownership is
+being engineered and physically qualified.
+
+On a future successfully booted **development image**, inspect
+`mount | grep ' /captures '` and `systemctl cat redux-capture-ingest.service`
+before activating `redux-capture-ingest.timer`. Do **not** run the source
+installer on a baked image unless you intentionally want a second, separate
+copy of Redux under `/opt/redux-pipeline`.
+
 ## Install on a disposable Pi / test system
 
 **This is not yet a standalone bootable image or a hardware-qualified release.**
