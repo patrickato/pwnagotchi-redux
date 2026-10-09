@@ -420,28 +420,64 @@ class LiveRuntime:
         self.capture_file = None
 
     def _handoff(self, source):
-        """Move a closed capture onto the ingestion queue without copying bytes."""
+        """Durably queue a closed capture without overwriting existing captures.
+
+        Link first, sync the queued directory, then unlink the active name.
+        An interrupted handoff may leave *both* names for one inode; the next
+        recovery pass recognizes and completes that harmless intermediate state.
+        """
         source = Path(source)
         try:
             st = source.lstat()
         except FileNotFoundError:
+            return False
+        except OSError as error:
+            self.last_handoff_error = f"capture stat failed: {type(error).__name__}"
             return False
         if (not stat.S_ISREG(st.st_mode) or st.st_size == 0
                 or source.parent != self.config.active_dir
                 or source.suffix != ".pcap"):
             return False
         destination = self.config.capture_dir / source.name
-        if destination.exists() or destination.is_symlink():
-            self.last_handoff_error = "capture destination already exists"
-            return False
         try:
-            os.replace(source, destination)
+            # Ensure capture bytes are on stable storage before publishing its name.
+            fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                now = os.fstat(fd)
+                if (now.st_ino, now.st_dev, now.st_size) != (
+                    st.st_ino, st.st_dev, st.st_size
+                ):
+                    self.last_handoff_error = "capture changed during handoff"
+                    return False
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            try:
+                os.link(source, destination, follow_symlinks=False)
+            except FileExistsError:
+                # Interrupted previous handoff: these are the SAME file inode.
+                prev = destination.lstat()
+                if ((prev.st_dev, prev.st_ino) != (st.st_dev, st.st_ino)
+                        or not stat.S_ISREG(prev.st_mode)):
+                    self.last_handoff_error = "capture destination already exists"
+                    return False
+            self._sync_directory(self.config.capture_dir)
+            source.unlink()
+            self._sync_directory(self.config.active_dir)
         except OSError as error:
             self.last_handoff_error = f"handoff failed: {type(error).__name__}"
             return False
         self.handoffs += 1
         self.last_handoff_error = ""
         return True
+
+    @staticmethod
+    def _sync_directory(path):
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
     def _recover_abandoned(self):
         """Resume stale captures after abrupt power loss; never touch fresh files."""
