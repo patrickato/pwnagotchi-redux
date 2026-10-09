@@ -230,6 +230,34 @@ Use `redux live doctor` for the reason behind a processing alert,
 A crashed scan may leave no new heartbeat; its previously recorded timestamp
 will eventually become overdue. No data is invented to cover that interval.
 
+## Bounded scan selection and dashboard query cost
+
+Capture ingest no longer loads and sorts **every filename** in
+`/captures/incoming` before processing a bounded pass. The worker streams
+the directory and retains only the lexicographically smallest
+`max_files_per_pass` candidates after a durable `cursor_path`. At the end,
+it wraps to the beginning and fills the remainder of the batch, if needed.
+The cursor is committed with the completed-scan heartbeat. If a worker
+crashes mid-pass, the cursor does not advance, and the existing content-hash
+ledger makes replay idempotent. Existing numeric cursors from older images
+are ignored once during migration; no original captures are deleted.
+
+This limits candidate-list memory to **O(K)** where K is the configured
+`max_files_per_pass`, instead of O(N) for N capture filenames. It still
+enumerates all directory entries in O(N) time, with O(N log K) selection CPU;
+wraparound may require two streaming passes. This is not a constant-time
+directory index, nor a reason to leave unlimited captures on one partition.
+Capture retention remains separate and opt-in.
+
+The live dashboard's channel counts and RSSI histogram are now aggregated
+inside SQLite without constructing Python objects for every saved sighting.
+The newest-access-point list uses SQL `ORDER BY ts DESC LIMIT 16` rather
+than reading and re-sorting the entire table. The Augur status and Doctor
+now **share one read-only worker-ledger snapshot per checkpoint**, eliminating
+the duplicate processing-DB read while preserving the same on-screen facts.
+These optimizations change query cost, not the number or authenticity of
+observations saved.
+
 ## Release gates not yet completed
 
 CI exercises the above with injected radios/transports/processes; it cannot
