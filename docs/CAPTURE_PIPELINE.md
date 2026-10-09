@@ -83,6 +83,31 @@ Use a Redux test installation, not your only working Pwnagotchi SD card.
 Redux Scope file. On a device without a functional Hashcat backend, the binary may
 exist without being usable; the complete test requires real Pi verification.
 
+## Long-running capture retention (explicit, reversible decision)
+
+Raw captures can consume storage even after a verified conversion. Redux now
+provides a **dry-run by default** storage inventory and an operator-only cleanup:
+
+```sh
+redux pipeline --config /etc/redux/pipeline.toml prune --older-than-days 30
+# Review the candidate list and estimated bytes first.
+redux pipeline --config /etc/redux/pipeline.toml prune --older-than-days 30 --apply
+```
+
+The cleanup command requires an explicit `--apply`; **there is no scheduled
+automatic deletion**. It has a minimum age of seven days, a bounded batch
+(default 100), and checks that the source path is an immediate child of a
+configured capture input. It verifies source SHA-256 against the conversion
+ledger and the prepared artifact SHA-256 against the actual output. It refuses
+invalid/error results, missing or corrupted outputs, newer captures, symlinks,
+and source files with additional hardlinks (including interrupted handoffs).
+The prepared `.hc22000` artifacts and ledger are never deleted.
+
+This intentionally cannot guarantee that an old capture has no other forensic
+value. It is an *optional retention choice*, not a replacement for exporting
+and backing up raw captures before cleanup. Cleanup is intended only for
+capture files on systems the owner administers.
+
 ## Integrity and reproducibility
 
 - The capture processor rejects symlinks and unstable files, limits bytes/time/jobs,
