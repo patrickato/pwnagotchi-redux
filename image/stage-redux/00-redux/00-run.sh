@@ -9,6 +9,8 @@ install -m 0644 files/redux.service "$ROOTFS_DIR/etc/systemd/system/redux.servic
 # stores code/config; jobs/results live on the dedicated writable /captures.
 install -d "$ROOTFS_DIR/etc/redux" "$ROOTFS_DIR/captures"
 install -m 0600 files/pipeline/pipeline.toml "$ROOTFS_DIR/etc/redux/pipeline.toml"
+install -m 0600 files/pipeline/live.toml "$ROOTFS_DIR/etc/redux/live.toml"
+install -m 0644 files/redux-live.service "$ROOTFS_DIR/etc/systemd/system/redux-live.service"
 for unit in redux-capture-ingest redux-capture-audit; do
     sed -e '/^\[Unit\]$/a RequiresMountsFor=/captures' \
         -e '/^\[Service\]$/a Environment=PYTHONPATH=/opt/redux' \
@@ -24,11 +26,15 @@ useradd --system --home-dir /var/lib/redux --shell /usr/sbin/nologin redux
 chown -R root:root /opt/redux
 python3 -m compileall -q /opt/redux/redux
 systemctl enable redux.service
+# Radio owner starts independently; no process is launched if hardware is unavailable.
+systemctl enable redux-live.service
+# Capture processing operates on the writable REDUXCAP partition, independently.
+systemctl enable redux-capture-ingest.timer
 # hcx conversion is bundled; Hashcat compute backend remains hardware-gated.
 apt-get install -y --no-install-recommends hcxtools
 # Timers are shipped, but left disabled until output paths and writable
 # mounts pass device acceptance checks.
-systemctl disable redux-capture-ingest.timer redux-capture-audit.timer 2>/dev/null || true
+systemctl disable redux-capture-audit.timer 2>/dev/null || true
 # The engine ships as a binary only. No stock unit may start an unscoped session.
 systemctl mask bettercap.service
 # Keep the image lean; compile tools belong on the build host, not in the field.
