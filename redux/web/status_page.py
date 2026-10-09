@@ -197,6 +197,11 @@ function markStale(why){
  document.getElementById('doctorlabel').textContent='UNKNOWN · STALE';
  document.getElementById('doctorcoverage').textContent=
   'Live health cannot be verified. Last known findings may be out of date.';
+ const pipeline=document.getElementById('pipelinestate');
+ pipeline.className='doctor-title unknown';
+ pipeline.textContent='UNKNOWN · STALE';
+ document.getElementById('pipelinereason').textContent=
+  'Latest capture-processing reading is unverified until reconnection.';
 }
 var skin=(function(){try{return localStorage.getItem('augur.skin')||'rich'}catch(e){return 'rich'}})();
 function applySkin(){document.body.setAttribute('data-skin',skin);
