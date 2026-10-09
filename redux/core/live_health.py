@@ -26,7 +26,7 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
                          doctor_report=None, dashboard_enabled=False,
                          dashboard_active=False, dashboard_error="",
                          sighting_pending=None, sighting_write_error="",
-                         sighting_lost=0):
+                         sighting_lost=0, engine_log_error=""):
     """Combine Augur's real Doctor report with physical supervisor observations.
 
     Without Augur the Doctor's normal probes are UNKNOWN, *never* silently OK.
@@ -115,6 +115,12 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
         findings.append(_finding("sighting persistence", "ok",
                                  "Sighting persistence queue is clear.",
                                  "No unsaved sightings remain in the in-memory queue."))
+
+    if engine_log_error:
+        findings.append(_finding("engine logging", "degraded",
+                                 "Engine diagnostic logging cannot be bounded.",
+                                 engine_log_error,
+                                 "Inspect capture storage permissions and free space."))
 
     if dashboard_enabled:
         if dashboard_active:
