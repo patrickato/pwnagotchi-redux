@@ -404,6 +404,8 @@ def test_preparation_exports_only_redux_and_targets_pi4(prepared):
     assert (tree / "stage-redux/EXPORT_IMAGE").exists()
     assert (tree / "stage-redux/00-redux/files/redux/core/boot.py").exists()
     assert (tree / "stage-redux/00-redux/files/pipeline/pipeline.toml").exists()
+    assert (tree / "stage-redux/00-redux/files/pipeline/live.toml").exists()
+    assert (tree / "stage-redux/00-redux/files/redux/core/live_runtime.py").exists()
     assert (tree / "stage-redux/00-redux/files/pipeline/redux-capture-ingest.service").exists()
     config = invoke(["bash", "-c", 'source "$1"; printf "%s|%s|%s" "$RELEASE" "$STAGE_LIST" "$ENABLE_SSH"', "bash", str(tree / "config")], env=env)
     assert config.stdout == "bookworm|stage0 stage1 stage2 stage-redux|0"
@@ -442,12 +444,16 @@ bash ./00-run.sh
     chroot = Path(env["CHROOT_INPUT"]).read_text()
     assert "systemctl enable redux.service" in chroot
     assert (root / "etc/redux/pipeline.toml").is_file()
+    assert (root / "etc/redux/live.toml").is_file()
+    assert "ExecStart=/usr/bin/python3 -m redux.core.live_runtime" in (root / "etc/systemd/system/redux-live.service").read_text()
+    assert "systemctl enable redux-live.service" in chroot
+    assert "systemctl enable redux-capture-ingest.timer" in chroot
     assert "/captures/jobs.db" in (root / "etc/redux/pipeline.toml").read_text()
     pipeline_unit = (root / "etc/systemd/system/redux-capture-ingest.service").read_text()
     assert "Environment=PYTHONPATH=/opt/redux" in pipeline_unit
     assert "RequiresMountsFor=/captures" in pipeline_unit
     assert "hcx" in chroot
-    assert "systemctl disable redux-capture-ingest.timer" in chroot
+    assert "systemctl disable redux-capture-audit.timer" in chroot
     assert "systemctl mask bettercap.service" in chroot
 
 
