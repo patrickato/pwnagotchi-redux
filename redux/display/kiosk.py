@@ -111,11 +111,52 @@ def x11_probe(display: str, *, socket_dir: Path = Path("/tmp/.X11-unix"),
     return result
 
 
+def x11_geometry_probe(display: str, *, which=shutil.which,
+                       runner=subprocess.run) -> dict:
+    """Verify the live authenticated X11 root screen is the TFT-sized canvas.
+
+    This rejects an accidentally selected HDMI desktop or an unreachable
+    Xauthority session. It cannot prove Xorg is wired to the selected fbN.
+    """
+    result = {"ok": False, "resolution": None, "reason": ""}
+    if not re.fullmatch(r":[0-9]{1,3}(?:\.[0-9]{1,2})?", display or ""):
+        result["reason"] = "a local X11 DISPLAY is required"
+        return result
+    binary = which("xdpyinfo")
+    if not binary or not os.path.isabs(binary):
+        result["reason"] = "xdpyinfo unavailable; install the opt-in manual-x11 profile"
+        return result
+    try:
+        proc = runner([binary, "-display", display], capture_output=True,
+                      text=True, timeout=3, check=False)
+        if proc.returncode != 0:
+            result["reason"] = "xdpyinfo could not read the current X11 screen"
+            return result
+        matches = re.findall(
+            r"^\s*dimensions:\s*([0-9]+)x([0-9]+)\s+pixels",
+            proc.stdout[:65536], flags=re.MULTILINE,
+        )
+        if len(matches) != 1:
+            result["reason"] = "X11 screen geometry is missing or ambiguous"
+            return result
+        dimensions = tuple(map(int, matches[0]))
+        result["resolution"] = list(dimensions)
+        if dimensions not in _ALLOWED:
+            result["reason"] = ("X11 root screen is not 480x320 or 320x480; "
+                                "check Xorg fbdev output and rotation")
+            return result
+        result["ok"] = True
+        result["reason"] = "Authenticated local X11 screen geometry observed"
+    except (OSError, subprocess.TimeoutExpired, UnicodeError) as error:
+        result["reason"] = f"X11 geometry unavailable: {type(error).__name__}"
+    return result
+
+
 def preflight(framebuffer: str, port: int = 8080, *,
               environ=None, uid=None, which=shutil.which,
               sys_graphics: Path = Path("/sys/class/graphics"),
               statter=os.stat, opener=urllib.request.urlopen,
-              x11_check=x11_probe) -> dict:
+              x11_check=x11_probe, x11_geometry_check=x11_geometry_probe) -> dict:
     env = os.environ if environ is None else environ
     effective_uid = os.geteuid() if uid is None else uid
     if not 1 <= port <= 65535:
@@ -128,6 +169,10 @@ def preflight(framebuffer: str, port: int = 8080, *,
     x11 = x11_check(env.get("DISPLAY", "")) if session_ok else {
         "ok": False, "reason": "No unprivileged local X11 session configured",
     }
+    geometry = x11_geometry_check(env.get("DISPLAY", "")) if x11["ok"] else {
+        "ok": False, "resolution": None,
+        "reason": "X11 transport unavailable; screen geometry not assessed",
+    }
     dashboard = dashboard_probe(port, opener=opener)
     checks = {
         "framebuffer": screen,
@@ -138,6 +183,7 @@ def preflight(framebuffer: str, port: int = 8080, *,
                     "unprivileged DISPLAY set" if session_ok else
                     "run as a non-root user inside a working X11 display session"},
         "x11": x11,
+        "x11_geometry": geometry,
         "dashboard": dashboard,
     }
     return {"ok": all(item["ok"] for item in checks.values()), "checks": checks,
