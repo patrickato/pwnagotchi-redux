@@ -26,7 +26,8 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
                          doctor_report=None, dashboard_enabled=False,
                          dashboard_active=False, dashboard_error="",
                          sighting_pending=None, sighting_write_error="",
-                         sighting_lost=0, engine_log_error=""):
+                         sighting_lost=0, engine_log_error="",
+                         capture_mount_ok=None):
     """Combine Augur's real Doctor report with physical supervisor observations.
 
     Without Augur the Doctor's normal probes are UNKNOWN, *never* silently OK.
@@ -62,7 +63,13 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
                                  last_error or f"Live runtime state: {state}.",
                                  "Review redux-live.service and the read-only device preflight."))
 
-    if free_bytes is None:
+    if capture_mount_ok is False:
+        findings.append(_finding("capture storage", "action",
+                                 "Writable REDUXCAP capture partition is unavailable.",
+                                 "/captures is not mounted, or the mount was lost during this run.",
+                                 "Check the capture mount and restart redux-live.service "
+                                 "after recovery to reacquire its ownership lock."))
+    elif free_bytes is None:
         findings.append(_finding("capture storage", "unknown",
                                  "Capture storage space could not be measured.",
                                  "The filesystem free-space probe was unavailable.",
