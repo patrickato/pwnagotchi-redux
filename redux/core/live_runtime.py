@@ -48,6 +48,7 @@ class LiveConfig:
     enable_web: bool = True
     retry_seconds: int = 10
     probe_seconds: int = 30
+    rotation_seconds: int = 300
 
     @classmethod
     def load(cls, path):
@@ -64,6 +65,7 @@ class LiveConfig:
             enable_web=values.get("enable_web", True),
             retry_seconds=int(values.get("retry_seconds", 10)),
             probe_seconds=int(values.get("probe_seconds", 30)),
+            rotation_seconds=int(values.get("rotation_seconds", 300)),
         )
 
     def validate(self):
@@ -83,6 +85,8 @@ class LiveConfig:
             raise ValueError("API and web ports must be distinct valid ports")
         if not 2 <= self.retry_seconds <= 300 or not 5 <= self.probe_seconds <= 3600:
             raise ValueError("invalid retry/probe cadence")
+        if not 30 <= self.rotation_seconds <= 86400:
+            raise ValueError("capture rotation must be 30-86400 seconds")
         if self.enable_web is not True and self.enable_web is not False:
             raise ValueError("enable_web must be a boolean")
 
@@ -390,6 +394,12 @@ class LiveRuntime:
 
         if self.augur is not None:
             try:
+                if now - self.started >= self.config.rotation_seconds:
+                    self._drop()
+                    self.state = "rotating"
+                    self.next_try = now + 1
+                    self._checkpoint()
+                    return self.state
                 self.augur.pump()
                 if now - self.last_probe >= self.config.probe_seconds:
                     radio, _ = select_radio(self.radio_probe(), self.config.preferred_iface)
