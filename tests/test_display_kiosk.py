@@ -157,3 +157,53 @@ def test_cli_never_claims_touchscreen_was_hardware_verified(monkeypatch, capsys)
     assert json.loads(capsys.readouterr().out) == report
     assert kiosk.main(["--launch", "--framebuffer", "/dev/fb1"]) == 2
     assert json.loads(capsys.readouterr().out) == report
+
+
+def test_kiosk_launch_refuses_missing_ephemeral_profile_directory(
+    tmp_path, monkeypatch, capsys
+):
+    verified = {
+        "ok": True, "checks": {"browser": {"executable": "/usr/bin/chromium"}},
+        "touch_verified": False, "physical_display_verified": False,
+    }
+    monkeypatch.setattr(kiosk, "preflight", lambda *a, **k: verified)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    assert kiosk.main(["--launch", "--framebuffer", "/dev/fb1"]) == 2
+    assert "XDG_RUNTIME_DIR" in capsys.readouterr().err
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "missing"))
+    assert kiosk.main(["--launch", "--framebuffer", "/dev/fb1"]) == 2
+
+
+def test_verified_kiosk_execs_only_loopback_browser_as_current_user(
+    tmp_path, monkeypatch
+):
+    verified = {
+        "ok": True, "checks": {"browser": {"executable": "/usr/bin/chromium"}},
+        "touch_verified": False, "physical_display_verified": False,
+    }
+    monkeypatch.setattr(kiosk, "preflight", lambda *a, **k: verified)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    launched = []
+    def fake_exec(path, argv):
+        launched.append((path, argv))
+        raise RuntimeError("mock exec")
+    monkeypatch.setattr(kiosk.os, "execv", fake_exec)
+    with pytest.raises(RuntimeError, match="mock exec"):
+        kiosk.main(["--launch", "--framebuffer", "/dev/fb1"])
+    assert len(launched) == 1
+    executable, args = launched[0]
+    assert executable == "/usr/bin/chromium"
+    assert args == kiosk.chromium_argv(
+        executable, 8080, profile=tmp_path / "redux-chromium")
+    assert all("no-sandbox" not in arg for arg in args)
+
+
+def test_check_flag_does_not_exec_browser_even_when_all_probes_pass(
+    monkeypatch, capsys
+):
+    verified = {"ok": True, "checks": {"browser": {"executable": "/usr/bin/chromium"}},
+                "touch_verified": False, "physical_display_verified": False}
+    monkeypatch.setattr(kiosk, "preflight", lambda *a, **k: verified)
+    monkeypatch.setattr(kiosk.os, "execv", lambda *a: pytest.fail("unwanted exec"))
+    assert kiosk.main(["--check", "--framebuffer", "/dev/fb1"]) == 0
+    assert json.loads(capsys.readouterr().out) == verified
