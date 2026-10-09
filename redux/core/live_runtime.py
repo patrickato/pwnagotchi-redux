@@ -53,6 +53,7 @@ class LiveConfig:
     probe_seconds: int = 30
     rotation_seconds: int = 300
     min_free_bytes: int = 64 * 1024 * 1024
+    max_log_bytes: int = 4 * 1024 * 1024
     allow_connected_capture: bool = False
 
     @classmethod
@@ -72,6 +73,7 @@ class LiveConfig:
             probe_seconds=int(values.get("probe_seconds", 30)),
             rotation_seconds=int(values.get("rotation_seconds", 300)),
             min_free_bytes=int(values.get("min_free_bytes", 64 * 1024 * 1024)),
+            max_log_bytes=int(values.get("max_log_bytes", 4 * 1024 * 1024)),
             allow_connected_capture=values.get("allow_connected_capture", False),
         )
 
@@ -96,6 +98,8 @@ class LiveConfig:
             raise ValueError("capture rotation must be 30-86400 seconds")
         if self.min_free_bytes < 1024 * 1024:
             raise ValueError("capture minimum free bytes must be >=1 MiB")
+        if not 65536 <= self.max_log_bytes <= 64 * 1024 * 1024:
+            raise ValueError("max_log_bytes must be between 64 KiB and 64 MiB")
         if self.enable_web is not True and self.enable_web is not False:
             raise ValueError("enable_web must be a boolean")
         if type(self.allow_connected_capture) is not bool:
@@ -263,6 +267,8 @@ class LiveRuntime:
         self.saved_state = ""
         self.started = 0.0
         self.log_handle = None
+        self.log_truncations = 0
+        self.log_error = ""
         self.capture_file = None
         self.handoffs = 0
         self.last_handoff_error = ""
@@ -324,6 +330,9 @@ class LiveRuntime:
             "sightings_loss_reason": self.last_sighting_loss_reason[:140],
             "dashboard_active": self.web is not None if self.config.enable_web else None,
             "dashboard_error": self.web_error[:120],
+            "log_bytes": self._log_size(),
+            "log_truncations": self.log_truncations,
+            "log_error": self.log_error[:120],
             "free_bytes": free,
             "last_error": self.last_error[:180],
             "updated_utc": time.time(),
@@ -350,6 +359,7 @@ class LiveRuntime:
             dashboard_error=self.web_error,
             sighting_pending=pending, sighting_write_error=write_error,
             sighting_lost=self.sighting_loss_events,
+            engine_log_error=self.log_error,
         )
         metadata["health"] = health["overall"]
         metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])
@@ -383,6 +393,68 @@ class LiveRuntime:
         self.web_thread = thread
         self.web_error = ""
 
+    def _log_size(self):
+        if self.log_handle is None:
+            return None
+        try:
+            return os.fstat(self.log_handle.fileno()).st_size
+        except OSError:
+            return None
+
+    def _open_engine_log(self):
+        path = self.config.state_dir / "bettercap.log"
+        old = self.config.state_dir / "bettercap.log.previous"
+        # Older builds may have left a huge, abandoned archive. Do not allow a
+        # pre-existing symlink or hardlink to point cleanup outside state_dir.
+        if old.is_symlink():
+            raise ValueError("refusing engine log archive symlink")
+        if old.exists():
+            st = old.lstat()
+            if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+                raise ValueError("refusing non-regular engine log archive")
+            if st.st_size > self.config.max_log_bytes:
+                fd = os.open(old, os.O_WRONLY | os.O_NOFOLLOW)
+                try:
+                    seen = os.fstat(fd)
+                    if not stat.S_ISREG(seen.st_mode) or seen.st_nlink != 1:
+                        raise ValueError("refusing linked engine log archive")
+                    os.ftruncate(fd, 0)
+                finally:
+                    os.close(fd)
+        fd = os.open(path, os.O_CREAT | os.O_APPEND | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+                raise ValueError("refusing linked or non-regular engine log")
+            os.fchmod(fd, 0o600)
+            if st.st_size > self.config.max_log_bytes:
+                os.ftruncate(fd, 0)
+                self.log_truncations += 1
+            return os.fdopen(fd, "ab", buffering=0)
+        except Exception:
+            os.close(fd)
+            raise
+
+    def _enforce_log_limit(self):
+        if self.log_handle is None:
+            return
+        try:
+            fd = self.log_handle.fileno()
+            size = os.fstat(fd).st_size
+            if size >= self.config.max_log_bytes:
+                # A live subprocess retains the same O_APPEND descriptor.
+                # Truncation is intentional: logs are expendable; .pcap files
+                # and the durable events database are never deleted by this.
+                os.ftruncate(fd, 0)
+                self.log_truncations += 1
+                _LOG.info("engine log reached size limit; reset live log")
+            self.log_error = ""
+        except OSError as error:
+            message = f"engine log size enforcement failed: {type(error).__name__}"
+            if self.log_error != message:
+                _LOG.warning("%s", message)
+            self.log_error = message
+
     def _launch(self, iface):
         ensure_monitor(iface, run=self.executor,
                        allow_connected=self.config.allow_connected_capture)
@@ -410,14 +482,10 @@ class LiveRuntime:
         finally:
             if os.path.exists(name):
                 os.unlink(name)
-        # A bounded previous log is retained across restarts; secrets stay private.
-        log_path = self.config.state_dir / "bettercap.log"
-        if log_path.is_symlink():
-            raise ValueError("refusing engine log symlink")
-        if log_path.is_file() and log_path.stat().st_size > 4 * 1024 * 1024:
-            log_path.replace(self.config.state_dir / "bettercap.log.previous")
-        self.log_handle = log_path.open("ab", buffering=0)
-        os.chmod(self.config.state_dir / "bettercap.log", 0o600)
+        # The subprocess keeps an O_APPEND descriptor, so ftruncate from the
+        # supervisor starts a new log segment without a child restart.
+        # A restart-only rename previously let a healthy process fill the SD.
+        self.log_handle = self._open_engine_log()
         self.process = self.spawn(
             [self.config.bettercap_binary, "-iface", iface, "-caplet", str(caplet),
              "-no-history", "-env-file", "", "-no-colors", "-silent"],
@@ -574,6 +642,7 @@ class LiveRuntime:
 
     def tick(self):
         now = self.clock()
+        self._enforce_log_limit()
         # Bring up read-only diagnostics even without a radio or working
         # Bettercap. Broken captures should not make their own cause invisible.
         if self.web is not None and self.web_thread is not None:
