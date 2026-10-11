@@ -227,6 +227,17 @@ may fail to use a legacy SPI fbdev node on a given target kernel.
 Do not call this profile plug-and-play or mark the physical TFT tested
 until the actual device proves it.
 
+## Headless first-boot acceptance
+
+The standalone image installs `redux-boot-check` without a graphical
+session, radio test, or automatic boot hook. See
+[BOOT_ACCEPTANCE.md](BOOT_ACCEPTANCE.md) for an explicit operator-invoked,
+read-only evidence workflow. It verifies mounted filesystem types/modes and
+REDUXCAP provenance, systemd unit state, baked manifest presence and the
+local Doctor JSON endpoint, without treating software evidence as physical
+Pi 4/Pi 5 qualification. An absent fact is UNKNOWN, never silently OK.
+The additional `--strict` switch makes unknown evidence a nonzero exit.
+
 ## Verification
 
 ```sh

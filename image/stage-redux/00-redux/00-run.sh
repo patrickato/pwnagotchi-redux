@@ -23,6 +23,12 @@ cat > "$ROOTFS_DIR/usr/local/bin/redux-display-diag" <<'REDUX_DISPLAY_DIAG_LAUNC
 PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.display.acceptance "$@"
 REDUX_DISPLAY_DIAG_LAUNCHER
 chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-display-diag"
+# Headless first-boot mount, service, and image evidence: operator invoked only.
+cat > "$ROOTFS_DIR/usr/local/bin/redux-boot-check" <<'REDUX_BOOT_CHECK_LAUNCHER'
+#!/bin/sh
+PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.boot_readiness "$@"
+REDUX_BOOT_CHECK_LAUNCHER
+chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-boot-check"
 # Record the browser profile only if explicitly requested by the build host.
 # Never enable a desktop autostart unit or claim the TFT has passed acceptance.
 if [[ -f files/kiosk-profile ]]; then
