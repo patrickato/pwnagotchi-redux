@@ -1,6 +1,7 @@
 # Standalone Redux passive runtime; no active wireless operations.
 [live]
-state_dir = "/captures/redux"
+# Root-owned live supervisor state. Keep separate from redux/ (unprivileged service-owned).
+state_dir = "/captures/live"
 capture_dir = "/captures/incoming"
 active_dir = "/captures/active" # Bettercap writes here; never watched by converter
 bettercap_binary = "bettercap"

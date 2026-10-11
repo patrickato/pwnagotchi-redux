@@ -24,6 +24,20 @@ def radio(iface="wlan1mon", *, monitor=True, onboard=False, bands=("2.4", "5")):
                  bands=frozenset(bands), driver="mt76x2u")
 
 
+def test_baked_live_state_is_separate_from_redux_service_owner():
+    """A capped root radio worker must not chmod the redux-owned 0700 directory."""
+    example = Path(__file__).resolve().parents[1] / "config/live.example.toml"
+    baked = live.LiveConfig.load(example)
+    assert live.LiveConfig().state_dir == Path("/captures/live")
+    assert baked.state_dir == Path("/captures/live")
+    assert baked.state_dir != Path("/captures/redux")
+    unit = (Path(__file__).resolve().parents[1]
+            / "image/stage-redux/00-redux/files/redux-live.service").read_text()
+    assert "CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW" in unit
+    assert "CAP_DAC_OVERRIDE" not in unit
+    assert "CAP_FOWNER" not in unit
+
+
 def test_select_radio_only_capable_and_preferred():
     rs = [radio("wlan0", onboard=True, bands=("2.4",)),
           radio("wlan1mon")]

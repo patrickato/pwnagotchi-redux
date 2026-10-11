@@ -43,7 +43,7 @@ _IFACE = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
 
 @dataclass(frozen=True)
 class LiveConfig:
-    state_dir: Path = Path("/captures/redux")
+    state_dir: Path = Path("/captures/live")
     capture_dir: Path = Path("/captures/incoming")
     active_dir: Path = Path("/captures/active")
     bettercap_binary: str = "bettercap"
@@ -66,7 +66,7 @@ class LiveConfig:
         with open(path, "rb") as stream:
             values = tomllib.load(stream).get("live", {})
         return cls(
-            state_dir=Path(values.get("state_dir", "/captures/redux")),
+            state_dir=Path(values.get("state_dir", "/captures/live")),
             capture_dir=Path(values.get("capture_dir", "/captures/incoming")),
             active_dir=Path(values.get("active_dir", "/captures/active")),
             bettercap_binary=values.get("bettercap_binary", "bettercap"),

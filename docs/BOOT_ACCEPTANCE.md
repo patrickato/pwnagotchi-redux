@@ -56,6 +56,36 @@ files. It deliberately does *not* calculate or endorse firmware checksums.
 Use the separate build guide's real `sha256sum -c` and loaded module/kernel
 vermagic checks when qualifying each Raspberry Pi board.
 
+## Physical test finding: live supervisor permissions (2026-10-11)
+
+On the first Pi 4 Redux development card, `redux-live.service` repeatedly
+exited with `PermissionError: [Errno 1] Operation not permitted:
+'/captures/redux'` on `os.chmod(state_dir, 0o700)`. The radio supervisor
+runs as root but deliberately has **only** `CAP_NET_ADMIN` and
+`CAP_NET_RAW`; it does not have `CAP_FOWNER` or `CAP_DAC_OVERRIDE`
+to override ownership of a directory created for other services.
+
+The live supervisor must exclusively own `/captures/live`, **not**
+the existing `/captures/redux` namespace. The baked example configuration
+and the Python defaults both use `/captures/live` in subsequent images.
+No additional capabilities were granted; existing files in
+`/captures/redux` are not modified or reassigned.
+
+To test the correction on an already-booted development card without
+rebuilding the image:
+
+```sh
+sudo systemctl stop redux-live.service
+sudo sed -i 's|^state_dir = "/captures/redux"|state_dir = "/captures/live"|' /etc/redux/live.toml
+sudo systemctl restart redux-live.service
+systemctl is-active redux-live.service
+```
+
+The image's overlay root can make this **temporary until reboot**. A
+successful `active` response only establishes the service stays up;
+verify that radio capture and Doctor work independently before qualifying
+them. The physical hardware result after this workaround is pending.
+
 ## After the software snapshot
 
 Observe and record separately on both Raspberry Pi 4 and Pi 5:
