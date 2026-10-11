@@ -84,7 +84,7 @@ def config_tree(tmp_path):
 
 def test_credential_is_private_unique_and_resolves_pigen_guard(tmp_path):
     config, destination = config_tree(tmp_path)
-    secret = "abcdef" * 16
+    secret = "abcdef" * 8  # 48 hex characters = 192 bits
     report = creds.generate(config, destination, random_hex=lambda: secret)
     assert report["password_bits"] == 192
     assert config.stat().st_mode & 0o077 == 0
