@@ -36,10 +36,10 @@ def test_healthy_host_indicates_prerequisites_not_a_build(tmp_path):
 
 def test_missing_tools_are_named_and_block(tmp_path):
     kw=kwargs(tmp_path)
-    kw['which']=lambda name: None if name in {'quilt','qemu-aarch64-static'} else '/usr/bin/'+name
+    kw['which']=lambda name: None if name in {'quilt','qemu-aarch64-static','qemu-aarch64'} else '/usr/bin/'+name
     report=p.report(**kw)
     assert report['overall']=='blocked'
-    assert report['checks']['dependencies']['evidence']['missing']==['quilt','qemu-aarch64-static']
+    assert report['checks']['dependencies']['evidence']['missing']==['quilt','qemu-aarch64-static or qemu-aarch64']
 
 
 def test_native_arm64_does_not_require_qemu_binary(tmp_path):
@@ -129,3 +129,43 @@ def test_check_host_is_wired_to_build_script_without_fetch_or_root(tmp_path):
     assert report["image_built"] is False
     assert report["network_sources_fetched"] is False
     assert not (tmp_path/"fresh").exists()
+
+
+
+def test_new_ubuntu_2604_qemu_user_binary_is_accepted(tmp_path):
+    kw = kwargs(tmp_path)
+    kw["which"] = lambda name: (
+        None if name == "qemu-aarch64-static" else "/usr/bin/" + name
+    )
+    result = p.report(**kw)
+    assert result["overall"] == "host_checks_ok"
+    assert result["build_ready"] is True
+    assert result["checks"]["dependencies"]["evidence"]["qemu_emulator"] == "qemu-aarch64"
+
+
+def test_qemu_binary_without_executable_binfmt_still_blocks(tmp_path):
+    kw = kwargs(tmp_path)
+    kw["which"] = lambda name: (
+        None if name == "qemu-aarch64-static" else "/usr/bin/" + name
+    )
+    original = fake_runner
+    kw["runner"] = lambda argv, **kwargs: (
+        subprocess.CompletedProcess(argv, 1, "", "ARM64 chroot unsupported")
+        if argv[0] == "arch-test" else original(argv, **kwargs)
+    )
+    result = p.report(**kw)
+    assert result["checks"]["dependencies"]["status"] == "ok"
+    assert result["checks"]["arm64_execution"]["status"] == "blocker"
+    assert result["build_ready"] is False
+
+
+def test_both_qemu_binary_names_missing_blocks(tmp_path):
+    kw = kwargs(tmp_path)
+    kw["which"] = lambda name: (
+        None if name in ("qemu-aarch64-static", "qemu-aarch64")
+        else "/usr/bin/" + name
+    )
+    result = p.report(**kw)
+    assert result["checks"]["dependencies"]["evidence"]["missing"] == [
+        "qemu-aarch64-static or qemu-aarch64"
+    ]

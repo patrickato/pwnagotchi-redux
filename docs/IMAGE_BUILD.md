@@ -118,17 +118,39 @@ Full `./build.sh` now invokes this gate automatically before cloning upstream
 source trees. `--prepare-only` remains a source-staging operation, not a
 production build, and does not demand chroot or full-build host readiness.
 
-Install the needed host packages when the report identifies blockers:
+Install the needed host packages when the report identifies blockers.
+Ubuntu 26.04 (`resolute`) replaced the directly installable
+`qemu-user-static` with `qemu-user` and `qemu-user-binfmt`.
+Choose the package set matching your actual build host:
+
+**Ubuntu 26.04 / Resolute under WSL2:**
 
 ```sh
 sudo apt-get update
-sudo apt-get install git quilt parted coreutils qemu-user-static debootstrap \
-  libarchive-tools zerofree zip dosfstools e2fsprogs libcap2-bin grep rsync xz-utils curl xxd \
-  file kmod bc gpg pigz arch-test binfmt-support ca-certificates
+sudo apt-get install -y quilt parted debootstrap dosfstools zip zerofree \
+  arch-test pigz qemu-user qemu-user-binfmt binfmt-support
+arch-test arm64
+sudo env REDUX_BUILD_DIR="$HOME/redux-image-build" ./build.sh --check-host
+```
+
+**Ubuntu 24.04 / Debian hosts with the older QEMU packaging:**
+
+```sh
+sudo apt-get update
+sudo apt-get install -y git quilt parted coreutils qemu-user-static debootstrap \
+  libarchive-tools zerofree zip dosfstools e2fsprogs libcap2-bin grep rsync \
+  xz-utils curl xxd file kmod bc gpg pigz arch-test binfmt-support ca-certificates
 sudo update-binfmts --enable qemu-aarch64
 arch-test arm64
-sudo ./build.sh
 ```
+
+The host gate now accepts either `qemu-aarch64` or
+`qemu-aarch64-static`, but always still requires **working** ARM64
+execution from `arch-test arm64`. Installing a QEMU executable by itself is
+insufficient. In WSL2, if `arch-test` fails after installing packages,
+check `binfmt_misc` support before running a full image build; do not
+fake the result with a manual symlink. Use a fresh ext4 work directory for each
+real build.
 
 The `REDUXCAP` partition defaults to 512 MiB for compatibility. For sustained
 passive capture on a larger SD card, explicitly choose an image capacity that

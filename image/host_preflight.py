@@ -85,11 +85,21 @@ def report(workspace, *, uid=None, system=None, machine=None,
         checks.setdefault("workspace_filesystem", item("unknown", "filesystem query failed", error=type(error).__name__))
         checks["disk_space"] = item("unknown", "workspace free-space query failed", error=type(error).__name__)
 
-    required_tools = REQUIRED_TOOLS + (() if arch == "aarch64" else ("qemu-aarch64-static",))
-    missing = [command for command in required_tools if not which(command)]
-    checks["dependencies"] = item("blocker" if missing else "ok",
-                                   "missing required host tools" if missing else "required host tools found",
-                                   missing=missing, examined=list(required_tools))
+    # Ubuntu 26.04 and newer ship qemu-user as static executables named
+    # qemu-aarch64, with registration in qemu-user-binfmt. Older Ubuntu and
+    # Debian builds provide qemu-aarch64-static. Accept either spelling,
+    # while arch-test below still proves that ARM64 chroot execution works.
+    emulators = () if arch == "aarch64" else ("qemu-aarch64-static", "qemu-aarch64")
+    emulator = next((command for command in emulators if which(command)), None)
+    missing = [command for command in REQUIRED_TOOLS if not which(command)]
+    if emulators and emulator is None:
+        missing.append("qemu-aarch64-static or qemu-aarch64")
+    checks["dependencies"] = item(
+        "blocker" if missing else "ok",
+        "missing required host tools" if missing else "required host tools found",
+        missing=missing, examined=list(REQUIRED_TOOLS + emulators),
+        qemu_emulator=emulator,
+    )
     if os_name != "Linux":
         checks["arm64_execution"] = item("blocker", "arm64 chroot requires Linux")
     elif not which("arch-test"):
