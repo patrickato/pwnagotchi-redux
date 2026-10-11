@@ -64,9 +64,20 @@ def unit_contract(root):
         enable = services / want / unit
         if not enable.is_symlink():
             raise ValueError(f"image unit not enabled: {unit}")
-        resolved = (enable.parent / enable.readlink()).resolve(strict=False)
-        actual = (services / unit).resolve(strict=False)
-        if resolved != actual:
+        target = enable.readlink()
+        # systemctl enable from a chroot (or systemctl --root) normally writes
+        # /etc/systemd/system/<unit> as an ABSOLUTE guest-root symlink.
+        # Host Path.resolve() would incorrectly follow it into the build
+        # host's /etc, rejecting the image that systemctl correctly enabled.
+        # Treat a guest-absolute link as an image-root path and only accept
+        # the exact installed unit; keep relative links strictly confined.
+        expected_guest = Path("/etc/systemd/system") / unit
+        expected_host = (services / unit).resolve(strict=False)
+        if target.is_absolute():
+            correct = target == expected_guest
+        else:
+            correct = (enable.parent / target).resolve(strict=False) == expected_host
+        if not correct:
             raise ValueError(f"image enable link points outside expected unit: {unit}")
         checked.append(unit)
     for disabled in ("bettercap.service", "resize2fs_once.service"):

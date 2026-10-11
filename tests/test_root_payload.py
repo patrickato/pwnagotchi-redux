@@ -190,3 +190,50 @@ def test_prepare_gate_wires_root_before_boot_in_lite_and_ab():
     assert source.count("redux-root-payload.py") >= 3
     assert '--other-root "$other"' in source
     assert "--profile lite --root" in source
+
+
+@pytest.mark.parametrize("unit", sorted(gate._UNITS))
+def test_image_absolute_systemctl_enable_symlinks_resolve_in_guest_root(tmp_path, unit):
+    root = slot(tmp_path)
+    group = gate._UNITS[unit][0]
+    link = root / "etc/systemd/system" / group / unit
+    link.unlink()
+    link.symlink_to("/etc/systemd/system/" + unit)
+    assert gate.verify(root)["root_payload_verified"] is True
+
+
+@pytest.mark.parametrize("target", [
+    "/etc/passwd",
+    "/etc/systemd/system/other.service",
+    "/usr/lib/systemd/system/redux.service",
+    "../../../../../../etc/passwd",
+    "../redux-live.service",
+])
+def test_image_service_link_cannot_escape_or_select_other_unit(tmp_path, target):
+    root = slot(tmp_path)
+    link = root / "etc/systemd/system/multi-user.target.wants/redux.service"
+    link.unlink()
+    link.symlink_to(target)
+    with pytest.raises(ValueError, match="outside expected unit"):
+        gate.verify(root)
+
+
+def test_real_offline_systemctl_enable_link_survives_export_gate(tmp_path):
+    import shutil
+    executable = shutil.which("systemctl")
+    if not executable:
+        pytest.skip("systemctl unavailable; guest-root fixture still covers absolute links")
+    root = slot(tmp_path)
+    unit = "redux.service"
+    target = root / "etc/systemd/system" / unit
+    target.write_text(target.read_text() + "\n[Install]\nWantedBy=multi-user.target\n")
+    link = root / "etc/systemd/system/multi-user.target.wants" / unit
+    link.unlink()
+    invocation = subprocess.run(
+        [executable, "--root", str(root), "enable", unit],
+        text=True, capture_output=True, timeout=10,
+    )
+    assert invocation.returncode == 0, invocation.stderr
+    assert link.is_symlink()
+    assert link.readlink() == Path("/etc/systemd/system/redux.service")
+    assert gate.verify(root)["root_payload_verified"] is True

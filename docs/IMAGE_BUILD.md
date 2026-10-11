@@ -18,6 +18,13 @@ masks for conflicting legacy services, 0600 capture configs, passive radio
 defaults, capture directories and database paths on `/captures`,
 `overlayroot` policy and the correct Lite fstab or A/B RAUC wiring.
 For A/B, **both** mounted root slots are checked before the clone is closed.
+Service-enable symlinks are resolved **inside the exported guest root**:
+pi-gen/systemctl normally writes absolute `/etc/systemd/system/...` links
+which must not be interpreted against the Linux build host. The gate
+accepts only links back to the exact expected Redux unit and rejects
+redirected/escaping links. Regression tests also invoke real offline
+`systemctl --root` to guard this integration contract.
+
 A missing runtime file, broken unit link, unexpected writable location or
 missing update trust anchor stops export. Example manual read-only check
 against a *mounted* development image filesystem:
