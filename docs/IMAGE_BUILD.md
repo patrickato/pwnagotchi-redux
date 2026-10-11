@@ -84,7 +84,17 @@ mounts from a failed pi-gen run must be unmounted before removing any build tree
 Output: `build/image/pi-gen/deploy/*.img.xz` with a matching
 `.img.xz.sha256` checksum and `.img.xz.release.json` provenance manifest.
 The wrapper streams and verifies the complete xz payload without mounting
-the image. The default Lite profile requires three non-overlapping MBR
+the image. **Release publication is fail-closed:** the publisher locks the
+compressed source image while it validates and writes metadata, first
+invalidates sidecars from any previous attempt, and writes the checksum
+before the manifest. The atomically written `.img.xz.release.json` manifest
+is the final *publication completion marker*. An interrupted write before
+that point is not a completed release even if an orphan checksum remains
+after a process crash. Hand-off tooling must require both a valid matching
+`.sha256` and `.release.json`; never treat a checksum alone as an approved
+release. A failed rerun removes old sidecars rather than leaving obsolete
+provenance for a now-invalid image. No file metadata asserts boot or
+hardware validation. The default Lite profile requires three non-overlapping MBR
 partitions with REDUXCAP in p3. The optional A/B profile requires six named
 GPT partitions (REDUXCTRL, REDUXBOOTA, REDUXBOOTB, REDUXROOTA, REDUXROOTB,
 REDUXCAP), valid primary and backup GPT headers/entry arrays and their CRC32

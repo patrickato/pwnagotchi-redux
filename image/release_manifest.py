@@ -7,6 +7,7 @@ image size and the digest of the exact downloadable compressed bytes.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import itertools
 import zlib
 import hashlib
@@ -314,6 +315,36 @@ def _write_private_atomic(target: Path, data: bytes):
             os.unlink(temp)
 
 
+def _clear_release_sidecars(manifest: Path, checksum: Path):
+    """Invalidate an old publication before attempting a new one.
+
+    A release.json file is the commit marker: publication is not complete
+    until the checksum has been durably written and this manifest appears.
+    Reject symlinks and other unexpected sidecars instead of following them.
+    """
+    paths = (manifest, checksum)
+    for path in paths:
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(mode):
+            raise ValueError(f"unsafe release sidecar (not a regular file): {path.name}")
+    removed = False
+    for path in paths:
+        try:
+            path.unlink()
+            removed = True
+        except FileNotFoundError:
+            pass
+    if removed:
+        directory = os.open(manifest.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+
+
 def publish(path, revision, pi_gen_revision, nexmon_revision, *,
             minimum_bytes=512 * 1024 * 1024, expected_profile=None):
     image = Path(path)
@@ -322,26 +353,47 @@ def publish(path, revision, pi_gen_revision, nexmon_revision, *,
         "pi_gen": _commit(pi_gen_revision),
         "nexmon": _commit(nexmon_revision),
     }
-    info = inspect_image(image, minimum_bytes=minimum_bytes,
-                         expected_profile=expected_profile)
-    record = {
-        "schema": 1,
-        "image": image.name,
-        "revisions": revs,
-        **info,
-        "checks": ["xz_stream", ("disk_gpt_primary_backup" if info["partition_table"] == "gpt" else "disk_mbr_partitions"), "partition_filesystem_signatures", "sha256"],
-        "hardware_tested": False,
-        "boot_tested": False,
-        "note": "File-integrity checks only. ARM64 boot, partition mounts, radio and capture require physical validation.",
-    }
+    if not image.name.endswith(".img.xz") or not stat.S_ISREG(image.lstat().st_mode):
+        raise ValueError("release artifact must be a regular *.img.xz file")
     manifest = image.with_name(image.name + ".release.json")
     checksum = image.with_name(image.name + ".sha256")
-    _write_private_atomic(
-        manifest, (json.dumps(record, sort_keys=True, indent=2) + "\n").encode("utf-8")
-    )
-    _write_private_atomic(
-        checksum, (info["sha256"] + "  " + image.name + "\n").encode("ascii")
-    )
+    # Use the immutable image inode for an advisory producer lock; competing
+    # Redux publishers must not interleave their two metadata writes.
+    with image.open("rb") as held:
+        try:
+            fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ValueError("release image is already being published") from error
+        # Remove any earlier successful marker before validating the possibly
+        # replaced image. Failed retries must never leave stale provenance.
+        _clear_release_sidecars(manifest, checksum)
+        try:
+            info = inspect_image(image, minimum_bytes=minimum_bytes,
+                                 expected_profile=expected_profile)
+            if image.stat().st_ino != os.fstat(held.fileno()).st_ino or (
+                    image.stat().st_dev != os.fstat(held.fileno()).st_dev):
+                raise ValueError("release image was replaced during publication")
+            record = {
+                "schema": 1,
+                "image": image.name,
+                "revisions": revs,
+                **info,
+                "checks": ["xz_stream", ("disk_gpt_primary_backup" if info["partition_table"] == "gpt" else "disk_mbr_partitions"), "partition_filesystem_signatures", "sha256"],
+                "hardware_tested": False,
+                "boot_tested": False,
+                "note": "File-integrity checks only. ARM64 boot, partition mounts, radio and capture require physical validation.",
+            }
+            # Checksum comes first. The atomically replaced manifest is the
+            # final marker, never proof of a successful hardware boot.
+            _write_private_atomic(
+                checksum, (info["sha256"] + "  " + image.name + "\n").encode("ascii")
+            )
+            _write_private_atomic(
+                manifest, (json.dumps(record, sort_keys=True, indent=2) + "\n").encode("utf-8")
+            )
+        except BaseException:
+            _clear_release_sidecars(manifest, checksum)
+            raise
     return record
 
 

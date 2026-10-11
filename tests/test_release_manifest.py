@@ -196,3 +196,101 @@ def test_build_release_profile_is_bound_to_image_export_selection():
     assert '--expected-profile "$BOOT_GATE_PROFILE"' in build
     assert "BOOT_GATE_PROFILE=ab" in build
     assert "BOOT_GATE_PROFILE=lite" in build
+
+
+
+def test_release_metadata_manifest_is_written_last(tmp_path, monkeypatch):
+    image = fixture_image(tmp_path)
+    original = MODULE._write_private_atomic
+    order = []
+
+    def observed_writer(path, data):
+        order.append(path.name)
+        if path.name.endswith(".release.json"):
+            checksum = image.with_name(image.name + ".sha256")
+            assert checksum.is_file()
+            assert checksum.read_text().startswith(hashlib.sha256(image.read_bytes()).hexdigest())
+        return original(path, data)
+
+    monkeypatch.setattr(MODULE, "_write_private_atomic", observed_writer)
+    published = publish(image, REV, PI_GEN_REV, NEXMON_REV,
+                        minimum_bytes=512, expected_profile="lite")
+    assert order == [image.name + ".sha256", image.name + ".release.json"]
+    assert published["boot_tested"] is False
+
+
+@pytest.mark.parametrize("fail_at", [1, 2])
+def test_release_write_failure_leaves_no_completion_sidecars(tmp_path, monkeypatch, fail_at):
+    image = fixture_image(tmp_path)
+    original = MODULE._write_private_atomic
+    count = 0
+
+    def failing_writer(path, data):
+        nonlocal count
+        count += 1
+        if count == fail_at:
+            raise OSError("simulated metadata write failure")
+        return original(path, data)
+
+    monkeypatch.setattr(MODULE, "_write_private_atomic", failing_writer)
+    with pytest.raises(OSError, match="simulated"):
+        publish(image, REV, PI_GEN_REV, NEXMON_REV, minimum_bytes=512)
+    assert not (tmp_path / (image.name + ".release.json")).exists()
+    assert not (tmp_path / (image.name + ".sha256")).exists()
+
+
+def test_failed_republication_invalidates_old_release_metadata(tmp_path):
+    image = fixture_image(tmp_path)
+    publish(image, REV, PI_GEN_REV, NEXMON_REV, minimum_bytes=512)
+    manifest = tmp_path / (image.name + ".release.json")
+    checksum = tmp_path / (image.name + ".sha256")
+    assert manifest.exists() and checksum.exists()
+    image.write_bytes(image.read_bytes()[:100])
+    with pytest.raises(ValueError):
+        publish(image, REV, PI_GEN_REV, NEXMON_REV, minimum_bytes=512)
+    assert not manifest.exists()
+    assert not checksum.exists()
+
+
+def test_sidecar_symlink_is_refused_without_following(tmp_path):
+    image = fixture_image(tmp_path)
+    target = tmp_path / "outside"
+    target.write_text("keep this")
+    checksum = tmp_path / (image.name + ".sha256")
+    checksum.symlink_to(target)
+    with pytest.raises(ValueError, match="unsafe release sidecar"):
+        publish(image, REV, PI_GEN_REV, NEXMON_REV, minimum_bytes=512)
+    assert checksum.is_symlink()
+    assert target.read_text() == "keep this"
+    assert not (tmp_path / (image.name + ".release.json")).exists()
+
+
+def test_concurrent_publisher_cannot_invalidate_completed_metadata(tmp_path):
+    import fcntl
+    image = fixture_image(tmp_path)
+    publish(image, REV, PI_GEN_REV, NEXMON_REV, minimum_bytes=512)
+    manifest = tmp_path / (image.name + ".release.json")
+    original = manifest.read_bytes()
+    with image.open("rb") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(ValueError, match="already being published"):
+            publish(image, REV, PI_GEN_REV, NEXMON_REV, minimum_bytes=512)
+    assert manifest.read_bytes() == original
+
+
+def test_source_image_in_place_replacement_during_validation_is_refused(tmp_path, monkeypatch):
+    image = fixture_image(tmp_path)
+    original = MODULE.inspect_image
+
+    def swapping_validator(path, **kwargs):
+        result = original(path, **kwargs)
+        new = path.with_name("swapped.img.xz")
+        new.write_bytes(path.read_bytes())
+        new.replace(path)
+        return result
+
+    monkeypatch.setattr(MODULE, "inspect_image", swapping_validator)
+    with pytest.raises(ValueError, match="replaced during publication"):
+        publish(image, REV, PI_GEN_REV, NEXMON_REV, minimum_bytes=512)
+    assert not (tmp_path / (image.name + ".release.json")).exists()
+    assert not (tmp_path / (image.name + ".sha256")).exists()
