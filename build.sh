@@ -49,6 +49,9 @@ checkout_source() {
     [[ $(git -C "$dest" rev-parse HEAD) == "$rev" ]] || { echo "Source revision mismatch: $dest" >&2; exit 1; }
 }
 checkout_source "$PI_GEN_URL" "$PI_GEN_REV" "$BUILD_DIR/pi-gen"
+# Validate exact upstream export hooks before fetching Nexmon or staging Redux.
+# A successful source revision alone does not prove compatibility with patches.
+python3 "$REPO_DIR/image/pinned_pigen_contract.py" "$BUILD_DIR/pi-gen"
 # Fetch nexmon lazily: use the distro compiler, excluding bundled compilers.
 NEXMON_DIR="$BUILD_DIR/nexmon"
 git init -q "$NEXMON_DIR"

@@ -11,6 +11,21 @@ physical acceptance gates.
 
 ## Linux host
 
+**Pinned exporter compatibility gate.** After checking out the immutable
+`PI_GEN_REV`, `build.sh` now examines the actual fetched pi-gen exporter
+before downloading Nexmon or staging code. It validates the expected
+three-partition Lite exporter, PARTUUID substitution script, finalization
+and compression hooks, and their required ordering. Missing, duplicated
+or changed anchors fail the build with a JSON report identifying the
+incompatible script. This is an upstream source compatibility check,
+not an image build or boot test. It does not replace the later GPT A/B
+conversion, partition signature checks, or mounted boot-file export gate.
+
+To inspect a previously fetched checkout independently (read-only):
+
+```sh
+python3 image/pinned_pigen_contract.py /path/to/pi-gen
+```
 Use root on Debian/Ubuntu with network access, at least 30 GB free, and an ext4
 workspace without spaces. WSL2 can build under ARM emulation; use its persistent
 Linux filesystem, not NTFS or `/tmp`. Host prerequisites:

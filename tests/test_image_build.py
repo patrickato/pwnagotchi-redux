@@ -375,12 +375,28 @@ case $1 in
   checkout)
     if [[ $dir == */pi-gen ]]; then
       mkdir -p "$dir/stage0/02-firmware" "$dir/stage2"
-      mkdir -p "$dir/export-image/05-finalise"
-      echo 'unmount "${ROOTFS_DIR}"' > "$dir/export-image/05-finalise/01-run.sh"
+      mkdir -p "$dir/export-image/05-finalise" "$dir/export-image/04-set-partuuid"
+      touch "$dir/stage2/EXPORT_IMAGE"
+      cat > "$dir/export-image/05-finalise/01-run.sh" <<'FINALISE'
+update-initramfs -k all -c
+unmount "${ROOTFS_DIR}"
+zerofree "${ROOT_DEV}"
+case "${DEPLOY_COMPRESSION}" in
+xz --compress --force
+FINALISE
+      cat > "$dir/export-image/04-set-partuuid/00-run.sh" <<'PARTUUID'
+sed -i "s/BOOTDEV/PARTUUID=${BOOT_PARTUUID}/" "${ROOTFS_DIR}/etc/fstab"
+sed -i "s/ROOTDEV/PARTUUID=${ROOT_PARTUUID}/" "${ROOTFS_DIR}/etc/fstab"
+sed -i "s/ROOTDEV/PARTUUID=${ROOT_PARTUUID}/" "${ROOTFS_DIR}/boot/firmware/cmdline.txt"
+PARTUUID
       cat > "$dir/export-image/prerun.sh" <<'LAYOUT'
 IMG_SIZE=$((BOOT_PART_START + BOOT_PART_SIZE + ROOT_PART_SIZE))
 echo "Creating loop device..."
 ROOT_DEV="${LOOP_DEV}p2"
+parted --script "${IMG_FILE}" mklabel msdos
+mkdosfs -n bootfs -F "$FAT_SIZE"
+mkfs.ext4 -L rootfs
+mount -v "$BOOT_DEV" "${ROOTFS_DIR}/boot/firmware" -t vfat
 LAYOUT
       echo 'exit 91' > "$dir/build.sh"
     fi ;;
