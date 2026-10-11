@@ -9,6 +9,27 @@ is masked so only the Redux-owned supervisor can start the capture engine.
 These services are source/CI integrated; actual boot and capture remain
 physical acceptance gates.
 
+## Mounted root-system export gate
+
+Before an exported image is unmounted or compressed, pi-gen now runs a
+read-only `image/root_payload.py` contract against the **assembled rootfs**.
+It verifies installed Redux runtime entrypoints, enabled systemd units,
+masks for conflicting legacy services, 0600 capture configs, passive radio
+defaults, capture directories and database paths on `/captures`,
+`overlayroot` policy and the correct Lite fstab or A/B RAUC wiring.
+For A/B, **both** mounted root slots are checked before the clone is closed.
+A missing runtime file, broken unit link, unexpected writable location or
+missing update trust anchor stops export. Example manual read-only check
+against a *mounted* development image filesystem:
+
+```sh
+python3 image/root_payload.py --profile lite --root /path/to/mounted-root
+```
+
+The stage runs this gate alongside the existing boot-payload check. Passing
+either one proves only image **assembly**, not firmware boot, systemd
+execution, radio behavior or physical device acceptance.
+
 ## First-boot partition safety (fixed root + REDUXCAP)
 
 The pinned Bookworm pi-gen stage2 adds the stock

@@ -1,7 +1,7 @@
 """Wire the boot payload gate into the pinned pi-gen exporter.
 
-Default Lite: validate its mounted final boot partition before unmount.
-Optional A/B: clone validates both mounted boot slots and selector.
+Default Lite: validate assembled root and boot partition before unmount.
+Optional A/B: clone validates both mounted root/boot slots and selector.
 """
 from __future__ import annotations
 
@@ -19,21 +19,34 @@ def prepare(source, tree, profile):
     stage = tree / "export-image"
     finalise = stage / "05-finalise/01-run.sh"
     target = stage / "redux-boot-payload.py"
-    if target.exists():
-        raise ValueError("export boot gate already prepared")
+    root_target = stage / "redux-root-payload.py"
+    if target.exists() or root_target.exists():
+        raise ValueError("export boot/root gate already prepared")
     script = finalise.read_text()
     if profile == "lite":
         if "redux-ota-clone.sh" in script:
             raise ValueError("Lite boot gate refuses an A/B exporter")
         script = replace_once(
             script, 'unmount "${ROOTFS_DIR}"',
+            'python3 "${STAGE_DIR}/redux-root-payload.py" --profile lite --root "${ROOTFS_DIR}"\n'
             'python3 "${STAGE_DIR}/redux-boot-payload.py" --profile lite --root "${ROOTFS_DIR}"\n'
             'unmount "${ROOTFS_DIR}"')
         finalise.write_text(script)
-    elif ('redux-ota-clone.sh' not in script
-          or 'redux-boot-payload.py' not in (stage / "redux-ota-clone.sh").read_text()):
-        raise ValueError("A/B gate must run while both boot slots are mounted")
+    else:
+        clone = stage / "redux-ota-clone.sh"
+        if ("redux-ota-clone.sh" not in script or not clone.is_file()
+                or "redux-boot-payload.py" not in clone.read_text()):
+            raise ValueError("A/B gate must run while both boot slots are mounted")
+        # The clone script still has BOTH root slots mounted here. Run the
+        # assembled root contract before the existing boot signature gate.
+        cloned = replace_once(clone.read_text(),
+            'python3 "${STAGE_DIR}/redux-boot-payload.py" --profile ab',
+            'python3 "${STAGE_DIR}/redux-root-payload.py" --profile ab ' 
+            '--root "$ROOTFS_DIR" --other-root "$other"\n'
+            'python3 "${STAGE_DIR}/redux-boot-payload.py" --profile ab')
+        clone.write_text(cloned)
     shutil.copyfile(source / "boot_payload.py", target)
+    shutil.copyfile(source / "root_payload.py", root_target)
 
 
 def main(argv=None):

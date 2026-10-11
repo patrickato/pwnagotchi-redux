@@ -165,8 +165,10 @@ def test_lite_hook_stops_export_before_unmount(tmp_path):
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode == 0, res.stderr
     script = finalise.read_text()
+    assert script.index("redux-root-payload.py") < script.index("redux-boot-payload.py")
     assert script.index("redux-boot-payload.py") < script.index('unmount "${ROOTFS_DIR}"')
     assert (stage / "redux-boot-payload.py").exists()
+    assert (stage / "redux-root-payload.py").exists()
     assert subprocess.run(cmd, capture_output=True).returncode != 0
 
 
@@ -185,6 +187,9 @@ def test_ab_hook_requires_live_two_slot_clone(tmp_path):
     result = subprocess.run(cmd, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert (stage / "redux-boot-payload.py").exists()
+    assert (stage / "redux-root-payload.py").exists()
+    clone_script = clone.read_text()
+    assert clone_script.index("redux-root-payload.py") < clone_script.index("redux-boot-payload.py")
     assert "redux-boot-payload.py" not in finalise.read_text()
 
 
