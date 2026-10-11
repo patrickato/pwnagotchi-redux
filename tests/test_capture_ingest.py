@@ -440,3 +440,89 @@ def test_readonly_worker_health_refuses_symlinked_ledger(tmp_path):
     assert read_summary(cfg.database)["available"] is True
 
 
+
+
+
+def test_real_capture_paths_refuse_missing_partition_before_any_mkdir(
+        monkeypatch):
+    from redux.crack import ingest
+    conf = Settings(
+        (Path("/captures/incoming"),), Path("/captures/ready"),
+        Path("/captures/jobs.db"),
+    )
+    monkeypatch.setattr(ingest, "capture_mount_snapshot", lambda: None)
+    with pytest.raises(ingest.CaptureMountLost, match="REDUXCAP"):
+        CaptureIngestor(conf)
+    # No attempt may create directories on the read-only/rootfs fallback.
+
+
+def test_worker_pins_capture_mount_for_entire_lifetime(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    monkeypatch.setattr(ingest, "requires_capture_mount", lambda cfg: True)
+    mount = [(42, "179:3", "ext4", 2049, 2)]
+    monkeypatch.setattr(ingest, "capture_mount_snapshot", lambda: mount[0])
+    conf = settings(tmp_path)
+    source = write_file(conf.inputs[0] / "test.hc22000", (REC+"\n").encode())
+    with CaptureIngestor(conf) as worker:
+        assert worker.scan()["outcomes"]["ready"] == 1
+        first = worker.summary()
+        mount[0] = (43, "179:3", "ext4", 2049, 2)
+        with pytest.raises(ingest.CaptureMountLost, match="changed"):
+            worker.scan()
+        with pytest.raises(ingest.CaptureMountLost, match="changed"):
+            worker.ingest_file(source)
+        assert worker.summary() == first
+        # A newly reappearing mount cannot implicitly heal the old worker.
+        mount[0] = (42, "179:3", "ext4", 2049, 2)
+        with pytest.raises(ingest.CaptureMountLost, match="restart"):
+            worker._assert_mount()
+
+
+def test_missing_mount_at_start_never_creates_ledger(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    monkeypatch.setattr(ingest, "requires_capture_mount", lambda cfg: True)
+    monkeypatch.setattr(ingest, "capture_mount_snapshot", lambda: None)
+    conf = settings(tmp_path)
+    with pytest.raises(ingest.CaptureMountLost):
+        CaptureIngestor(conf)
+    assert not conf.output_dir.exists()
+    assert not conf.database.parent.exists()
+
+
+def test_mid_conversion_mount_loss_blocks_output_and_ledger(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    monkeypatch.setattr(ingest, "requires_capture_mount", lambda cfg: True)
+    mounted = [(42, "179:3", "ext4", 2049, 2)]
+    monkeypatch.setattr(ingest, "capture_mount_snapshot", lambda: mounted[0])
+    conf = settings(tmp_path)
+    source = write_file(conf.inputs[0] / "test.pcap", b"fixture-pcap")
+    def converter(args, **kw):
+        Path(args[2]).write_text(REC+"\n")
+        mounted[0] = (43, "179:3", "ext4", 2049, 2)
+        return subprocess.CompletedProcess(args, 0)
+    with CaptureIngestor(conf, runner=converter) as worker:
+        with pytest.raises(ingest.CaptureMountLost, match="changed"):
+            worker.scan()
+        assert worker.rows() == []
+        assert not list(conf.output_dir.glob("*.hc22000"))
+        assert worker.db.execute(
+            "SELECT value FROM pipeline_meta WHERE key='last_scan'"
+        ).fetchone() is None
+
+
+def test_ledger_record_and_scan_heartbeat_refuse_mount_change(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    monkeypatch.setattr(ingest, "requires_capture_mount", lambda cfg: True)
+    mounted = [(42, "179:3", "ext4", 2049, 2)]
+    monkeypatch.setattr(ingest, "capture_mount_snapshot", lambda: mounted[0])
+    conf = settings(tmp_path)
+    with CaptureIngestor(conf) as worker:
+        mounted[0] = None
+        with pytest.raises(ingest.CaptureMountLost):
+            worker._record("f"*64, conf.inputs[0], "error")
+        with pytest.raises(ingest.CaptureMountLost):
+            worker._completed_scan(0, {})
+        assert worker.rows() == []
+        assert worker.db.execute(
+            "SELECT value FROM pipeline_meta WHERE key='last_scan'"
+        ).fetchone() is None

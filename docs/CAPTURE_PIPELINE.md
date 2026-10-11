@@ -1,7 +1,7 @@
 # Native Redux capture processing (development branch)
 
-This module is **part of the Redux source tree** on branch
-`human/redux-capture-pipeline-integration`. No changes to `main` are needed.
+The active development branch is `human/redux-workbench`. The original
+`main` branch remains unchanged.
 
 ## Architecture
 
@@ -21,6 +21,24 @@ This module is **part of the Redux source tree** on branch
   only. The existing web UI's `/api/status` obtains the same counts; it does **not**
   publish hashes or recovered credentials.
 - Independent systemd oneshots/timers avoid blocking the radio event loop or web UI.
+
+## REDUXCAP mount identity and safe processing
+
+On a standalone Redux image, the ingestion worker refuses to initialize its
+SQLite ledger or output directories unless `/captures` is an observable
+ext4 mount. It pins the kernel mount ID, device number and root inode for
+the worker's entire lifetime. Startup, file conversion, result publication,
+ledger updates, and scan heartbeats recheck that identity. A missing or
+replaced mount stops processing with a `CaptureMountLost` error rather than
+writing into a rootfs fallback directory or recording a false successful
+pass. Loss is latched: a worker restart is required after storage recovery.
+
+Manually mounted/test installations whose processing paths do **not**
+reference `/captures` remain supported without this production-specific
+check. The systemd service's `RequiresMountsFor=/captures` is kept as a
+second layer. These are software safeguards, not proof of physical SD
+fault tolerance; transient unmounts during external conversion remain a
+physical device acceptance case.
 
 ## In the standalone pi-gen image
 

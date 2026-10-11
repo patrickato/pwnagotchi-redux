@@ -22,6 +22,18 @@ import tempfile
 import time
 import tomllib
 
+from ..storage_mount import capture_mount_snapshot
+
+class CaptureMountLost(RuntimeError):
+    """REDUXCAP missing or replaced: stop processing rather than write to rootfs."""
+
+
+def requires_capture_mount(settings):
+    root = Path("/captures")
+    paths = (*settings.inputs, settings.output_dir, settings.database)
+    return any(path == root or root in path.parents for path in paths)
+
+
 SUFFIXES = frozenset({".pcap", ".pcapng", ".cap", ".hc22000"})
 _HEX = re.compile(r"^[0-9a-fA-F]*$")
 _MAC = re.compile(r"^[0-9a-fA-F]{12}$")
@@ -147,6 +159,12 @@ class CaptureIngestor:
         self.settings = settings
         self.runner = runner or subprocess.run
         self.clock = clock
+        self._capture_mount_required = requires_capture_mount(settings)
+        self._capture_mount_identity = (
+            capture_mount_snapshot() if self._capture_mount_required else None
+        )
+        self._capture_mount_lost = False
+        self._assert_mount()
         if settings.database.is_symlink() or settings.output_dir.is_symlink():
             raise ValueError("output/database symlinks not permitted")
         settings.database.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -173,6 +191,17 @@ class CaptureIngestor:
         self.db.commit()
         os.chmod(settings.database, 0o600)
 
+    def _assert_mount(self):
+        if self._capture_mount_required:
+            # Latch loss until a NEW worker acquires the actual volume.
+            if (self._capture_mount_identity is None or
+                    capture_mount_snapshot() != self._capture_mount_identity):
+                self._capture_mount_lost = True
+            if self._capture_mount_lost:
+                raise CaptureMountLost(
+                    "REDUXCAP mount missing or changed; restart ingestion after recovery"
+                )
+
     def __enter__(self):
         return self
 
@@ -195,6 +224,7 @@ class CaptureIngestor:
 
     def _record(self, sha, source, status, *, reason="", out_sha=None,
                 out_path=None, count=0, bssids=()):
+        self._assert_mount()
         now = self.clock()
         self.db.execute("""INSERT INTO artifacts
           (source_sha,source_path,output_sha,output_path,status,hashes,
@@ -210,6 +240,7 @@ class CaptureIngestor:
         self.db.commit()
 
     def ingest_file(self, source):
+        self._assert_mount()
         source = Path(source)
         try:
             st = source.lstat()
@@ -257,6 +288,7 @@ class CaptureIngestor:
             # The database claims success but the file vanished (for example an
             # interrupted SD write or operator cleanup). Rebuild from source.
         try:
+            self._assert_mount()
             if source.suffix.lower() == ".hc22000":
                 raw = source.read_bytes()
             else:
@@ -272,6 +304,7 @@ class CaptureIngestor:
                     if result.returncode != 0:
                         raise RuntimeError(f"hcxpcapngtool returned {result.returncode}")
                     raw = target.read_bytes() if target.exists() else b""
+            self._assert_mount()
             after = source.lstat()
             if not stat.S_ISREG(after.st_mode) or (
                 after.st_size, after.st_mtime_ns
@@ -279,12 +312,14 @@ class CaptureIngestor:
                 return "deferred"
             records, bssids = normalize_22000(raw)
             if not records:
+                self._assert_mount()
                 self._record(sha, source, "invalid",
                              reason="no structurally valid 22000 records")
                 return "invalid"
             data = ("\n".join(records) + "\n").encode("ascii")
             output_sha = hashlib.sha256(data).hexdigest()
             output_path = self.settings.output_dir / (output_sha + ".hc22000")
+            self._assert_mount()
             if output_path.exists():
                 if (output_path.is_symlink() or not output_path.is_file()
                         or _digest_file(output_path) != output_sha):
@@ -293,9 +328,12 @@ class CaptureIngestor:
             else:
                 _atomic_write(output_path, data)
                 state = "ready"
+            self._assert_mount()
             self._record(sha, source, state, out_sha=output_sha,
                          out_path=output_path, count=len(records), bssids=bssids)
             return state
+        except CaptureMountLost:
+            raise
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
             self._record(sha, source, "error",
                          reason=f"{type(error).__name__}: {str(error)[:160]}")
@@ -307,6 +345,7 @@ class CaptureIngestor:
         It proves the scan returned successfully, NOT that a captured handshake
         was valid. The existing database transaction also persists the cursor.
         """
+        self._assert_mount()
         heartbeat = {
             "schema": 1, "completed_utc": self.clock(), "scanned": scanned,
             "outcomes": dict(outcomes),
@@ -363,10 +402,12 @@ class CaptureIngestor:
         return selected
 
     def scan(self):
+        self._assert_mount()
         lock = self.settings.database.with_suffix(".lock")
         with lock.open("a+b") as handle:
             os.fchmod(handle.fileno(), 0o600)
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            self._assert_mount()
             if free_bytes(self.settings.output_dir) < self.settings.min_free_bytes:
                 return self._completed_scan(0, {"paused_low_storage": 1})
             selected = self._select_batch()
@@ -374,6 +415,7 @@ class CaptureIngestor:
                 return self._completed_scan(0, {})
             outcome = {}
             for path in selected:
+                self._assert_mount()
                 state = self.ingest_file(path)
                 outcome[state] = outcome.get(state, 0) + 1
             return self._completed_scan(
