@@ -3,6 +3,8 @@ import os
 import subprocess
 import time
 
+import pytest
+
 from redux.crack.ingest import CaptureIngestor, Settings, normalize_22000, valid_22000_line, read_summary
 
 MAC1 = "aabbccddeeff"
