@@ -58,6 +58,19 @@ then record exact Redux, pi-gen and Nexmon source revisions. The release
 manifest identifies the observed partition-table profile. It **explicitly records `hardware_tested: false`**; file-integrity
 verification is not Pi boot verification. A missing, truncated, undersized, or
 ambiguous image causes release publication to fail.
+**Pre-export boot payload gate:** the image builder also inspects the actual
+mounted boot partition before pi-gen unmounts it. A missing or empty
+`kernel8.img` (Pi 4), `kernel_2712.img` (Pi 5), board-specific DTB,
+`start4.elf`/`fixup4.dat`, `config.txt`, or `cmdline.txt` prevents export.
+The gate requires ARM64 configuration and one plausible root selector;
+on A/B exports it validates the control FAT selector, distinct root PARTUUIDs,
+slot A/B cmdlines, and byte-identical shared firmware/kernel files while both
+boot slots are mounted. It is host-side source/export evidence, **not** a
+filesystem fsck or proof that firmware, kernel, initramfs, and radio boot.
+No checker writes to the working Jayofelony SD. The extra checks are enabled
+for both image profiles automatically when running `build.sh`; operators do
+not need to enable a new service on the Pi.
+
 Additional release checks require actual filesystem signature evidence for
 **every** partition: FAT32 boot and ext4 root/captures on Lite MBR, or
 FAT16 selector, FAT32 Boot A/B, and ext4 Root A/B/captures on A/B GPT.

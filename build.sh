@@ -157,7 +157,14 @@ python3 "$REPO_DIR/image/export_layout.py" "$PI_GEN_DIR/export-image/prerun.sh" 
     --captures-mib "${REDUX_CAPTURES_MIB:-512}"
 if [[ -n ${REDUX_OTA_CERT:-} ]]; then
     python3 "$REPO_DIR/image/prepare_ota.py" "$REPO_DIR/image" "$PI_GEN_DIR"
+    BOOT_GATE_PROFILE=ab
+else
+    BOOT_GATE_PROFILE=lite
 fi
+# Validate final boot files while the exporter has its FAT/root partitions
+# mounted. A/B runs its paired-slot gate inside redux-ota-clone.sh.
+python3 "$REPO_DIR/image/prepare_boot_gate.py" "$REPO_DIR/image" "$PI_GEN_DIR" \
+    --profile "$BOOT_GATE_PROFILE"
 chmod +x "$PI_GEN_DIR/stage-redux/10-overlay/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/20-boot-budget/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/30-watchdog/00-run.sh"
