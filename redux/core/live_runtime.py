@@ -124,6 +124,45 @@ def free_bytes(path):
     stats = os.statvfs(path)
     return stats.f_bavail * stats.f_frsize
 
+def capture_mount_snapshot(*, mountinfo=Path("/proc/self/mountinfo"),
+                           mountpoint=Path("/captures")):
+    """Return a pinned mount identity; never confuse a remount with continuity.
+
+    Filesystem paths alone are insufficient: /captures may be unmounted and
+    replaced between supervisor ticks, leaving owner.lock on the old inode.
+    Require a real ext4 mount, preserve its kernel mount ID and underlying
+    device, and verify the root directory inode remains unchanged. A failed
+    probe always returns None (fail closed).
+    """
+    try:
+        if not os.path.ismount(mountpoint) or mountpoint.is_symlink():
+            return None
+        evidence = None
+        for line in mountinfo.read_text(encoding="utf-8").splitlines():
+            left, separator, right = line.partition(" - ")
+            if not separator:
+                continue
+            fields, fs = left.split(), right.split()
+            if len(fields) < 6 or len(fs) < 3:
+                continue
+            if fields[4] != str(mountpoint):
+                continue
+            # Linux reports kernel mount IDs for individual mount instances.
+            # A new mount on the same disk still gets a new identity.
+            if not fields[0].isdigit() or fs[0] != "ext4":
+                return None
+            evidence = (int(fields[0]), fields[2], fs[0])
+        if evidence is None:
+            return None
+        info = mountpoint.stat()
+        if not stat.S_ISDIR(info.st_mode):
+            return None
+        return evidence + (info.st_dev, info.st_ino)
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+
 
 def select_radio(radios, preferred=""):
     """Use the existing orchestrator. Never make up absent radio capabilities."""
@@ -263,10 +302,15 @@ class LiveRuntime:
             for path in (config.state_dir, config.capture_dir, config.active_dir)
         )
         self.capture_mount_lost = False
+        # Bind lifetime of the radio owner lock to this exact ext4 mount.
+        # A replacement mount has a new kernel mount ID even on the same card.
+        self.capture_mount_identity = (
+            capture_mount_snapshot() if self.capture_mount_required else None
+        )
         # Refuse to create /captures/... on the root filesystem when REDUXCAP
         # is missing. This precedes *all* mkdir, chmod and lock operations.
         if not self._capture_mount_ok():
-            raise RuntimeError("REDUXCAP partition is not mounted at /captures")
+            raise RuntimeError("REDUXCAP ext4 partition is not mounted at /captures")
         self.radio_probe = radio_probe
         self.executor = executor
         self.spawn = spawn
@@ -331,7 +375,8 @@ class LiveRuntime:
 
     def _capture_mount_ok(self):
         return (not self.capture_mount_required
-                or os.path.ismount("/captures"))
+                or (self.capture_mount_identity is not None
+                    and capture_mount_snapshot() == self.capture_mount_identity))
 
     def _observe(self, emission):
         event = emission.payload.get("event")

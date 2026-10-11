@@ -1323,3 +1323,84 @@ def test_doctor_marks_missing_capture_mount_action_not_unknown():
 def test_source_tree_is_importable_and_service_opt_in(tmp_path):
     assert callable(live.main)
     live.LiveConfig.load
+
+
+
+def test_capture_mount_identity_comes_from_real_ext4_mount_record(tmp_path, monkeypatch):
+    mount = tmp_path / "captures"
+    mount.mkdir()
+    info = tmp_path / "mountinfo"
+    info.write_text(
+        f"42 1 0:17 / {mount} rw,relatime - ext4 /dev/mock-capture rw\n"
+    )
+    monkeypatch.setattr(live.os.path, "ismount", lambda path: True)
+    first = live.capture_mount_snapshot(mountpoint=mount, mountinfo=info)
+    assert first is not None
+    assert first[:3] == (42, "0:17", "ext4")
+    assert first[-2:] == (mount.stat().st_dev, mount.stat().st_ino)
+    # Replacing a mounted filesystem on the *same path* must be detected.
+    info.write_text(
+        f"43 1 0:17 / {mount} rw,relatime - ext4 /dev/mock-capture rw\n"
+    )
+    second = live.capture_mount_snapshot(mountpoint=mount, mountinfo=info)
+    assert second is not None and first != second
+    # A different device under the original mount ID is also a mismatch.
+    info.write_text(f"42 1 0:18 / {mount} rw - ext4 /dev/other rw\n")
+    assert live.capture_mount_snapshot(mountpoint=mount, mountinfo=info) != first
+
+
+@pytest.mark.parametrize("record", [
+    "42 1 0:17 / {mount} rw - tmpfs tmpfs rw\n",
+    "42 1 0:17 / {mount} rw - overlay overlay rw\n",
+    "42 1 0:17 / {other} rw - ext4 /dev/disk rw\n",
+    "malformed mountinfo line\n",
+    "notanid 1 0:17 / {mount} rw - ext4 /dev/disk rw\n",
+])
+def test_capture_mount_refuses_wrong_filesystem_or_mountinfo(tmp_path, monkeypatch, record):
+    mount = tmp_path / "captures"
+    mount.mkdir()
+    info = tmp_path / "mountinfo"
+    info.write_text(record.format(mount=mount, other=tmp_path / "elsewhere"))
+    monkeypatch.setattr(live.os.path, "ismount", lambda path: True)
+    assert live.capture_mount_snapshot(mountpoint=mount, mountinfo=info) is None
+
+
+def test_capture_mount_snapshot_requires_real_mount_not_directory(tmp_path, monkeypatch):
+    mount = tmp_path / "captures"
+    mount.mkdir()
+    info = tmp_path / "mountinfo"
+    info.write_text(f"42 1 0:17 / {mount} rw - ext4 /dev/mock rw\n")
+    monkeypatch.setattr(live.os.path, "ismount", lambda path: False)
+    assert live.capture_mount_snapshot(mountpoint=mount, mountinfo=info) is None
+
+
+def test_runtime_does_not_resume_after_same_path_remount(tmp_path, monkeypatch):
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [],
+                               clock=lambda: 0)
+    try:
+        # Simulate the mounted production layout and a later replacement
+        # with a different kernel mount ID, without any real mounts.
+        identity = (42, "0:17", "ext4", 2049, 2)
+        observed = [identity]
+        runtime.capture_mount_required = True
+        runtime.capture_mount_identity = identity
+        monkeypatch.setattr(live, "capture_mount_snapshot", lambda: observed[0])
+        assert runtime._capture_mount_ok()
+        observed[0] = (43, "0:17", "ext4", 2049, 2)
+        assert runtime.tick() == "storage_paused"
+        assert runtime.capture_mount_lost is True
+        assert runtime.last_error.startswith("REDUXCAP")
+        assert runtime._snapshot["runtime"]["capture_mount"] is False
+        # Even if the exact old mount came back, the owner lock is stale.
+        observed[0] = identity
+        assert runtime.tick() == "storage_paused"
+        assert runtime.capture_mount_lost is True
+    finally:
+        runtime.close()
+
+
+def test_production_runtime_rejects_unknown_mount_identity_before_mkdir(
+        monkeypatch):
+    monkeypatch.setattr(live, "capture_mount_snapshot", lambda: None)
+    with pytest.raises(RuntimeError, match="not mounted"):
+        live.LiveRuntime(live.LiveConfig(), radio_probe=lambda: [])

@@ -112,6 +112,24 @@ in `/etc/redux/live.toml`; the override explicitly permits disconnecting that
 interface. Network managers that independently own the same interface may
 still interfere and will require configuration based on the physical Pi.
 
+## Capture mount continuity across remounts
+
+Mount presence alone is not enough to establish ownership of a live capture.
+At startup the production supervisor now pins the `/captures` ext4 mount's
+kernel mount ID, device identity and root directory inode from
+`/proc/self/mountinfo`. Every supervisor tick verifies that exact identity
+still exists. A temporary unmount/remount, bind replacement, or different
+filesystem at the same path fails closed—even if the replacement is already
+mounted when the next tick runs.
+
+On any identity change the runtime stops its Bettercap child, refuses
+capture handoff to the replacement path, and reports `storage_paused`.
+Returning the original mount does **not** automatically resume it:
+restart `redux-live.service` explicitly after checking storage and radio
+readiness so the ownership lock is reacquired on the actual live volume.
+Mount continuity is runtime protection, not a substitute for checking that
+the real device carries the `REDUXCAP` label during first-boot acceptance.
+
 ## Bounded Bettercap logs and REDUXCAP mount safety
 
 A running Bettercap process keeps its private diagnostic log open. Redux now
