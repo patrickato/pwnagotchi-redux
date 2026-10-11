@@ -195,6 +195,7 @@ release_images=( "$PI_GEN_DIR"/deploy/*.img.xz )
 python3 "$REPO_DIR/image/release_manifest.py" "${release_images[0]}" \
     --revision "$(git -C "$REPO_DIR" rev-parse HEAD)" \
     --pi-gen-revision "$PI_GEN_REV" \
-    --nexmon-revision "$NEXMON_REV"
+    --nexmon-revision "$NEXMON_REV" \
+    --expected-profile "$BOOT_GATE_PROFILE"
 echo "Image, SHA256 and provenance manifest: $PI_GEN_DIR/deploy"
 echo "Physical ARM64 boot, radio and capture validation remain REQUIRED."

@@ -138,3 +138,25 @@ def test_backup_header_must_be_at_the_end_of_the_disk(tmp_path):
     image.write_bytes(lzma.compress(raw))
     with pytest.raises(ValueError, match="disk length"):
         release.inspect_image(image, minimum_bytes=512)
+
+
+def test_ab_profile_binding_rejects_lite_policy_without_publication(tmp_path):
+    image = sample(tmp_path)
+    accepted = release.publish(image, "a" * 40, "b" * 40, "c" * 40,
+                               minimum_bytes=512, expected_profile="ab")
+    assert accepted["image_profile"] == "ab"
+    assert accepted["partition_table"] == "gpt"
+    assert accepted["profile_match_verified"] is True
+    wrong = tmp_path / "mismatch-ab.img.xz"
+    wrong.write_bytes(image.read_bytes())
+    with pytest.raises(ValueError, match="profile mismatch"):
+        release.publish(wrong, "a" * 40, "b" * 40, "c" * 40,
+                        minimum_bytes=512, expected_profile="lite")
+    assert not (tmp_path / "mismatch-ab.img.xz.release.json").exists()
+    assert not (tmp_path / "mismatch-ab.img.xz.sha256").exists()
+
+
+def test_ab_unbound_inspection_is_not_profile_verified(tmp_path):
+    report = release.inspect_image(sample(tmp_path), minimum_bytes=512)
+    assert report["image_profile"] == "ab"
+    assert report["profile_match_verified"] is False

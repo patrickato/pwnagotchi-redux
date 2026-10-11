@@ -137,3 +137,62 @@ def test_reject_extra_mbr_partition(tmp_path):
     image.write_bytes(lzma.compress(bytes(raw)))
     with pytest.raises(ValueError, match="fourth MBR"):
         inspect_image(image, minimum_bytes=512)
+
+
+def test_lite_profile_binding_rejects_ab_without_sidecars(tmp_path):
+    image = fixture_image(tmp_path)
+    accepted = publish(image, REV, PI_GEN_REV, NEXMON_REV,
+                       minimum_bytes=512, expected_profile="lite")
+    assert accepted["image_profile"] == "lite"
+    assert accepted["partition_table"] == "mbr"
+    assert accepted["profile_match_verified"] is True
+    # A failed separate validation must never publish companion files.
+    refused = tmp_path / "bad-profile.img.xz"
+    refused.write_bytes(image.read_bytes())
+    with pytest.raises(ValueError, match="profile mismatch"):
+        publish(refused, REV, PI_GEN_REV, NEXMON_REV,
+                minimum_bytes=512, expected_profile="ab")
+    assert not list(tmp_path.glob("bad-profile.img.xz.*"))
+
+
+@pytest.mark.parametrize("invalid", ["", "mbr", "gpt", "auto", "../ab"])
+def test_invalid_release_profile_rejected_before_decompressing(tmp_path, invalid):
+    image = fixture_image(tmp_path)
+    with pytest.raises(ValueError, match="expected image profile"):
+        inspect_image(image, minimum_bytes=512, expected_profile=invalid)
+    with pytest.raises(ValueError, match="expected image profile"):
+        publish(image, REV, PI_GEN_REV, NEXMON_REV, minimum_bytes=512,
+                expected_profile=invalid)
+
+
+def test_unbound_inspection_is_not_a_profile_qualification(tmp_path):
+    image = fixture_image(tmp_path)
+    result = inspect_image(image, minimum_bytes=512)
+    assert result["image_profile"] == "lite"
+    assert result["profile_match_verified"] is False
+
+
+def test_release_cli_profile_mismatch_exit_and_no_manifest(tmp_path):
+    import subprocess
+    import sys
+    image = fixture_image(tmp_path)
+    cmd = [sys.executable, str(SOURCE), str(image), "--revision", REV,
+           "--pi-gen-revision", PI_GEN_REV, "--nexmon-revision", NEXMON_REV,
+           "--minimum-bytes", "512", "--expected-profile", "ab"]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    assert "profile mismatch" in result.stderr
+    assert not (tmp_path / (image.name + ".release.json")).exists()
+    assert not (tmp_path / (image.name + ".sha256")).exists()
+    cmd[-1] = "lite"
+    accepted = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    assert accepted.returncode == 0, accepted.stderr
+    assert json.loads(accepted.stdout)["profile_match_verified"] is True
+
+
+def test_build_release_profile_is_bound_to_image_export_selection():
+    build = (SOURCE.parent.parent / "build.sh").read_text()
+    assert "--expected-profile " in build
+    assert '--expected-profile "$BOOT_GATE_PROFILE"' in build
+    assert "BOOT_GATE_PROFILE=ab" in build
+    assert "BOOT_GATE_PROFILE=lite" in build

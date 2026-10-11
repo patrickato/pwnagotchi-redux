@@ -91,7 +91,19 @@ REDUXCAP), valid primary and backup GPT headers/entry arrays and their CRC32
 checksums, consistent disk geometry and REDUXCAP in p6. Both profiles verify
 the capture partition's ext4 superblock magic and `REDUXCAP` filesystem label,
 then record exact Redux, pi-gen and Nexmon source revisions. The release
-manifest identifies the observed partition-table profile. It **explicitly records `hardware_tested: false`**; file-integrity
+manifest identifies the observed partition-table profile. **Publication is
+also bound to the selected build profile.** Standard Lite builds must export
+three-partition MBR images; builds opting into a signed A/B profile must
+export six-partition GPT images. The wrapper passes
+`--expected-profile lite|ab` to `image/release_manifest.py` based on the
+build's selected `REDUX_OTA_CERT` profile. A mismatch terminates before
+writing `.release.json` or `.sha256` companion files.
+
+Standalone inspection without `--expected-profile` still identifies the
+observed layout, but records `profile_match_verified: false` rather than
+claiming a configured-build match. Accepted builds record
+`profile_match_verified: true`, `image_profile`, and `partition_table`.
+This validates the image format, not that OTA updates or firmware boot work. It **explicitly records `hardware_tested: false`**; file-integrity
 verification is not Pi boot verification. A missing, truncated, undersized, or
 ambiguous image causes release publication to fail.
 **Pre-export boot payload gate:** the image builder also inspects the actual

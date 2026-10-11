@@ -212,8 +212,14 @@ def _check_filesystem_signatures(expected, observed):
     return results
 
 
-def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
-    """Stream-check Lite MBR or A/B GPT and bounded partition signatures."""
+def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024, expected_profile=None):
+    """Stream-check a disk, optionally enforcing the operator-selected profile.
+
+    A/B signing configuration must never silently publish a Lite image, or
+    vice versa. Unspecified profiles preserve standalone inspection behavior.
+    """
+    if expected_profile not in (None, "lite", "ab"):
+        raise ValueError("expected image profile must be lite or ab")
     path = Path(path)
     meta = path.lstat()
     if not stat.S_ISREG(meta.st_mode) or not path.name.endswith(".img.xz"):
@@ -242,6 +248,11 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
                     {"mbr_type": kind, "start_lba": start, "sector_count": sectors}
                     for kind, start, sectors in mbr
                 ]
+            actual_profile = "ab" if table == "gpt" else "lite"
+            if expected_profile is not None and actual_profile != expected_profile:
+                raise ValueError(
+                    f"release profile mismatch: expected {expected_profile}, "
+                    f"but image contains {actual_profile} ({table}) layout")
             expected, probes = _filesystem_checks(partitions, table)
             observed = {name: b"" for name in probes}
             # Small bounded reads for every filesystem's boot/superblock evidence.
@@ -275,7 +286,9 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
     return {
         "sha256": digest.hexdigest(),
         "compressed_bytes": meta.st_size, "disk_bytes": total,
-        "partition_table": table, "partitions": partitions,
+        "partition_table": table, "image_profile": actual_profile,
+        "profile_match_verified": expected_profile is not None,
+        "partitions": partitions,
         "partition_filesystems": evidence,
         "captures_filesystem": "ext4", "captures_label": "REDUXCAP",
     }
@@ -302,14 +315,15 @@ def _write_private_atomic(target: Path, data: bytes):
 
 
 def publish(path, revision, pi_gen_revision, nexmon_revision, *,
-            minimum_bytes=512 * 1024 * 1024):
+            minimum_bytes=512 * 1024 * 1024, expected_profile=None):
     image = Path(path)
     revs = {
         "redux": _commit(revision),
         "pi_gen": _commit(pi_gen_revision),
         "nexmon": _commit(nexmon_revision),
     }
-    info = inspect_image(image, minimum_bytes=minimum_bytes)
+    info = inspect_image(image, minimum_bytes=minimum_bytes,
+                         expected_profile=expected_profile)
     record = {
         "schema": 1,
         "image": image.name,
@@ -338,11 +352,13 @@ def main(argv=None):
     parser.add_argument("--pi-gen-revision", required=True)
     parser.add_argument("--nexmon-revision", required=True)
     parser.add_argument("--minimum-bytes", type=int, default=512 * 1024 * 1024)
+    parser.add_argument("--expected-profile", choices=("lite", "ab"),
+                        help="fail closed if exported disk layout differs from selected build")
     args = parser.parse_args(argv)
     try:
         record = publish(
             args.artifact, args.revision, args.pi_gen_revision, args.nexmon_revision,
-            minimum_bytes=args.minimum_bytes,
+            minimum_bytes=args.minimum_bytes, expected_profile=args.expected_profile,
         )
     except (ValueError, OSError) as error:
         parser.error(str(error))
