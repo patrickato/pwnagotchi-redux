@@ -4,9 +4,10 @@ set -euo pipefail
 REPO_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 usage() {
     cat <<'EOF'
-Usage: ./build.sh [--prepare-only]
+Usage: ./build.sh [--prepare-only|--check-host]
 Build an arm64 Raspberry Pi 4/5 image on a Debian/Ubuntu Linux host as root.
 --prepare-only stages pinned sources and configuration without building an image.
+--check-host reports read-only build-host prerequisites as JSON and exits.
 Optional: REDUX_BUILD_DIR (default build/image), REDUX_IMAGE_CONFIG (local config).
 See docs/IMAGE_BUILD.md for host dependencies and the physical boot gate.
 EOF
@@ -16,6 +17,7 @@ PREPARE_ONLY=0
 case ${1:-} in
     --help|-h) usage; exit 0 ;;
     --prepare-only) PREPARE_ONLY=1 ;;
+    --check-host) exec python3 "$REPO_DIR/image/host_preflight.py" --workspace "${REDUX_BUILD_DIR:-$REPO_DIR/build/image}" ;;
     '') ;;
     *) usage >&2; exit 2 ;;
 esac
@@ -27,14 +29,14 @@ fi
 for tool in git realpath install tar python3; do
     command -v "$tool" >/dev/null || { echo "Missing build prerequisite: $tool" >&2; exit 1; }
 done
-if [[ $PREPARE_ONLY == 0 ]]; then
-    command -v arch-test >/dev/null || { echo 'Missing arch-test; install the host prerequisites in docs/IMAGE_BUILD.md.' >&2; exit 1; }
-    arch-test arm64 >/dev/null || { echo 'Host cannot execute arm64 binaries. Enable qemu-aarch64 binfmt_misc; see docs/IMAGE_BUILD.md.' >&2; exit 1; }
-fi
 BUILD_DIR=$(realpath -m -- "${REDUX_BUILD_DIR:-$REPO_DIR/build/image}")
 [[ $BUILD_DIR != *' '* ]] || { echo 'pi-gen requires a build path without spaces.' >&2; exit 1; }
 [[ ! -e $BUILD_DIR ]] || { echo "Build directory already exists: $BUILD_DIR. Choose a fresh REDUX_BUILD_DIR." >&2; exit 1; }
 [[ $REPO_DIR != *' '* ]] || { echo 'Use a repository path without spaces for pi-gen.' >&2; exit 1; }
+if [[ $PREPARE_ONLY == 0 ]]; then
+    # Fail before fetching sources, creating build directories or using loop mounts.
+    python3 "$REPO_DIR/image/host_preflight.py" --workspace "$BUILD_DIR"
+fi
 source "$REPO_DIR/image/sources.sh"
 mkdir -p "$BUILD_DIR"
 

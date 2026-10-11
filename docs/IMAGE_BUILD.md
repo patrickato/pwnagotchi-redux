@@ -15,6 +15,27 @@ Use root on Debian/Ubuntu with network access, at least 30 GB free, and an ext4
 workspace without spaces. WSL2 can build under ARM emulation; use its persistent
 Linux filesystem, not NTFS or `/tmp`. Host prerequisites:
 
+Before downloading pinned sources or invoking any privileged builder, use:
+
+```sh
+./build.sh --check-host
+```
+
+This read-only preflight prints JSON and exits 0 only when its required
+host prerequisites are observed. It checks privilege, a **fresh** workspace
+path, ext4 filesystem, available scratch space (20 GiB absolute minimum,
+30 GiB recommended), expected tools, and working `arch-test arm64`
+(via binfmt/QEMU on x86_64). It reports each missing command by name.
+`REDUX_BUILD_DIR` selects the workspace to qualify. A warning between
+20 and 30 GiB is not a proven sufficient build size; increase free space
+for large capture partitions or the A/B layout. No network, downloads,
+partition writes, image creation or hardware checks occur in this probe.
+Full `./build.sh` now invokes this gate automatically before cloning upstream
+source trees. `--prepare-only` remains a source-staging operation, not a
+production build, and does not demand chroot or full-build host readiness.
+
+Install the needed host packages when the report identifies blockers:
+
 ```sh
 sudo apt-get update
 sudo apt-get install git quilt parted coreutils qemu-user-static debootstrap \
