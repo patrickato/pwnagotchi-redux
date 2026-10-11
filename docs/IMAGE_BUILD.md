@@ -27,10 +27,28 @@ ship with auto-resizing enabled. **Do not re-enable stock root expansion**
 after flashing; any storage growth needs a partition-aware procedure.
 
 This intentionally changes the stock Raspberry Pi first-boot experience.
-Image user/login provisioning remains a separate acceptance gate:
-no shared login password or remotely exposed service is provided by
-this change. Establish a secure owner-specific access method before
-attempting unattended/headless deployment.
+**Secure headless access is available by opt-in at build time.** Generate
+your own SSH public key on the operator machine, for example:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/redux_dev -C redux-dev
+sudo env REDUX_OPERATOR_PUBKEY_FILE="$HOME/.ssh/redux_dev.pub" \
+  REDUX_BUILD_DIR=/your/ext4/workspace/redux-build ./build.sh
+```
+
+Only the single **public** key is accepted. Redux checks its OpenSSH
+format, rejects symlinks, private keys, malformed or multi-key inputs,
+and safely quotes the key in the generated pi-gen configuration.
+That mode enables SSH **public-key-only**, disables account password
+login, and disables the interactive first-boot user-rename workflow.
+The owner logs in using the configured `FIRST_USER_NAME` (default `field`).
+The private key stays exclusively on the operator's machine.
+
+Without `REDUX_OPERATOR_PUBKEY_FILE`, the image still has SSH disabled
+and no universal first-user password. Such a card is not headless-ready
+until some other deliberate, secure operator-specific provisioning route
+is provided. This is intentionally not a usable shared password.
+The hardware boot and actual SSH connection remain physical gates.
 
 ## Linux host
 

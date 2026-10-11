@@ -141,10 +141,19 @@ cp "$REPO_DIR/image/config" "$PI_GEN_DIR/config"
 if [[ -n ${REDUX_IMAGE_CONFIG:-} ]]; then
     cat "$REDUX_IMAGE_CONFIG" >> "$PI_GEN_DIR/config"
 fi
+# Build-time authorized-key provisioning avoids a shared password. Validated
+# before pi-gen sources this config, including protection against shell injection.
+if [[ -n ${REDUX_OPERATOR_PUBKEY_FILE:-} ]]; then
+    python3 "$REPO_DIR/image/operator_provision.py" "$REDUX_OPERATOR_PUBKEY_FILE" >> "$PI_GEN_DIR/config"
+fi
+# These topology choices and the noninteractive account identity cannot be
+# overridden by local configuration: the stock firstboot init was removed.
+# Disable user renaming as a separate, explicit first-boot action.
 # These topology choices cannot be overridden by local login/locale settings.
 cat >> "$PI_GEN_DIR/config" <<'EOF'
 RELEASE=bookworm
 STAGE_LIST="stage0 stage1 stage2 stage-redux"
+DISABLE_FIRST_BOOT_USER_RENAME=1
 EOF
 touch "$PI_GEN_DIR/stage2/SKIP_IMAGES"
 # Both supported boards use arm64, with their respective kernel packages.
