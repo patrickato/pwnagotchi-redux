@@ -83,6 +83,35 @@ build, SSH continues to use public-key-only authentication. For local
 console login, inspect the credential on your own build host using
 `sudo cat /path/to/redux-build/operator-login.txt` and keep it private.
 
+### Disposable hardware-test login
+
+For a **development SD only**, run a fresh build with
+`REDUX_DEV_LOGIN=1`. This explicitly replaces the default long console
+password with the known test credentials **username `pi`, password `redux`**.
+It forces SSH off, refuses SSH-key provisioning in the same build, and does
+not enable remote password login. Because these credentials are public,
+**never use this image on untrusted hardware or as a production deployment**.
+
+The same development build intentionally keeps PID 1's hardware-reset
+watchdog disabled (`RuntimeWatchdogSec=0`, `RebootWatchdogSec=0` and no
+additional `dtparam=watchdog=on`). The `redux.service` process watchdog
+remains enabled, allowing failed services to restart without causing the
+Pi itself to power-cycle. Re-enable the hardware watchdog only after
+recording successful boot and crash-recovery behavior on the actual board.
+
+```bash
+cd ~/redux-workbench-src
+git pull --ff-only
+set -o pipefail
+sudo env REDUX_DEV_LOGIN=1 REDUX_BUILD_DIR="$HOME/redux-image-build-03" \
+  ./build.sh 2>&1 | tee ~/redux-dev-build.log
+```
+
+Always use a **new ext4 workspace**; the source code, disk image and checksum
+from previous successful builds are left untouched. Flash this new
+development image to the **spare** SD, never the working Pwnagotchi card.
+The previous `-02` card's login does not change when a new build completes.
+
 Without `REDUX_OPERATOR_PUBKEY_FILE`, the image still has SSH disabled
 and no universal first-user password. Such a card is not headless-ready
 until some other deliberate, secure operator-specific provisioning route

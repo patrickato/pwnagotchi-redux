@@ -920,3 +920,69 @@ def test_boot_budget_stage_uses_target_inventory_and_installs_actual_timing_tool
     manifest = (root / 'usr/share/redux/boot-policy.txt').read_text()
     assert 'rpt-rpi-2712' in manifest and 'rpt-rpi-v8' in manifest
     assert 'redux boot needs local storage, not an uplink' in manifest
+
+
+def test_explicit_dev_login_is_staged_without_ssh(prepared, tmp_path):
+    repo, env = prepared
+    workspace = tmp_path / "dev-build"
+    env = dict(env, REDUX_BUILD_DIR=str(workspace), REDUX_DEV_LOGIN="1")
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode == 0, result.stderr
+    config = workspace / "pi-gen/config"
+    login = workspace / "operator-login.txt"
+    assert login.read_text().splitlines()[-2:] == ["Username: pi", "Password: redux"]
+    assert login.stat().st_mode & 0o077 == 0
+    assert config.stat().st_mode & 0o077 == 0
+    sourced = invoke(["bash", "-c",
+        'source "$1"; printf "%s|%s|%s|%s" "$FIRST_USER_NAME" "$FIRST_USER_PASS" "$ENABLE_SSH" "$REDUX_DEV_LOGIN"',
+        "bash", str(config)], env=env)
+    assert sourced.stdout == "pi|redux|0|1"
+    assert sourced.returncode == 0
+
+
+def test_dev_login_refuses_ssh_before_fetching_sources(prepared, tmp_path):
+    repo, env = prepared
+    workspace = tmp_path / "invalid-dev-build"
+    env = dict(env, REDUX_BUILD_DIR=str(workspace),
+               REDUX_DEV_LOGIN="1", REDUX_OPERATOR_PUBKEY_FILE="/tmp/a-key.pub")
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode != 0
+    assert "cannot be combined" in result.stderr
+    assert not workspace.exists()
+
+
+def test_dev_watchdog_is_disarmed_but_app_supervision_remains(tmp_path):
+    import os
+    stage = REPO / "image/stage-redux/30-watchdog"
+    root = tmp_path / "dev-rootfs"
+    (root / "etc/systemd/system").mkdir(parents=True)
+    (root / "boot/firmware").mkdir(parents=True)
+    (root / "boot/firmware/config.txt").write_text("[all]\n")
+    unit = root / "etc/systemd/system/redux.service"
+    unit.write_text("[Service]\nType=notify\n")
+    env = dict(os.environ, ROOTFS_DIR=str(root), REDUX_DEV_LOGIN="1")
+    result = invoke(["bash", str(stage / "00-run.sh")], cwd=stage, env=env)
+    assert result.returncode == 0, result.stderr
+    settings = (root / "etc/systemd/system.conf.d/redux-watchdog.conf").read_text()
+    assert "RuntimeWatchdogSec=0" in settings
+    assert "RebootWatchdogSec=0" in settings
+    assert "watchdog=on" not in (root / "boot/firmware/config.txt").read_text()
+    assert "WatchdogSec=15s" in unit.read_text()
+
+
+def test_regular_build_still_arms_watchdog(tmp_path):
+    import os
+    stage = REPO / "image/stage-redux/30-watchdog"
+    root = tmp_path / "release-rootfs"
+    (root / "etc/initramfs-tools").mkdir(parents=True)
+    (root / "etc/initramfs-tools/modules").write_text("bcm2835_wdt\n")
+    (root / "etc/systemd/system").mkdir(parents=True)
+    (root / "boot/firmware").mkdir(parents=True)
+    (root / "boot/firmware/config.txt").write_text("[all]\n")
+    unit = root / "etc/systemd/system/redux.service"
+    unit.write_text("[Service]\nType=notify\n")
+    env = dict(os.environ, ROOTFS_DIR=str(root), REDUX_DEV_LOGIN="0")
+    result = invoke(["bash", str(stage / "00-run.sh")], cwd=stage, env=env)
+    assert result.returncode == 0, result.stderr
+    assert "RuntimeWatchdogSec=15s" in (root / "etc/systemd/system.conf.d/redux-watchdog.conf").read_text()
+    assert "dtparam=watchdog=on" in (root / "boot/firmware/config.txt").read_text()

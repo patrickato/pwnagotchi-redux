@@ -115,3 +115,27 @@ def test_credential_path_must_stay_inside_build(tmp_path):
     config, dest = config_tree(tmp_path)
     with pytest.raises(ValueError, match="workspace root"):
         creds.generate(config, tmp_path / "outside.txt", random_hex=lambda: "a" * 48)
+
+
+def test_explicit_dev_login_is_short_local_only_and_private(tmp_path):
+    config, destination = config_tree(tmp_path)
+    report = creds.generate(config, destination, dev_login=True)
+    assert report["dev_login"] is True
+    assert config.stat().st_mode & 0o077 == 0
+    assert destination.stat().st_mode & 0o077 == 0
+    credential = destination.read_text()
+    assert "Username: pi" in credential
+    assert "Password: redux" in credential
+    source = subprocess.run(
+        ["bash", "-c",
+         'source "$1"; printf "%s:%s:%s:%s" "$FIRST_USER_NAME" "$FIRST_USER_PASS" "$ENABLE_SSH" "$PUBKEY_ONLY_SSH"',
+         "bash", str(config)], capture_output=True, text=True, timeout=5)
+    assert source.returncode == 0, source.stderr
+    assert source.stdout == "pi:redux:0:0"
+
+
+def test_dev_login_never_accepts_injected_password(tmp_path):
+    config, dest = config_tree(tmp_path)
+    with pytest.raises(ValueError, match="cannot inject"):
+        creds.generate(config, dest, dev_login=True, random_hex=lambda: "a" * 48)
+    assert not dest.exists()

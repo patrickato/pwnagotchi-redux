@@ -37,6 +37,18 @@ if [[ $PREPARE_ONLY == 0 ]]; then
     # Fail before fetching sources, creating build directories or using loop mounts.
     python3 "$REPO_DIR/image/host_preflight.py" --workspace "$BUILD_DIR"
 fi
+# Test-only local login is opt-in. Never combine weak local test credentials
+# with an SSH provisioning request.
+case ${REDUX_DEV_LOGIN:-0} in
+    0) ;;
+    1)
+        [[ -z ${REDUX_OPERATOR_PUBKEY_FILE:-} ]] || {
+            echo 'REDUX_DEV_LOGIN=1 cannot be combined with SSH provisioning.' >&2
+            exit 1
+        }
+        ;;
+    *) echo 'REDUX_DEV_LOGIN must be 0 or 1.' >&2; exit 1 ;;
+esac
 source "$REPO_DIR/image/sources.sh"
 mkdir -p "$BUILD_DIR"
 
@@ -158,7 +170,12 @@ STAGE_LIST="stage0 stage1 stage2 stage-redux"
 DISABLE_FIRST_BOOT_USER_RENAME=1
 EOF
 # Create a unique build-local password required by pinned pi-gen; no shared default.
-python3 "$REPO_DIR/image/build_credentials.py" "$PI_GEN_DIR/config" "$BUILD_DIR/operator-login.txt"
+if [[ ${REDUX_DEV_LOGIN:-0} == 1 ]]; then
+    python3 "$REPO_DIR/image/build_credentials.py" "$PI_GEN_DIR/config" "$BUILD_DIR/operator-login.txt" --dev-login
+    printf '\nexport REDUX_DEV_LOGIN=1\n' >> "$PI_GEN_DIR/config"
+else
+    python3 "$REPO_DIR/image/build_credentials.py" "$PI_GEN_DIR/config" "$BUILD_DIR/operator-login.txt"
+fi
 touch "$PI_GEN_DIR/stage2/SKIP_IMAGES"
 # Both supported boards use arm64, with their respective kernel packages.
 cat > "$PI_GEN_DIR/stage0/02-firmware/01-packages" <<'EOF'
