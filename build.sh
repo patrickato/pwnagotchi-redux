@@ -141,6 +141,7 @@ install -d "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline"
 cp "$REPO_DIR/config/pipeline.example.toml" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/pipeline.toml"
 cp "$REPO_DIR/config/live.example.toml" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/live.toml"
 cp "$REPO_DIR/scripts/redux-live-diag.sh" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/redux-live-diag.sh"
+cp "$REPO_DIR/scripts/redux-field-report.py" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/redux-field-report.py"
 for unit in redux-capture-ingest redux-capture-audit; do
     cp "$REPO_DIR/systemd/$unit.service" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/"
     cp "$REPO_DIR/systemd/$unit.timer" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/"
@@ -151,6 +152,12 @@ mv "$NEXMON_DIR" "$PI_GEN_DIR/stage-redux/00-redux/files/nexmon"
 cp "$REPO_DIR/image/sources.sh" "$PI_GEN_DIR/stage-redux/00-redux/files/sources.sh"
 git -C "$REPO_DIR" rev-parse HEAD > "$PI_GEN_DIR/stage-redux/00-redux/files/redux-revision"
 [[ -z $(git -C "$REPO_DIR" status --porcelain --untracked-files=normal) ]] || printf '%s\n' 'dirty working tree' >> "$PI_GEN_DIR/stage-redux/00-redux/files/redux-revision"
+# An explicitly supplied SSH public key makes disposable field cards
+# remotely accessible on Ethernet. All SSH authentication stays key-only.
+if [[ -n ${REDUX_OPERATOR_PUBKEY_FILE:-} ]]; then
+    printf 'openssh-server\navahi-daemon\n' >> "$PI_GEN_DIR/stage-redux/00-redux/00-packages-nr"
+    touch "$PI_GEN_DIR/stage-redux/00-redux/files/field-ssh-profile"
+fi
 cp "$REPO_DIR/image/config" "$PI_GEN_DIR/config"
 if [[ -n ${REDUX_IMAGE_CONFIG:-} ]]; then
     cat "$REDUX_IMAGE_CONFIG" >> "$PI_GEN_DIR/config"

@@ -46,6 +46,19 @@ install -d "$ROOTFS_DIR/etc/redux" "$ROOTFS_DIR/captures"
 install -m 0600 files/pipeline/pipeline.toml "$ROOTFS_DIR/etc/redux/pipeline.toml"
 install -m 0600 files/pipeline/live.toml "$ROOTFS_DIR/etc/redux/live.toml"
 install -m 0755 files/pipeline/redux-live-diag.sh "$ROOTFS_DIR/usr/local/bin/redux-live-diag"
+install -d "$ROOTFS_DIR/usr/local/lib/redux"
+install -m 0644 files/pipeline/redux-field-report.py "$ROOTFS_DIR/usr/local/lib/redux/report.py"
+cat > "$ROOTFS_DIR/usr/local/bin/redux-report" <<'REDUX_REPORT_LAUNCHER'
+#!/bin/sh
+PYTHONPATH=/opt/redux exec /usr/bin/python3 /usr/local/lib/redux/report.py "$@"
+REDUX_REPORT_LAUNCHER
+chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-report"
+ln -s redux-report "$ROOTFS_DIR/usr/local/bin/r"
+install -m 0644 files/redux-field-report.service "$ROOTFS_DIR/etc/systemd/system/redux-field-report.service"
+install -m 0644 files/redux-field-report.timer "$ROOTFS_DIR/etc/systemd/system/redux-field-report.timer"
+if [[ -f files/field-ssh-profile ]]; then
+    install -m 0644 files/field-ssh-profile "$ROOTFS_DIR/usr/share/redux/field-ssh-profile"
+fi
 install -m 0644 files/redux-live.service "$ROOTFS_DIR/etc/systemd/system/redux-live.service"
 for unit in redux-capture-ingest redux-capture-audit; do
     sed -e '/^\[Unit\]$/a RequiresMountsFor=/captures' \
@@ -64,6 +77,10 @@ python3 -m compileall -q /opt/redux/redux
 systemctl enable redux.service
 # Radio owner starts independently; no process is launched if hardware is unavailable.
 systemctl enable redux-live.service
+systemctl enable redux-field-report.timer
+if [[ -f /usr/share/redux/field-ssh-profile ]]; then
+    systemctl enable ssh.service avahi-daemon.service
+fi
 # Capture processing operates on the writable REDUXCAP partition, independently.
 systemctl enable redux-capture-ingest.timer
 # hcx conversion is bundled; Hashcat compute backend remains hardware-gated.

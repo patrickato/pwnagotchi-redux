@@ -502,6 +502,11 @@ bash ./00-run.sh
     assert "Restart=on-failure" in live_unit
     assert "systemctl enable redux-live.service" in chroot
     assert (root / "usr/local/bin/redux-live-diag").is_file()
+    assert (root / "usr/local/bin/redux-report").is_file()
+    assert (root / "usr/local/bin/r").is_symlink()
+    assert (root / "usr/local/lib/redux/report.py").is_file()
+    assert (root / "etc/systemd/system/redux-field-report.service").is_file()
+    assert (root / "etc/systemd/system/redux-field-report.timer").is_file()
     assert "systemctl enable redux-capture-ingest.timer" in chroot
     assert "/captures/jobs.db" in (root / "etc/redux/pipeline.toml").read_text()
     pipeline_unit = (root / "etc/systemd/system/redux-capture-ingest.service").read_text()
@@ -940,15 +945,25 @@ def test_explicit_dev_login_is_staged_without_ssh(prepared, tmp_path):
     assert sourced.returncode == 0
 
 
-def test_dev_login_refuses_ssh_before_fetching_sources(prepared, tmp_path):
+def test_dev_login_with_provisioned_ssh_is_key_only(prepared, tmp_path):
     repo, env = prepared
-    workspace = tmp_path / "invalid-dev-build"
+    workspace = tmp_path / "field-build"
+    key = tmp_path / "field.pub"
+    key.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg4QERITFBUWFxgZGhscHR4f field@lab\n")
     env = dict(env, REDUX_BUILD_DIR=str(workspace),
-               REDUX_DEV_LOGIN="1", REDUX_OPERATOR_PUBKEY_FILE="/tmp/a-key.pub")
+               REDUX_DEV_LOGIN="1", REDUX_OPERATOR_PUBKEY_FILE=str(key))
     result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
-    assert result.returncode != 0
-    assert "cannot be combined" in result.stderr
-    assert not workspace.exists()
+    assert result.returncode == 0, result.stderr
+    config = workspace / "pi-gen/config"
+    sourced = invoke(["bash", "-c",
+        'source "$1"; printf "%s|%s|%s|%s" "$FIRST_USER_NAME" "$FIRST_USER_PASS" "$ENABLE_SSH" "$PUBKEY_ONLY_SSH"',
+        "bash", str(config)], env=env)
+    assert sourced.returncode == 0, sourced.stderr
+    assert sourced.stdout == "pi|redux|1|1"
+    pkgs = (workspace / "pi-gen/stage-redux/00-redux/00-packages-nr").read_text()
+    assert "openssh-server" in pkgs and "avahi-daemon" in pkgs
+    assert (workspace / "pi-gen/stage-redux/00-redux/files/field-ssh-profile").exists()
+
 
 
 def test_dev_watchdog_is_disarmed_but_app_supervision_remains(tmp_path):

@@ -51,8 +51,8 @@ def generate(config, credential, *, random_hex=None, dev_login=False):
             # ASCII hex is safe in pi-gen's shell config and chpasswd.
             out.write("\n# Unique build-time first-user password; no shared default\n")
             if dev_login:
-                out.write("# Development-only physical-console account; SSH forced off\n")
-                out.write("FIRST_USER_NAME='pi'\nENABLE_SSH=0\nPUBKEY_ONLY_SSH=0\n")
+                out.write("# Disposable physical-console account; SSH remains key-only if provisioned\n")
+                out.write("FIRST_USER_NAME='pi'\n")
             out.write("FIRST_USER_PASS='" + secret + "'\n")
     except BaseException:
         credential.unlink(missing_ok=True)
@@ -65,7 +65,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pi_gen_config", type=Path)
     parser.add_argument("credential_file", type=Path)
-    parser.add_argument("--dev-login", action="store_true", help="explicit test-only pi/redux local login; SSH off")
+    parser.add_argument("--dev-login", action="store_true", help="explicit test-only pi/redux local login; SSH off unless key-only provisioned")
     args = parser.parse_args(argv)
     try:
         result = generate(args.pi_gen_config, args.credential_file, dev_login=args.dev_login)

@@ -128,7 +128,7 @@ def test_explicit_dev_login_is_short_local_only_and_private(tmp_path):
     assert "Password: redux" in credential
     source = subprocess.run(
         ["bash", "-c",
-         'source "$1"; printf "%s:%s:%s:%s" "$FIRST_USER_NAME" "$FIRST_USER_PASS" "$ENABLE_SSH" "$PUBKEY_ONLY_SSH"',
+         'source "$1"; printf "%s:%s:%s:%s" "$FIRST_USER_NAME" "$FIRST_USER_PASS" "$ENABLE_SSH" "${PUBKEY_ONLY_SSH:-0}"',
          "bash", str(config)], capture_output=True, text=True, timeout=5)
     assert source.returncode == 0, source.stderr
     assert source.stdout == "pi:redux:0:0"
@@ -139,3 +139,15 @@ def test_dev_login_never_accepts_injected_password(tmp_path):
     with pytest.raises(ValueError, match="cannot inject"):
         creds.generate(config, dest, dev_login=True, random_hex=lambda: "a" * 48)
     assert not dest.exists()
+
+
+def test_dev_login_keeps_authorized_key_only_ssh(tmp_path):
+    config, destination = config_tree(tmp_path)
+    with config.open("a") as out:
+        out.write("ENABLE_SSH=1\nPUBKEY_ONLY_SSH=1\n")
+    creds.generate(config, destination, dev_login=True)
+    result = subprocess.run(["bash", "-c",
+        'source "$1"; printf "%s/%s/%s/%s" "$FIRST_USER_NAME" "$FIRST_USER_PASS" "$ENABLE_SSH" "$PUBKEY_ONLY_SSH"',
+        "bash", str(config)], capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "pi/redux/1/1"

@@ -88,8 +88,12 @@ console login, inspect the credential on your own build host using
 For a **development SD only**, run a fresh build with
 `REDUX_DEV_LOGIN=1`. This explicitly replaces the default long console
 password with the known test credentials **username `pi`, password `redux`**.
-It forces SSH off, refuses SSH-key provisioning in the same build, and does
-not enable remote password login. Because these credentials are public,
+By itself it keeps SSH off. With an explicit operator public key,
+it enables **public-key-only SSH** for convenient Ethernet testing; the
+shared console password is never accepted for SSH. The one-paste laptop
+helper in [FIELD_TEST.md](FIELD_TEST.md) generates the private key locally,
+builds a fresh test image, enables mDNS for `redux.local`, and bakes in
+an automatic, private capture-engine diagnostic report. Because these credentials are public,
 **never use this image on untrusted hardware or as a production deployment**.
 
 The same development build intentionally keeps PID 1's hardware-reset

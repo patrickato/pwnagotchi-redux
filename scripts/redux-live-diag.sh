@@ -17,8 +17,8 @@ if command -v iw >/dev/null 2>&1; then iw dev; else echo "iw missing"; fi
 heading "Service status"
 systemctl --no-pager --full status redux.service redux-live.service redux-capture-ingest.timer 2>&1 | tail -n 65 || true
 heading "Engine status (sanitized; does NOT print caplet credentials)"
-if [[ -f /captures/redux/live.json ]]; then
-  python3 -m json.tool /captures/redux/live.json || echo "status JSON unreadable"
+if [[ -f /captures/live/live.json ]]; then
+  python3 -m json.tool /captures/live/live.json || echo "status JSON unreadable"
 else
   echo "No live status file"
 fi
@@ -38,4 +38,4 @@ for tool in bettercap hcxpcapngtool hashcat python3; do
 done
 heading "Recent live service log"
 journalctl -u redux-live.service -n 40 --no-pager 2>&1 || true
-echo "Done. Never share /captures/redux/bettercap-live.cap, hash files, or recovered credentials."
+echo "Done. Never share /captures/live/bettercap-live.cap, hash files, or recovered credentials."
