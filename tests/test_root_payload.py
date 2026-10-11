@@ -33,7 +33,7 @@ def slot(tmp_path, name="lite", profile="lite"):
     config.mkdir(parents=True)
     live = config / "live.toml"
     live.write_text(
-        '[live]\nstate_dir = "/captures/redux"\n'
+        '[live]\nstate_dir = "/captures/live"\n'
         'capture_dir = "/captures/incoming"\nactive_dir = "/captures/active"\n'
         'pipeline_database = "/captures/jobs.db"\nallow_connected_capture = false\n'
     )
@@ -68,6 +68,24 @@ def test_lite_assembled_root_accepts_runtime_config_and_enabled_services(tmp_pat
     assert result["slots_checked"] == 1
     assert result["root_payload_verified"] is True
     assert result["physical_boot_verified"] is False
+
+
+def test_live_state_dir_must_not_collide_with_unprivileged_redux_service(tmp_path):
+    root = slot(tmp_path)
+    baked = root / "etc/redux/live.toml"
+    assert 'state_dir = "/captures/live"' in baked.read_text()
+    baked.write_text(baked.read_text().replace('/captures/live', '/captures/redux'))
+    with pytest.raises(ValueError, match="state_dir"):
+        gate.verify(root)
+
+
+def test_root_contract_matches_staged_source_live_config():
+    import tomllib
+    actual = tomllib.loads(
+        (ROOT / "config/live.example.toml").read_text())["live"]
+    assert actual["state_dir"] == "/captures/live"
+    assert actual["capture_dir"] == "/captures/incoming"
+    assert actual["active_dir"] == "/captures/active"
 
 
 def test_ab_checks_both_slots_individually(tmp_path):

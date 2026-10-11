@@ -96,7 +96,9 @@ def capture_contract(root, profile):
     pipeline_config = pipeline.get("pipeline")
     if not isinstance(live_config, dict) or not isinstance(pipeline_config, dict):
         raise ValueError("missing image live/pipeline configuration")
-    expected_live = {"state_dir": "/captures/redux",
+    # The root-owned radio supervisor must not write into the separate
+    # unprivileged redux.service state namespace.
+    expected_live = {"state_dir": "/captures/live",
                      "capture_dir": "/captures/incoming",
                      "active_dir": "/captures/active",
                      "pipeline_database": "/captures/jobs.db"}
