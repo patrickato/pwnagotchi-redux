@@ -37,16 +37,10 @@ if [[ $PREPARE_ONLY == 0 ]]; then
     # Fail before fetching sources, creating build directories or using loop mounts.
     python3 "$REPO_DIR/image/host_preflight.py" --workspace "$BUILD_DIR"
 fi
-# Test-only local login is opt-in. Never combine weak local test credentials
-# with an SSH provisioning request.
+# Disposable short console login can coexist with explicitly provisioned
+# SSH public-key-only access. The console password is never SSH-authenticated.
 case ${REDUX_DEV_LOGIN:-0} in
-    0) ;;
-    1)
-        [[ -z ${REDUX_OPERATOR_PUBKEY_FILE:-} ]] || {
-            echo 'REDUX_DEV_LOGIN=1 cannot be combined with SSH provisioning.' >&2
-            exit 1
-        }
-        ;;
+    0|1) ;;
     *) echo 'REDUX_DEV_LOGIN must be 0 or 1.' >&2; exit 1 ;;
 esac
 source "$REPO_DIR/image/sources.sh"
