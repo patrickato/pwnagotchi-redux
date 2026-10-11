@@ -375,7 +375,8 @@ case $1 in
   checkout)
     if [[ $dir == */pi-gen ]]; then
       mkdir -p "$dir/stage0/02-firmware" "$dir/stage2"
-      mkdir -p "$dir/export-image"
+      mkdir -p "$dir/export-image/05-finalise"
+      echo 'unmount "${ROOTFS_DIR}"' > "$dir/export-image/05-finalise/01-run.sh"
       cat > "$dir/export-image/prerun.sh" <<'LAYOUT'
 IMG_SIZE=$((BOOT_PART_START + BOOT_PART_SIZE + ROOT_PART_SIZE))
 echo "Creating loop device..."
@@ -394,6 +395,7 @@ esac
     result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
     assert result.returncode == 0, result.stderr
     assert "no image has been built" in result.stdout
+    assert "redux-boot-payload.py" in (repo / "build/image/pi-gen/export-image/05-finalise/01-run.sh").read_text()
     return repo, env
 
 
