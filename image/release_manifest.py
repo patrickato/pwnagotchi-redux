@@ -7,6 +7,8 @@ image size and the digest of the exact downloadable compressed bytes.
 from __future__ import annotations
 
 import argparse
+import itertools
+import zlib
 import hashlib
 import json
 import lzma
@@ -46,8 +48,107 @@ def _mbr_layout(sector):
     return records
 
 
+_GPT_NAMES = ("REDUXCTRL", "REDUXBOOTA", "REDUXBOOTB",
+              "REDUXROOTA", "REDUXROOTB", "REDUXCAP")
+_GPT_ARRAY_SIZE = 128 * 128
+_GPT_TAIL_SIZE = 33 * 512
+
+
+def _u32(data, offset):
+    return int.from_bytes(data[offset:offset + 4], "little")
+
+
+def _u64(data, offset):
+    return int.from_bytes(data[offset:offset + 8], "little")
+
+
+def _gpt_header(sector, *, current):
+    """Validate a standard 128-entry GPT header and its IEEE CRC32."""
+    if len(sector) != 512 or sector[:8] != b"EFI PART":
+        raise ValueError("GPT header signature missing")
+    size = _u32(sector, 12)
+    if _u32(sector, 8) != 0x00010000 or not 92 <= size <= 512:
+        raise ValueError("unsupported GPT header version or length")
+    payload = bytearray(sector[:size])
+    original = _u32(payload, 16)
+    payload[16:20] = b"\x00" * 4
+    if zlib.crc32(payload) != original:
+        raise ValueError("GPT header checksum mismatch")
+    this_lba = _u64(sector, 24)
+    other_lba = _u64(sector, 32)
+    entry_lba = _u64(sector, 72)
+    if (this_lba != current or _u32(sector, 80) != 128
+            or _u32(sector, 84) != 128 or sector[20:24] != bytes(4)):
+        raise ValueError("unsupported GPT entry/header geometry")
+    return {"this_lba": this_lba, "other_lba": other_lba,
+            "first_usable": _u64(sector, 40), "last_usable": _u64(sector, 48),
+            "disk_guid": sector[56:72], "entry_lba": entry_lba,
+            "entries_crc": _u32(sector, 88)}
+
+
+def _gpt_layout(prefix):
+    """Require the exact A/B partition topology and intact primary GPT CRCs."""
+    if len(prefix) < 34 * 512:
+        raise ValueError("truncated primary GPT header or entries")
+    mbr = prefix[:512]
+    if mbr[510:512] != b"\x55\xaa" or mbr[450] != 0xEE or _u32(mbr, 454) != 1:
+        raise ValueError("invalid protective GPT MBR")
+    head = _gpt_header(prefix[512:1024], current=1)
+    if (head["entry_lba"] != 2 or head["first_usable"] < 34
+            or head["last_usable"] <= head["first_usable"]
+            or head["other_lba"] <= head["last_usable"] + 32):
+        raise ValueError("unsupported primary GPT partition bounds")
+    entries = prefix[1024:1024 + _GPT_ARRAY_SIZE]
+    if zlib.crc32(entries) != head["entries_crc"]:
+        raise ValueError("GPT partition array checksum mismatch")
+    records = []
+    for index in range(128):
+        entry = entries[index * 128:(index + 1) * 128]
+        if entry[:16] == bytes(16):
+            if any(entry):
+                raise ValueError("nonempty unused GPT partition record")
+            continue
+        if index >= 6:
+            raise ValueError("unexpected extra GPT partition")
+        try:
+            name = entry[56:128].decode("utf-16-le").rstrip("\x00")
+        except UnicodeDecodeError as exc:
+            raise ValueError("invalid GPT partition name") from exc
+        start, last = _u64(entry, 32), _u64(entry, 40)
+        if (name != _GPT_NAMES[index] or start < head["first_usable"]
+                or last < start or last > head["last_usable"]):
+            raise ValueError("incorrect Redux A/B GPT partition name or bounds")
+        records.append({"gpt_name": name, "start_lba": start,
+                        "sector_count": last - start + 1})
+    if len(records) != 6:
+        raise ValueError("missing Redux A/B GPT partition")
+    ordered = sorted(records, key=lambda record: record["start_lba"])
+    for first, second in zip(ordered, ordered[1:]):
+        if first["start_lba"] + first["sector_count"] > second["start_lba"]:
+            raise ValueError("overlapping GPT partitions")
+    return records, head, entries
+
+
+def _gpt_backup(tail, total, primary, entries):
+    """Check the mirrored GPT header and entry array at the disk's end."""
+    if total % 512 or total < 68 * 512 or len(tail) != _GPT_TAIL_SIZE:
+        raise ValueError("GPT disk size is not sector aligned")
+    last_lba = total // 512 - 1
+    if primary["other_lba"] != last_lba or primary["last_usable"] >= last_lba - 32:
+        raise ValueError("GPT backup header does not match disk length")
+    backup = _gpt_header(tail[-512:], current=last_lba)
+    if (backup["other_lba"] != 1 or backup["entry_lba"] != last_lba - 32
+            or backup["first_usable"] != primary["first_usable"]
+            or backup["last_usable"] != primary["last_usable"]
+            or backup["disk_guid"] != primary["disk_guid"]
+            or backup["entries_crc"] != primary["entries_crc"]):
+        raise ValueError("primary and backup GPT headers disagree")
+    if tail[:_GPT_ARRAY_SIZE] != entries:
+        raise ValueError("backup GPT partition entries differ from primary")
+
+
 def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
-    """Verify xz, MBR topology, REDUXCAP ext4 label and digest without mounting."""
+    """Stream-check either Lite MBR or A/B GPT plus REDUXCAP ext4 evidence."""
     path = Path(path)
     meta = path.lstat()
     if not stat.S_ISREG(meta.st_mode) or not path.name.endswith(".img.xz"):
@@ -60,34 +161,53 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
             digest.update(block)
 
     total = 0
-    checks = {}
+    tail = b""
     try:
         with lzma.open(path, "rb") as reader:
-            sector = reader.read(512)
-            partitions = _mbr_layout(sector)
-            capture_start = partitions[2][1] * 512
+            prefix = reader.read(34 * 512)
+            if len(prefix) < 512 or prefix[510:512] != b"\x55\xaa":
+                raise ValueError("missing disk MBR 0x55AA signature")
+            if prefix[450] == 0xEE:
+                table = "gpt"
+                partitions, primary, entries = _gpt_layout(prefix)
+                capture_start = partitions[5]["start_lba"] * 512
+            else:
+                table = "mbr"
+                mbr = _mbr_layout(prefix[:512])
+                partitions = [
+                    {"mbr_type": kind, "start_lba": start, "sector_count": sectors}
+                    for kind, start, sectors in mbr
+                ]
+                capture_start = mbr[2][1] * 512
             checks = {
                 "ext4_magic": (capture_start + 1024 + 0x38, b"", 2),
                 "ext4_label": (capture_start + 1024 + 0x78, b"", 16),
             }
-            total = len(sector)
-            while block := reader.read(1024 * 1024):
+            # Consume the already-read prefix as well as all subsequent xz blocks,
+            # retaining only a small GPT backup tail and ext4 superblock fields.
+            for block in itertools.chain((prefix,), iter(lambda: reader.read(1024 * 1024), b"")):
                 start = total
                 end = start + len(block)
                 for name, (offset, previous, size) in checks.items():
-                    # Capture the few bytes we need even across read boundaries.
                     region_start = max(start, offset + len(previous))
                     region_end = min(end, offset + size)
                     if region_start < region_end:
                         previous += block[region_start - start:region_end - start]
                         checks[name] = (offset, previous, size)
+                if table == "gpt":
+                    tail = (tail + block)[-_GPT_TAIL_SIZE:]
                 total = end
     except (lzma.LZMAError, EOFError, OSError) as error:
         raise ValueError(f"corrupt or truncated xz image: {type(error).__name__}") from error
     if total < minimum_bytes:
         raise ValueError(f"decompressed disk image too small: {total} bytes")
-    if any((start + sectors) * 512 > total for _, start, sectors in partitions):
+    if total % 512:
+        raise ValueError("decompressed disk image not sector aligned")
+    if any((item["start_lba"] + item["sector_count"]) * 512 > total
+           for item in partitions):
         raise ValueError("image partition extends beyond decompressed disk")
+    if table == "gpt":
+        _gpt_backup(tail, total, primary, entries)
     if checks["ext4_magic"][1] != b"\x53\xef":
         raise ValueError("REDUXCAP ext4 superblock magic missing")
     if checks["ext4_label"][1].rstrip(b"\x00") != b"REDUXCAP":
@@ -97,10 +217,7 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
     return {
         "sha256": digest.hexdigest(),
         "compressed_bytes": meta.st_size, "disk_bytes": total,
-        "partitions": [
-            {"mbr_type": kind, "start_lba": start, "sector_count": sectors}
-            for kind, start, sectors in partitions
-        ],
+        "partition_table": table, "partitions": partitions,
         "captures_filesystem": "ext4", "captures_label": "REDUXCAP",
     }
 
@@ -139,7 +256,7 @@ def publish(path, revision, pi_gen_revision, nexmon_revision, *,
         "image": image.name,
         "revisions": revs,
         **info,
-        "checks": ["xz_stream", "disk_mbr_partitions", "reduxcap_ext4_label", "sha256"],
+        "checks": ["xz_stream", ("disk_gpt_primary_backup" if info["partition_table"] == "gpt" else "disk_mbr_partitions"), "reduxcap_ext4_label", "sha256"],
         "hardware_tested": False,
         "boot_tested": False,
         "note": "File-integrity checks only. ARM64 boot, partition mounts, radio and capture require physical validation.",

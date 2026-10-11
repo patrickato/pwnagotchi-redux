@@ -47,11 +47,15 @@ mounts from a failed pi-gen run must be unmounted before removing any build tree
 
 Output: `build/image/pi-gen/deploy/*.img.xz` with a matching
 `.img.xz.sha256` checksum and `.img.xz.release.json` provenance manifest.
-The wrapper streams and verifies the complete xz payload, checks all
-three MBR partitions for valid non-overlapping extents, verifies the capture
-partition's ext4 superblock magic and `REDUXCAP` filesystem label without
-mounting the image, and records the exact Redux, pi-gen, and Nexmon source
-revisions. It **explicitly records `hardware_tested: false`**; file-integrity
+The wrapper streams and verifies the complete xz payload without mounting
+the image. The default Lite profile requires three non-overlapping MBR
+partitions with REDUXCAP in p3. The optional A/B profile requires six named
+GPT partitions (REDUXCTRL, REDUXBOOTA, REDUXBOOTB, REDUXROOTA, REDUXROOTB,
+REDUXCAP), valid primary and backup GPT headers/entry arrays and their CRC32
+checksums, consistent disk geometry and REDUXCAP in p6. Both profiles verify
+the capture partition's ext4 superblock magic and `REDUXCAP` filesystem label,
+then record exact Redux, pi-gen and Nexmon source revisions. The release
+manifest identifies the observed partition-table profile. It **explicitly records `hardware_tested: false`**; file-integrity
 verification is not Pi boot verification. A missing, truncated, undersized, or
 ambiguous image causes release publication to fail.
 Only the redux stage exports an image; there is no desktop stage.
