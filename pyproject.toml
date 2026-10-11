@@ -11,6 +11,7 @@ dependencies = []
 
 [project.scripts]
 redux = "redux.cli:main"
+redux-display-diag = "redux.display.acceptance:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]

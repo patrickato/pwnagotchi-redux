@@ -75,6 +75,7 @@ chromium
 xinit
 xauth
 x11-utils
+xinput
 xserver-xorg-core
 xserver-xorg-legacy
 xserver-xorg-video-fbdev

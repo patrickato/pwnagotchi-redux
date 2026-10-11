@@ -98,6 +98,11 @@ Pinned upstream references: [pi-gen arm64 Bookworm](https://github.com/RPi-Distr
 
 ## Optional 480×320 graphical kiosk profile (manual X11)
 
+The separate [display hardware acceptance guide](DISPLAY_ACCEPTANCE.md) now provides
+`redux-display-diag` for read-only framebuffer/input discovery, authenticated
+X11 device evidence, and opt-in ADS7846 raw tap samples. It leaves actual
+pixel visibility, calibration and Pi 4/Pi 5 acceptance explicitly pending.
+
 The base image remains **Pi OS Lite**, not a full desktop. It always ships
 `/usr/local/bin/redux-kiosk`, a Python standard-library preflight/launcher,
 but deliberately does **not** install Chromium/X11 or auto-start a browser.
