@@ -52,6 +52,8 @@ checkout_source "$PI_GEN_URL" "$PI_GEN_REV" "$BUILD_DIR/pi-gen"
 # Validate exact upstream export hooks before fetching Nexmon or staging Redux.
 # A successful source revision alone does not prove compatibility with patches.
 python3 "$REPO_DIR/image/pinned_pigen_contract.py" "$BUILD_DIR/pi-gen"
+# Adapt the pinned ARMHF QEMU dependency only after ARM64 execution verifies.
+python3 "$REPO_DIR/image/pigen_dependencies.py" "$BUILD_DIR/pi-gen"
 # Fetch nexmon lazily: use the distro compiler, excluding bundled compilers.
 NEXMON_DIR="$BUILD_DIR/nexmon"
 git init -q "$NEXMON_DIR"
@@ -155,6 +157,8 @@ RELEASE=bookworm
 STAGE_LIST="stage0 stage1 stage2 stage-redux"
 DISABLE_FIRST_BOOT_USER_RENAME=1
 EOF
+# Create a unique build-local password required by pinned pi-gen; no shared default.
+python3 "$REPO_DIR/image/build_credentials.py" "$PI_GEN_DIR/config" "$BUILD_DIR/operator-login.txt"
 touch "$PI_GEN_DIR/stage2/SKIP_IMAGES"
 # Both supported boards use arm64, with their respective kernel packages.
 cat > "$PI_GEN_DIR/stage0/02-firmware/01-packages" <<'EOF'

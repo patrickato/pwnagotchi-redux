@@ -377,6 +377,7 @@ case $1 in
       mkdir -p "$dir/stage0/02-firmware" "$dir/stage2"
       mkdir -p "$dir/export-image/05-finalise" "$dir/export-image/04-set-partuuid"
       touch "$dir/stage2/EXPORT_IMAGE"
+      echo "qemu-arm-static:qemu-user-static" > "$dir/depends"
       cat > "$dir/export-image/05-finalise/01-run.sh" <<'FINALISE'
 update-initramfs -k all -c
 unmount "${ROOTFS_DIR}"
@@ -407,6 +408,9 @@ LAYOUT
 esac
 ''')
     git.chmod(0o755)
+    # Preparation-only fixture represents an older host with pinned QEMU tool.
+    (shim / "qemu-arm-static").write_text("#!/bin/sh\nexit 0\n")
+    (shim / "qemu-arm-static").chmod(0o755)
     env = dict(os.environ, PATH=f"{shim}:{os.environ['PATH']}")
     result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
     assert result.returncode == 0, result.stderr
@@ -419,6 +423,11 @@ def test_preparation_exports_only_redux_and_targets_pi4(prepared):
     repo, env = prepared
     tree = repo / "build/image/pi-gen"
     assert (tree / "stage2/SKIP_IMAGES").exists()
+    secret = tree.parent / "operator-login.txt"
+    assert secret.is_file() and secret.stat().st_mode & 0o077 == 0
+    assert "Password: " in secret.read_text()
+    assert "FIRST_USER_PASS=" in (tree / "config").read_text()
+    assert (tree / "config").stat().st_mode & 0o077 == 0
     assert (tree / "stage-redux/EXPORT_IMAGE").exists()
     assert (tree / "stage-redux/00-redux/files/redux/core/boot.py").exists()
     assert (tree / "stage-redux/00-redux/files/pipeline/pipeline.toml").exists()

@@ -17,6 +17,7 @@ GIB = 1024 ** 3
 REQUIRED_TOOLS = (
     "git", "python3", "realpath", "install", "tar", "quilt", "parted",
     "rsync", "losetup", "blkid", "mount", "umount", "debootstrap",
+    "bsdtar", "capsh", "lsmod", "mke2fs",
     "mkfs.ext4", "mkfs.vfat", "xz", "zip", "zerofree", "arch-test",
     "findmnt", "gpg", "pigz", "curl", "file", "xxd", "bc", "mkdosfs",
 )

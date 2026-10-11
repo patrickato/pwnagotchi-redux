@@ -52,7 +52,6 @@ def config_fragment(path):
     key = public_key(path)
     return "\n".join((
         "# Redux operator-provided SSH public-key-only boot access",
-        "FIRST_USER_PASS=''",
         "DISABLE_FIRST_BOOT_USER_RENAME=1",
         "ENABLE_SSH=1",
         "PUBKEY_ONLY_SSH=1",

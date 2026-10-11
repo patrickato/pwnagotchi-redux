@@ -27,7 +27,7 @@ def fixture(tmp_path, *, body=None):
 def test_valid_key_generates_passwordless_ssh_config(tmp_path):
     key = fixture(tmp_path)
     text = p.config_fragment(key)
-    assert "FIRST_USER_PASS=''" in text
+    assert 'FIRST_USER_PASS=' not in text
     assert "ENABLE_SSH=1" in text
     assert "PUBKEY_ONLY_SSH=1" in text
     assert "DISABLE_FIRST_BOOT_USER_RENAME=1" in text
@@ -97,4 +97,4 @@ def test_image_builder_explicit_key_provisioning_and_safe_default():
     assert "DISABLE_FIRST_BOOT_USER_RENAME=1" in build
     assert "DISABLE_FIRST_BOOT_USER_RENAME=1" in config
     assert "ENABLE_SSH=0" in config
-    assert "FIRST_USER_PASS=" not in config
+    assert 'FIRST_USER_PASS=' not in config

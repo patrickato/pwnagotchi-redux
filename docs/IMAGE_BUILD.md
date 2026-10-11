@@ -72,6 +72,17 @@ login, and disables the interactive first-boot user-rename workflow.
 The owner logs in using the configured `FIRST_USER_NAME` (default `field`).
 The private key stays exclusively on the operator's machine.
 
+The pinned pi-gen additionally **requires a nonempty** `FIRST_USER_PASS`
+when interactive user renaming is disabled. Redux now generates a different
+cryptographically random **192-bit local console password per image** and
+stores the credential in the build workspace's `operator-login.txt`,
+readable only by root (mode 0600). Its staging config is also private
+(0600); the password is not printed into logs and the plaintext host
+credential file is not installed into the image. For an optional SSH-key
+build, SSH continues to use public-key-only authentication. For local
+console login, inspect the credential on your own build host using
+`sudo cat /path/to/redux-build/operator-login.txt` and keep it private.
+
 Without `REDUX_OPERATOR_PUBKEY_FILE`, the image still has SSH disabled
 and no universal first-user password. Such a card is not headless-ready
 until some other deliberate, secure operator-specific provisioning route
@@ -125,10 +136,18 @@ Choose the package set matching your actual build host:
 
 **Ubuntu 26.04 / Resolute under WSL2:**
 
+The pinned pi-gen still checks the obsolete `qemu-arm-static` program
+while building ARM64 images. Redux modifies only the fetched pi-gen
+`depends` manifest to require `qemu-aarch64`, and only after
+`arch-test arm64` succeeds. It never fakes a system package; unexpected
+upstream changes stop the build. Genuine `bsdtar` from `libarchive-tools`
+still must be installed.
+
+
 ```sh
 sudo apt-get update
 sudo apt-get install -y quilt parted debootstrap dosfstools zip zerofree \
-  arch-test pigz qemu-user qemu-user-binfmt binfmt-support
+  arch-test pigz qemu-user qemu-user-binfmt binfmt-support libarchive-tools
 arch-test arm64
 sudo env REDUX_BUILD_DIR="$HOME/redux-image-build" ./build.sh --check-host
 ```
@@ -166,6 +185,10 @@ time; it does **not** auto-expand a flashed card, erase existing capture
 data, or affect a running installation. Use a disposable SD card and allow
 sufficient scratch space for the uncompressed image. The original default
 is maintained unless this variable is supplied.
+
+For a second attempt after source staging, choose a **fresh**
+`REDUX_BUILD_DIR` such as `~/redux-image-build-02`. Do not delete or reuse
+an existing build tree if mounted resources may be present.
 
 The wrapper refuses existing build directories. Choose a fresh path for another
 run with `sudo REDUX_BUILD_DIR="$PWD/build/image-next" ./build.sh`. Filesystem
