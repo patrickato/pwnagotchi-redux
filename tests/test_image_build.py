@@ -749,7 +749,7 @@ def flash_cli_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(flash, 'disk_snapshot', lambda *_: (1, {'path': str(target)}))
     monkeypatch.setattr(flash.os, 'geteuid', lambda: 0)
     monkeypatch.setattr(sys, 'argv', ['flash', str(image), '--sha256', hashlib.sha256(raw).hexdigest(),
-                                    '--device', str(target), '--confirm-device', str(target)])
+                                    '--device', str(target), '--confirm-device', str(target), '--checksum-only'])
     return flash, target, bytes(raw)
 
 

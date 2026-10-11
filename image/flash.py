@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write a checksum-verified release to an unmounted removable Linux disk."""
+"""Flash a manifest-verified Redux release to an unmounted removable Linux disk."""
 import argparse
 from contextlib import contextmanager
 import fcntl
@@ -118,15 +118,43 @@ def exclusive_disk(device, identity):
             stream.close()
 
 
+def validate_published_handoff(image, trusted_sha256, expected_profile=None,
+                               *, minimum_bytes=512 * 1024 * 1024):
+    """Audit all sidecars before querying/opening any target disk.
+
+    Dynamic sibling import works both as image/flash.py and when CI loads it
+    directly by file path (without installing Redux as a Python package).
+    """
+    import importlib.util
+    module_path = Path(__file__).with_name("verify_release.py")
+    import sys
+    sys.path.insert(0, str(module_path.parent))
+    spec = importlib.util.spec_from_file_location("redux_verify_release", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.verify(image, trusted_sha256=trusted_sha256,
+                         expected_profile=expected_profile,
+                         minimum_bytes=minimum_bytes)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('image', type=Path)
     parser.add_argument('--sha256', required=True, help='SHA256 from a trusted release channel')
+    parser.add_argument('--expected-profile', choices=('lite', 'ab'),
+                        help='require a matching Lite or A/B image profile')
+    parser.add_argument('--checksum-only', action='store_true',
+                        help='explicit legacy bypass of sidecar/partition-release verification')
     parser.add_argument('--device', required=True, help='whole removable disk, e.g. /dev/sdb')
     parser.add_argument('--confirm-device', help='repeat the exact device path to authorize erasure')
     parser.add_argument('--dry-run', action='store_true', help='validate and print the actual plan without writing')
     args = parser.parse_args()
     try:
+        if args.checksum_only:
+            # Explicitly weaker compatibility path for older/manual images.
+            print('Warning: checksum-only mode skips release manifest and layout verification.', file=__import__('sys').stderr)
+        else:
+            validate_published_handoff(args.image, args.sha256, args.expected_profile)
         size, digest = inspect_image(args.image, args.sha256)
         identity, disk = disk_snapshot(args.device, size)
         print(json.dumps({'image': str(args.image), 'raw_bytes': size, 'raw_sha256': digest,

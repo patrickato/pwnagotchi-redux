@@ -81,6 +81,45 @@ run with `sudo REDUX_BUILD_DIR="$PWD/build/image-next" ./build.sh`. Filesystem
 mounts from a failed pi-gen run must be unmounted before removing any build tree.
 `--prepare-only` stages sources without root or image creation; it is not a build.
 
+## Verify a transferred image before flashing
+
+Copy **all three** release files together: the compressed `.img.xz`,
+its `.img.xz.sha256`, and its `.img.xz.release.json` publication marker.
+After downloading or transferring them to a Linux host with Python 3:
+
+```sh
+python3 image/verify_release.py /path/to/pwnagotchi-redux.img.xz \
+  --expected-profile lite --trusted-sha256 TRUSTED_64_CHARACTER_SHA256
+```
+
+Change `lite` to `ab` for the opt-in signed-update partition profile.
+The verifier does not mount anything, require root or access a block device.
+It re-inspects the decompressed partition geometry and filesystem signatures
+and compares the entire observed release record to its manifest and checksum
+sidecar. It rejects stale, incomplete, mismatched, linked or tampered release
+components. Without `--trusted-sha256`, it confirms self-consistency **only**:
+an attacker could replace all three files together. A trusted digest must
+come from a separate authenticated channel; this does not authenticate an
+image cryptographically or prove it will boot.
+
+The removable-disk flasher now **requires this release triplet by default**:
+
+```sh
+sudo python3 image/flash.py /path/to/pwnagotchi-redux.img.xz \
+  --sha256 TRUSTED_64_CHARACTER_SHA256 --expected-profile lite \
+  --device /dev/sdX --dry-run
+```
+
+First inspect the dry-run report and confirm `/dev/sdX` is your **spare**,
+unmounted and genuinely removable development card. For the destructive
+write, omit `--dry-run` and add `--confirm-device /dev/sdX`.
+Flashing checks the release before even querying the target device and
+continues to flush and read back every written byte. `--checksum-only`
+remains an explicit, weaker legacy override for artifacts without the
+published triplet; it still requires an independently trusted SHA256,
+removable whole disk, and explicit erasure confirmation. Do not use this
+override for normal Redux releases. Neither method tests Pi hardware.
+
 Output: `build/image/pi-gen/deploy/*.img.xz` with a matching
 `.img.xz.sha256` checksum and `.img.xz.release.json` provenance manifest.
 The wrapper streams and verifies the complete xz payload without mounting
