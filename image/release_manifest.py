@@ -39,8 +39,10 @@ def _mbr_layout(sector):
         if start == 0 or sectors == 0 or kind == 0:
             raise ValueError("missing/invalid Pi image partition " + str(idx + 1))
         records.append((kind, start, sectors))
-    if records[2][0] != 0x83:
-        raise ValueError("REDUXCAP partition must use Linux MBR type 0x83")
+    if records[0][0] not in (0x0B, 0x0C) or any(record[0] != 0x83 for record in records[1:]):
+        raise ValueError("MBR partitions must be FAT boot and Linux root/REDUXCAP")
+    if any(sector[494:510]):
+        raise ValueError("unexpected fourth MBR partition")
     occupied = sorted((start, start + sectors) for _, start, sectors in records)
     for left, right in zip(occupied, occupied[1:]):
         if left[1] > right[0]:
@@ -102,6 +104,7 @@ def _gpt_layout(prefix):
     if zlib.crc32(entries) != head["entries_crc"]:
         raise ValueError("GPT partition array checksum mismatch")
     records = []
+    identifiers = set()
     for index in range(128):
         entry = entries[index * 128:(index + 1) * 128]
         if entry[:16] == bytes(16):
@@ -110,6 +113,10 @@ def _gpt_layout(prefix):
             continue
         if index >= 6:
             raise ValueError("unexpected extra GPT partition")
+        unique = entry[16:32]
+        if not any(unique) or unique in identifiers:
+            raise ValueError("GPT partition unique GUID missing or duplicated")
+        identifiers.add(unique)
         try:
             name = entry[56:128].decode("utf-16-le").rstrip("\x00")
         except UnicodeDecodeError as exc:
@@ -147,8 +154,66 @@ def _gpt_backup(tail, total, primary, entries):
         raise ValueError("backup GPT partition entries differ from primary")
 
 
+
+def _filesystem_checks(partitions, table):
+    """Bounded on-disk signatures, NOT fsck, bootability or file contents.
+
+    FAT16 is used by the A/B selector, FAT32 by boot partitions, and ext4
+    by roots/captures. Bounds are measured relative to their own partition;
+    a valid signature in the next partition must never satisfy this check.
+    """
+    expected = (
+        [("fat32", None), ("ext4", None), ("ext4", "REDUXCAP")]
+        if table == "mbr" else
+        [("fat16", "REDUXCTRL"), ("fat32", "REDUXBOOTA"),
+         ("fat32", "REDUXBOOTB"), ("ext4", "REDUXROOTA"),
+         ("ext4", "REDUXROOTB"), ("ext4", "REDUXCAP")]
+    )
+    if len(partitions) != len(expected):
+        raise ValueError("unexpected number of image filesystems")
+    checks = {}
+    for index, (partition, (kind, label)) in enumerate(zip(partitions, expected), 1):
+        base = partition["start_lba"] * 512
+        limit = base + partition["sector_count"] * 512
+        if kind.startswith("fat"):
+            fields = {"boot_signature": (base + 510, 2),
+                      "fat_type": (base + (54 if kind == "fat16" else 82), 5)}
+            if label:
+                fields["label"] = (base + (43 if kind == "fat16" else 71), 11)
+        else:
+            fields = {"ext4_magic": (base + 1024 + 0x38, 2)}
+            if label:
+                fields["label"] = (base + 1024 + 0x78, 16)
+        for field, (offset, length) in fields.items():
+            if offset < base or offset + length > limit:
+                raise ValueError(f"partition {index} is too short for its {kind} header")
+            checks[(index, field)] = (offset, length)
+    return expected, checks
+
+
+def _check_filesystem_signatures(expected, observed):
+    """Validate sampled bytes from each partition (no mount or full fsck)."""
+    results = []
+    for index, (kind, label) in enumerate(expected, 1):
+        if kind.startswith("fat"):
+            matched = (observed[(index, "boot_signature")] == b"\x55\xaa"
+                       and observed[(index, "fat_type")] == kind.upper().encode("ascii"))
+        else:
+            matched = observed[(index, "ext4_magic")] == b"\x53\xef"
+        if not matched:
+            raise ValueError(f"partition {index} has no valid {kind} filesystem signature")
+        if label is not None:
+            stored = observed[(index, "label")].rstrip(b"\x00 ").decode("ascii", "replace")
+            if stored != label:
+                raise ValueError(f"partition {index} filesystem label mismatch: expected {label}")
+        results.append({"partition": index, "format": kind, "label": label,
+                        "signature_observed": True,
+                        "filesystem_checked": False})
+    return results
+
+
 def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
-    """Stream-check either Lite MBR or A/B GPT plus REDUXCAP ext4 evidence."""
+    """Stream-check Lite MBR or A/B GPT and bounded partition signatures."""
     path = Path(path)
     meta = path.lstat()
     if not stat.S_ISREG(meta.st_mode) or not path.name.endswith(".img.xz"):
@@ -170,7 +235,6 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
             if prefix[450] == 0xEE:
                 table = "gpt"
                 partitions, primary, entries = _gpt_layout(prefix)
-                capture_start = partitions[5]["start_lba"] * 512
             else:
                 table = "mbr"
                 mbr = _mbr_layout(prefix[:512])
@@ -178,22 +242,19 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
                     {"mbr_type": kind, "start_lba": start, "sector_count": sectors}
                     for kind, start, sectors in mbr
                 ]
-                capture_start = mbr[2][1] * 512
-            checks = {
-                "ext4_magic": (capture_start + 1024 + 0x38, b"", 2),
-                "ext4_label": (capture_start + 1024 + 0x78, b"", 16),
-            }
-            # Consume the already-read prefix as well as all subsequent xz blocks,
-            # retaining only a small GPT backup tail and ext4 superblock fields.
+            expected, probes = _filesystem_checks(partitions, table)
+            observed = {name: b"" for name in probes}
+            # Small bounded reads for every filesystem's boot/superblock evidence.
+            # Consume prefix too; it can contain the boot-sector fields.
             for block in itertools.chain((prefix,), iter(lambda: reader.read(1024 * 1024), b"")):
                 start = total
                 end = start + len(block)
-                for name, (offset, previous, size) in checks.items():
-                    region_start = max(start, offset + len(previous))
+                for name, (offset, size) in probes.items():
+                    prev = observed[name]
+                    region_start = max(start, offset + len(prev))
                     region_end = min(end, offset + size)
                     if region_start < region_end:
-                        previous += block[region_start - start:region_end - start]
-                        checks[name] = (offset, previous, size)
+                        observed[name] = prev + block[region_start - start:region_end - start]
                 if table == "gpt":
                     tail = (tail + block)[-_GPT_TAIL_SIZE:]
                 total = end
@@ -208,16 +269,14 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024):
         raise ValueError("image partition extends beyond decompressed disk")
     if table == "gpt":
         _gpt_backup(tail, total, primary, entries)
-    if checks["ext4_magic"][1] != b"\x53\xef":
-        raise ValueError("REDUXCAP ext4 superblock magic missing")
-    if checks["ext4_label"][1].rstrip(b"\x00") != b"REDUXCAP":
-        raise ValueError("REDUXCAP ext4 filesystem label missing")
+    evidence = _check_filesystem_signatures(expected, observed)
     if path.lstat().st_size != meta.st_size or path.lstat().st_mtime_ns != meta.st_mtime_ns:
         raise ValueError("compressed image changed while being validated")
     return {
         "sha256": digest.hexdigest(),
         "compressed_bytes": meta.st_size, "disk_bytes": total,
         "partition_table": table, "partitions": partitions,
+        "partition_filesystems": evidence,
         "captures_filesystem": "ext4", "captures_label": "REDUXCAP",
     }
 
@@ -256,7 +315,7 @@ def publish(path, revision, pi_gen_revision, nexmon_revision, *,
         "image": image.name,
         "revisions": revs,
         **info,
-        "checks": ["xz_stream", ("disk_gpt_primary_backup" if info["partition_table"] == "gpt" else "disk_mbr_partitions"), "reduxcap_ext4_label", "sha256"],
+        "checks": ["xz_stream", ("disk_gpt_primary_backup" if info["partition_table"] == "gpt" else "disk_mbr_partitions"), "partition_filesystem_signatures", "sha256"],
         "hardware_tested": False,
         "boot_tested": False,
         "note": "File-integrity checks only. ARM64 boot, partition mounts, radio and capture require physical validation.",

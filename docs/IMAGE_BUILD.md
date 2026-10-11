@@ -58,6 +58,15 @@ then record exact Redux, pi-gen and Nexmon source revisions. The release
 manifest identifies the observed partition-table profile. It **explicitly records `hardware_tested: false`**; file-integrity
 verification is not Pi boot verification. A missing, truncated, undersized, or
 ambiguous image causes release publication to fail.
+Additional release checks require actual filesystem signature evidence for
+**every** partition: FAT32 boot and ext4 root/captures on Lite MBR, or
+FAT16 selector, FAT32 Boot A/B, and ext4 Root A/B/captures on A/B GPT.
+GPT filesystem labels and partition-unique GUIDs must match the expected
+slot topology. The image manifest records each observed signature and sets
+`filesystem_checked: false` because a boot-sector or superblock signature
+is not a full fsck, proof of kernel files, or evidence that either Pi boots.
+Both hardware and boot qualification remain explicitly false.
+
 Only the redux stage exports an image; there is no desktop stage.
 
 For local login, country, locale or timezone provisioning, pass a private shell

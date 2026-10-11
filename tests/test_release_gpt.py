@@ -35,6 +35,8 @@ def sample(tmp_path, bad=None):
         entries[offset + 56:offset + 56 + len(encoded)] = encoded
     if bad == "extra_partition":
         entries[6 * 128:6 * 128 + 16] = b"\x11" * 16
+    if bad == "duplicate_partition_guid":
+        entries[5 * 128 + 16:5 * 128 + 32] = entries[4 * 128 + 16:4 * 128 + 32]
     if bad == "wrong_name":
         entries[5 * 128 + 56:5 * 128 + 58] = "X".encode("utf-16-le")
     if bad == "overlap":
@@ -72,11 +74,31 @@ def sample(tmp_path, bad=None):
     if bad == "truncated_primary":
         raw = raw[:1600]
     else:
-        capture_offset = starts[-1] * 512 + 1024
-        if bad != "missing_ext4":
-            raw[capture_offset + 0x38:capture_offset + 0x3A] = b"\x53\xef"
-        if bad != "wrong_label":
-            raw[capture_offset + 0x78:capture_offset + 0x80] = b"REDUXCAP"
+        for index, (name, start) in enumerate(zip(release._GPT_NAMES, starts)):
+            base = start * 512
+            if index < 3:
+                kind = "fat16" if index == 0 else "fat32"
+                offset = 54 if kind == "fat16" else 82
+                raw[base + offset:base + offset + 5] = kind.upper().encode()
+                raw[base + 510:base + 512] = b"\x55\xaa"
+                label_offset = 43 if kind == "fat16" else 71
+                raw[base + label_offset:base + label_offset + 11] = name.encode().ljust(11, b" ")
+            else:
+                raw[base + 1024 + 0x38:base + 1024 + 0x3a] = b"\x53\xef"
+                label_bytes = name.encode()
+                raw[base + 1024 + 0x78:base + 1024 + 0x78 + 16] = label_bytes.ljust(16, b"\x00")
+        if bad == "missing_ext4":
+            raw[starts[5] * 512 + 1024 + 0x38:starts[5] * 512 + 1024 + 0x3a] = b"\x00\x00"
+        if bad == "wrong_label":
+            raw[starts[5] * 512 + 1024 + 0x78] = ord("X")
+        if bad == "missing_control":
+            raw[starts[0] * 512 + 54:starts[0] * 512 + 59] = bytes(5)
+        if bad == "missing_boot_b":
+            raw[starts[2] * 512 + 82:starts[2] * 512 + 87] = bytes(5)
+        if bad == "missing_root_a":
+            raw[starts[3] * 512 + 1024 + 0x38:starts[3] * 512 + 1024 + 0x3a] = bytes(2)
+        if bad == "wrong_root_b_label":
+            raw[starts[4] * 512 + 1024 + 0x78] = ord("X")
 
     target = tmp_path / "redux-ab.img.xz"
     target.write_bytes(lzma.compress(bytes(raw)))
@@ -89,6 +111,7 @@ def test_real_compressed_gpt_release_is_accepted(tmp_path):
     assert result["partition_table"] == "gpt"
     assert result["captures_label"] == "REDUXCAP"
     assert len(result["partitions"]) == 6
+    assert [p["format"] for p in result["partition_filesystems"]] == ["fat16", "fat32", "fat32", "ext4", "ext4", "ext4"]
     assert [p["gpt_name"] for p in result["partitions"]] == list(release._GPT_NAMES)
     record = release.publish(image, "a" * 40, "b" * 40, "c" * 40,
                              minimum_bytes=512)
@@ -98,10 +121,11 @@ def test_real_compressed_gpt_release_is_accepted(tmp_path):
 
 
 @pytest.mark.parametrize("bad", [
-    "extra_partition", "wrong_name", "overlap", "outside_usable",
+    "extra_partition", "duplicate_partition_guid", "wrong_name", "overlap", "outside_usable",
     "primary_header_crc", "primary_entries_crc", "backup_header_crc",
     "backup_entries", "backup_missing", "backup_wrong_disk",
     "missing_ext4", "wrong_label", "truncated_primary",
+    "missing_control", "missing_boot_b", "missing_root_a", "wrong_root_b_label",
 ])
 def test_reject_unexpected_or_corrupted_ab_images(tmp_path, bad):
     with pytest.raises(ValueError):
