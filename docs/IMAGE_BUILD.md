@@ -9,6 +9,29 @@ is masked so only the Redux-owned supervisor can start the capture engine.
 These services are source/CI integrated; actual boot and capture remain
 physical acceptance gates.
 
+## First-boot partition safety (fixed root + REDUXCAP)
+
+The pinned Bookworm pi-gen stage2 adds the stock
+`init=/usr/lib/raspberrypi-sys-mods/firstboot` boot token and
+`resize2fs_once` SysV startup service. They expect the root filesystem
+to grow on first boot, but Redux places REDUXCAP **after** root (p3 in Lite,
+p6 in A/B). Auto-expansion would conflict with that fixed partition map.
+
+The image overlay stage now removes the known firstboot resize kernel
+argument, disables and removes the old init script, and masks the
+`resize2fs_once.service` unit. It deliberately fails if the upstream
+firstboot pattern or script is unfamiliar. During export the mounted
+boot/root gate verifies the resizer is absent and the service is masked
+in every exported slot; neither a Lite nor an A/B image may silently
+ship with auto-resizing enabled. **Do not re-enable stock root expansion**
+after flashing; any storage growth needs a partition-aware procedure.
+
+This intentionally changes the stock Raspberry Pi first-boot experience.
+Image user/login provisioning remains a separate acceptance gate:
+no shared login password or remotely exposed service is provided by
+this change. Establish a secure owner-specific access method before
+attempting unattended/headless deployment.
+
 ## Linux host
 
 **Pinned exporter compatibility gate.** After checking out the immutable

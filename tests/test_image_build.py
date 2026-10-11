@@ -667,6 +667,14 @@ def test_overlay_stage_preserves_capture_writes_and_hardens_service(tmp_path):
     (root / "etc/systemd/system").mkdir(parents=True)
     (root / "etc/fstab").write_text('ROOTDEV / ext4 defaults 0 1\nBOOTDEV /boot/firmware vfat defaults 0 2\n')
     (root / "etc/systemd/system/redux.service").write_text('[Unit]\n[Service]\nStateDirectory=redux\n')
+    boot = root / "boot/firmware"
+    boot.mkdir(parents=True)
+    (boot / "cmdline.txt").write_text(
+        "console=tty1 root=ROOTDEV rootwait quiet "
+        "init=/usr/lib/raspberrypi-sys-mods/firstboot\\n".replace("\\n", "\n"))
+    script = root / "etc/init.d/resize2fs_once"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\\n".replace("\\n", "\n"))
     stage = REPO / "image/stage-redux/10-overlay"
     result = invoke(["bash", "-c", 'on_chroot() { cat >/dev/null; }; export -f on_chroot; bash 00-run.sh'], cwd=stage, env=dict(os.environ, ROOTFS_DIR=str(root)))
     assert result.returncode == 0, result.stderr
@@ -678,6 +686,10 @@ def test_overlay_stage_preserves_capture_writes_and_hardens_service(tmp_path):
     assert 'RequiresMountsFor=/captures' in unit
     assert 'StateDirectory=' not in unit
     assert 'ReadWritePaths=/captures' in unit
+    assert 'firstboot' not in (boot / 'cmdline.txt').read_text()
+    assert (root / 'etc/systemd/system/resize2fs_once.service').is_symlink()
+    assert (root / 'etc/systemd/system/resize2fs_once.service').readlink() == Path('/dev/null')
+    assert not script.exists()
 
 
 def boot_policy_module():

@@ -58,6 +58,17 @@ def boot_files(root: Path, *, slot=None, partuuid=None):
     if "\n" in cmdline.strip("\r\n") or "\x00" in cmdline:
         raise ValueError("cmdline.txt must contain one line without NULs")
     words = cmdline.split()
+    # Stock Pi OS firstboot/init_resize scripts can alter partition boundaries.
+    # A Redux root partition is deliberately NOT last: REDUXCAP follows it.
+    if any(word.startswith('init=') or 'firstboot' in word.lower()
+           or 'resize' in word.lower() for word in words):
+        raise ValueError('stock firstboot/resize token remains in boot cmdline')
+    mask = root / 'etc/systemd/system/resize2fs_once.service'
+    if not mask.is_symlink() or mask.readlink() != Path('/dev/null'):
+        raise ValueError('resize2fs_once must be masked for fixed partition layout')
+    legacy = root / 'etc/init.d/resize2fs_once'
+    if legacy.exists() or legacy.is_symlink():
+        raise ValueError('legacy resize2fs_once init script remains in image')
     roots = [word.removeprefix("root=") for word in words if word.startswith("root=")]
     slots = [word.removeprefix("rauc.slot=") for word in words
              if word.startswith("rauc.slot=")]

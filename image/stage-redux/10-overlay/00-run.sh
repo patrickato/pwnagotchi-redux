@@ -1,5 +1,15 @@
 #!/bin/bash
 set -euo pipefail
+# pi-gen Bookworm stage2 still arms firstboot root resizing and resize2fs_once.
+# Both are incompatible with REDUXCAP located AFTER the root partition.
+# Remove the known firstboot token, disable the legacy service before deletion,
+# and leave a persistent systemd mask so first boot cannot expand into captures.
+python3 files/disable-resize.py "$ROOTFS_DIR"
+on_chroot <<'EOF'
+systemctl disable resize2fs_once.service 2>/dev/null || true
+EOF
+rm -f "$ROOTFS_DIR/etc/init.d/resize2fs_once"
+ln -s /dev/null "$ROOTFS_DIR/etc/systemd/system/resize2fs_once.service"
 # recurse=0 protects root while leaving the dedicated captures filesystem writable.
 install -m 0644 files/overlayroot.conf "$ROOTFS_DIR/etc/overlayroot.conf"
 install -d "$ROOTFS_DIR/captures" "$ROOTFS_DIR/etc/systemd/journald.conf.d"

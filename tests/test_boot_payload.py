@@ -23,6 +23,9 @@ def slot(tmp_path, which=None, uuid=None):
     if which:
         cmd += f" rauc.slot={which} panic=10"
     (boot / "cmdline.txt").write_text(cmd + "\n")
+    services = root / "etc/systemd/system"
+    services.mkdir(parents=True)
+    (services / "resize2fs_once.service").symlink_to("/dev/null")
     if which == "A":
         ctrl = root / "boot/redux-control"
         ctrl.mkdir()
@@ -192,3 +195,42 @@ def test_build_wires_both_operator_profiles():
     assert "BOOT_GATE_PROFILE=lite" in build and "BOOT_GATE_PROFILE=ab" in build
     assert "--a-root-partuuid" in clone and "--b-root-partuuid" in clone
     assert "redux-boot-payload.py" in clone
+
+
+
+@pytest.mark.parametrize("token", [
+    "init=/usr/lib/raspberrypi-sys-mods/firstboot",
+    "init=/usr/lib/raspi-config/init_resize.sh",
+    "init=/bin/sh",
+    "firstboot",
+])
+def test_lite_does_not_export_stock_resizer(tmp_path, token):
+    root = slot(tmp_path)
+    cmd = root / "boot/firmware/cmdline.txt"
+    cmd.write_text(cmd.read_text().strip() + " " + token + "\n")
+    with pytest.raises(ValueError, match="firstboot|resize"):
+        payload.verify(root)
+
+
+@pytest.mark.parametrize("failure", ["mask_missing", "mask_wrong", "legacy_script"])
+def test_lite_requires_inert_resize_service(tmp_path, failure):
+    root = slot(tmp_path)
+    unit = root / "etc/systemd/system/resize2fs_once.service"
+    if failure == "mask_missing":
+        unit.unlink()
+    elif failure == "mask_wrong":
+        unit.unlink()
+        unit.write_text("[Service]\nExecStart=/bin/true\n")
+    else:
+        script = root / "etc/init.d/resize2fs_once"
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/bin/sh\nexit 0\n")
+    with pytest.raises(ValueError, match="resize2fs_once"):
+        payload.verify(root)
+
+
+def test_ab_rejects_unsafe_resize_mask_on_inactive_slot(tmp_path):
+    a, b = pair(tmp_path)
+    (b / "etc/systemd/system/resize2fs_once.service").unlink()
+    with pytest.raises(ValueError, match="resize2fs_once"):
+        verify_pair(a, b)
