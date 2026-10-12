@@ -57,8 +57,11 @@ fingerprint/host identity differs from what was expected.
   global cfg80211 policy at boot. For the US card, the report must say
   `country US`, *not* `country 00`. Neither software nor hardware
   rfkill is blocked.
-- [ ] A real Wi-Fi interface is in monitor mode; the radio supervisor
-  selects it without disrupting an active Ethernet connection.
+- [ ] The **selected capture-radio interface itself** is in monitor mode,
+  not merely a different Wi-Fi interface. The laptop checker matches the
+  selected interface against its own `iw dev` block; unknown or missing
+  interface data does not count as a pass. Verify no Wi-Fi device reports
+  a software or hardware RF block. The supervisor must not disrupt Ethernet.
 - [ ] Bettercap is alive, and the REST interface is reachable on
   `127.0.0.1:8081`. An **unauthenticated** probe should return HTTP 401
   (authentication required); HTTP 400 is unexpected, while HTTP 200

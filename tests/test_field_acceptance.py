@@ -44,8 +44,9 @@ warning: synthetic log line
 def test_valid_live_telemetry_meets_measured_field_gates():
     parsed = gate.parse(SAMPLE)
     assert parsed["wifi_soft_blocked"] == "no"
+    assert parsed["wifi_hard_blocked"] == "no"
     assert parsed["regulatory_country"] == "US"
-    assert parsed["monitor_mode"] is True
+    assert parsed["monitor_ifaces"] == {"wlan0"}
     statuses = {name: state for name, state, _ in gate.verdicts(parsed, "US")}
     assert all(state == "PASS" for state in statuses.values())
     # This is only the declared field signal gate, never a valid handshake claim.
@@ -109,3 +110,44 @@ def test_unreported_capture_is_unknown_not_success():
     statuses = {name: state for name, state, _ in gate.verdicts(parsed, "US")}
     assert statuses["Observed radio events"] == "UNKNOWN"
     assert statuses["Closed capture handoff"] == "UNKNOWN"
+
+
+def test_unrelated_monitor_interface_never_qualifies_capture_radio():
+    text = SAMPLE.replace("  type monitor", "  type managed\n Interface wlan1\n  type monitor")
+    parsed = gate.parse(text)
+    assert parsed["monitor_ifaces"] == {"wlan1"}
+    assert {name: state for name, state, _ in
+            gate.verdicts(parsed, "US")}["Monitor radio"] == "FAIL"
+
+
+def test_any_wifi_hardware_or_software_block_is_a_failure():
+    # Multiple Wi-Fi devices: a blocked second adapter must not be ignored.
+    text = SAMPLE.replace("== Regulatory domain ==",
+                          "1: phy1: Wireless LAN\n Soft blocked: yes\n"
+                          " Hard blocked: no\n== Regulatory domain ==")
+    statuses = {name: state for name, state, _ in gate.verdicts(gate.parse(text), "US")}
+    assert statuses["Wi-Fi software block"] == "FAIL"
+    assert statuses["Wi-Fi hardware block"] == "PASS"
+
+    text = SAMPLE.replace("Hard blocked: no", "Hard blocked: yes")
+    statuses = {name: state for name, state, _ in gate.verdicts(gate.parse(text), "US")}
+    assert statuses["Wi-Fi hardware block"] == "FAIL"
+
+
+def test_missing_rfkill_details_are_unknown_not_pass():
+    text = SAMPLE.replace("Hard blocked: no", "Hard blocked: unavailable")
+    statuses = {name: state for name, state, _ in gate.verdicts(gate.parse(text), "US")}
+    assert statuses["Wi-Fi hardware block"] == "UNKNOWN"
+    assert statuses["Wi-Fi software block"] == "PASS"
+
+
+def test_regulatory_domain_uses_global_only_and_ignores_log_tail():
+    text = SAMPLE.replace("country US: DFS-FCC",
+                          "country 00: DFS-UNSET\nphy#0\ncountry US: DFS-FCC")
+    statuses = {name: state for name, state, _ in gate.verdicts(gate.parse(text), "US")}
+    assert statuses["Regulatory country"] == "FAIL"
+
+    text = SAMPLE.replace("country US: DFS-FCC", "unavailable: TimeoutExpired")
+    text += "\ncountry US: synthetic diagnostic log line\n"
+    statuses = {name: state for name, state, _ in gate.verdicts(gate.parse(text), "US")}
+    assert statuses["Regulatory country"] == "UNKNOWN"

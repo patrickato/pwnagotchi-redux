@@ -117,11 +117,11 @@ def snapshot(*, full=False) -> str:
     lines.append("bettercap_api_probe: " + api_status())
     if full:
         lines.append("== RF kill ==")
-        lines.extend(command(["rfkill", "list"], limit=12))
+        lines.extend(command(["rfkill", "list"], limit=48))
         lines.append("== Regulatory domain ==")
         lines.extend(command(["iw", "reg", "get"], limit=10))
         lines.append("== Interfaces ==")
-        lines.extend(command(["iw", "dev"], limit=12))
+        lines.extend(command(["iw", "dev"], limit=48))
     lines.append("== Bettercap last output (sanitized; no caplet) ==")
     lines.extend(log_tail(count=14 if full else 8))
     return "\n".join(lines) + "\n"

@@ -19,8 +19,9 @@ FIELDS = (
     "redux-capture-ingest.timer", "live_state", "capture_radio", "dashboard",
     "bettercap_api_probe", "events_seen", "handed_off",
 )
-COUNTRY = re.compile(r"\bcountry ([A-Z]{2}|00):")
+COUNTRY = re.compile(r"(?m)^\s*country\s+([A-Z]{2}|00):")
 SOFT = re.compile(r"Soft blocked:\s*(yes|no)", re.I)
+HARD = re.compile(r"Hard blocked:\s*(yes|no)", re.I)
 MONITOR = re.compile(r"(?m)^\s*type monitor\s*$")
 
 
@@ -34,16 +35,38 @@ def parse(report):
             key, value = line.split(": ", 1)
             if key in FIELDS and key not in result:
                 result[key] = value.strip()[:100]
-    result["regulatory_country"] = (
-        COUNTRY.search(report).group(1) if COUNTRY.search(report) else "")
-    wifi_block = report.partition("== RF kill ==")[2].partition("== Regulatory domain ==")[0]
+    # Restrict country detection to the global cfg80211 section, not a
+    # PHY-specific self-managed domain or arbitrary diagnostic log lines.
+    reg = report.partition("== Regulatory domain ==")[2].partition(
+        "== Interfaces ==")[0].split("phy#", 1)[0]
+    country = COUNTRY.search(reg)
+    result["regulatory_country"] = country.group(1) if country else ""
+
+    wifi_block = report.partition("== RF kill ==")[2].partition(
+        "== Regulatory domain ==")[0]
     blocks = re.split(r"(?m)^\d+:\s*", wifi_block)
-    relevant = [block for block in blocks if "Wireless LAN" in block]
-    found = SOFT.search(relevant[0]) if relevant else None
-    result["wifi_soft_blocked"] = found.group(1).lower() if found else ""
+    wireless = [block for block in blocks if "Wireless LAN" in block]
+
+    def block_state(pattern):
+        # Any known block is a failure; missing data can never pass.
+        matches = [pattern.search(block) for block in wireless]
+        values = [match.group(1).lower() for match in matches if match]
+        if "yes" in values:
+            return "yes"
+        return "no" if matches and len(values) == len(matches) else ""
+
+    result["wifi_soft_blocked"] = block_state(SOFT)
+    result["wifi_hard_blocked"] = block_state(HARD)
+
     interfaces = report.partition("== Interfaces ==")[2].partition(
         "== Bettercap last output")[0]
-    result["monitor_mode"] = bool(MONITOR.search(interfaces))
+    # Match the selected interface's own 'iw dev' block. Monitor mode
+    # on an unrelated radio is not a live capture-radio PASS.
+    parts = re.split(r"(?m)^\s*Interface\s+(\S+)\s*$", interfaces)
+    result["monitor_ifaces"] = {
+        parts[i] for i in range(1, len(parts), 2)
+        if MONITOR.search(parts[i + 1])
+    }
     return result
 
 
@@ -62,18 +85,21 @@ def verdicts(data, expected_country):
           state)
     check("Doctor dashboard", "PASS" if data.get("dashboard") == "True" else "FAIL",
           "reported live listener state")
-    wifi = data.get("wifi_soft_blocked")
-    check("Wi-Fi software block", "PASS" if wifi == "no" else
-          "FAIL" if wifi == "yes" else "UNKNOWN",
-          "soft blocked: " + (wifi or "not observed"))
+    for title, key in (("Wi-Fi software block", "wifi_soft_blocked"),
+                       ("Wi-Fi hardware block", "wifi_hard_blocked")):
+        blocked = data.get(key)
+        check(title, "PASS" if blocked == "no" else
+              "FAIL" if blocked == "yes" else "UNKNOWN",
+              "blocked: " + (blocked or "not observed"))
     current_country = data.get("regulatory_country", "")
     check("Regulatory country", "PASS" if current_country == expected_country else
           "FAIL" if current_country else "UNKNOWN",
           (current_country or "unknown") + "; expected " + expected_country)
-    check("Monitor radio", "PASS" if data.get("capture_radio") and
-          data["capture_radio"] not in ("unobserved", "None") and
-          data.get("monitor_mode") else "FAIL",
-          "radio: " + data.get("capture_radio", "unknown"))
+    radio = data.get("capture_radio", "")
+    check("Monitor radio", "PASS" if radio and radio in
+          data.get("monitor_ifaces", set()) else "FAIL",
+          "selected: " + (radio or "unknown") +
+          "; monitors: " + (", ".join(sorted(data.get("monitor_ifaces", set()))) or "none"))
     api = data.get("bettercap_api_probe", "")
     check("Bettercap REST auth", "PASS" if api.startswith("HTTP 401") else
           "FAIL" if api.startswith(("HTTP 200", "HTTP 400", "HTTP 403", "unavailable"))
