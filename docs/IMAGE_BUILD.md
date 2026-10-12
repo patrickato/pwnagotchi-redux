@@ -913,6 +913,28 @@ were copied to the repository.
   complete authenticated session or cryptographically valid capture.
 - Runtime counters reported `events_seen: 6` and `handed_off: 0`.
 
+
+### Follow-up after 15 minutes — 2026-10-12T19:48:26Z
+
+A second photograph of `sudo redux-report --full` on the same separate Pi 4
+image showed: `live_state: running`, `wlan0` in monitor mode on channel 11,
+`captures_ext4: True`, all three reported services active, global country US,
+no Wi-Fi rfkill, localhost Bettercap REST returning HTTP 401,
+`failure_streak: 0`, and no current `last_error`. Changes since the earlier
+19:33:36Z report: `engine_attempts: 2 -> 4`, `events_seen: 6 -> 12`,
+`handed_off: 0 -> 0`. This is one more healthy status snapshot, not proof of
+channel hopping, actual frame volume, handshake material or processing.
+
+**Source interpretation:** `engine_attempts` increases whenever a Bettercap
+child launches, including the deliberate five-minute rotation. `events_seen`
+counts Augur bus `Signal.EVENT` emissions, not raw received 802.11 frames.
+The `_handoff` routine refuses absent or zero-byte PCAPs, which can explain
+`handed_off: 0` during otherwise healthy passive observation. It is not
+by itself evidence of a failed rotation. Next check the on-device active/incoming
+capture directory sizes and `handshake_events` (from the private live checkpoint)
+without printing capture contents or REST credentials. Do not force a handshake,
+deauth an AP, reflash, or claim a completed capture solely from event counts.
+
 **Still open:** The six reported events have not been independently tied
 to specific received radio frames. No closed-file handoff has yet been
 observed, and no ingestion/conversion ledger or valid owned-AP handshake
