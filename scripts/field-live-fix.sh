@@ -5,13 +5,13 @@
 # /run systemd overrides do not persist; the permanent HOME fix is in the image.
 set -euo pipefail
 
-if [[ $EUID -ne 0 ]]; then
-  echo 'Run remotely through sudo (see docs/FIELD_TEST.md).' >&2
-  exit 2
-fi
 if [[ ${1:-} == --help || $# -ne 1 || ! ${1:-} =~ ^[A-Z]{2}$ ]]; then
   echo 'Usage: sudo bash -s -- <TWO-LETTER-PHYSICAL-COUNTRY>' >&2
   echo 'Example: US only when physically using this Pi in the United States.' >&2
+  exit 2
+fi
+if [[ $EUID -ne 0 ]]; then
+  echo 'Run remotely through sudo (see docs/FIELD_TEST.md).' >&2
   exit 2
 fi
 country=$1
