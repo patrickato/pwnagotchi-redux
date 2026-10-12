@@ -882,3 +882,49 @@ symlink and atomically swaps that pointer only AFTER the artifact qualifier
 succeeds; a failed build retains the old last-known-good symlink. This
 protects against showing the previous artifact as a successful new image.
 See [FIELD_ACCEPTANCE.md](FIELD_ACCEPTANCE.md) for physical acceptance gates.
+
+## First standalone Redux Pi 4 boot — operator field observation (2026-10-12)
+
+Evidence: operator provided a photograph of `sudo redux-report --full` at
+`2026-10-12T19:33:36+00:00` after flashing and logging into the *separate*
+Redux SD. Build helper previously reported:
+`/home/dad/redux-field-20261012-125118/pi-gen/deploy`, with successful
+image qualification. This report reflects **one on-device snapshot**, not
+a multi-hour stability run. No private capture data or device identifiers
+were copied to the repository.
+
+**Observed on the Pi 4 (pass for these narrow checks):**
+
+- Boot and local login worked; `redux.service`, `redux-live.service` and
+  `redux-capture-ingest.timer` all reported `active`.
+- Runtime reported `live_state: running`, `capture_radio: wlan0`,
+  `dashboard: True`, no displayed `last_error`, `engine_attempts: 2`,
+  `failure_streak: 0`, and no retry delay.
+- Reported dedicated ext4 capture mount: `captures_ext4: True`.
+  The reporter's mount predicate passed, but partition label, inode
+  continuity and reboot persistence were not independently measured.
+- Global cfg80211 country read **US** (DFS-FCC); both displayed Wi-Fi and
+  Bluetooth devices had no software or hardware rfkill block.
+- Actual `iw dev` output showed **wlan0 in monitor mode**, channel 11,
+  2462 MHz, 20 MHz width.
+- Bettercap 2.32.0 output appeared in the sanitized engine log.
+  An unauthenticated loopback REST request returned **HTTP 401**, which
+  confirms a responding, authentication-gated API endpoint, **not** a
+  complete authenticated session or cryptographically valid capture.
+- Runtime counters reported `events_seen: 6` and `handed_off: 0`.
+
+**Still open:** The six reported events have not been independently tied
+to specific received radio frames. No closed-file handoff has yet been
+observed, and no ingestion/conversion ledger or valid owned-AP handshake
+has been verified. Also pending: clean cold reboot/country persistence,
+time-under-load, full touch/TFT, and the Pi 5 build/boot qualification.
+Do not promote the full image/capture/hardware gates to complete on this
+snapshot alone.
+
+**Immediate next gate:** Keep the Pi running beyond one configured
+capture-rotation interval (nominally five minutes), re-run
+`sudo redux-report --full`, and verify real closed-capture handoff and
+the processor ledger; if `handed_off` remains zero, inspect logs and
+rotation configuration without changing capture files or reflashing.
+Record the exact image SHA-256/source revision from the local build's
+manifest before associating this observation with a release artifact.
