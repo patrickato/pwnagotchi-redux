@@ -841,3 +841,35 @@ call `bash image/ci.sh` from its workflow.
 This CI builds no image and requires no root, ARM emulator, card or radio. Full
 arm64 image export and physical Pi 4/5 boot/storage/watchdog/rollback checks remain
 separate build and hardware gates; a green dry run does not establish boot success.
+
+## Post-build country-bound field image qualification
+
+The country selected at build time is now an export contract, not merely a
+file copied into the staging tree. For a field image built with the explicit
+US country selection, the exporter's mounted root gate requires
+/etc/redux/regulatory-country to contain exactly US on the actual root
+filesystem before any unmount/compression. For A/B exports, this is
+checked independently in both mounted root slots. Missing, invalid, stale,
+or mismatched country files stop export. Generic builds without an explicitly
+selected country retain their fail-closed runtime behavior.
+
+After pi-gen finishes its existing streaming xz/partition/checksum validation,
+the laptop-side field builder now runs scripts/qualify-field-image.py BEFORE
+updating the redux-field-latest symlink or printing SUCCESS. It checks the exact
+compressed artifact's SHA-256 against both producer sidecars, the selected
+disk-layout profile, REDUXCAP partition metadata, Git source revision,
+staged country and passive runtime configuration, and the export script's
+mounted-root country gate. A dirty source checkout is rejected before
+building. The qualifier is read-only and does not decompress, mount,
+reflash, or contact the Pi; it relies on the producer's earlier xz and
+filesystem signature checks. A successful qualification remains NOT
+proof of physical boot or RF capture.
+
+The operator builds from a fresh, clean checkout:
+
+    cd ~/redux-workbench-src && git pull --ff-only && bash scripts/build-field-image.sh
+
+The build still requires a suitable Ubuntu WSL ext4 workspace, available
+build dependencies and sudo for pi-gen. A real compressed disk artifact exists
+ONLY after the operator actually runs the builder; GitHub CI alone
+does not create a hardware-tested distributable SD image.

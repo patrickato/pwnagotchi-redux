@@ -211,8 +211,13 @@ else
 fi
 # Validate final boot files while the exporter has its FAT/root partitions
 # mounted. A/B runs its paired-slot gate inside redux-ota-clone.sh.
+# Bind the operator country to the ACTUAL mounted rootfs at export time.
+boot_gate_args=(--profile "$BOOT_GATE_PROFILE")
+if [[ -n ${REDUX_REGULATORY_COUNTRY:-} ]]; then
+    boot_gate_args+=(--expected-country "$REDUX_REGULATORY_COUNTRY")
+fi
 python3 "$REPO_DIR/image/prepare_boot_gate.py" "$REPO_DIR/image" "$PI_GEN_DIR" \
-    --profile "$BOOT_GATE_PROFILE"
+    "${boot_gate_args[@]}"
 chmod +x "$PI_GEN_DIR/stage-redux/10-overlay/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/20-boot-budget/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/30-watchdog/00-run.sh"

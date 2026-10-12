@@ -97,7 +97,7 @@ def unit_contract(root):
     return checked
 
 
-def capture_contract(root, profile):
+def capture_contract(root, profile, *, expected_country=None):
     live = tomllib.loads(text(root, "etc/redux/live.toml"))
     pipeline = tomllib.loads(text(root, "etc/redux/pipeline.toml"))
     live_config = live.get("live")
@@ -131,6 +131,13 @@ def capture_contract(root, profile):
         if not (len(country) == 2 and country.isascii() and country.isupper()
                 and country.isalpha() and country not in ("ZZ", "AA")):
             raise ValueError("image contains invalid regulatory country")
+    if expected_country is not None:
+        if country_file.is_symlink() or not country_file.is_file():
+            raise ValueError("expected regulatory country missing from assembled image")
+        if country != expected_country:
+            raise ValueError(
+                f"assembled image regulatory country mismatch: expected {expected_country}"
+            )
     if live_config.get("allow_connected_capture") is not False:
         raise ValueError("image must preserve passive-by-default uplink policy")
     if pipeline.get("audit", {}).get("enabled") is not False:
@@ -153,7 +160,12 @@ def capture_contract(root, profile):
     return {"incoming": "/captures/incoming", "database": "/captures/jobs.db"}
 
 
-def verify(root, *, profile="lite", other_root=None):
+def verify(root, *, profile="lite", other_root=None, expected_country=None):
+    if expected_country is not None:
+        if (not isinstance(expected_country, str) or len(expected_country) != 2
+                or not expected_country.isascii() or not expected_country.isupper()
+                or not expected_country.isalpha() or expected_country in ("ZZ", "AA")):
+            raise ValueError("invalid expected regulatory country")
     if profile not in ("lite", "ab"):
         raise ValueError("unknown Redux root profile")
     primary = Path(root)
@@ -170,7 +182,7 @@ def verify(root, *, profile="lite", other_root=None):
         for filename in _MUST_EXIST:
             regular(candidate, filename)
         unit_contract(candidate)
-        capture_contract(candidate, profile)
+        capture_contract(candidate, profile, expected_country=expected_country)
         if profile == "ab":
             regular(candidate, "etc/rauc/keyring.pem")
             if not (candidate / "etc/rauc/system.conf").is_symlink():
@@ -183,6 +195,7 @@ def verify(root, *, profile="lite", other_root=None):
             "runtime_files_checked": len(_MUST_EXIST) * len(roots),
             "systemd_units": sorted(_UNITS),
             "root_payload_verified": True,
+            "regulatory_country_verified": expected_country is not None,
             "physical_boot_verified": False,
             "note": "Mounted image rootfs contract only; not proof of boot or peripherals"}
 
@@ -192,9 +205,11 @@ def main(argv=None):
     parser.add_argument("--profile", choices=("lite", "ab"), required=True)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--other-root", type=Path)
+    parser.add_argument("--expected-country")
     args = parser.parse_args(argv)
     try:
-        report = verify(args.root, profile=args.profile, other_root=args.other_root)
+        report = verify(args.root, profile=args.profile, other_root=args.other_root,
+                        expected_country=args.expected_country)
     except (OSError, UnicodeError, ValueError) as exc:
         parser.error(str(exc))
     print(json.dumps(report, sort_keys=True))

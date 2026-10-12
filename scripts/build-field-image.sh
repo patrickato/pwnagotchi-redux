@@ -30,8 +30,18 @@ country=${REDUX_REGULATORY_COUNTRY:-US}
 }
 printf 'This field image will configure regulatory country: %s (override REDUX_REGULATORY_COUNTRY).\n' "$country"
 printf 'After flashing, connect the Pi Ethernet port to your trusted LAN.\n\n'
+# Do not publish a field build from uncommitted or mismatched source.
+[[ -z $(git status --porcelain --untracked-files=normal) ]] || {
+    echo 'Field build requires a clean committed workbench checkout.' >&2
+    exit 1
+}
+revision=$(git rev-parse HEAD)
 sudo env REDUX_DEV_LOGIN=1 REDUX_OPERATOR_PUBKEY_FILE="$key.pub" \
   REDUX_REGULATORY_COUNTRY="$country" REDUX_BUILD_DIR="$workspace" "$ROOT/build.sh"
+# Before updating "latest" or advertising the disk image, re-check exactly
+# the downloadable artifact, its manifest, and the mounted-root export gate.
+python3 "$ROOT/scripts/qualify-field-image.py" --workspace "$workspace" \
+  --revision "$revision" --country "$country" --profile lite
 if [[ -L "$HOME/redux-field-latest" ]]; then
     rm "$HOME/redux-field-latest"
 fi

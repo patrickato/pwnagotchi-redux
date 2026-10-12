@@ -12,7 +12,13 @@ import shutil
 from export_layout import replace_once
 
 
-def prepare(source, tree, profile):
+def prepare(source, tree, profile, *, expected_country=None):
+    if expected_country is not None:
+        if (len(expected_country) != 2 or not expected_country.isascii()
+                or not expected_country.isalpha() or not expected_country.isupper()
+                or expected_country in ("AA", "ZZ")):
+            raise ValueError("invalid operator-selected regulatory country")
+    country_arg = f" --expected-country {expected_country}" if expected_country else ""
     if profile not in {"lite", "ab"}:
         raise ValueError("boot gate profile must be lite or ab")
     source, tree = Path(source), Path(tree)
@@ -28,7 +34,7 @@ def prepare(source, tree, profile):
             raise ValueError("Lite boot gate refuses an A/B exporter")
         script = replace_once(
             script, 'unmount "${ROOTFS_DIR}"',
-            'python3 "${STAGE_DIR}/redux-root-payload.py" --profile lite --root "${ROOTFS_DIR}"\n'
+            f'python3 "${{STAGE_DIR}}/redux-root-payload.py" --profile lite --root "${{ROOTFS_DIR}}"{country_arg}\n'
             'python3 "${STAGE_DIR}/redux-boot-payload.py" --profile lite --root "${ROOTFS_DIR}"\n'
             'unmount "${ROOTFS_DIR}"')
         finalise.write_text(script)
@@ -42,7 +48,7 @@ def prepare(source, tree, profile):
         cloned = replace_once(clone.read_text(),
             'python3 "${STAGE_DIR}/redux-boot-payload.py" --profile ab',
             'python3 "${STAGE_DIR}/redux-root-payload.py" --profile ab ' 
-            '--root "$ROOTFS_DIR" --other-root "$other"\n'
+            f'--root "$ROOTFS_DIR" --other-root "$other"{country_arg}\n'
             'python3 "${STAGE_DIR}/redux-boot-payload.py" --profile ab')
         clone.write_text(cloned)
     shutil.copyfile(source / "boot_payload.py", target)
@@ -54,9 +60,11 @@ def main(argv=None):
     parser.add_argument("source", type=Path)
     parser.add_argument("tree", type=Path)
     parser.add_argument("--profile", required=True, choices=["lite", "ab"])
+    parser.add_argument("--expected-country")
     args = parser.parse_args(argv)
     try:
-        prepare(args.source, args.tree, args.profile)
+        prepare(args.source, args.tree, args.profile,
+                expected_country=args.expected_country)
     except (OSError, ValueError) as error:
         parser.error(str(error))
     return 0

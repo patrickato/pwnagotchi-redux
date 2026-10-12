@@ -338,3 +338,16 @@ and booted with these changes; CI tests alone cannot validate chip/firmware
 country support, real radio reception, processing of a controlled capture
 or the Pi's TFT touch behavior. The current already-flashed card is
 unchanged.
+
+## One-image qualification: do not reflash after each source fix
+
+The next disposable US field build uses the existing laptop command to
+build the image, then automatically verifies one compressed disk image,
+both release metadata sidecars, the exact compressed SHA-256, source commit,
+mounted-root country export check, and selected Wi-Fi policy.
+Only after all checks pass is redux-field-latest updated.
+
+This does not connect to the Pi or alter the working Pwnagotchi SD.
+The earlier field card continues running its old image until the operator
+chooses to flash the new SEPARATE SD. Hardware acceptance still
+requires a controlled test, including a real capture/handoff.

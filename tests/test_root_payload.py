@@ -308,3 +308,40 @@ def test_image_regulatory_oneshot_and_order_enforced(tmp_path):
         "Before=redux-live.service", "After=redux-live.service"))
     with pytest.raises(ValueError, match="Before=redux-live.service"):
         gate.verify(root)
+
+
+def test_field_export_mounted_root_binds_selected_country(tmp_path):
+    root = slot(tmp_path)
+    file = root / "etc/redux/regulatory-country"
+    with pytest.raises(ValueError, match="expected regulatory country missing"):
+        gate.verify(root, expected_country="US")
+    file.write_text("US\n")
+    result = gate.verify(root, expected_country="US")
+    assert result["regulatory_country_verified"] is True
+    with pytest.raises(ValueError, match="country mismatch"):
+        gate.verify(root, expected_country="CA")
+    with pytest.raises(ValueError, match="invalid expected regulatory country"):
+        gate.verify(root, expected_country="US; restart")
+
+
+def test_field_export_checks_both_ab_slot_countries(tmp_path):
+    a = slot(tmp_path, "slot_a", "ab")
+    b = slot(tmp_path, "slot_b", "ab")
+    for root in (a, b):
+        (root / "etc/redux/regulatory-country").write_text("US\n")
+    assert gate.verify(a, profile="ab", other_root=b,
+                       expected_country="US")["regulatory_country_verified"] is True
+    (b / "etc/redux/regulatory-country").write_text("CA\n")
+    with pytest.raises(ValueError, match="country mismatch"):
+        gate.verify(a, profile="ab", other_root=b, expected_country="US")
+
+
+def test_root_payload_cli_rejects_mismatched_country(tmp_path):
+    root = slot(tmp_path)
+    (root / "etc/redux/regulatory-country").write_text("CA\n")
+    command = [sys.executable, str(ROOT / "image/root_payload.py"),
+               "--profile", "lite", "--root", str(root),
+               "--expected-country", "US"]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    assert "country mismatch" in result.stderr
