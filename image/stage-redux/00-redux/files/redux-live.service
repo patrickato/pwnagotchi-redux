@@ -1,6 +1,7 @@
 [Unit]
 Description=Redux passive live Wi-Fi supervisor (single Bettercap owner)
-After=local-fs.target redux.service
+After=local-fs.target redux.service redux-regdom.service
+Wants=redux-regdom.service
 RequiresMountsFor=/captures
 ConditionPathExists=/etc/redux/live.toml
 

@@ -300,3 +300,41 @@ credentials, and the script never changes configuration or radio state.
 operator-owned access point, physical GPIO TFT/touch operation, and
 reboot persistence of the operator-selected regulatory country. These
 cannot be established by the laptop's unit tests or a TCP port alone.
+
+## Next consolidated field image: persistent regulatory configuration
+
+The previous Pi 4 test exposed `country 00` and Wi-Fi software rfkill.
+Earlier manual `iw reg set US` and `rfkill unblock wifi` fixed those
+symptoms **only until reboot**. The next image fixes that boot lifecycle:
+
+- `redux-regdom.service` runs after device enumeration and before
+  `redux-live.service`. It reads only the operator-selected
+  `/etc/redux/regulatory-country` from the immutable image, applies it
+  via `iw reg set`, checks that the **global** domain matches, then
+  clears only Wi-Fi software rfkill and verifies that neither software
+  nor hardware rfkill blocks the Wi-Fi devices. It does not change
+  monitor mode, perform Wi-Fi scanning or send frames.
+- The live runtime independently requires that configured country and
+  an unblocked Wi-Fi device **on every engine launch**. A failed or skipped
+  one-shot cannot accidentally lead to a `running` capture engine.
+  Diagnostics and Doctor remain active so operators can identify the issue.
+- A generic `build.sh` invocation does **not** guess a country.
+  Without `REDUX_REGULATORY_COUNTRY`, the country file is absent, and
+  the passive radio engine remains disabled with a diagnostic error.
+- The **disposable US field helper** uses `US` because that location
+  was previously explicitly confirmed for this Pi. To build for another
+  country, the operator must override
+  `REDUX_REGULATORY_COUNTRY=XX` with the correct uppercase ISO 3166-1
+  alpha-2 regulatory country. The code validates the simple format but
+  does not independently establish physical location or regulatory legality.
+
+All previous permanent fixes also ship directly in the next image:
+private writable Bettercap HOME, held-open stdin, direct proxy-free REST,
+bounded failure retries and Doctor state propagation. No other Pi-side
+configuration patch is intended for this build.
+
+**Still unverified:** the final compressed image has not yet been created
+and booted with these changes; CI tests alone cannot validate chip/firmware
+country support, real radio reception, processing of a controlled capture
+or the Pi's TFT touch behavior. The current already-flashed card is
+unchanged.

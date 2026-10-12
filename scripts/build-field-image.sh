@@ -21,9 +21,17 @@ workspace="$HOME/redux-field-$(date +%Y%m%d-%H%M%S)"
 [[ ! -e "$workspace" ]] || { echo "Build folder exists: $workspace" >&2; exit 1; }
 printf '\nBuilding disposable field image (Pi login: pi / redux; SSH: public key only).\n'
 printf 'Build directory: %s\n' "$workspace"
+# This user's physically US-based disposable Pi field test previously
+# selected US explicitly. Other operators must override for their location.
+country=${REDUX_REGULATORY_COUNTRY:-US}
+[[ $country =~ ^[A-Z]{2}$ && $country != ZZ && $country != AA ]] || {
+    echo 'Invalid operator regulatory country; select your real two-letter country.' >&2
+    exit 1
+}
+printf 'This field image will configure regulatory country: %s (override REDUX_REGULATORY_COUNTRY).\n' "$country"
 printf 'After flashing, connect the Pi Ethernet port to your trusted LAN.\n\n'
 sudo env REDUX_DEV_LOGIN=1 REDUX_OPERATOR_PUBKEY_FILE="$key.pub" \
-  REDUX_BUILD_DIR="$workspace" "$ROOT/build.sh"
+  REDUX_REGULATORY_COUNTRY="$country" REDUX_BUILD_DIR="$workspace" "$ROOT/build.sh"
 if [[ -L "$HOME/redux-field-latest" ]]; then
     rm "$HOME/redux-field-latest"
 fi

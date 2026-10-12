@@ -39,6 +39,14 @@ if [[ $PREPARE_ONLY == 0 ]]; then
 fi
 # Disposable short console login can coexist with explicitly provisioned
 # SSH public-key-only access. The console password is never SSH-authenticated.
+# Optional explicit physical regulatory country. Empty/unset keeps Wi-Fi capture
+# unavailable, while diagnostic services still run. No country is inferred.
+if [[ -n ${REDUX_REGULATORY_COUNTRY:-} ]]; then
+    [[ ${REDUX_REGULATORY_COUNTRY} =~ ^[A-Z]{2}$ && ${REDUX_REGULATORY_COUNTRY} != ZZ && ${REDUX_REGULATORY_COUNTRY} != AA ]] || {
+        echo 'REDUX_REGULATORY_COUNTRY must be an operator-chosen uppercase two-letter country, e.g. US.' >&2
+        exit 1
+    }
+fi
 case ${REDUX_DEV_LOGIN:-0} in
     0|1) ;;
     *) echo 'REDUX_DEV_LOGIN must be 0 or 1.' >&2; exit 1 ;;
@@ -78,6 +86,10 @@ git -C "$NEXMON_DIR" checkout -q --detach FETCH_HEAD
 
 PI_GEN_DIR="$BUILD_DIR/pi-gen"
 cp -a "$REPO_DIR/image/stage-redux" "$PI_GEN_DIR/stage-redux"
+if [[ -n ${REDUX_REGULATORY_COUNTRY:-} ]]; then
+    printf '%s\n' "$REDUX_REGULATORY_COUNTRY" > "$PI_GEN_DIR/stage-redux/00-redux/files/regulatory-country"
+    chmod 0644 "$PI_GEN_DIR/stage-redux/00-redux/files/regulatory-country"
+fi
 # Desktop packages consume significant space and must remain an explicit
 # operator selection. A browser alone does not guarantee SPI fbdev or touch.
 case ${REDUX_KIOSK_PROFILE:-none} in

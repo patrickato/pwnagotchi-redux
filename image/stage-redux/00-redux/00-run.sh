@@ -45,6 +45,11 @@ fi
 install -d "$ROOTFS_DIR/etc/redux" "$ROOTFS_DIR/captures"
 install -m 0600 files/pipeline/pipeline.toml "$ROOTFS_DIR/etc/redux/pipeline.toml"
 install -m 0600 files/pipeline/live.toml "$ROOTFS_DIR/etc/redux/live.toml"
+# Country is opt-in at image build time. Without it, runtime remains fail-closed.
+if [[ -f files/regulatory-country ]]; then
+    install -m 0644 files/regulatory-country "$ROOTFS_DIR/etc/redux/regulatory-country"
+fi
+install -m 0644 files/redux-regdom.service "$ROOTFS_DIR/etc/systemd/system/redux-regdom.service"
 install -m 0755 files/pipeline/redux-live-diag.sh "$ROOTFS_DIR/usr/local/bin/redux-live-diag"
 install -d "$ROOTFS_DIR/usr/local/lib/redux"
 install -m 0644 files/pipeline/redux-field-report.py "$ROOTFS_DIR/usr/local/lib/redux/report.py"
@@ -76,6 +81,7 @@ chown -R root:root /opt/redux
 python3 -m compileall -q /opt/redux/redux
 systemctl enable redux.service
 # Radio owner starts independently; no process is launched if hardware is unavailable.
+systemctl enable redux-regdom.service
 systemctl enable redux-live.service
 systemctl enable redux-field-report.timer
 if [[ -f /usr/share/redux/field-ssh-profile ]]; then

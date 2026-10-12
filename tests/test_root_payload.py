@@ -36,6 +36,8 @@ def slot(tmp_path, name="lite", profile="lite"):
         '[live]\nstate_dir = "/captures/live"\n'
         'capture_dir = "/captures/incoming"\nactive_dir = "/captures/active"\n'
         'pipeline_database = "/captures/jobs.db"\nallow_connected_capture = false\n'
+        'require_regulatory_country = true\n'
+        'regulatory_country_file = "/etc/redux/regulatory-country"\n'
     )
     pipe = config / "pipeline.toml"
     pipe.write_text(
@@ -272,4 +274,37 @@ def test_field_image_rejects_home_sandbox_regression(tmp_path):
     unit = root / "etc/systemd/system/redux-live.service"
     unit.write_text(unit.read_text().replace("ProtectHome=true", "ProtectHome=false"))
     with pytest.raises(ValueError, match="ProtectHome=true"):
+        gate.verify(root)
+
+
+def test_regulatory_country_optin_has_valid_image_contract(tmp_path):
+    root = slot(tmp_path)
+    country = root / "etc/redux/regulatory-country"
+    assert gate.verify(root)["root_payload_verified"] is True  # absent => runtime safely disabled
+    country.write_text("US\n")
+    assert gate.verify(root)["root_payload_verified"] is True
+    country.write_text("00\n")
+    with pytest.raises(ValueError, match="invalid regulatory country"):
+        gate.verify(root)
+    country.write_text("US\n")
+    country.chmod(0o666)
+    with pytest.raises(ValueError, match="writable by group"):
+        gate.verify(root)
+
+
+def test_image_rejects_optout_of_country_requirement(tmp_path):
+    root = slot(tmp_path)
+    live = root / "etc/redux/live.toml"
+    live.write_text(live.read_text().replace(
+        "require_regulatory_country = true", "require_regulatory_country = false"))
+    with pytest.raises(ValueError, match="require an operator-configured"):
+        gate.verify(root)
+
+
+def test_image_regulatory_oneshot_and_order_enforced(tmp_path):
+    root = slot(tmp_path)
+    unit = root / "etc/systemd/system/redux-regdom.service"
+    unit.write_text(unit.read_text().replace(
+        "Before=redux-live.service", "After=redux-live.service"))
+    with pytest.raises(ValueError, match="Before=redux-live.service"):
         gate.verify(root)

@@ -16,6 +16,7 @@ import tomllib
 _MUST_EXIST = (
     "opt/redux/redux/core/boot.py",
     "opt/redux/redux/core/live_runtime.py",
+    "opt/redux/redux/core/regulatory.py",
     "opt/redux/redux/crack/ingest.py",
     "opt/redux/redux/storage_mount.py",
     "opt/redux/redux/boot_readiness.py",
@@ -29,7 +30,13 @@ _MUST_EXIST = (
 _UNITS = {
     "redux.service": ("multi-user.target.wants", "Type=notify", "RequiresMountsFor=/captures",
                       "ReadWritePaths=/captures", "Environment=REDUX_STATE_DIR=/captures/boot"),
+    "redux-regdom.service": ("multi-user.target.wants", "Type=oneshot",
+                              "ConditionPathExists=/etc/redux/regulatory-country",
+                              "Before=redux-live.service",
+                              "CapabilityBoundingSet=CAP_NET_ADMIN"),
     "redux-live.service": ("multi-user.target.wants", "Type=simple",
+                           "Wants=redux-regdom.service",
+                           "After=local-fs.target redux.service redux-regdom.service",
                            "RequiresMountsFor=/captures", "ReadWritePaths=/captures",
                            "Environment=PYTHONPATH=/opt/redux",
                            "Environment=HOME=/captures/live", "ProtectHome=true"),
@@ -112,6 +119,18 @@ def capture_contract(root, profile):
     for key, val in expected_pipeline.items():
         if pipeline_config.get(key) != val:
             raise ValueError(f"image pipeline config {key} must use REDUXCAP")
+    if live_config.get("require_regulatory_country") is not True:
+        raise ValueError("image must require an operator-configured Wi-Fi country")
+    if live_config.get("regulatory_country_file") != "/etc/redux/regulatory-country":
+        raise ValueError("image regulatory country path must be baked and system-owned")
+    country_file = root / "etc/redux/regulatory-country"
+    if country_file.exists() or country_file.is_symlink():
+        if regular(root, "etc/redux/regulatory-country").stat().st_mode & 0o022:
+            raise ValueError("image regulatory country is writable by group or others")
+        country = text(root, "etc/redux/regulatory-country", limit=8).strip()
+        if not (len(country) == 2 and country.isascii() and country.isupper()
+                and country.isalpha() and country not in ("ZZ", "AA")):
+            raise ValueError("image contains invalid regulatory country")
     if live_config.get("allow_connected_capture") is not False:
         raise ValueError("image must preserve passive-by-default uplink policy")
     if pipeline.get("audit", {}).get("enabled") is not False:

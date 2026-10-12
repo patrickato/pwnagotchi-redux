@@ -35,6 +35,7 @@ from ..web.status_page import make_handler, status_payload
 from .augur import Augur
 from .boot import atomic_checkpoint
 from .live_health import describe_live_health
+from .regulatory import read_country, verify_country
 from .signals import Signal
 
 _LOG = logging.getLogger("redux.live")
@@ -60,6 +61,8 @@ class LiveConfig:
     pipeline_stale_seconds: int = 180
     status_sample_seconds: int = 5
     allow_connected_capture: bool = False
+    require_regulatory_country: bool = False
+    regulatory_country_file: Path = Path("/etc/redux/regulatory-country")
 
     @classmethod
     def load(cls, path):
@@ -84,6 +87,9 @@ class LiveConfig:
             pipeline_stale_seconds=int(values.get("pipeline_stale_seconds", 180)),
             status_sample_seconds=int(values.get("status_sample_seconds", 5)),
             allow_connected_capture=values.get("allow_connected_capture", False),
+            require_regulatory_country=values.get("require_regulatory_country", False),
+            regulatory_country_file=Path(values.get("regulatory_country_file",
+                                                    "/etc/redux/regulatory-country")),
         )
 
     def validate(self):
@@ -119,6 +125,10 @@ class LiveConfig:
             raise ValueError("enable_web must be a boolean")
         if type(self.allow_connected_capture) is not bool:
             raise ValueError("allow_connected_capture must be a boolean")
+        if type(self.require_regulatory_country) is not bool:
+            raise ValueError("require_regulatory_country must be a boolean")
+        if self.regulatory_country_file != Path("/etc/redux/regulatory-country"):
+            raise ValueError("regulatory_country_file must use the baked system path")
 
 
 def free_bytes(path):
@@ -568,6 +578,12 @@ class LiveRuntime:
         self.next_try = now + self.retry_delay
 
     def _launch(self, iface):
+        # Never start Bettercap with an unconfigured/blocked regulatory domain.
+        # This safety gate runs independently of the boot one-shot so a failed
+        # service cannot result in a falsely "running" radio. Doctor stays up.
+        if self.config.require_regulatory_country:
+            country = read_country(self.config.regulatory_country_file)
+            verify_country(country, runner=self.executor)
         ensure_monitor(iface, run=self.executor,
                        allow_connected=self.config.allow_connected_capture)
         credentials = secrets.token_hex(24)
