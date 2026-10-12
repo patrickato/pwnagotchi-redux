@@ -42,11 +42,13 @@ def test_report_summary_uses_only_synthetic_service_data(monkeypatch):
         "dashboard_active": True})
     monkeypatch.setattr(report, "command", lambda args, **kw: ["active"])
     monkeypatch.setattr(report, "log_tail", lambda **kw: ["bettercap: synthetic error"])
+    monkeypatch.setattr(report, "api_status", lambda: "HTTP 401 (authentication required; API responding)")
     monkeypatch.setattr(report, "capture_mount_snapshot", lambda: (1, 2))
     text = report.snapshot()
     assert "live_state: degraded" in text
     assert "last_error: Bettercap exited unexpectedly" in text
     assert "dashboard: True" in text
+    assert "bettercap_api_probe: HTTP 401" in text
     assert "bettercap: synthetic error" in text
     assert "/captures/redux/bettercap-live.cap" not in text
 
@@ -88,3 +90,48 @@ def test_single_short_command_launchers_are_installed_from_source():
              "image/stage-redux/00-redux/files/redux-field-report.timer").read_text()
     assert "OnBootSec=2min" in timer
     assert "OnUnitActiveSec=15min" in timer
+
+def test_api_probe_reports_auth_and_never_reads_sensitive_session(monkeypatch):
+    from urllib.error import HTTPError
+    import io
+
+    class FakeOpener:
+        def __init__(self, code):
+            self.code = code
+        def open(self, req, timeout):
+            assert req.full_url == "http://127.0.0.1:8081/api/session"
+            assert req.get_method() == "GET"
+            assert not req.has_header("Authorization")
+            assert timeout == 1.0
+            raise HTTPError(req.full_url, self.code, "mock",
+                            {}, io.BytesIO(b"api.rest.password VERY_PRIVATE"))
+    assert "authentication required" in report.api_status(opener=FakeOpener(401))
+    assert "HTTP 400 (unexpected" in report.api_status(opener=FakeOpener(400))
+    assert "VERY_PRIVATE" not in report.api_status(opener=FakeOpener(400))
+
+
+def test_api_probe_200_warns_about_auth_configuration_without_reading_body():
+    class FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self):
+            raise AssertionError("must not read an unauthenticated session dump")
+    class FakeOpener:
+        def open(self, req, timeout): return FakeResponse()
+    assert "unauthenticated" in report.api_status(opener=FakeOpener())
+
+
+def test_api_probe_ignores_environment_proxies(monkeypatch):
+    class FakeOpener:
+        def open(self, req, timeout):
+            raise ConnectionRefusedError("synthetic unbound test port")
+    def fake_build(*handlers):
+        import urllib.request
+        assert len(handlers) == 1
+        assert isinstance(handlers[0], urllib.request.ProxyHandler)
+        assert handlers[0].proxies == {}
+        return FakeOpener()
+    monkeypatch.setattr(report.urllib.request, "build_opener", fake_build)
+    assert "unavailable" in report.api_status()
+

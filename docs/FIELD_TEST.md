@@ -214,3 +214,22 @@ physically applied to the running field card**. No conclusion about passive
 packet reception is warranted. Continue coding and review, then validate
 an integrated image in a separate future gate; avoid rebuilding/flashing
 on every individual hypothesis.
+
+## Automatic REST provenance in subsequent field reports
+
+Future builds include a minimal, **unauthenticated** loopback GET probe in
+`redux-report` and its scheduled snapshots. It uses a proxy-free opener and
+never reads or prints the REST session body, authentication credentials,
+caplets, or captured data. Interpret responses as follows:
+
+- `HTTP 401`: Bettercap-compatible authenticated endpoint is responding
+  (does **not** prove the actual Redux REST login succeeds).
+- `HTTP 200`: endpoint appears to allow unauthenticated session access;
+  review the Bettercap authentication configuration.
+- `HTTP 400`: unexpected for the v2.32.0 GET session route; investigate the
+  listener identity and HTTP request path rather than blaming the radio.
+- `unavailable`: endpoint could not be reached/read with this bounded probe.
+
+The diagnostic is informational and does not restart Bettercap or issue
+any wireless commands. Its next-image availability is not a claim that
+current field-card software has been updated.

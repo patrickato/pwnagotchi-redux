@@ -14,6 +14,8 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 
 from redux.storage_mount import capture_mount_snapshot
 
@@ -71,6 +73,28 @@ def log_tail(path=ENGINE_LOG, *, count=14) -> list[str]:
         return ["(engine log not yet available)"]
 
 
+def api_status(*, opener=None) -> str:
+    """Unauthenticated loopback probe; never reads session data or credentials.
+
+    Bettercap v2.32.0 responds 401 to GET /api/session when authenticated,
+    200 if authentication is disabled. HTTP 400 is unexpected for this route.
+    Ignore inherited HTTP proxy configuration to preserve probe provenance.
+    """
+    client = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    req = urllib.request.Request("http://127.0.0.1:8081/api/session", method="GET")
+    try:
+        with client.open(req, timeout=1.0) as response:
+            if response.status == 200:
+                return "HTTP 200 (warning: API appears unauthenticated)"
+            return f"HTTP {response.status} (unexpected)"
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            return "HTTP 401 (authentication required; API responding)"
+        return f"HTTP {error.code} (unexpected for GET /api/session)"
+    except (urllib.error.URLError, OSError, TimeoutError) as error:
+        return f"unavailable ({type(error).__name__})"
+
+
 def snapshot(*, full=False) -> str:
     d = read_json()
     lines = [
@@ -84,6 +108,7 @@ def snapshot(*, full=False) -> str:
                       ("last_error", "last_error"),
                       ("dashboard", "dashboard_active")):
         lines.append(f"{name}: {clean(str(d.get(key, 'unobserved')))}")
+    lines.append("bettercap_api_probe: " + api_status())
     if full:
         lines.append("== RF kill ==")
         lines.extend(command(["rfkill", "list"], limit=12))
