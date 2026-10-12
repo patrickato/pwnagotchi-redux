@@ -132,3 +132,38 @@ establishes a healthy live engine and packet collection is physically tested.
 The full report should be reviewed before sharing outside a private support
 chat: it redacts MAC addresses and known credential patterns, but log lines
 may contain names of nearby wireless networks.
+
+## Bettercap opens interactive quit prompt on every retry (2026-10-12)
+
+The Pi 4 runtime now reaches `starting_engine`, with `wlan0` in monitor
+mode and Wi-Fi unblocked in the actual US regulatory domain. But the
+Bettercap log displays `Are you sure you want to quit this session? y/n`.
+
+Review of Bettercap's upstream `main.go` confirmed that after applying a
+caplet, Bettercap **always enters its interactive `ReadLine` loop**. When its
+standard input immediately returns EOF, the main loop invokes an interactive
+quit confirmation. Redux supplied `stdin=subprocess.DEVNULL`, forcing that
+EOF on every engine launch. `-silent` and `-no-history` do not change
+this behavior. The permanent source correction supplies `subprocess.PIPE`
+and keeps the private input pipe open for the child's lifetime, closing
+the parent descriptor only **after** the child is reaped. No keystrokes,
+passwords, or interactive commands are sent to Bettercap.
+
+On the **existing booted** field card only, test the correction from the
+ASUS Ubuntu terminal without rebuilding or reflashing:
+
+```bash
+cd ~/redux-workbench-src && git pull --ff-only && ssh -i ~/.ssh/redux_field_ed25519 pi@192.168.12.115 'sudo -n bash -s' < scripts/field-stdin-fix.sh
+```
+
+The script verifies the exact expected runtime source, stops the single radio
+service, patches its source on the **temporary OverlayFS upper layer**,
+compiles it, restarts only that service, and prints a fresh bounded report
+after 16 seconds. Regulatory country is **not altered**. Ethernet/SSH stays
+connected. The earlier runtime HOME override remains effective for this
+boot. A later reboot discards these live rootfs modifications; the permanent
+changes are committed on the workbench branch.
+
+The report must show `live_state: running` before considering the engine
+healthy. Even then, actual passive radio reception and closed file handoff
+need a separate physical test on the user's own access point.

@@ -460,10 +460,12 @@ def test_engine_launch_augur_event_pump_restart_and_private_caplet(tmp_path, mon
     children = []
     commands = []
     child_env = []
+    child_stdin_modes = []
     clock = [10.0]
     def spawn(argv, **kwargs):
         commands.append(argv)
         child_env.append(kwargs["env"])
+        child_stdin_modes.append(kwargs["stdin"])
         child = Child()
         children.append(child)
         return child
@@ -479,6 +481,8 @@ def test_engine_launch_augur_event_pump_restart_and_private_caplet(tmp_path, mon
         assert "-caplet" in commands[0]
         assert child_env[0]["HOME"] == str(tmp_path / "state")
         assert child_env[0]["HOME"] != "/root"
+        assert child_stdin_modes[0] is subprocess.PIPE
+        assert "-no-history" in commands[0]
         initial_capture = runtime.capture_file
         assert initial_capture.parent == tmp_path / "active"
         initial_capture.write_bytes(b"synthetic closed capture bytes")

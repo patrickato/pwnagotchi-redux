@@ -577,7 +577,11 @@ class LiveRuntime:
         self.process = self.spawn(
             [self.config.bettercap_binary, "-iface", iface, "-caplet", str(caplet),
              "-no-history", "-env-file", "", "-no-colors", "-silent"],
-            stdin=subprocess.DEVNULL, stdout=self.log_handle, stderr=subprocess.STDOUT,
+            # Bettercap always enters an interactive read loop after its caplet.
+            # DEVNULL delivers immediate EOF and triggers a recurring 'quit?'
+            # prompt even with -silent and -no-history. Hold a private pipe
+            # open until our supervisor has reaped the child.
+            stdin=subprocess.PIPE, stdout=self.log_handle, stderr=subprocess.STDOUT,
             # Bettercap expands ~/bettercap.aliases from HOME. The hardened
             # systemd unit deliberately blocks /root: give the child only its
             # existing root-owned writable REDUXCAP live state as a home.
@@ -645,6 +649,14 @@ class LiveRuntime:
             )
             _LOG.error("%s", self.last_error)
             return False
+        # Release the parent's write descriptor only after the child is
+        # confirmed exited. Closing it earlier generates interactive EOF.
+        input_pipe = getattr(child, "stdin", None)
+        if input_pipe is not None:
+            try:
+                input_pipe.close()
+            except OSError:
+                pass
         self.process = None
         return True
 
