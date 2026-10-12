@@ -1428,3 +1428,91 @@ def test_production_runtime_rejects_unknown_mount_identity_before_mkdir(
     monkeypatch.setattr(live, "capture_mount_snapshot", lambda: None)
     with pytest.raises(RuntimeError, match="not mounted"):
         live.LiveRuntime(live.LiveConfig(), radio_probe=lambda: [])
+
+
+def test_engine_startup_http_400_is_visible_during_grace_and_backs_off(tmp_path, monkeypatch):
+    """No hardware: repeated REST failures must not churn Bettercap every 3s."""
+    from redux.engine.bettercap_driver import BettercapUnavailable
+
+    class RejectApi:
+        def __init__(self, config, timeout=1.5):
+            self.config = config
+        def session(self):
+            raise BettercapUnavailable(
+                "bettercap API rejected GET /session (HTTP 400 Bad Request)")
+
+    now = [0.0]
+    spawned = []
+    def spawn(*args, **kwargs):
+        child = Child()
+        spawned.append(child)
+        return child
+    def monitor(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, "type monitor\n", "")
+    monkeypatch.setattr(live, "HttpTransport", RejectApi)
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [radio()],
+                               executor=monitor, spawn=spawn, clock=lambda: now[0])
+    try:
+        assert runtime.tick() == "starting_engine"
+        assert len(spawned) == 1
+        assert runtime.tick() == "starting_engine"
+        assert "HTTP 400" in runtime.last_error
+        assert runtime._snapshot["runtime"]["last_error"].endswith("Bad Request)")
+        assert runtime.failure_streak == 0
+        now[0] = 16.0
+        assert runtime.tick() == "degraded"
+        assert spawned[0].terminated
+        assert runtime.failure_streak == 1
+        assert runtime.retry_delay == 3
+        assert runtime.next_try == 19.0
+        assert runtime._snapshot["runtime"]["retry_in_seconds"] == 3.0
+        assert runtime.tick() == "degraded"
+        assert len(spawned) == 1
+        now[0] = 19.0
+        assert runtime.tick() == "starting_engine"
+        now[0] = 35.0
+        assert runtime.tick() == "degraded"
+        assert runtime.failure_streak == 2
+        assert runtime.retry_delay == 6.0
+        assert runtime.next_try == 41.0
+        assert runtime._snapshot["runtime"]["engine_attempts"] == 2
+        now[0] = 41.0
+        assert runtime.tick() == "starting_engine"
+        assert len(spawned) == 3
+        assert runtime.tick() == "starting_engine"
+        assert "HTTP 400" in runtime.last_error
+        monkeypatch.setattr(live, "HttpTransport", Transport)
+        # Already-created failed transport remains; substitute a working
+        # transport for the live child to exercise post-recovery reset.
+        runtime.transport = Transport(config=None)
+        assert runtime.tick() == "running"
+        assert runtime.failure_streak == 0
+        assert runtime.retry_delay == 0
+        assert runtime.next_try == 0
+        assert runtime._snapshot["runtime"]["retry_in_seconds"] == 0
+    finally:
+        runtime.close()
+
+
+def test_failed_launch_backoff_is_capped_without_losing_status(tmp_path, monkeypatch):
+    clock = [0.0]
+    attempts = []
+    def monitor(*args, **kwargs):
+        attempts.append(args)
+        return subprocess.CompletedProcess(args, 0, "type monitor\n", "")
+    monkeypatch.setattr(live, "free_bytes", lambda path: 512 * 1024 * 1024)
+    runtime = live.LiveRuntime(cfg(tmp_path, retry_seconds=10),
+                               radio_probe=lambda: [],
+                               executor=monitor, clock=lambda: clock[0])
+    try:
+        for expected in (10, 20, 40, 80, 160, 300, 300):
+            assert runtime.tick() == "degraded"
+            assert runtime.retry_delay == expected
+            assert runtime._snapshot["runtime"]["failure_streak"] >= 1
+            assert runtime._snapshot["runtime"]["retry_in_seconds"] == expected
+            assert "no monitor-capable" in runtime.last_error
+            clock[0] = runtime.next_try
+        assert runtime.failure_streak == 7
+        assert attempts == []
+    finally:
+        runtime.close()

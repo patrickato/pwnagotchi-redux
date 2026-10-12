@@ -106,7 +106,11 @@ def snapshot(*, full=False) -> str:
         lines.append(f"{unit}: {command(['systemctl', 'is-active', unit], limit=1)[0]}")
     for name, key in (("live_state", "state"), ("capture_radio", "iface"),
                       ("last_error", "last_error"),
-                      ("dashboard", "dashboard_active")):
+                      ("dashboard", "dashboard_active"),
+                      ("engine_attempts", "engine_attempts"),
+                      ("failure_streak", "failure_streak"),
+                      ("retry_delay_seconds", "retry_delay_seconds"),
+                      ("retry_in_seconds", "retry_in_seconds")):
         lines.append(f"{name}: {clean(str(d.get(key, 'unobserved')))}")
     lines.append("bettercap_api_probe: " + api_status())
     if full:

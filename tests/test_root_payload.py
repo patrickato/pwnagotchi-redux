@@ -255,3 +255,21 @@ def test_real_offline_systemctl_enable_link_survives_export_gate(tmp_path):
     assert link.is_symlink()
     assert link.readlink() == Path("/etc/systemd/system/redux.service")
     assert gate.verify(root)["root_payload_verified"] is True
+
+
+def test_field_image_rejects_unconfined_bettercap_home(tmp_path):
+    root = slot(tmp_path)
+    unit = root / "etc/systemd/system/redux-live.service"
+    text = unit.read_text()
+    assert "Environment=HOME=/captures/live" in text
+    unit.write_text(text.replace("Environment=HOME=/captures/live", "Environment=HOME=/root"))
+    with pytest.raises(ValueError, match="Environment=HOME=/captures/live"):
+        gate.verify(root)
+
+
+def test_field_image_rejects_home_sandbox_regression(tmp_path):
+    root = slot(tmp_path)
+    unit = root / "etc/systemd/system/redux-live.service"
+    unit.write_text(unit.read_text().replace("ProtectHome=true", "ProtectHome=false"))
+    with pytest.raises(ValueError, match="ProtectHome=true"):
+        gate.verify(root)

@@ -290,6 +290,9 @@ class LiveRuntime:
         self.handshakes = 0
         self.last_error = ""
         self.next_try = 0.0
+        self.failure_streak = 0
+        self.retry_delay = 0.0
+        self.engine_attempts = 0
         self.last_probe = 0.0
         self.last_saved = float("-inf")
         self.last_recovery = float("-inf")
@@ -365,6 +368,7 @@ class LiveRuntime:
                        if self.augur is not None else "")
         failures = (self.augur._sighting_flush_failures
                     if self.augur is not None else 0)
+        now = self.clock()
         metadata = {
             "state": self.state, "iface": self.iface or "",
             "events_seen": self.created, "handshake_events": self.handshakes,
@@ -385,9 +389,14 @@ class LiveRuntime:
             "free_bytes": free,
             "capture_mount": (mount_ok if self.capture_mount_required else None),
             "last_error": self.last_error[:180],
+            "engine_attempts": self.engine_attempts,
+            "failure_streak": self.failure_streak,
+            "retry_delay_seconds": self.retry_delay,
+            "retry_in_seconds": (round(max(0.0, self.next_try - now), 1)
+                                 if self.state in ("degraded", "storage_paused")
+                                 else 0.0),
             "updated_utc": time.time(),
         }
-        now = self.clock()
         pipeline_path = (self.config.pipeline_database
                          or self.config.capture_dir.parent / "jobs.db")
         if not mount_ok:
@@ -543,6 +552,19 @@ class LiveRuntime:
                 _LOG.warning("%s", message)
             self.log_error = message
 
+    def _schedule_retry(self, now):
+        """Exponential backoff for repeated engine failures, capped at 5 min.
+
+        A healthy launch resets the streak in _connect. This only applies to
+        failures; the normal 1s polling loop remains unchanged.
+        """
+        self.failure_streak = min(99, self.failure_streak + 1)
+        self.retry_delay = (float(self.config.retry_seconds)
+                            if self.failure_streak == 1
+                            else min(300.0, max(float(self.config.retry_seconds),
+                                                self.retry_delay * 2)))
+        self.next_try = now + self.retry_delay
+
     def _launch(self, iface):
         ensure_monitor(iface, run=self.executor,
                        allow_connected=self.config.allow_connected_capture)
@@ -574,6 +596,7 @@ class LiveRuntime:
         # supervisor starts a new log segment without a child restart.
         # A restart-only rename previously let a healthy process fill the SD.
         self.log_handle = self._open_engine_log()
+        self.engine_attempts += 1
         self.process = self.spawn(
             [self.config.bettercap_binary, "-iface", iface, "-caplet", str(caplet),
              "-no-history", "-env-file", "", "-no-colors", "-silent"],
@@ -615,6 +638,9 @@ class LiveRuntime:
         self._cached_processing = None
         self.state = "running"
         self.last_error = ""
+        self.failure_streak = 0
+        self.retry_delay = 0.0
+        self.next_try = 0.0
         _LOG.info("live passive capture started on %s", self.iface)
 
     def _stop_engine_child(self):
@@ -827,7 +853,7 @@ class LiveRuntime:
         if self.state == "termination_pending":
             if self._drop():
                 self.state = "degraded"
-                self.next_try = now + self.config.retry_seconds
+                self._schedule_retry(now)
             self._checkpoint()
             return self.state
         if self.process is not None and self.process.poll() is not None:
@@ -836,7 +862,7 @@ class LiveRuntime:
                 self._checkpoint()
                 return self.state
             self.state = "degraded"
-            self.next_try = now + self.config.retry_seconds
+            self._schedule_retry(now)
 
         if self.augur is not None:
             try:
@@ -846,7 +872,7 @@ class LiveRuntime:
                         return self.state
                     self.state = "storage_paused"
                     self.last_error = "capture partition is below free-space reserve"
-                    self.next_try = now + self.config.retry_seconds
+                    self._schedule_retry(now)
                     self._checkpoint()
                     return self.state
                 if now - self.started >= self.config.rotation_seconds:
@@ -892,19 +918,21 @@ class LiveRuntime:
                     self._checkpoint()
                     return self.state
                 self.state = "degraded"
-                self.next_try = now + self.config.retry_seconds
+                self._schedule_retry(now)
         elif self.process is not None:
             try:
                 self._connect()
             except Exception as error:
-                # Startup grace permits REST to come up without restarting radio.
+                # Preserve the actual handshake error during the startup
+                # grace period instead of showing only "starting_engine".
+                # Never print an API response body or caplet secrets.
+                self.last_error = f"engine initialization: {str(error)[:150]}"
                 if now - self.started > 15:
-                    self.last_error = f"engine initialization: {str(error)[:150]}"
                     if not self._drop():
                         self._checkpoint()
                         return self.state
                     self.state = "degraded"
-                    self.next_try = now + self.config.retry_seconds
+                    self._schedule_retry(now)
         elif now >= self.next_try:
             try:
                 if free_bytes(self.config.active_dir) < self.config.min_free_bytes:
@@ -922,7 +950,7 @@ class LiveRuntime:
                     self._checkpoint()
                     return self.state
                 self.state = "degraded"
-                self.next_try = now + self.config.retry_seconds
+                self._schedule_retry(now)
         self._checkpoint()
         return self.state
 

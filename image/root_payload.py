@@ -31,7 +31,8 @@ _UNITS = {
                       "ReadWritePaths=/captures", "Environment=REDUX_STATE_DIR=/captures/boot"),
     "redux-live.service": ("multi-user.target.wants", "Type=simple",
                            "RequiresMountsFor=/captures", "ReadWritePaths=/captures",
-                           "Environment=PYTHONPATH=/opt/redux"),
+                           "Environment=PYTHONPATH=/opt/redux",
+                           "Environment=HOME=/captures/live", "ProtectHome=true"),
     "redux-capture-ingest.timer": ("timers.target.wants", "Unit=redux-capture-ingest.service"),
 }
 

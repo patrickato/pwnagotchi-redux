@@ -233,3 +233,27 @@ caplets, or captured data. Interpret responses as follows:
 The diagnostic is informational and does not restart Bettercap or issue
 any wireless commands. Its next-image availability is not a claim that
 current field-card software has been updated.
+
+## Bettercap supervisor failure-backoff and live status (workbench)
+
+The supervised engine now distinguishes an **in-progress startup** from a
+healthy running capture. A failed HTTP handshake is exposed immediately as
+a concise `last_error` while preserving the existing 15-second startup
+grace period. Repeated failures increase the retry interval from the
+configured `retry_seconds` (10 seconds in the field config) exponentially,
+capped at 300 seconds; this protects the Pi/SD from endlessly churning the
+process. A confirmed successful engine initialization immediately resets
+the failure streak and returns to the original normal live polling cadence.
+
+The `/captures/live/live.json` runtime checkpoint and `redux-report`
+include `engine_attempts`, `failure_streak`, `retry_delay_seconds` and
+`retry_in_seconds` so the reason for apparent inactivity is explicit.
+The status does not misrepresent an open TCP port as a functioning capture.
+
+The mounted-root image export contract now requires the hardened
+`redux-live.service` directives `ProtectHome=true` and
+`Environment=HOME=/captures/live`; a stale unit is rejected before
+a distributable image is produced. These protections are offline
+build checks, not physical acceptance tests.
+
+No Pi-side command or image reflash is needed during this coding pass.
