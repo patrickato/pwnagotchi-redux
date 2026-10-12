@@ -36,6 +36,8 @@ def test_baked_live_state_is_separate_from_redux_service_owner():
     assert "CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW" in unit
     assert "CAP_DAC_OVERRIDE" not in unit
     assert "CAP_FOWNER" not in unit
+    assert "ProtectHome=true" in unit
+    assert "Environment=HOME=/captures/live" in unit
 
 
 def test_select_radio_only_capable_and_preferred():
@@ -457,9 +459,11 @@ def test_no_radio_retries_without_spawning(tmp_path, monkeypatch):
 def test_engine_launch_augur_event_pump_restart_and_private_caplet(tmp_path, monkeypatch):
     children = []
     commands = []
+    child_env = []
     clock = [10.0]
     def spawn(argv, **kwargs):
         commands.append(argv)
+        child_env.append(kwargs["env"])
         child = Child()
         children.append(child)
         return child
@@ -473,6 +477,8 @@ def test_engine_launch_augur_event_pump_restart_and_private_caplet(tmp_path, mon
         assert runtime.tick() == "starting_engine"
         assert commands and commands[0][0] == "bettercap"
         assert "-caplet" in commands[0]
+        assert child_env[0]["HOME"] == str(tmp_path / "state")
+        assert child_env[0]["HOME"] != "/root"
         initial_capture = runtime.capture_file
         assert initial_capture.parent == tmp_path / "active"
         initial_capture.write_bytes(b"synthetic closed capture bytes")

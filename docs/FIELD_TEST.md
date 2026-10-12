@@ -91,3 +91,44 @@ supervisor service with a functioning capture engine.
 
 The GPIO SPI 3.5-inch TFT is **not** installed/configured as part of this lite
 diagnostic profile, and physical display acceptance remains a separate gate.
+
+## Pi 4 field evidence: Bettercap aliases + Wi-Fi soft block (2026-10-11)
+
+The first laptop-side SSH report on `192.168.12.115` confirmed the Redux
+field image runs all three systemd services, mounts REDUXCAP as ext4 and
+serves the dashboard, **but radio capture remains degraded**. Bettercap
+repeatedly reports `open /root/bettercap.aliases: permission denied` and
+the Wi-Fi phy is soft blocked with a world regulatory domain (`country 00`).
+This **does not yet prove** whether one or both issues cause Bettercap to
+exit. The radio was in monitor mode, but that alone is not functioning capture.
+
+Bettercap loads `~/bettercap.aliases` using `HOME`. Our
+`redux-live.service` correctly forbids access to `/root` through
+`ProtectHome=true` and deliberately grants only networking capabilities.
+The permanent fix sets `HOME=/captures/live` for Bettercap's child process,
+as well as for the live service; it does not weaken the service sandbox,
+grant file-ownership capabilities, or modify the other service's
+`/captures/redux` directory. This will be baked into the **next** image,
+but is not present in the already-flashed card.
+
+To test on the **currently running field card**, with a correct operator-
+chosen two-letter regulatory domain and Ethernet still connected, run this
+**single command on the Ubuntu laptop** (example **US only if the Pi is
+physically operating in the United States**):
+
+```bash
+cd ~/redux-workbench-src && git pull --ff-only && ssh -i ~/.ssh/redux_field_ed25519 pi@192.168.12.115 'sudo -n bash -s -- US' < scripts/field-live-fix.sh
+```
+
+It stops the live service, creates a temporary `/run/systemd/system` drop-in
+for HOME, reloads systemd, applies the given country with `iw reg set`,
+unblocks software rfkill only after the regulatory-setting command succeeds,
+restarts the live supervisor and prints a bounded report. This code neither
+updates the SD's immutable root nor changes another card. The settings
+**do not survive reboot**. If radio country cannot be set, the script does
+not unblock it. No claim of working capture is made until a later report
+establishes a healthy live engine and packet collection is physically tested.
+
+The full report should be reviewed before sharing outside a private support
+chat: it redacts MAC addresses and known credential patterns, but log lines
+may contain names of nearby wireless networks.

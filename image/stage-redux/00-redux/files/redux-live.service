@@ -11,6 +11,8 @@ Group=root
 WorkingDirectory=/opt/redux
 Environment=PYTHONPATH=/opt/redux
 Environment=PYTHONUNBUFFERED=1
+# Bettercap must never try to create ~/bettercap.aliases in protected /root.
+Environment=HOME=/captures/live
 UMask=0077
 ExecStart=/usr/bin/python3 -m redux.core.live_runtime --config /etc/redux/live.toml
 Restart=on-failure

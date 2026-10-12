@@ -578,6 +578,10 @@ class LiveRuntime:
             [self.config.bettercap_binary, "-iface", iface, "-caplet", str(caplet),
              "-no-history", "-env-file", "", "-no-colors", "-silent"],
             stdin=subprocess.DEVNULL, stdout=self.log_handle, stderr=subprocess.STDOUT,
+            # Bettercap expands ~/bettercap.aliases from HOME. The hardened
+            # systemd unit deliberately blocks /root: give the child only its
+            # existing root-owned writable REDUXCAP live state as a home.
+            env={**os.environ, "HOME": str(self.config.state_dir)},
             start_new_session=True,
         )
         self.iface = iface
