@@ -3,6 +3,13 @@
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
+# Refuse to overwrite a real directory/file at the human-facing latest path.
+# Check this BEFORE expensive pi-gen work and again before publication.
+latest="$HOME/redux-field-latest"
+[[ ! -e "$latest" || -L "$latest" ]] || {
+    echo "Cannot publish: $latest exists and is not a symlink." >&2
+    exit 1
+}
 [[ $EUID != 0 ]] || { echo 'Run as your normal Ubuntu user, not root.' >&2; exit 1; }
 for tool in ssh-keygen sudo date; do
     command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }
@@ -42,12 +49,21 @@ sudo env REDUX_DEV_LOGIN=1 REDUX_OPERATOR_PUBKEY_FILE="$key.pub" \
 # the downloadable artifact, its manifest, and the mounted-root export gate.
 python3 "$ROOT/scripts/qualify-field-image.py" --workspace "$workspace" \
   --revision "$revision" --country "$country" --profile lite
-if [[ -L "$HOME/redux-field-latest" ]]; then
-    rm "$HOME/redux-field-latest"
-fi
-if [[ ! -e "$HOME/redux-field-latest" ]]; then
-    ln -s "$workspace" "$HOME/redux-field-latest"
-fi
+[[ ! -e "$latest" || -L "$latest" ]] || {
+    echo "Cannot publish: $latest was replaced by a non-symlink during build." >&2
+    exit 1
+}
+# Swap the pointer atomically only after successful artifact qualification.
+# Never remove the previous pointer before the replacement is ready.
+pending="$latest.pending.$"
+[[ ! -e "$pending" && ! -L "$pending" ]] || {
+    echo "Cannot publish: temporary link already exists: $pending" >&2
+    exit 1
+}
+trap 'rm -f -- "$pending"' EXIT
+ln -s -- "$workspace" "$pending"
+mv -Tf -- "$pending" "$latest"
+trap - EXIT
 printf '\nSUCCESS. New image: %s/pi-gen/deploy\n' "$workspace"
 printf 'Windows: \\\\wsl.localhost\\Ubuntu\\home\\%s\\redux-field-latest\\pi-gen\\deploy\n' "$USER"
 printf 'From your Ubuntu laptop (Pi on Ethernet):\n'

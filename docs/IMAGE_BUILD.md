@@ -873,3 +873,12 @@ The build still requires a suitable Ubuntu WSL ext4 workspace, available
 build dependencies and sudo for pi-gen. A real compressed disk artifact exists
 ONLY after the operator actually runs the builder; GitHub CI alone
 does not create a hardware-tested distributable SD image.
+
+## Safe publishing of the latest field build
+
+The `build-field-image.sh` wrapper refuses to reuse an occupied
+`~/redux-field-latest` ordinary file/directory. It now creates a replacement
+symlink and atomically swaps that pointer only AFTER the artifact qualifier
+succeeds; a failed build retains the old last-known-good symlink. This
+protects against showing the previous artifact as a successful new image.
+See [FIELD_ACCEPTANCE.md](FIELD_ACCEPTANCE.md) for physical acceptance gates.

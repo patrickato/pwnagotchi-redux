@@ -351,3 +351,11 @@ This does not connect to the Pi or alter the working Pwnagotchi SD.
 The earlier field card continues running its old image until the operator
 chooses to flash the new SEPARATE SD. Hardware acceptance still
 requires a controlled test, including a real capture/handoff.
+
+## Complete acceptance checklist for the next separate SD
+
+Follow [FIELD_ACCEPTANCE.md](FIELD_ACCEPTANCE.md) to distinguish a proven
+compressed image from a physically verified boot and real passive capture.
+It includes stop conditions, cold-boot persistence, storage handoff, and
+deferred TFT/touch checks. One command from WSL collects the read-only field
+report; the checklist records the remaining manual evidence.

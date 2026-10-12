@@ -150,6 +150,27 @@ def test_missing_duplicate_symlink_and_wrong_profile_fail(tmp_path):
 def test_field_helper_qualifies_before_latest_symlink():
     script = (ROOT / "scripts/build-field-image.sh").read_text()
     assert "scripts/qualify-field-image.py" in script
-    assert script.index("scripts/qualify-field-image.py") < script.index('if [[ -L "$HOME/redux-field-latest" ]]')
+    assert script.index("scripts/qualify-field-image.py") < script.index('mv -Tf -- "$pending" "$latest"')
+    assert script.index('latest="$HOME/redux-field-latest"') < script.index('ssh-keygen -q')
+    assert '[[ ! -e "$latest" || -L "$latest" ]]' in script
+    assert 'ln -s -- "$workspace" "$pending"' in script
+    assert 'trap \'rm -f -- "$pending"\' EXIT' in script
     assert "git status --porcelain" in script
     assert "--revision \"$revision\" --country \"$country\"" in script
+
+
+def test_occupied_latest_path_aborts_before_key_generation_or_build(tmp_path):
+    import os
+    import subprocess
+    home = tmp_path / "home"
+    home.mkdir()
+    reserved = home / "redux-field-latest"
+    reserved.mkdir()
+    env = dict(os.environ, HOME=str(home))
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/build-field-image.sh")],
+        capture_output=True, text=True, env=env, timeout=5)
+    assert result.returncode != 0
+    assert "exists and is not a symlink" in result.stderr
+    assert not (home / ".ssh").exists()
+    assert reserved.is_dir()

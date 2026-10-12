@@ -1001,3 +1001,56 @@ def test_regular_build_still_arms_watchdog(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "RuntimeWatchdogSec=15s" in (root / "etc/systemd/system.conf.d/redux-watchdog.conf").read_text()
     assert "dtparam=watchdog=on" in (root / "boot/firmware/config.txt").read_text()
+
+
+def test_us_disposable_build_prepares_matching_country_service_and_export(prepared, tmp_path):
+    """Full real source-staging flow with fake upstream; no Pi, network or sudo."""
+    repo, env = prepared
+    work = tmp_path / "us-field-stage"
+    env = dict(env, REDUX_BUILD_DIR=str(work),
+               REDUX_REGULATORY_COUNTRY="US", REDUX_DEV_LOGIN="1")
+    out = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert out.returncode == 0, out.stderr
+    stage = work / "pi-gen/stage-redux/00-redux"
+    assert (stage / "files/regulatory-country").read_text() == "US\n"
+    assert (stage / "files/regulatory-country").stat().st_mode & 0o022 == 0
+    assert "require_regulatory_country = true" in (
+        stage / "files/pipeline/live.toml").read_text()
+    assert "def configure(" in (stage / "files/redux/core/regulatory.py").read_text()
+    assert "Before=redux-live.service" in (
+        stage / "files/redux-regdom.service").read_text()
+    final = work / "pi-gen/export-image/05-finalise/01-run.sh"
+    assert '--expected-country US' in final.read_text()
+    assert final.read_text().index("redux-root-payload.py") < (
+        final.read_text().index('unmount "${ROOTFS_DIR}"'))
+
+    # Simulate the entire Redux file-install phase into an unmounted fake
+    # root. Intercept chroot rather than executing apt/Nexmon on the runner.
+    root = tmp_path / "mock-root"
+    (root / "boot/firmware").mkdir(parents=True)
+    (root / "boot/firmware/config.txt").write_text("[all]\n")
+    install_env = dict(env, ROOTFS_DIR=str(root))
+    done = invoke(["bash", "-c",
+                   "on_chroot() { cat >/dev/null; }; "
+                   "export -f on_chroot; bash ./00-run.sh"],
+                  cwd=stage, env=install_env)
+    assert done.returncode == 0, done.stderr
+    assert (root / "etc/redux/regulatory-country").read_text() == "US\n"
+    assert "ExecStart=/usr/bin/python3 -m redux.core.regulatory" in (
+        root / "etc/systemd/system/redux-regdom.service").read_text()
+    assert "Wants=redux-regdom.service" in (
+        root / "etc/systemd/system/redux-live.service").read_text()
+    assert (root / "opt/redux/redux/core/regulatory.py").is_file()
+    assert (root / "usr/local/bin/redux-report").is_file()
+
+
+@pytest.mark.parametrize("invalid", ["us", "USA", "00", "ZZ", "US;reboot"])
+def test_invalid_country_refused_before_any_build_workspace(prepared, tmp_path, invalid):
+    repo, env = prepared
+    work = tmp_path / "must-not-build"
+    env = dict(env, REDUX_BUILD_DIR=str(work),
+               REDUX_REGULATORY_COUNTRY=invalid)
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode != 0
+    assert "REDUX_REGULATORY_COUNTRY" in result.stderr
+    assert not work.exists()
