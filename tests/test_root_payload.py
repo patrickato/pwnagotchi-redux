@@ -193,7 +193,7 @@ def test_image_install_unit_templates_satisfy_root_contract_directives():
         if unit == "redux.service":
             source = (units / unit).read_text() + (
                 ROOT / "image/stage-redux/10-overlay/00-run.sh").read_text()
-        elif unit == "redux-live.service":
+        elif unit in ("redux-live.service", "redux-regdom.service"):
             source = (units / unit).read_text()
         else:
             source = (ROOT / "systemd" / unit).read_text()
