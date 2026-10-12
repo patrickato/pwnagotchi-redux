@@ -63,10 +63,13 @@ def qualify(workspace: Path, *, revision: str, country: str, profile="lite"):
         raise ValueError("invalid release manifest") from exc
     if not isinstance(record, dict):
         raise ValueError("release manifest must be an object")
+    revisions = record.get("revisions")
+    if not isinstance(revisions, dict):
+        raise ValueError("release manifest has invalid revisions")
     checks = {
         "schema": record.get("schema") == 1,
         "artifact_name": record.get("image") == image.name,
-        "source_revision": record.get("revisions", {}).get("redux") == revision,
+        "source_revision": revisions.get("redux") == revision,
         "partition_profile": (
             record.get("image_profile") == profile
             and record.get("profile_match_verified") is True
@@ -94,6 +97,8 @@ def qualify(workspace: Path, *, revision: str, country: str, profile="lite"):
     config = regular(pi_gen / "stage-redux/00-redux/files/pipeline/live.toml",
                      limit=16*1024)
     live = tomllib.loads(config.read_text(encoding="utf-8")).get("live", {})
+    if not isinstance(live, dict):
+        raise ValueError("staged live configuration has no [live] table")
     checks["fail_closed_live_config"] = (
         live.get("require_regulatory_country") is True
         and live.get("regulatory_country_file") == "/etc/redux/regulatory-country"

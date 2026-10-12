@@ -128,13 +128,13 @@ def test_missing_duplicate_symlink_and_wrong_profile_fail(tmp_path):
     with pytest.raises(ValueError, match="exactly one"):
         accepted(workspace)
     duplicate.unlink()
-    imglink = image.with_name("linked.img.xz")
-    image.rename(imglink)
-    image.symlink_to(imglink)
+    backing = image.with_name("backing-file.bin")
+    image.rename(backing)
+    image.symlink_to(backing)
     with pytest.raises(ValueError, match="unsafe"):
         accepted(workspace)
     image.unlink()
-    imglink.rename(image)
+    backing.rename(image)
     with pytest.raises(ValueError, match="partition_profile"):
         gate.qualify(workspace, revision=REV, country="US", profile="ab")
 
