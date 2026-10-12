@@ -167,3 +167,24 @@ changes are committed on the workbench branch.
 The report must show `live_state: running` before considering the engine
 healthy. Even then, actual passive radio reception and closed file handoff
 need a separate physical test on the user's own access point.
+
+## After stdin repair: still starting_engine
+
+A 16-second snapshot after changing Bettercap stdin to a parent-held pipe
+still reported `starting_engine`, with the new Bettercap banner but without
+a **new** quit prompt. The engine log is append-only, so an older prompt can
+remain visible. The supervisor's startup grace is 15 seconds, after which it
+can cycle between degraded/retrying/starting_engine. This status alone is
+insufficient to distinguish a failing caplet, a blocked REST listener, an
+HTTP authentication failure, or a radio-driver problem.
+
+Run one **read-only** two-sample check from ASUS Ubuntu to inspect actual
+runtime transitions, TCP 8081 readiness, and redacted journal logs:
+
+```bash
+cd ~/redux-workbench-src && git pull --ff-only && ssh -i ~/.ssh/redux_field_ed25519 pi@192.168.12.115 'sudo -n bash -s' < scripts/field-engine-check.sh
+```
+
+The script waits 22 seconds between samples and never changes a radio or
+restarts a service. Before sharing, still review journal lines for identifiable
+SSID/network text (MACs and common password patterns are redacted).
