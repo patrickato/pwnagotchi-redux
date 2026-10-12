@@ -135,6 +135,14 @@ def test_missing_duplicate_symlink_and_wrong_profile_fail(tmp_path):
         accepted(workspace)
     image.unlink()
     backing.rename(image)
+    with pytest.raises(ValueError, match="missing qualification input"):
+        gate.qualify(workspace, revision=REV, country="US", profile="ab")
+    # Supply the A/B clone gate so the profile mismatch, not the absent
+    # clone script, becomes the next independent rejection condition.
+    clone = workspace / "pi-gen/export-image/redux-ota-clone.sh"
+    clone.write_text(
+        'python3 "${STAGE_DIR}/redux-root-payload.py" --profile ab '
+        '--root "$ROOTFS_DIR" --other-root "$other" --expected-country US\n')
     with pytest.raises(ValueError, match="partition_profile"):
         gate.qualify(workspace, revision=REV, country="US", profile="ab")
 
