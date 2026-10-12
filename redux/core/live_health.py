@@ -31,7 +31,8 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
                          sighting_pending=None, sighting_write_error="",
                          sighting_lost=0, engine_log_error="",
                          capture_mount_ok=None, processing_report=None,
-                         processing_now_utc=None, processing_stale_seconds=180):
+                         processing_now_utc=None, processing_stale_seconds=180,
+                         failure_streak=0, retry_in_seconds=0):
     """Combine Augur's real Doctor report with physical supervisor observations.
 
     Without Augur the Doctor's normal probes are UNKNOWN, *never* silently OK.
@@ -42,6 +43,11 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
     if doctor_report is None:
         doctor_report = Doctor().report(DoctorInputs())
     findings = [dict(f) for f in doctor_report["findings"]]
+    retry_note = (
+        f" Automatic retry in {math.ceil(max(0, retry_in_seconds))}s "
+        f"after {failure_streak} consecutive failure(s)."
+        if state == "degraded" and failure_streak > 0 else ""
+    )
     if state == "running" and iface:
         findings.append(_finding("live engine", "ok",
                                  "Passive capture supervisor is running.",
@@ -49,7 +55,7 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
     elif state in {"starting", "starting_engine", "rotating"}:
         findings.append(_finding("live engine", "attention",
                                  "Capture engine is not yet ready.",
-                                 f"Live runtime state: {state}.",
+                                 last_error or f"Live runtime state: {state}.",
                                  "Inspect engine startup if it does not progress."))
     elif state == "storage_paused":
         findings.append(_finding("live engine", "action",
@@ -64,7 +70,8 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
     else:
         findings.append(_finding("live engine", "degraded",
                                  "Capture engine is not operational.",
-                                 last_error or f"Live runtime state: {state}.",
+                                 (last_error or f"Live runtime state: {state}.")
+                                 + retry_note,
                                  "Review redux-live.service and the read-only device preflight."))
 
     if capture_mount_ok is False:

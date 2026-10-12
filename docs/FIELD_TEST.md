@@ -257,3 +257,14 @@ a distributable image is produced. These protections are offline
 build checks, not physical acceptance tests.
 
 No Pi-side command or image reflash is needed during this coding pass.
+
+## Doctor and touch dashboard: engine recovery is observable
+
+Redux Doctor now surfaces the most recent initialization fault immediately
+while the service is still in the `starting_engine` grace period. When a
+degraded radio engine is automatically backing off, Doctor includes the
+actual failure streak and seconds until the next retry in its reason.
+The touch dashboard's runtime diagnostic panel displays the same bounded
+countdown without a restart button or control API. No mock signals or
+fabricated capture success are displayed; `running` remains a separate
+physical acceptance gate.

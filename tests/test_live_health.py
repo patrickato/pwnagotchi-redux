@@ -155,3 +155,39 @@ def test_processing_health_missing_database_and_clock_skew_not_green():
     assert finding(skewed, "capture processing")["status"] == "attention"
 
 
+
+
+def test_doctor_explains_engine_retry_without_claiming_radio_running():
+    report = describe_live_health(
+        "degraded", free_bytes=256_000_000, reserve_bytes=1_000_000,
+        last_error="engine initialization: GET /session HTTP 400",
+        failure_streak=3, retry_in_seconds=17.4,
+    )
+    engine = finding(report, "live engine")
+    assert engine["status"] == "degraded"
+    assert report["overall"] == "degraded"
+    assert "HTTP 400" in engine["reason"]
+    assert "retry in 18s" in engine["reason"]
+    assert "3 consecutive" in engine["reason"]
+
+
+def test_doctor_shows_startup_handshake_error_before_grace_expiry():
+    report = describe_live_health(
+        "starting_engine", free_bytes=256_000_000, reserve_bytes=1_000_000,
+        last_error="engine initialization: API returned HTTP 400",
+    )
+    engine = finding(report, "live engine")
+    assert engine["status"] == "attention"
+    assert "HTTP 400" in engine["reason"]
+    assert "retry in" not in engine["reason"]
+
+
+def test_doctor_does_not_claim_retries_when_engine_is_running():
+    report = describe_live_health(
+        "running", iface="wlan0", free_bytes=256_000_000,
+        reserve_bytes=1_000_000, failure_streak=5,
+        retry_in_seconds=100.0,
+    )
+    engine = finding(report, "live engine")
+    assert engine["status"] == "ok"
+    assert "retry" not in engine["reason"]

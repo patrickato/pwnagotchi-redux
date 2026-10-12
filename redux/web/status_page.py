@@ -583,9 +583,14 @@ function renderRuntimePanels(d){
    ?(runtime.free_bytes/(1024*1024)).toFixed(0)+' MiB':'—';
  document.getElementById('runtimelogs').textContent=
   Number.isInteger(runtime.log_truncations)?String(runtime.log_truncations):'—';
+ const retryText=runtime.state==='degraded' &&
+  Number.isFinite(runtime.retry_in_seconds) && runtime.failure_streak>0
+  ?' · automatic retry in '+Math.ceil(Math.max(0,runtime.retry_in_seconds))+'s'
+  :'';
  document.getElementById('runtimeerror').textContent=
-  runtime.last_error||runtime.log_error||
-  (connected?'No current supervisor error reported':'Waiting for live diagnostics');
+  (runtime.last_error||runtime.log_error||
+   (connected?'No current supervisor error reported':'Waiting for live diagnostics'))
+  +retryText;
 }
 async function tick(){
  if(fetchPending||document.hidden)return; // never queue overlapping polls

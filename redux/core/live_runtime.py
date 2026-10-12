@@ -456,6 +456,8 @@ class LiveRuntime:
             capture_mount_ok=(mount_ok if self.capture_mount_required else None),
             processing_report=processing,
             processing_stale_seconds=self.config.pipeline_stale_seconds,
+            failure_streak=self.failure_streak,
+            retry_in_seconds=metadata["retry_in_seconds"],
         )
         metadata["health"] = health["overall"]
         metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])

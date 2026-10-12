@@ -112,3 +112,12 @@ def test_theme_pack_registry_validates_palette_data_without_script_injection():
     assert "eval(" not in page
 
 
+
+
+def test_diagnostics_show_real_retry_countdown_without_enabling_controls():
+    page = render_page()
+    assert "runtime.retry_in_seconds" in page
+    assert "runtime.failure_streak" in page
+    assert "automatic retry in" in page
+    assert "Math.ceil(Math.max(0,runtime.retry_in_seconds))" in page
+    assert "/api/control" not in page
