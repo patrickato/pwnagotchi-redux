@@ -138,7 +138,16 @@ def test_http_transport_uses_documented_api_routes_and_auth(monkeypatch):
             return Reply(b'{"success":true,"msg":""}')
         return Reply(b'{}')
 
-    monkeypatch.setattr(urllib_request, "urlopen", open_fake)
+    # Bettercap traffic must use a proxy-free opener even if the inherited
+    # service environment contains a corporate or debugging HTTP proxy.
+    def fake_opener(*handlers):
+        assert any(isinstance(h, urllib_request.ProxyHandler)
+                   and h.proxies == {} for h in handlers)
+        class Opener:
+            def open(self, req, timeout=None):
+                return open_fake(req, timeout=timeout)
+        return Opener()
+    monkeypatch.setattr(urllib_request, "build_opener", fake_opener)
     transport = HttpTransport(BettercapConfig(
         host="127.0.0.1", port=8081, username="redux", password="synthetic"
     ))
@@ -183,3 +192,92 @@ def test_http_transport_rejects_invalid_event_payload(monkeypatch):
     with pytest.raises(BettercapUnavailable, match="unexpected payload"):
         transport.events(clear=True)
     assert calls == ["GET"]
+
+def test_http_transport_bypasses_inherited_proxy_with_real_local_http_server(monkeypatch):
+    """An environmental proxy must not answer the Bettercap loopback route."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from redux.engine.bettercap_driver import HttpTransport
+
+    requests = []
+    class BettercapMock(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append((self.command, self.path,
+                             self.headers.get("Authorization")))
+            payload = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        def log_message(self, *args):
+            pass
+    class ProxyMock(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(("PROXY", self.path, None))
+            self.send_error(400, "proxy refuses local host")
+        def log_message(self, *args):
+            pass
+
+    main = ThreadingHTTPServer(("127.0.0.1", 0), BettercapMock)
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), ProxyMock)
+    workers = []
+    try:
+        for server in (main, proxy):
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            workers.append(thread)
+        for key in ("http_proxy", "HTTP_PROXY", "no_proxy", "NO_PROXY"):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("http_proxy", f"http://127.0.0.1:{proxy.server_port}")
+        monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{proxy.server_port}")
+        transport = HttpTransport(BettercapConfig(
+            host="127.0.0.1", port=main.server_port,
+            username="redux", password="synthetic"))
+        assert transport.session() == {"ok": True}
+        assert [r[0] for r in requests] == ["GET"]
+        assert requests[0][1] == "/api/session"
+        assert requests[0][2].startswith("Basic ")
+    finally:
+        main.shutdown()
+        proxy.shutdown()
+        main.server_close()
+        proxy.server_close()
+        for worker in workers:
+            worker.join(timeout=2)
+
+
+def test_http_transport_400_surfaces_method_and_status_not_secret_or_endpoint(monkeypatch):
+    from urllib import error as urllib_error, request as urllib_request
+    from redux.engine.bettercap_driver import HttpTransport, BettercapUnavailable
+    class Opener:
+        def open(self, req, timeout=None):
+            raise urllib_error.HTTPError(
+                req.full_url, 400, "Bad Request", {},
+                __import__("io").BytesIO(b"private api.rest.password SecretPass"))
+    monkeypatch.setattr(urllib_request, "build_opener", lambda *args: Opener())
+    transport = HttpTransport(BettercapConfig(password="SecretPass"))
+    with pytest.raises(BettercapUnavailable) as caught:
+        transport.session()
+    diagnostic = str(caught.value)
+    assert "HTTP 400" in diagnostic
+    assert "GET /session" in diagnostic
+    assert "SecretPass" not in diagnostic
+    assert "private" not in diagnostic
+    assert "127.0.0.1" not in diagnostic
+
+
+def test_http_transport_invalid_json_is_explicit(monkeypatch):
+    from urllib import request as urllib_request
+    from redux.engine.bettercap_driver import HttpTransport, BettercapUnavailable
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self): return b"<html>not bettercap</html>"
+    class Opener:
+        def open(self, req, timeout=None): return Response()
+    monkeypatch.setattr(urllib_request, "build_opener", lambda *args: Opener())
+    with pytest.raises(BettercapUnavailable, match="invalid JSON for GET /session"):
+        HttpTransport(BettercapConfig()).session()
+

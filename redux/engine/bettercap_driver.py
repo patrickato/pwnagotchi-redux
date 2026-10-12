@@ -181,6 +181,11 @@ class HttpTransport:
         self.timeout = timeout
         token = f"{config.username}:{config.password}".encode()
         self._auth = "Basic " + base64.b64encode(token).decode()
+        # Bettercap is a directly reached local/private service, never an
+        # Internet endpoint. Ignore inherited http_proxy/HTTP_PROXY settings:
+        # an HTTP proxy can return 400 for /api/session even when Bettercap
+        # itself is healthy and listening on loopback.
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def _request(self, method: str, path: str, body: dict | None = None):
         url = f"{self.config.base_url}{path}"
@@ -190,11 +195,27 @@ class HttpTransport:
         if data is not None:
             req.add_header("Content-Type", "application/json")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with self._opener.open(req, timeout=self.timeout) as resp:
                 payload = resp.read()
                 return json.loads(payload) if payload else {}
-        except (urllib.error.URLError, OSError, TimeoutError) as e:
-            raise BettercapUnavailable(f"bettercap API unreachable at {url}: {e}") from e
+        except urllib.error.HTTPError as exc:
+            # HTTP 400 is not a network outage. Preserve the method/status
+            # in diagnostic checkpoints while never copying response bodies:
+            # Bettercap may echo command text containing private settings.
+            raise BettercapUnavailable(
+                f"bettercap API rejected {method} {path} "
+                f"(HTTP {exc.code} {exc.reason})"
+            ) from exc
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            # Avoid disclosing local endpoints/auth headers in logs.
+            raise BettercapUnavailable(
+                f"bettercap API connection failed for {method} {path}: "
+                f"{type(exc).__name__}"
+            ) from exc
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise BettercapUnavailable(
+                f"bettercap API returned invalid JSON for {method} {path}"
+            ) from exc
 
     def run(self, cmd: str) -> dict:
         return self._request("POST", "/session", {"cmd": cmd}) or {}

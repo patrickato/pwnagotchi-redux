@@ -188,3 +188,29 @@ cd ~/redux-workbench-src && git pull --ff-only && ssh -i ~/.ssh/redux_field_ed25
 The script waits 22 seconds between samples and never changes a radio or
 restarts a service. Before sharing, still review journal lines for identifiable
 SSID/network text (MACs and common password patterns are redacted).
+
+## 2026-10-12: Initial hardware report isolates HTTP 400 during Bettercap REST initialization
+
+Two 22-second-apart field samples showed the Bettercap process still alive,
+port `127.0.0.1:8081` accepting TCP connections, and Redux repeatedly
+restarting its engine. Redux's client raised `HTTP Error 400: Bad Request`
+from `GET /api/session`. This **does not prove** the response originated
+inside Bettercap, nor that the endpoint is incompatible. Inspection of the
+Bettercap **v2.32.0** controller confirms `GET /api/session` is the correct
+route; it normally returns JSON, or HTTP 401 when authentication fails.
+A normal GET on this route should not return HTTP 400.
+
+To avoid the common failure mode where inherited `http_proxy` settings
+redirect private loopback traffic to an unrelated HTTP proxy, the Redux
+`HttpTransport` now uses an explicitly **proxy-free urllib opener**.
+HTTP rejection errors now distinguish response status/method from network
+connectivity errors, and avoid echoing sensitive response bodies or
+authorization values into Redux checkpoints. Regression tests exercise all
+documented REST methods and a real local HTTP test server with malicious
+proxy settings.
+
+These improvements are committed and CI-tested on the workbench, **not yet
+physically applied to the running field card**. No conclusion about passive
+packet reception is warranted. Continue coding and review, then validate
+an integrated image in a separate future gate; avoid rebuilding/flashing
+on every individual hypothesis.
