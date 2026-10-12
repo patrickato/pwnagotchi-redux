@@ -41,7 +41,7 @@ def test_report_summary_uses_only_synthetic_service_data(monkeypatch):
         "last_error": "Bettercap exited unexpectedly",
         "dashboard_active": True, "engine_attempts": 4,
         "failure_streak": 2, "retry_delay_seconds": 6,
-        "retry_in_seconds": 4.5})
+        "retry_in_seconds": 4.5, "events_seen": 0, "handed_off": 2})
     monkeypatch.setattr(report, "command", lambda args, **kw: ["active"])
     monkeypatch.setattr(report, "log_tail", lambda **kw: ["bettercap: synthetic error"])
     monkeypatch.setattr(report, "api_status", lambda: "HTTP 401 (authentication required; API responding)")
@@ -54,6 +54,8 @@ def test_report_summary_uses_only_synthetic_service_data(monkeypatch):
     assert "failure_streak: 2" in text
     assert "retry_delay_seconds: 6" in text
     assert "retry_in_seconds: 4.5" in text
+    assert "events_seen: 0" in text
+    assert "handed_off: 2" in text
     assert "bettercap_api_probe: HTTP 401" in text
     assert "bettercap: synthetic error" in text
     assert "/captures/redux/bettercap-live.cap" not in text

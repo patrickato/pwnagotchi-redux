@@ -110,7 +110,9 @@ def snapshot(*, full=False) -> str:
                       ("engine_attempts", "engine_attempts"),
                       ("failure_streak", "failure_streak"),
                       ("retry_delay_seconds", "retry_delay_seconds"),
-                      ("retry_in_seconds", "retry_in_seconds")):
+                      ("retry_in_seconds", "retry_in_seconds"),
+                      ("events_seen", "events_seen"),
+                      ("handed_off", "handed_off")):
         lines.append(f"{name}: {clean(str(d.get(key, 'unobserved')))}")
     lines.append("bettercap_api_probe: " + api_status())
     if full:

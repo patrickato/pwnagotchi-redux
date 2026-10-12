@@ -268,3 +268,35 @@ The touch dashboard's runtime diagnostic panel displays the same bounded
 countdown without a restart button or control API. No mock signals or
 fabricated capture success are displayed; `running` remains a separate
 physical acceptance gate.
+
+## Next Pi test: one bounded acceptance command (not required now)
+
+Once a **consolidated new image** has been built/flashed to the **separate**
+Redux field card, one laptop command replaces repeated device-side diagnostics.
+The operator must pass the Pi's current private Ethernet IPv4 address and
+the two-letter regulatory country where the Pi is physically located.
+For example, **only in the United States**:
+
+```bash
+cd ~/redux-workbench-src && git pull --ff-only && python3 scripts/field-acceptance.py --host 192.168.12.115 --country US
+```
+
+It uses existing verified, **key-only SSH**, invokes just
+`sudo -n redux-report --full`, and checks the active services, REDUXCAP
+mount, startup state, localhost Bettercap REST authentication, Wi-Fi
+rfkill, configured country, monitor interface, actual observed radio
+events and completed capture handoffs.
+
+Each individual check is explicitly labeled PASS, FAIL, or UNKNOWN.
+An active service or network port **does not count** as an RF event.
+Zero real observations or no closed capture file remain UNKNOWN rather
+than being presented as a false success. An HTTP 200 from the Bettercap
+session endpoint indicates it may be publicly unauthenticated and fails
+the security acceptance gate; an HTTP 401 indicates auth is required.
+It does not retrieve captures, handshake material, caplets, or REST
+credentials, and the script never changes configuration or radio state.
+
+**Still separate:** a controlled handshake/converter test using only an
+operator-owned access point, physical GPIO TFT/touch operation, and
+reboot persistence of the operator-selected regulatory country. These
+cannot be established by the laptop's unit tests or a TCP port alone.
