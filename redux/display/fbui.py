@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import signal
 import stat
 import sys
@@ -258,11 +259,21 @@ def main(argv=None):
                         help="manually validated panel pixel order")
     parser.add_argument("--rotate", type=int, choices=(0, 180), default=0,
                         help="operator-confirmed software rotation")
+    parser.add_argument("--touch-device",
+                        help="opt-in, physically verified /dev/input/eventN (run mode only)")
+    parser.add_argument("--swipe-axis", choices=("x", "y"), default="x",
+                        help="actual raw horizontal swipe axis; use display diagnostics")
+    parser.add_argument("--swipe-reverse", action="store_true",
+                        help="invert swipe direction for rotated touch controllers")
+    parser.add_argument("--swipe-threshold", type=int, default=300,
+                        help="minimum raw axis movement for one swipe")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="read-only hardware/API checks")
     mode.add_argument("--once", action="store_true", help="paint one measured frame")
     mode.add_argument("--run", action="store_true", help="refresh every two seconds")
     args = parser.parse_args(argv)
+    if args.touch_device and not args.run:
+        parser.error("--touch-device requires --run; --once and --check never read touch")
     fb = framebuffer_info(args.framebuffer)
     if args.check:
         print(json.dumps({"framebuffer": fb,
@@ -274,6 +285,17 @@ def main(argv=None):
         print(f"Redux fbui preflight: {fb['reason']}", file=sys.stderr)
         return 2
     running = True
+    touch_fd = None
+    tracker = None
+    fragment = b""
+    page = args.page
+    if args.touch_device:
+        from . import touch_nav
+        tracker = touch_nav.SwipeTracker(
+            axis=args.swipe_axis, threshold=args.swipe_threshold,
+            reverse=args.swipe_reverse,
+        )
+        touch_fd = touch_nav.open_touch(args.touch_device)
 
     def stop(_signum, _frame):
         nonlocal running
@@ -287,7 +309,7 @@ def main(argv=None):
     try:
         while running:
             report = read_status(args.port)
-            image = render(report, page=args.page)
+            image = render(report, page=page)
             if args.rotate == 180:
                 from PIL import Image
                 image = image.transpose(Image.Transpose.ROTATE_180)
@@ -295,8 +317,31 @@ def main(argv=None):
                         rgb565_bytes(image, stride=fb["stride"], order=args.order))
             if args.once:
                 break
-            time.sleep(2)
+            deadline = time.monotonic() + 2
+            while running and time.monotonic() < deadline:
+                remaining = min(0.2, max(0, deadline - time.monotonic()))
+                if touch_fd is None:
+                    time.sleep(remaining)
+                    continue
+                available, _, _ = select.select([touch_fd], [], [], remaining)
+                if not available:
+                    continue
+                try:
+                    chunk = os.read(touch_fd, 4096)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    raise OSError("touch device disconnected")
+                fragment += chunk
+                if len(fragment) > 8192:
+                    raise OSError("unexpected unbounded touch input")
+                directions, fragment = touch_nav.consume(fragment, tracker)
+                if directions:
+                    page = touch_nav.navigate(page, directions[-1])
+                    break  # redraw new page immediately
     finally:
+        if touch_fd is not None:
+            os.close(touch_fd)
         for sig, old in previous.items():
             signal.signal(sig, old)
     return 0
