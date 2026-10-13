@@ -8,13 +8,15 @@ operator action, never part of the automatic timer.
 from __future__ import annotations
 
 from contextlib import closing
-import os
+import re
 from pathlib import Path
 import sqlite3
 import stat
 import time
 
 from ..storage_mount import capture_mount_snapshot
+_OUTPUT_SHA = re.compile(r"^[0-9a-f]{64}$")
+
 from .ingest import (
     CaptureIngestor, CaptureMountLost, Settings, SUFFIXES,
     capture_scan_lock, requires_capture_mount,
@@ -88,7 +90,8 @@ def _candidates(conn, settings, *, max_files, now):
             # A valid processed ledger row with its prepared output still
             # present is not a recovery candidate. Missing output is
             # regenerable by ingest_file, provided its original raw remains.
-            if (not isinstance(output_sha, str) or len(output_sha) != 64
+            if (not isinstance(output_sha, str)
+                    or _OUTPUT_SHA.fullmatch(output_sha) is None
                     or not isinstance(raw_output, str)
                     or Path(raw_output) !=
                     settings.output_dir / (output_sha + ".hc22000")):
