@@ -139,8 +139,10 @@ def _atomic_write(path, data):
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        os.chmod(path, 0o600)
+        # Publish without replacing a file that appeared after the caller's
+        # existence check. An atomic same-filesystem hard link refuses any
+        # existing name, including a symlink. Never destroy capture evidence.
+        os.link(temporary, path, follow_symlinks=False)
         # Durable directory entry after a sudden power loss on the Pi.
         directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
