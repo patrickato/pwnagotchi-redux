@@ -4,6 +4,58 @@ This repo is built by several agents in parallel (Claude Code, a Codex CLI, a Ge
 whatever you point at it) plus the human owner. These rules keep them from clobbering each other
 and keep `main` always-green. Any agent working here follows this file.
 
+## Active workbench autonomy override — 2026-10-12
+
+**Only on `human/redux-workbench`,** this section overrides older
+PR-to-`main`, one-task-per-branch, lead-only-path and relay-every-step
+instructions below. Those rules remain historical guidance for other branches.
+This owner's active Redux development path is a single integrated workbench,
+with direct, descriptive commits; **never merge or push to `main`**.
+Read `docs/WORKBENCH.md`, `docs/LOCAL_AGENT_HANDOFF.md`, and
+`docs/FIELD_ACCEPTANCE.md` for the current hardware rules.
+
+The owner explicitly wants agents to **complete as much work as possible
+without manual terminal command relay**. Make substantive, tested progress,
+not just advice. The chat-based lead has direct GitHub access but **no direct
+SSH/LAN access**; a locally running Codex CLI has WSL and Pi SSH access. Neither
+agent should pretend it can automatically speak to the other. GitHub commits
+and small, sanitized field notes are the shared coordination surface.
+
+**Proceed autonomously** with safe tasks: investigate and review source,
+write and run hardware-free tests, perform local static/simulation checks,
+make reversible source changes in the workbench, run CI, push verified
+commits, read public documentation, gather **read-only** Pi/WSL diagnostics
+over already-verified SSH, and identify/triage new defects. Explicitly
+distinguish hardware measurements from CI and synthetic fixtures.
+
+**Pause for specific operator approval** before changes to the physical Pi
+or surrounding network (including service stop/restart, driver unload/reload,
+Wi-Fi state/country, package/firmware deployment, network/service configuration,
+reboot, reflash, capture deletion, destructive hardware test or active RF
+transmissions). A general desire for more autonomy is **not** blanket
+authorization for those operations. When a physical action is blocked, queue
+one brief consolidated request **and keep working on independent safe tasks**
+instead of stopping all engineering work. Once authorized, stay strictly
+within the stated bounds and verify the result before reporting success.
+
+**Coordination and safeguards:**
+- Before GitHub writes, fetch the current branch HEAD; before local edits,
+  `git pull --ff-only` after verifying a clean worktree. Do not force-push or
+  overwrite another agent's in-progress changes. Reconcile conflicts.
+- Never put SSH keys, tokens, private IP+credential bundles, raw captures,
+  handshake artifacts, unredacted radio identifiers or private customer
+  material into the public repo, tickets, or chat.
+- Start each iteration by identifying the highest-value actionable gate;
+  finish implementation/tests/commit where possible. Prefer one or a few
+  bounded diagnostic calls over many Pi-side prompts.
+- Keep visible progress reports concise, with concrete findings, source
+  commit IDs, test results, and the next safe action. If the job is prolonged,
+  give an approximately 10-minute checkpoint when the agent's interactive
+  environment allows it.
+- No code completion, green CI, radio mode label or event counter implies
+  successful real RF capture. Record actual frame-link type, hardware
+  reception and conversion/handoff evidence independently.
+
 ## The loop
 
 **Orchestrate → carry out → verify → merge.**
