@@ -63,6 +63,44 @@ VIF destructor fix; CI passed. No valid frame capture/handoff demonstrated.
 `docs/FIELD_ACCEPTANCE.md`, not simply `iw dev type monitor` or six
 event emissions.
 
+## Independent Nexmon source review — 2026-10-12
+
+Reviewed pinned `jayofelony/nexmon` commit
+`1654e1857766df92086dbfbed5ffd288efc9bd8c`, notably
+`brcmfmac_6.12.y-nexmon/core.c` and `cfg80211.c`:
+
+- The ordinary `brcmf_net_attach` path installs
+  `ndev->priv_destructor = brcmf_cfg80211_free_netdev` on successful
+  netdev registration; the native monitor's `brcmf_net_mon_attach`
+  lacked that assignment. The code's `brcmf_cfg80211_free_netdev`
+  removes the attached `vif` from the driver list.
+- Monitor deletion follows `brcmf_cfg80211_del_ap_iface` to
+  `brcmf_remove_interface`, so the missing registered-netdev
+  destructor plausibly leaves the VIF in the list and contributes to
+  `brcmf_vif_add_validate` reporting `-EBUSY`.
+- The source-only fix in `0f01d80` installs the same destructor after
+  successful monitor registration; this is consistent with the ordinary
+  attachment pattern. It does **not** establish firmware-level cleanup
+  success, prove no latent netdev races, or prove a rebuilt kernel module
+  works on either Pi. Build and physical tests remain mandatory.
+- Nexmon's monitor path creates a **firmware AP-type interface**
+  through `brcmf_cfg80211_request_ap_if`; don't equate cfg80211
+  `monitor` label with native radiotap reception. Verify link type
+  and real frame ingress.
+
+Source links:
+[pinned core.c](https://github.com/jayofelony/nexmon/blob/1654e1857766df92086dbfbed5ffd288efc9bd8c/patches/driver/brcmfmac_6.12.y-nexmon/core.c) and
+[pinned cfg80211.c](https://github.com/jayofelony/nexmon/blob/1654e1857766df92086dbfbed5ffd288efc9bd8c/patches/driver/brcmfmac_6.12.y-nexmon/cfg80211.c).
+
+## Independent capture-ingestion hardening — 2026-10-12
+
+- `5320fa3` and `6a390a5` harden capture worker locking against
+  symlink redirection and linked/nonregular inodes, with regression tests.
+  No Pi changes or actual capture content touched.
+- GitHub CI for `6a390a5`:
+  [run 38334772850](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38334772850)
+  **passed**; software-only validation, not RF validation.
+
 ## P1 — engineer a less manual field workflow
 
 - Keep physical collection **read-only by default** and driven from
