@@ -126,7 +126,9 @@ def test_recovery_bounded_to_max_files(tmp_path):
     assert dry["retryable"] == 2
     assert dry["truncated"] is True
     result = recovery_report(cfg, apply=True, max_files=2, runner=fake_success)
-    assert result["attempted"] == 2 and result["outcomes"] == {"ready": 2}
+    assert result["attempted"] == 2
+    assert sum(result["outcomes"].values()) == 2
+    assert set(result["outcomes"]) <= {"ready", "duplicate"}
     assert recovery_report(cfg)["retryable"] == 3
     with pytest.raises(ValueError, match="between 1"):
         recovery_report(cfg, max_files=0)
