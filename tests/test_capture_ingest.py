@@ -165,6 +165,40 @@ def test_replaced_artifact_with_symlink_refused(tmp_path):
         assert ing.rows()[0]["status"] == "error"
 
 
+def test_prepared_artifact_publish_refuses_concurrent_existing_file(
+        tmp_path, monkeypatch):
+    from redux.crack import ingest as module
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "race.hc22000", (REC + "\n").encode())
+    real_link = module.os.link
+    collided = []
+
+    def competing_publisher(temp, destination, *, follow_symlinks=True):
+        # A different writer creates the exact destination after our
+        # pre-publication existence check, before atomic publication.
+        Path(destination).write_bytes(b"existing external artifact")
+        collided.append(Path(destination))
+        return real_link(temp, destination, follow_symlinks=follow_symlinks)
+
+    with CaptureIngestor(cfg) as worker:
+        monkeypatch.setattr(module.os, "link", competing_publisher)
+        assert worker.ingest_file(source) == "error"
+        assert len(collided) == 1
+        assert collided[0].read_bytes() == b"existing external artifact"
+        assert worker.rows()[0]["status"] == "error"
+        assert not list(cfg.output_dir.glob(".redux-*"))
+
+
+def test_atomic_publish_cleans_temporary_file_on_collision(tmp_path):
+    from redux.crack.ingest import _atomic_write
+    destination = tmp_path / "prepared.hc22000"
+    destination.write_bytes(b"keep me intact")
+    with pytest.raises(FileExistsError):
+        _atomic_write(destination, b"new bytes must not overwrite")
+    assert destination.read_bytes() == b"keep me intact"
+    assert not list(tmp_path.glob(".redux-*"))
+
+
 def test_input_disappears_during_digest_is_deferred(tmp_path, monkeypatch):
     from redux.crack import ingest as module
     cfg = settings(tmp_path)
