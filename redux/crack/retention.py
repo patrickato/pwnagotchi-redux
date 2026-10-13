@@ -16,7 +16,8 @@ import sqlite3
 import stat
 import time
 
-from .ingest import Settings
+from ..storage_mount import capture_mount_snapshot
+from .ingest import CaptureMountLost, Settings, requires_capture_mount
 
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _RAW = frozenset({".pcap", ".pcapng", ".cap"})
@@ -79,6 +80,28 @@ def _eligible(row, settings, cutoff):
         return None
 
 
+def _open_retention_lock(path, *, create):
+    """Use the same no-follow, one-inode lock policy as the ingest worker.
+
+    A dry run may open an existing legitimate lock, but must never create
+    one. O_NONBLOCK prevents unexpected FIFOs from blocking the operator.
+    """
+    flags = (os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC
+             | os.O_NONBLOCK)
+    if create:
+        flags |= os.O_CREAT
+    fd = os.open(path, flags, 0o600)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+            raise ValueError("retention lock must be a regular, singly linked file")
+        os.fchmod(fd, 0o600)
+        return os.fdopen(fd, "a+b")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def retention_report(settings: Settings, *, apply=False, older_than_days=30,
                      max_files=100, clock=time.time):
     """Inspect bounded candidates; deletion requires explicit apply=True.
@@ -97,16 +120,33 @@ def retention_report(settings: Settings, *, apply=False, older_than_days=30,
               "checked": 0, "eligible": 0, "reclaimable_bytes": 0,
               "removed": 0, "reclaimed_bytes": 0, "candidates": [],
               "note": "Prepared artifacts and unverified captures are never deleted."}
+    # The capture partition must be the same physical mount for this
+    # entire operation. Refuse to act on a bare /captures mountpoint or
+    # a different volume silently mounted between checks.
+    pin_mount = requires_capture_mount(settings)
+    expected_mount = capture_mount_snapshot() if pin_mount else None
+
+    def assert_mount():
+        if pin_mount and (expected_mount is None
+                          or capture_mount_snapshot() != expected_mount):
+            raise CaptureMountLost(
+                "REDUXCAP mount missing or changed; capture retention refused"
+            )
+
+    assert_mount()
     if not settings.database.is_file():
         return report
     cutoff = clock() - older_than_days * 86400
     lock_path = settings.database.with_suffix(".lock")
-    # A new dry run must not create a file. Existing workers share their flock.
-    locking = lock_path.open("a+b") if (apply or lock_path.is_file()) else nullcontext(None)
+    # A dry run never creates a lock. Applied retention requires the exact
+    # same securely opened lock file used by the ingestion worker.
+    locking = (_open_retention_lock(lock_path, create=apply)
+               if (apply or lock_path.is_symlink() or lock_path.exists())
+               else nullcontext(None))
     with locking as lock:
         if lock is not None:
-            os.fchmod(lock.fileno(), 0o600)
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        assert_mount()
         conn = sqlite3.connect(settings.database.as_uri() + "?mode=ro",
                                uri=True, timeout=5)
         try:
@@ -119,6 +159,7 @@ def retention_report(settings: Settings, *, apply=False, older_than_days=30,
                    LIMIT ?""", (cutoff, max_files * 10)
             )
             for row in candidates:
+                assert_mount()
                 report["checked"] += 1
                 found = _eligible(row, settings, cutoff)
                 if found is None:
@@ -128,7 +169,9 @@ def retention_report(settings: Settings, *, apply=False, older_than_days=30,
                 report["reclaimable_bytes"] += checked_st.st_size
                 report["candidates"].append(str(path))
                 if apply:
+                    # Never delete on a missing or substituted REDUXCAP mount.
                     # Ensure the directory entry has not changed since hashing.
+                    assert_mount()
                     try:
                         st = path.lstat()
                         if (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns,
