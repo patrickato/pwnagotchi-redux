@@ -22,6 +22,11 @@ _MUST_EXIST = (
     "opt/redux/redux/boot_readiness.py",
     "usr/local/bin/redux",
     "usr/local/bin/redux-boot-check",
+    "usr/local/bin/redux-fbui",
+    "opt/redux/redux/display/fbui.py",
+    "opt/redux/redux/display/touch_nav.py",
+    "etc/systemd/system/redux-fbui.service",
+    "usr/share/redux/fbui.example.env",
     "usr/local/bin/redux-live-diag",
     "usr/share/redux/sources.sh",
     "usr/share/redux/redux-revision",
@@ -88,6 +93,27 @@ def unit_contract(root):
         if not correct:
             raise ValueError(f"image enable link points outside expected unit: {unit}")
         checked.append(unit)
+    # The native TFT runtime must be present but never selected or started
+    # without a measured panel and persistent operator-supplied config.
+    fbui = text(root, "etc/systemd/system/redux-fbui.service")
+    for directive in (
+            "ConditionPathExists=/captures/config/fbui.env",
+            "EnvironmentFile=/captures/config/fbui.env",
+            "ExecStartPre=/usr/local/bin/redux-fbui --check --framebuffer ${REDUX_FRAMEBUFFER}",
+            "RequiresMountsFor=/captures"):
+        if directive not in fbui.splitlines():
+            raise ValueError(f"unsafe native TFT unit: missing {directive}")
+    if ((root / "captures/config/fbui.env").exists()
+            or (root / "captures/config/fbui.env").is_symlink()):
+        raise ValueError("image must not preconfigure the operator's TFT")
+    for want in ("multi-user.target.wants", "graphical.target.wants",
+                 "default.target.wants"):
+        entry = services / want / "redux-fbui.service"
+        if entry.exists() or entry.is_symlink():
+            raise ValueError("native TFT service must not autostart")
+    if "REDUX_FRAMEBUFFER=/dev/fbN" not in text(
+            root, "usr/share/redux/fbui.example.env"):
+        raise ValueError("native TFT template must require actual fb identity")
     for disabled in ("bettercap.service", "resize2fs_once.service"):
         mask = services / disabled
         if not mask.is_symlink() or mask.readlink() != Path("/dev/null"):
