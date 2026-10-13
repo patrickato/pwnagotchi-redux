@@ -214,6 +214,44 @@ unexpected-power-loss recovery, and Pi 4/5 packaged image smoke tests.
 These remain field gates. Do not represent a passing synthetic recovery
 test as a measured handshake or radio recovery.
 
+## Native TFT feature milestone — 2026-10-13
+
+The chat-side lead implemented a **real, lightweight browser-free TFT
+dashboard** for the standalone Lite image:
+
+- `redux/display/fbui.py`: read-only localhost
+  `/api/status` telemetry, honest stale/offline indication, Overview,
+  Captures and Doctor views, RGB565/BGR565 byte packing, measured 480×320
+  16bpp framebuffer preflight, explicit device selection, optional 180°
+  rotation and bounded two-second refresh.
+- `redux/display/touch_nav.py`: optional, operator-selected
+  `/dev/input/eventN` classic BTN_TOUCH/ABS_X/Y **read-only**
+  swipe paging. No EVIOCGRAB or calibration changes. Hardware orientation
+  and touch node must be verified before enabling.
+- Packaged `redux-fbui`, optional disabled `redux-fbui.service`,
+  `/usr/share/redux/fbui.example.env`, font runtime and Pillow into the
+  ARM64 image. **No display service is enabled by default.** Persistent
+  opt-in config belongs on `/captures/config/fbui.env`, not the disposable
+  overlayroot.
+- The export root contract refuses missing fbui software, unsafe
+  default enable links and baked-in framebuffer guesses. Tests:
+  `tests/test_fbui.py`, `tests/test_touch_nav.py`,
+  `tests/test_image_build.py`, `tests/test_root_payload.py`.
+- Hardware procedure and CLI options: `docs/DISPLAY_ACCEPTANCE.md`.
+
+**Status:** Source/UI tests, Pi-gen staging and browser-free rendering are
+software validated in CI. The mounted-root gate check for the final new
+fixtures is awaiting its latest CI result as this note is drafted.
+The image has **not** been rebuilt/flashed/tested with these additions.
+
+**Next physical gate, only when operator approves a new disposable image
+build/flash:** enumerate actual `/dev/fbN` and `/dev/input/eventN`,
+confirm 480×320/16bpp/stride, run `redux-fbui --check`, observe a single
+native RGB565 pixel frame, validate rotation/color order and real telemetry,
+then test manually selected swipe axis and touch latency. Never infer
+touchscreen correctness from synthetic unit tests. Do not enable
+`redux-fbui.service` until its specific hardware acceptance is complete.
+
 ## P2 — independent verification and release preparation
 
 **P0.2/P1 collector milestone:** Local source now provides
