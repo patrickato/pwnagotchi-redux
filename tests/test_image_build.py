@@ -439,6 +439,10 @@ def test_preparation_exports_only_redux_and_targets_pi4(prepared):
     assert (tree / "stage-redux/00-redux/files/pipeline/redux-live-diag.sh").exists()
     assert (tree / "stage-redux/00-redux/files/redux/core/live_runtime.py").exists()
     assert (tree / "stage-redux/00-redux/files/redux/display/kiosk.py").exists()
+    assert (tree / "stage-redux/00-redux/files/redux/display/fbui.py").exists()
+    assert (tree / "stage-redux/00-redux/files/redux-fbui.service").is_file()
+    assert (tree / "stage-redux/00-redux/files/fbui.example.env").is_file()
+    assert "fonts-dejavu-core" in (tree / "stage-redux/00-redux/00-packages-nr").read_text().splitlines()
     assert not (tree / "stage-redux/00-redux/files/kiosk-profile").exists()
     base_pkgs = (tree / "stage-redux/00-redux/00-packages-nr").read_text().splitlines()
     assert "chromium" not in base_pkgs and "xinit" not in base_pkgs
@@ -482,6 +486,18 @@ bash ./00-run.sh
     assert kiosk.is_file()
     assert "redux.display.kiosk" in kiosk.read_text()
     assert kiosk.stat().st_mode & 0o111
+    native = root / "usr/local/bin/redux-fbui"
+    assert native.is_file()
+    assert "redux.display.fbui" in native.read_text()
+    assert native.stat().st_mode & 0o111
+    native_unit = root / "etc/systemd/system/redux-fbui.service"
+    assert native_unit.is_file()
+    assert "ExecStart=/usr/local/bin/redux-fbui --run" in native_unit.read_text()
+    assert "ConditionPathExists=/etc/redux/fbui.env" in native_unit.read_text()
+    assert (root / "usr/share/redux/fbui.example.env").is_file()
+    assert not (root / "etc/redux/fbui.env").exists()
+    assert not (root / "etc/systemd/system/multi-user.target.wants/redux-fbui.service").exists()
+    assert "systemctl enable redux-fbui.service" not in (stage / "00-run.sh").read_text()
     assert not (root / "usr/share/redux/kiosk-profile").exists()
     assert not (root / "usr/lib/systemd/user/redux-kiosk.service").exists()
     assert not (root / "usr/share/redux/kiosk.example.env").exists()
