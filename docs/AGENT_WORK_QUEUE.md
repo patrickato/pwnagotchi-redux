@@ -114,6 +114,37 @@ Source links:
   private control bridge; no hidden daemons, public shell endpoints or
   credential uploads.
 
+## Completed software-only hardening — 2026-10-12
+
+The chat-side lead hardened the capture ingestion pipeline without touching
+the Pi, RF state, or deployed drivers:
+
+- `c5024b3` and `4fed2ea`: converted-artifact publication now uses an
+  atomic no-clobber hard link in place of a potentially overwriting rename,
+  with a regression covering another writer racing the destination name.
+  CI [38335216928](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38335216928)
+  passed.
+- `ba5c7c6`, `9afa25d` and `ac77d28`: nofollow regular-file digest
+  reads and matching original device/inode checks before accepting a
+  converted source, including a deterministic replacement-race regression.
+  CI [38335290544](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38335290544)
+  passed.
+- `fc1d4a6` and `ae98260`: bounded nofollow reads for direct
+  `.hc22000` inputs, with swapped-symlink and oversize fixtures. Final
+  CI [38335386221](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38335386221)
+  was **pending** at the time this note was authored; check conclusion
+  before treating the complete change as verified.
+
+**Further review (not yet implemented):** The external PCAP converter
+(`hcxpcapngtool`) still receives an input **pathname** after the
+ingestor's first file hash. Consider an independently tested design
+to pin or safely stage the exact input inode and hand it to the converter
+without inadvertently following a replaced symlink. Do not change the
+converter CLI, pass child file descriptors, or add new staging copies
+without targeted cross-platform/Linux tests, size limits, and checks for
+root-only capture storage behavior. Current patch does **not** claim
+to solve that last path race.
+
 ## P2 — independent verification and release preparation
 
 - Run full applicable unit tests, lint and image CI before source
