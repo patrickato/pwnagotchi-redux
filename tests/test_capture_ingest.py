@@ -341,6 +341,52 @@ def test_readonly_summary_missing_and_live(tmp_path):
     assert "bssids" not in data
 
 
+def test_scan_lock_is_private_regular_file(tmp_path):
+    cfg = settings(tmp_path)
+    with CaptureIngestor(cfg) as worker:
+        assert worker.scan()["scanned"] == 0
+    lock = cfg.database.with_suffix(".lock")
+    assert lock.is_file() and not lock.is_symlink()
+    assert lock.stat().st_nlink == 1
+    assert lock.stat().st_mode & 0o777 == 0o600
+
+
+def test_scan_refuses_symlinked_lock_without_opening_target(tmp_path):
+    cfg = settings(tmp_path)
+    untouched = tmp_path / "unrelated.txt"
+    untouched.write_text("do not modify")
+    with CaptureIngestor(cfg) as worker:
+        cfg.database.with_suffix(".lock").symlink_to(untouched)
+        with pytest.raises(OSError):
+            worker.scan()
+        assert untouched.read_text() == "do not modify"
+        assert worker.db.execute(
+            "SELECT value FROM pipeline_meta WHERE key='last_scan'"
+        ).fetchone() is None
+
+
+def test_scan_refuses_hardlinked_lock_without_recording_success(tmp_path):
+    cfg = settings(tmp_path)
+    with CaptureIngestor(cfg) as worker:
+        original = tmp_path / "shared-lock"
+        original.write_bytes(b"unchanged")
+        os.link(original, cfg.database.with_suffix(".lock"))
+        with pytest.raises(ValueError, match="singly linked"):
+            worker.scan()
+        assert original.read_bytes() == b"unchanged"
+        assert worker.db.execute(
+            "SELECT value FROM pipeline_meta WHERE key='last_scan'"
+        ).fetchone() is None
+
+
+def test_scan_refuses_directory_in_place_of_lock(tmp_path):
+    cfg = settings(tmp_path)
+    with CaptureIngestor(cfg) as worker:
+        cfg.database.with_suffix(".lock").mkdir()
+        with pytest.raises(OSError):
+            worker.scan()
+
+
 def test_low_storage_pauses_without_losing_input(tmp_path, monkeypatch):
     from redux.crack import ingest
     cfg = settings(tmp_path)
