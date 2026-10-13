@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 import os
 import stat
+import json
 
 import pytest
 
@@ -106,6 +107,132 @@ def test_snapshot_reports_actual_selected_interface_link_type(monkeypatch):
         return 1
     monkeypatch.setattr(report, "capture_link_type", probe)
     assert "capture_link_type: 1\n" in report.snapshot()
+
+
+def summary_fixture(monkeypatch):
+    private = "PRIVATE_SSID_TOKEN"
+    monkeypatch.setattr(report, "read_json", lambda: {
+        "state": "running", "iface": "wlan0", "events_seen": 17,
+        "handshake_events": 0, "handed_off": 0, "failure_streak": 0,
+        "retry_in_seconds": 0, "last_error": private, "ssid": private,
+        "api_password": private})
+    monkeypatch.setattr(report, "capture_link_type", lambda iface: 1)
+    monkeypatch.setattr(report, "capture_mount_snapshot", lambda: (1, 2))
+    def command(args, **kw):
+        if args[0] == "systemctl": return ["active"]
+        if args[:3] == ["iw", "reg", "get"]: return ["global", "country US: DFS-FCC"]
+        if args[0] == "rfkill":
+            return ["0: phy0: Wireless LAN", " Soft blocked: no", " Hard blocked: no"]
+        return ["Interface wlan0", " type monitor", " channel 6 (2437 MHz)", private]
+    monkeypatch.setattr(report, "command", command)
+    monkeypatch.setattr(report, "bounded_bytes", lambda path, limit:
+                        b"US\n" if path.name == "regulatory-country" else
+                        b'[live]\nrotation_seconds=300\nsecret="PRIVATE_SSID_TOKEN"\n')
+    monkeypatch.setattr(report, "capture_inventory", lambda path:
+                        {"available": True, "files": [], "truncated": False})
+    monkeypatch.setattr(report, "read_summary", lambda path: {
+        "available": True, "artifacts": 1, "by_status": {"ready": 1, private: 2},
+        "reason": private, "last_scan": {"completed_utc": 100, "scanned": 1,
+                                        "outcomes": {"ready": 1, private: 2}}})
+    monkeypatch.setattr(report, "api_status", lambda: "HTTP 401")
+    monkeypatch.setattr(report, "log_tail", lambda **kw: pytest.fail("summary must not read engine logs"))
+    return private
+
+
+def test_summary_uses_allowlisted_observations_without_private_text(monkeypatch, capsys):
+    private = summary_fixture(monkeypatch)
+    assert report.main(["--summary"]) == 0
+    text = capsys.readouterr().out
+    assert private not in text
+    data = json.loads(text)
+    assert data["summary_only"] is True
+    assert data["runtime"]["error"] == "unclassified"
+    assert data["runtime"]["handshake_events"] == 0
+    assert data["radio"] == {"iface": "wlan0", "link_type": 1, "mode": "monitor", "channel": 6}
+    assert data["regulatory"]["global_country"] == "US"
+    assert data["rotation_seconds"] == 300
+    assert data["processing"]["outcomes"] == {"ready": 1}
+    assert data["processing"]["last_scan_utc"] == 100
+    assert data["bettercap_http"] == 401
+
+
+def test_summary_missing_and_malformed_values_stay_unobserved(monkeypatch):
+    summary_fixture(monkeypatch)
+    monkeypatch.setattr(report, "read_json", lambda: {
+        "state": [], "events_seen": True, "handshake_events": float("nan"),
+        "handed_off": 10**1000, "last_error": "selected regulatory country is not active"})
+    monkeypatch.setattr(report, "capture_link_type", lambda iface: "unobserved")
+    monkeypatch.setattr(report, "bounded_bytes", lambda *args: None)
+    monkeypatch.setattr(report, "read_summary", lambda path: {"available": False, "reason": "PRIVATE_REASON"})
+    monkeypatch.setattr(report, "command", lambda *args, **kw: ["unavailable"])
+    monkeypatch.setattr(report, "api_status", lambda: "unavailable (URLError)")
+    data = report.snapshot_summary()
+    assert data["runtime"]["state"] is None
+    assert data["runtime"]["events_seen"] is None
+    assert data["runtime"]["handshake_events"] is None
+    assert data["runtime"]["handed_off"] is None
+    assert data["runtime"]["error"] == "regulatory_country_inactive"
+    assert data["radio"]["iface"] is None
+    assert data["regulatory"]["wifi_unblocked"] is None
+    assert data["processing"]["last_scan_utc"] is None
+    assert data["bettercap_http"] is None
+    assert "PRIVATE_REASON" not in json.dumps(data, allow_nan=False)
+
+
+def test_summary_and_full_log_mode_are_mutually_exclusive():
+    with pytest.raises(SystemExit) as error:
+        report.main(["--summary", "--full"])
+    assert error.value.code == 2
+
+
+def test_capture_inventory_never_reads_capture_payload_or_leaks_arbitrary_names(tmp_path):
+    safe = tmp_path / "bettercap-0123456789abcdef.pcap"
+    safe.write_bytes(b"PRIVATE_CAPTURE_PAYLOAD")
+    (tmp_path / "PRIVATE_SSID.pcap").write_bytes(b"private")
+    (tmp_path / "linked.pcap").symlink_to(safe)
+    value = report.capture_inventory(tmp_path)
+    text = json.dumps(value)
+    assert value["available"] is True
+    assert len(value["files"]) == 2
+    assert "PRIVATE_SSID" not in text and "PRIVATE_CAPTURE_PAYLOAD" not in text
+    assert {f["name"] for f in value["files"]} == {safe.name, "[filename withheld]"}
+    alias = tmp_path / "alias"
+    alias.symlink_to(tmp_path, target_is_directory=True)
+    assert report.capture_inventory(alias)["available"] is False
+
+
+def test_capture_inventory_is_bounded_and_marks_truncation(tmp_path):
+    for index in range(5):
+        (tmp_path / f"bettercap-{index:016x}.pcap").write_bytes(b"x")
+    value = report.capture_inventory(tmp_path, limit=2)
+    assert value["truncated"] is True
+    assert len(value["files"]) == 2
+
+
+def test_checkpoint_reader_refuses_symlink_fifo_and_oversize_inputs(tmp_path):
+    source = tmp_path / "state.json"
+    source.write_text('{"state":"running"}')
+    assert report.read_json(source) == {"state": "running"}
+    alias = tmp_path / "alias.json"
+    alias.symlink_to(source)
+    assert report.read_json(alias) == {}
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    assert report.read_json(fifo) == {}
+    source.write_bytes(b"x" * 131073)
+    assert report.read_json(source) == {}
+
+
+def test_actual_checkpoint_read_stays_bounded_if_file_grows_after_stat(tmp_path, monkeypatch):
+    source = tmp_path / "state.json"
+    source.write_bytes(b"")
+    fstat = report.os.fstat
+    def grow(fd):
+        prior = fstat(fd)
+        source.write_bytes(b"x" * 20)
+        return prior
+    monkeypatch.setattr(report.os, "fstat", grow)
+    assert report.bounded_bytes(source, 8) is None
 
 
 def test_private_atomic_save_requires_verified_capture_mount(tmp_path):

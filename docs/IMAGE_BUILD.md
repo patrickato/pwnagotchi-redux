@@ -1137,3 +1137,22 @@ duplicate-release prevention. An unpatched negative control retains the
 stale VIF. These checks do not compile an ARM64 driver or exercise a real
 kernel's unregister path. The patcher also rejects an existing destructor
 that is unconditional or installed before registration succeeds.
+
+### Read-only summary collector validation — 2026-10-13T02:34:27Z
+
+The new source `redux-report --summary` was streamed over verified strict
+SSH into a temporary Python process, with bytecode writing disabled. It
+was not installed or saved on the Pi. The allowlisted JSON reported all
+three Redux units active, REDUXCAP mounted, global/configured country US,
+unblocked Wi-Fi, and the unauthenticated Bettercap probe returning 401.
+Runtime was running with `engine_attempts: 4`, `events_seen: 12`, zero
+failure streak and no current classified error. The selected `wlan0`
+reported monitor mode on channel 40 but retained Ethernet link type 1.
+Both capture inventories were empty. The worker heartbeat was present
+with zero scanned files/artifacts and no scan-record error. Handshake
+events and handoffs remained zero. These are service/worker observations,
+not successful native RF reception or handshake conversion.
+
+Summary regression tests cover withheld operator-supplied filenames,
+bounded enumeration, missing/malformed telemetry, secret text exclusion,
+and checkpoint refusal of symlinks, FIFOs and oversized/growing files.

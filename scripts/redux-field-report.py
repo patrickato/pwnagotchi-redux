@@ -9,15 +9,20 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import tempfile
+import tomllib
 import urllib.error
 import urllib.request
 
 from redux.storage_mount import capture_mount_snapshot
+from redux.core.regulatory import current_country, wireless_unblocked
+from redux.crack.ingest import read_summary
 
 STATE = Path("/captures/live/live.json")
 ENGINE_LOG = Path("/captures/live/bettercap.log")
@@ -51,13 +56,33 @@ def command(args, *, limit=8) -> list[str]:
         return [f"unavailable: {type(exc).__name__}"]
 
 
+def bounded_bytes(path, limit):
+    """Pin a regular, nofollow file and bound the actual read, not just stat."""
+    fd = None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > limit:
+            return None
+        with os.fdopen(fd, "rb") as stream:
+            fd = None
+            data = stream.read(limit + 1)
+        return data if len(data) <= limit else None
+    except OSError:
+        return None
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 def read_json(path=STATE) -> dict:
     try:
-        if path.stat().st_size > 131072 or path.is_symlink():
+        raw = bounded_bytes(path, 131072)
+        if raw is None:
             return {}
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(raw)
         return data if isinstance(data, dict) else {}
-    except (OSError, ValueError, UnicodeError):
+    except (ValueError, UnicodeError):
         return {}
 
 
@@ -143,6 +168,123 @@ def snapshot(*, full=False) -> str:
     return "\n".join(lines) + "\n"
 
 
+def number(value):
+    try:
+        return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
+    except OverflowError:
+        return None
+
+
+def capture_inventory(directory, *, limit=100):
+    """Names and sizes only, from a pinned directory; never read capture bytes."""
+    result = {"available": False, "files": [], "truncated": False}
+    fd = None
+    try:
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        with os.scandir(fd) as entries:
+            for index, entry in enumerate(entries):
+                if index >= limit:
+                    result["truncated"] = True
+                    break
+                st = entry.stat(follow_symlinks=False)
+                if stat.S_ISREG(st.st_mode) and entry.name.endswith(".pcap"):
+                    # Operator-supplied filenames may embed SSIDs/MACs.
+                    name = (entry.name if re.fullmatch(r"bettercap-[0-9a-f]{16}\.pcap", entry.name)
+                            else "[filename withheld]")
+                    result["files"].append({"name": name, "bytes": st.st_size})
+        result["available"] = True
+    except OSError:
+        pass  # Partial inventory remains explicitly unavailable.
+    finally:
+        if fd is not None:
+            os.close(fd)
+    return result
+
+
+def snapshot_summary(*, config=Path("/etc/redux/live.toml")):
+    """Allowlisted observations only: no raw logs, RF IDs or free-text errors."""
+    d = read_json()
+    states = {"running", "degraded", "starting", "starting_engine", "rotating",
+              "storage_paused", "telemetry_degraded", "termination_pending", "stopped"}
+    state = d.get("state")
+    runtime = {"state": state if isinstance(state, str) and state in states else None}
+    for key in ("engine_attempts", "failure_streak", "retry_in_seconds", "events_seen",
+                "handshake_events", "handed_off", "updated_utc"):
+        runtime[key] = number(d.get(key))
+    known_errors = {
+        "selected regulatory country is not active": "regulatory_country_inactive",
+        "Wi-Fi rfkill is blocked or could not be verified": "rfkill_unverified_or_blocked",
+        "radio mode change failed": "radio_mode_change_failed",
+        "no monitor-capable Wi-Fi interface detected": "capture_interface_missing",
+    }
+    error = d.get("last_error")
+    runtime["error"] = (next((value for key, value in known_errors.items()
+                             if isinstance(error, str) and key in error), "unclassified")
+                        if error else None)
+    for key in ("handoff_error", "sightings_write_error", "log_error"):
+        runtime[key + "_present"] = bool(d.get(key))
+    iface = d.get("iface")
+    link = capture_link_type(iface)
+    # Report an interface only when its sysfs measurement was obtained.
+    iface = iface if type(link) is int else None
+    radio = {"iface": iface, "link_type": link if type(link) is int else None,
+             "mode": None, "channel": None}
+    if iface:
+        info = "\n".join(command(["iw", "dev", iface, "info"], limit=16))
+        mode = re.search(r"(?m)^\s*type (managed|monitor)\s*$", info)
+        channel = re.search(r"\bchannel (\d+)\b", info)
+        radio.update(mode=mode.group(1) if mode else None,
+                     channel=int(channel.group(1)) if channel else None)
+    reg = "\n".join(command(["iw", "reg", "get"], limit=48))
+    rfkill = "\n".join(command(["rfkill", "list"], limit=48))
+    blocks = [block for block in re.split(r"(?m)^\d+:\s*", rfkill) if "Wireless LAN" in block]
+    rf_complete = bool(blocks) and all(
+        re.search(r"Soft blocked:\s*(yes|no)\b", block, re.I)
+        and re.search(r"Hard blocked:\s*(yes|no)\b", block, re.I) for block in blocks)
+    rotation = country = None
+    raw = bounded_bytes(config, 65536)
+    try:
+        values = tomllib.loads(raw.decode("utf-8")).get("live", {}) if raw else {}
+        rotation = number(values.get("rotation_seconds"))
+    except (ValueError, UnicodeError, AttributeError):
+        pass
+    # The baked country file is independent of live.toml.
+    raw = bounded_bytes(Path("/etc/redux/regulatory-country"), 8)
+    if raw:
+        candidate = raw.decode("ascii", "replace").strip()
+        country = candidate if re.fullmatch(r"[A-Z]{2}", candidate) else None
+    processing = read_summary("/captures/jobs.db")
+    scan = processing.get("last_scan") or {}
+    statuses = {"ready", "invalid", "error", "duplicate", "deferred", "skipped",
+                "deferred_low_storage", "paused_low_storage", "storage_error"}
+    def counts(values):
+        return ({key: number(value) for key, value in values.items() if key in statuses}
+                if isinstance(values, dict) else {})
+    api = api_status()
+    http = re.match(r"HTTP (\d{3})\b", api)
+    return {
+        "schema": 1, "summary_only": True,
+        "sampled_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "captures_ext4": capture_mount_snapshot() is not None,
+        "services": {unit: (value if value in {"active", "inactive", "failed", "activating", "deactivating"}
+                            else "unobserved")
+                     for unit in sorted(ALLOWED)
+                     for value in [command(["systemctl", "is-active", unit], limit=1)[0]]},
+        "runtime": runtime, "radio": radio, "rotation_seconds": rotation,
+        "regulatory": {"configured_country": country, "global_country": current_country(reg) or None,
+                       "wifi_unblocked": wireless_unblocked(rfkill) if rf_complete else None},
+        "bettercap_http": int(http.group(1)) if http else None,
+        "captures": {name: capture_inventory(Path("/captures") / name) for name in ("active", "incoming")},
+        "processing": {"available": bool(processing.get("available")),
+                       "artifacts": number(processing.get("artifacts")),
+                       "by_status": counts(processing.get("by_status", {})),
+                       "last_scan_utc": number(scan.get("completed_utc")),
+                       "scanned": number(scan.get("scanned")),
+                       "outcomes": counts(scan.get("outcomes", {})),
+                       "scan_error_present": bool(processing.get("scan_error"))},
+    }
+
+
 def save(report, *, destination=SAVED, mount_check=capture_mount_snapshot):
     if mount_check() is None:
         raise RuntimeError("REDUXCAP ext4 mount unavailable; refusing to save on rootfs")
@@ -169,10 +311,13 @@ def save(report, *, destination=SAVED, mount_check=capture_mount_snapshot):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--full", action="store_true", help="include RF inventory and log tail")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--full", action="store_true", help="include RF inventory and log tail")
+    mode.add_argument("--summary", action="store_true", help="allowlisted JSON; no raw logs or RF identifiers")
     parser.add_argument("--save", action="store_true", help="save private latest report on REDUXCAP")
     args = parser.parse_args(argv)
-    report = snapshot(full=args.full)
+    report = (json.dumps(snapshot_summary(), sort_keys=True, allow_nan=False) + "\n"
+              if args.summary else snapshot(full=args.full))
     if args.save:
         save(report)
         print("Saved local diagnostic snapshot to /captures/diagnostics/latest.txt")

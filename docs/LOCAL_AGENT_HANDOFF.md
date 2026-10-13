@@ -106,6 +106,19 @@ explain the blocker to the operator.
 
 ## Local agent responsibilities and autonomy boundary
 
+For a bounded, shareable collector, current source supports
+`redux-report --summary`: allowlisted JSON with link type/channel, country,
+runtime counters and classified errors, capture names/sizes, and the worker
+heartbeat. It does not read engine logs or emit free-text ledger errors.
+Only generated `bettercap-<16 hex>.pcap` names are printed; other capture
+names are withheld because they may contain Wi-Fi identifiers. Inventory
+enumeration is capped and explicitly marks truncation. Missing measurements
+remain null/unobserved. This source feature is not installed on the current
+Pi; it can be exercised read-only by streaming the collector through strict
+SSH with `python3 -B` and `PYTHONPATH=/opt/redux`, without `--save` or copying
+files onto the device. Legacy `--full` output remains private troubleshooting
+material; do not treat arbitrary log text as safe for a public commit.
+
 1. Work from Ubuntu WSL (not Windows PowerShell) and confirm the Git
    worktree and active branch before any edit. Never assume the terminal
    prompt is the Pi.

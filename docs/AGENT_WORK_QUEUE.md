@@ -190,6 +190,16 @@ unbacked captures without operator approval.
 
 ## P2 — independent verification and release preparation
 
+**P0.2/P1 collector milestone:** Local source now provides
+`redux-report --summary`, with allowlisted observations and bounded capture
+inventories. It reuses the link-type probe and read-only ingest summary.
+No raw engine logs, private error strings, credentials or RF identifiers
+are emitted; non-generated capture filenames are withheld. The collector
+was exercised read-only from stdin on the Pi without installation or file
+writes: services/worker healthy, but native RF remains unqualified with
+Ethernet link type 1 and no handoff. Source tests also cover safe bounded
+checkpoint reads. Do not deploy it or infer RF success from that smoke test.
+
 - Run full applicable unit tests, lint and image CI before source
   milestones; fix false greens and contradictory docs.
 - Keep a concise hardware scorecard distinguishing **Pi 4 tested**,
