@@ -113,6 +113,79 @@ def test_hardlinked_source_is_not_deleted_mid_handoff(tmp_path):
     assert source.exists() and second.exists()
 
 
+def test_retention_refuses_symlink_lock_for_dry_run_and_apply(tmp_path):
+    cfg, source, _ = create(tmp_path)
+    unrelated = tmp_path / "private-data"
+    unrelated.write_text("do not touch")
+    lock = cfg.database.with_suffix(".lock")
+    lock.unlink()
+    lock.symlink_to(unrelated)
+    with pytest.raises(OSError):
+        retention_report(cfg, clock=lambda: NOW)
+    with pytest.raises(OSError):
+        retention_report(cfg, apply=True, clock=lambda: NOW)
+    assert unrelated.read_text() == "do not touch"
+    assert source.exists()
+
+
+def test_retention_refuses_hardlinked_lock(tmp_path):
+    cfg, source, _ = create(tmp_path)
+    lock = cfg.database.with_suffix(".lock")
+    lock.unlink()
+    outside = tmp_path / "shared-lock"
+    outside.write_text("unchanged")
+    os.link(outside, lock)
+    with pytest.raises(ValueError, match="singly linked"):
+        retention_report(cfg, apply=True, clock=lambda: NOW)
+    assert source.exists()
+    assert outside.read_text() == "unchanged"
+
+
+def test_retention_rejects_fifo_lock_without_blocking(tmp_path):
+    cfg, source, _ = create(tmp_path)
+    lock = cfg.database.with_suffix(".lock")
+    lock.unlink()
+    os.mkfifo(lock)
+    with pytest.raises(ValueError, match="regular"):
+        retention_report(cfg, apply=True, clock=lambda: NOW)
+    assert source.exists()
+
+
+def test_retention_refuses_missing_capture_mount_before_creating_lock(
+        tmp_path, monkeypatch):
+    from redux.crack import retention
+    cfg, source, _ = create(tmp_path)
+    lock = cfg.database.with_suffix(".lock")
+    lock.unlink()
+    monkeypatch.setattr(retention, "requires_capture_mount", lambda settings: True)
+    monkeypatch.setattr(retention, "capture_mount_snapshot", lambda: None)
+    with pytest.raises(retention.CaptureMountLost, match="REDUXCAP"):
+        retention_report(cfg, apply=True, clock=lambda: NOW)
+    assert source.exists()
+    assert not lock.exists()
+
+
+def test_retention_detects_capture_mount_swap_before_deleting(tmp_path,
+                                                              monkeypatch):
+    from redux.crack import retention
+    cfg, source, _ = create(tmp_path)
+    mount = [("REDUXCAP", 42)]
+    monkeypatch.setattr(retention, "requires_capture_mount", lambda settings: True)
+    monkeypatch.setattr(retention, "capture_mount_snapshot", lambda: mount[0])
+    original = retention._eligible
+
+    def swap_after_verification(*args):
+        found = original(*args)
+        if found is not None:
+            mount[0] = ("different-mount", 43)
+        return found
+
+    monkeypatch.setattr(retention, "_eligible", swap_after_verification)
+    with pytest.raises(retention.CaptureMountLost, match="changed"):
+        retention_report(cfg, apply=True, clock=lambda: NOW)
+    assert source.exists()
+
+
 def test_missing_database_dry_run_creates_no_files(tmp_path):
     cfg = Settings((tmp_path / "none",), tmp_path / "ready", tmp_path / "db" / "jobs.db")
     report = retention_report(cfg, clock=lambda: NOW)
