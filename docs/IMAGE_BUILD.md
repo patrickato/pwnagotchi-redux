@@ -1000,3 +1000,12 @@ verified RF fix or proof that a new ARM64 module/image has been built.
 No replacement module was loaded and no physical Pi configuration was changed.
 
 Source: [pinned maintained Nexmon 6.12 callback](https://github.com/jayofelony/nexmon/blob/1654e1857766df92086dbfbed5ffd288efc9bd8c/patches/driver/brcmfmac_6.12.y-nexmon/cfg80211.c).
+
+A subsequent read-only check found `/sys/class/net/wlan0/type` equal to
+`1` (Ethernet link type) despite `iw` reporting monitor mode. Installed
+Nexutil help documents `-m, --monitor[=INT]` as Set/Get; querying with
+`sudo -n nexutil -I wlan0 -m` (no value supplied) returned `monitor: 0`.
+This establishes that the reported cfg80211 interface mode and firmware
+monitor setting disagree. Firmware monitor enablement and a native
+radiotap capture interface remain unverified. No `-m2` setter, interface
+creation, service restart or other radio change was performed.
