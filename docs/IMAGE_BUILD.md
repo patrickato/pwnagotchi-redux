@@ -1070,3 +1070,41 @@ source files and synthetic hardware-free regression tests. No rebuilt
 ARM64 module was produced or deployed during this experiment.
 
 Source: [pinned maintained Nexmon netdev lifecycle](https://github.com/jayofelony/nexmon/blob/1654e1857766df92086dbfbed5ffd288efc9bd8c/patches/driver/brcmfmac_6.12.y-nexmon/core.c).
+
+### Single controlled existing-driver recovery — 2026-10-12
+
+The operator explicitly approved one graceful unload/reload of the existing
+`brcmfmac` driver, with no forced removal, driver rebuild/deployment,
+experimental-interface retry, reflash or reboot. The SSH return route was
+verified as `eth0` before changes. Sanitized before/after output was saved
+on the WSL host at `/tmp/redux-controlled-recovery-sanitized.txt`; no raw
+logs, RF identifiers, credentials or captures were saved in this record.
+
+Before recovery, all three Redux services/timer and NetworkManager were
+active, but runtime was degraded (`failure_streak: 7`), with no engine
+launches in the current supervisor process. `wlan0` was managed, link
+type 1, and firmware monitor mode 0.
+
+`redux-live.service` was stopped and confirmed inactive. Plain
+`modprobe -r brcmfmac` succeeded; `/sys/module/brcmfmac` disappeared.
+Plain `modprobe brcmfmac` succeeded; the module and `wlan0` reappeared.
+The selected module path remained
+`/lib/modules/6.12.109+rpt-rpi-v8/updates/brcmfmac.ko`.
+No replacement driver was built, installed or selected.
+
+After starting `redux-live.service`, a bounded 35-second wait did **not**
+verify a running runtime. The three Redux units and NetworkManager were
+active, and the checkpoint reported dashboard availability, but runtime
+remained degraded (`failure_streak: 3`, `engine_attempts: 0`). The radio
+was still managed, link type 1, with firmware monitor mode 0. The
+unauthenticated Bettercap loopback probe failed with connection refused;
+the subsequent Doctor HTTP check was not reached. Service activity is
+not proof of engine/radio recovery or measured dashboard health.
+
+Recovery stopped on that unexpected error as instructed. No second driver
+reload, further Pi mutation, experimental-interface retry, reboot or
+reflash followed. The existing-driver reload was verified; restoration of
+a running capture engine **failed**. The next recommended investigation is
+read-only classification of the current engine-launch error and recent
+driver/interface-combination diagnostics, alongside NetworkManager's
+ownership state, before approving another physical recovery or test.
