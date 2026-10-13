@@ -1,8 +1,19 @@
 # Redux Pi 4 — Consolidated Field Acceptance (disposable SD only)
 
-**Status:** Engineering checklist; NOT a claim that this image has booted or
-captured data on real hardware. The separate existing Jayofelony SD card is
-out of scope and must remain untouched.
+**Status:** Engineering checklist with partial Pi 4 hardware evidence.
+The disposable image has booted and its services/regulatory recovery have
+been observed. Native packet decoding, closed capture handoff and conversion
+remain unverified. The separate existing Jayofelony SD card is out of scope
+and must remain untouched. See `docs/IMAGE_BUILD.md` for timestamped evidence.
+
+| Gate | Pi 4 evidence | Remaining qualification |
+|---|---|---|
+| Boot and storage | Console boot/login, REDUXCAP and services observed | Cold-boot persistence and endurance |
+| Engine and country | Running supervisor, Bettercap 401, US restored after reload | Full radio/driver recovery behavior |
+| Native RF capture | Firmware-mode test increased RX; selected netdev remains Ethernet type 1 | 802.11/radiotap decoding, sightings and handshake/handoff |
+| Ingestion | Fresh empty worker scans | Real closed-file conversion and ledger consistency |
+| TFT/touch | No physical qualification | Display, touch and kiosk checks |
+| Pi 5 | No physical qualification | Build, boot and all hardware gates |
 
 ## Preconditions — before touching a Pi
 
@@ -86,7 +97,9 @@ to reattempt the same fault.
 
 - [ ] On an operator-owned test network/AP, confirm Redux observes
   actual live events. The `events_seen` counter must increment from
-  real activity, not simulated data.
+  real activity, not simulated data. This counter includes runtime/service
+  events; an increment alone is not proof of decoded Wi-Fi frames. Confirm
+  real sightings independently before claiming RF reception.
 - [ ] Wait at least one configured rotation interval (default five
   minutes, or use a dedicated controlled test profile), then confirm
   `handed_off > 0` and a completed file is no longer owned by

@@ -1156,3 +1156,9 @@ not successful native RF reception or handshake conversion.
 Summary regression tests cover withheld operator-supplied filenames,
 bounded enumeration, missing/malformed telemetry, secret text exclusion,
 and checkpoint refusal of symlinks, FIFOs and oversized/growing files.
+
+Hardware-free image CI now requires a host C compiler (`cc`, or the `CC`
+environment override) and `ld` in addition to Python, Bash and shellcheck.
+They compile/link the synthetic lifecycle fixture only. The preflight checks
+these tools before the test suite starts; neither this host fixture nor a
+passing image CI run builds the target ARM64 Nexmon module.

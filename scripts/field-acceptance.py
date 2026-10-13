@@ -109,7 +109,7 @@ def verdicts(data, expected_country):
     check("Bettercap REST auth", "PASS" if api.startswith("HTTP 401") else
           "FAIL" if api.startswith(("HTTP 200", "HTTP 400", "HTTP 403", "unavailable"))
           else "UNKNOWN", api or "not measured")
-    for name, key in (("Observed radio events", "events_seen"),
+    for name, key in (("Observed runtime events", "events_seen"),
                       ("Closed capture handoff", "handed_off")):
         raw = data.get(key, "")
         count = int(raw) if raw.isdecimal() else None

@@ -63,7 +63,7 @@ def test_starting_engine_does_not_claim_complete_radio_capture():
     statuses = {name: state for name, state, _ in gate.verdicts(parsed, "US")}
     assert statuses["Live capture supervisor"] == "FAIL"
     assert statuses["Bettercap REST auth"] == "FAIL"
-    assert statuses["Observed radio events"] == "UNKNOWN"
+    assert statuses["Observed runtime events"] == "UNKNOWN"
     assert statuses["Closed capture handoff"] == "UNKNOWN"
 
 
@@ -109,7 +109,7 @@ def test_unreported_capture_is_unknown_not_success():
     parsed = gate.parse(SAMPLE.replace("events_seen: 17", "")
                         .replace("handed_off: 2", ""))
     statuses = {name: state for name, state, _ in gate.verdicts(parsed, "US")}
-    assert statuses["Observed radio events"] == "UNKNOWN"
+    assert statuses["Observed runtime events"] == "UNKNOWN"
     assert statuses["Closed capture handoff"] == "UNKNOWN"
 
 
