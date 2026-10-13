@@ -101,6 +101,42 @@ Use a Redux test installation, not your only working Pwnagotchi SD card.
 Redux Scope file. On a device without a functional Hashcat backend, the binary may
 exist without being usable; the complete test requires real Pi verification.
 
+## Crash/interruption recovery — operator command
+
+After a conversion error, unexpected worker shutdown, or lost prepared output,
+Redux can now **inspect and selectively retry** previously recorded work
+without blindly reprocessing the entire capture directory:
+
+```bash
+redux pipeline --config /etc/redux/pipeline.toml recover
+# Review JSON: retryable, recorded_errors, missing_outputs, blocked, deferred
+redux pipeline --config /etc/redux/pipeline.toml recover --max-files 50 --apply
+```
+
+The default invocation is genuinely **read-only**: it opens the existing
+SQLite ledger in read-only mode, creates no database/lock/outputs, and returns
+bounded counts **without printing filenames, hashes or MAC addresses**.
+It distinguishes records with prior errors from successfully recorded
+artifacts whose converted output has disappeared. Missing source inputs,
+symlinks, unsettled captures and suspicious paths are not retried.
+
+`--apply` retries a bounded set of eligible sources using the very same
+`CaptureIngestor`, protected by its exclusive `jobs.lock` and REDUXCAP
+mount-identity checks. It preserves raw sources and never overwrites an
+altered prepared artifact. The existing normal timer can continue afterward;
+it does not automatically invoke this operator-only recovery pass.
+`max_files` defaults to 100 (allowed 1–1000); inspection reads no more
+than ten times that many candidate ledger records and reports
+`truncated: true` if further work may remain. Repeat deliberately if
+needed. Content deduplication can yield a `duplicate` outcome for
+different captures containing the same valid record, which is expected.
+
+**Limitations:** The inspection reports only previously ledgered errors
+or missing prepared paths. It does not claim every unledgered capture is
+healthy or that the converter or radio has been validated on physical
+hardware. The operation is exercised by synthetic CI tests; actual
+ARM64 capture conversion and power-loss recovery remain field gates.
+
 ## Long-running capture retention (explicit, reversible decision)
 
 Raw captures can consume storage even after a verified conversion. Redux now
