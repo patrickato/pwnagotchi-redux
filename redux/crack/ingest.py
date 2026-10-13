@@ -6,7 +6,7 @@ Format checks do not cryptographically prove handshake correctness.
 from __future__ import annotations
 
 import argparse
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 import fcntl
 import hashlib
@@ -193,6 +193,25 @@ def _atomic_write(path, data):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+@contextmanager
+def capture_scan_lock(database):
+    """Serialize recovery, ingestion and operator retention on one safe inode.
+
+    O_NOFOLLOW prevents lock-name redirection, O_NONBLOCK avoids FIFO stalls,
+    and an exclusive flock coordinates with the existing retention command.
+    """
+    lock = Path(database).with_suffix(".lock")
+    flags = (os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW
+             | os.O_CLOEXEC | os.O_NONBLOCK)
+    with os.fdopen(os.open(lock, flags, 0o600), "a+b") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("capture ingestion lock must be a regular, singly linked file")
+        os.fchmod(handle.fileno(), 0o600)
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
 
 
 class CaptureIngestor:
@@ -452,19 +471,7 @@ class CaptureIngestor:
 
     def scan(self):
         self._assert_mount()
-        lock = self.settings.database.with_suffix(".lock")
-        # A mutable capture partition must not redirect our locking/open
-        # operations through a symlink (or share the lock inode via a
-        # hardlink). Pin one regular inode for the lifetime of this scan.
-        # O_NONBLOCK avoids hanging while opening an unexpected FIFO.
-        flags = (os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW
-                 | os.O_CLOEXEC | os.O_NONBLOCK)
-        with os.fdopen(os.open(lock, flags, 0o600), "a+b") as handle:
-            opened = os.fstat(handle.fileno())
-            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
-                raise ValueError("capture ingestion lock must be a regular, singly linked file")
-            os.fchmod(handle.fileno(), 0o600)
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        with capture_scan_lock(self.settings.database):
             self._assert_mount()
             if free_bytes(self.settings.output_dir) < self.settings.min_free_bytes:
                 return self._completed_scan(0, {"paused_low_storage": 1})
