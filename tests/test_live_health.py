@@ -109,6 +109,7 @@ def test_processing_health_distinguishes_current_empty_work_from_bad_conversion(
                                   processing_report=report,
                                   processing_now_utc=1040)
     assert finding(failed, "capture processing")["status"] == "degraded"
+    assert "redux pipeline recover" in finding(failed, "capture processing")["remediation"]
     report["last_scan"]["outcomes"] = {"invalid": 2}
     invalid = describe_live_health("running", iface="wlan1mon",
                                    processing_report=report,
