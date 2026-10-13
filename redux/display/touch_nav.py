@@ -56,7 +56,9 @@ class SwipeTracker:
         elif type_code == EV_KEY and code == BTN_TOUCH:
             if value == 1 and not self.pressed:
                 self.pressed = True
-                self.start = self.position
+                # Discard the last finger's coordinates; wait for a fresh
+                # axis event to establish this contact's start position.
+                self.start = None
             elif value == 0 and self.pressed:
                 self.pressed = False
                 start, end = self.start, self.position
