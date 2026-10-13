@@ -128,6 +128,19 @@ def test_retention_refuses_symlink_lock_for_dry_run_and_apply(tmp_path):
     assert source.exists()
 
 
+def test_retention_dry_run_does_not_repair_lock_permissions(tmp_path):
+    cfg, source, _ = create(tmp_path)
+    lock = cfg.database.with_suffix(".lock")
+    lock.chmod(0o644)
+    with pytest.raises(ValueError, match="mode 0600"):
+        retention_report(cfg, clock=lambda: NOW)
+    assert lock.stat().st_mode & 0o777 == 0o644
+    assert source.exists()
+    # Explicit apply uses the same private-ingest lock and may repair it.
+    assert retention_report(cfg, apply=True, clock=lambda: NOW)["removed"] == 1
+    assert lock.stat().st_mode & 0o777 == 0o600
+
+
 def test_retention_refuses_hardlinked_lock(tmp_path):
     cfg, source, _ = create(tmp_path)
     lock = cfg.database.with_suffix(".lock")
