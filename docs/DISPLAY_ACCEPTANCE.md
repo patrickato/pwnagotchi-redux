@@ -56,7 +56,31 @@ Each refresh reads `http://127.0.0.1:8080/api/status` over loopback
 with a 2-second timeout and a 64 KiB maximum response, then paints a
 480×320 frame every two seconds. An absent/old health report renders
 UNKNOWN/STALE, not a fabricated green status. It shows no raw captures
-or credentials. The app does not access a touch input node.
+or credentials. By default the app does not access a touch input node. With the
+physically identified ADS7846/XPT2046 event source and operator approval,
+the manually started renderer can optionally read **classic single-touch
+swipes** to change pages:
+
+```sh
+sudo redux-fbui --framebuffer /dev/fbN --run \
+    --touch-device /dev/input/eventN --swipe-axis x
+```
+
+The `eventN` device and `x` axis must be selected from the actual
+`redux-display-diag` readings; neither is guessed. For a physically
+rotated controller use `--swipe-axis y` and/or `--swipe-reverse`.
+The default raw-axis threshold is 300 units; `--swipe-threshold` can
+be selected deliberately after measuring your touch controller's range.
+One complete left or right swipe changes between Overview, Captures and
+Doctor. Vertical movement on the other axis does not navigate. The reader
+is read-only, nonblocking, nofollow, does not EVIOCGRAB or change input
+calibration, and resets an incomplete gesture after kernel SYN_DROPPED.
+
+**Touch caveats:** physical accuracy, raw-axis reversal, finger pressure,
+tap calibration, swipe latency and long press are not yet hardware
+qualified. This first native implementation provides swipe navigation
+only; its systemd service intentionally leaves touch **off** until the
+operator separately validates input and decides to enable it.
 
 ### Optional persistent display service after acceptance
 
@@ -172,7 +196,7 @@ touch effects can close the hardware acceptance gates.**
 ## Software validation
 
 ```sh
-python -m pytest tests/test_display_acceptance.py tests/test_display_kiosk.py
+python -m pytest tests/test_display_acceptance.py tests/test_display_kiosk.py tests/test_fbui.py tests/test_touch_nav.py
 python -m compileall -q redux/display
 ```
 
