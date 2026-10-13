@@ -161,6 +161,33 @@ real ARM64 Pi capture files is not yet qualified**. Check it during the
 next approved field image validation. No change to the installed Pi was
 made by this source-only work.
 
+## Retention safety follow-up — 2026-10-12
+
+The manually invoked `redux pipeline prune` command now uses nofollow,
+regular/single-inode lock handling consistent with the ingestion worker
+rather than blindly opening `jobs.lock` by pathname. Retention pins
+the REDUXCAP mount identity and refuses to continue if the volume goes
+missing or is substituted while evaluating an eligible raw source.
+Dry runs never create a lock or silently repair its permissions; a
+misconfigured existing lock is reported explicitly. Destructive apply
+still requires deliberate operator invocation, a verified raw source
+and a verified corresponding converted artifact. No automatic capture
+deletion has been introduced.
+
+- `2bda6cc`: fail-closed lock and capture mount checks.
+- `dbaab4b`: symlink, hardlink, FIFO, missing-mount and swapped-mount tests.
+- `62ea24b` / `09e793f`: dry-run lock permission immutability with
+  explicit apply recovery test.
+- GitHub CI
+  [38337310532](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38337310532)
+  **passed**. This proves the software regression suite, not Pi storage
+  fault recovery under real power loss.
+
+**Remaining:** fully vet actual `hcxpcapngtool` conversion on the
+disposable Pi image, and test volume-removal behavior during controlled
+field acceptance. Never test destructive retention against real
+unbacked captures without operator approval.
+
 ## P2 — independent verification and release preparation
 
 - Run full applicable unit tests, lint and image CI before source
