@@ -20,6 +20,14 @@ def slot(tmp_path, name="lite", profile="lite"):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("installed fixture\n")
     systemd = root / "etc/systemd/system"
+    # The field image ships the real, disabled native TFT unit. Rootfs
+    # fixtures mimic its exact policy rather than activating any display.
+    (systemd / "redux-fbui.service").write_text(
+        (ROOT / "systemd/redux-fbui.service").read_text()
+    )
+    (root / "usr/share/redux/fbui.example.env").write_text(
+        (ROOT / "config/fbui.example.env").read_text()
+    )
     for unit, (group, *directives) in gate._UNITS.items():
         target = systemd / unit
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -173,6 +181,33 @@ def test_ab_refuses_lite_fstab_and_missing_rauc_trust(tmp_path):
     (b / "etc/rauc/keyring.pem").unlink()
     with pytest.raises(ValueError, match="missing"):
         gate.verify(a, profile="ab", other_root=b)
+
+
+def test_native_tft_payload_is_required_but_never_enabled(tmp_path):
+    root = slot(tmp_path)
+    assert gate.verify(root)["root_payload_verified"] is True
+    unit = root / "etc/systemd/system/redux-fbui.service"
+    unit.write_text(unit.read_text().replace(
+        "ConditionPathExists=/captures/config/fbui.env",
+        "ConditionPathExists=/dev/fb1",
+    ))
+    with pytest.raises(ValueError, match="TFT"):
+        gate.verify(root)
+    unit.write_text((ROOT / "systemd/redux-fbui.service").read_text())
+    wants = root / "etc/systemd/system/multi-user.target.wants"
+    wants.mkdir(exist_ok=True)
+    (wants / "redux-fbui.service").symlink_to("../redux-fbui.service")
+    with pytest.raises(ValueError, match="autostart"):
+        gate.verify(root)
+
+
+def test_export_rejects_baked_in_unverified_framebuffer_config(tmp_path):
+    root = slot(tmp_path)
+    active = root / "captures/config/fbui.env"
+    active.parent.mkdir(parents=True)
+    active.write_text("REDUX_FRAMEBUFFER=/dev/fb1\n")
+    with pytest.raises(ValueError, match="preconfigure"):
+        gate.verify(root)
 
 
 def test_root_gate_cli_is_readonly_and_fails_on_missing_service(tmp_path):
