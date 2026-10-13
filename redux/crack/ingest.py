@@ -135,6 +135,21 @@ def _digest_file(path):
     return digest.hexdigest()
 
 
+def _read_regular_bytes(path, limit):
+    """Read a bounded regular file without following a last-moment symlink."""
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+    with os.fdopen(os.open(path, flags), "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError("capture source is not a regular file")
+        if info.st_size > limit:
+            raise ValueError("capture source exceeds direct-read limit")
+        data = stream.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("capture source grew beyond direct-read limit")
+        return data
+
+
 def _atomic_write(path, data):
     fd, temporary = tempfile.mkstemp(prefix=".redux-", dir=path.parent)
     try:
@@ -296,7 +311,7 @@ class CaptureIngestor:
         try:
             self._assert_mount()
             if source.suffix.lower() == ".hc22000":
-                raw = source.read_bytes()
+                raw = _read_regular_bytes(source, min(self.settings.max_capture_bytes, 32 * 1024 * 1024))
             else:
                 with tempfile.TemporaryDirectory(
                     prefix=".hcx-", dir=self.settings.output_dir
