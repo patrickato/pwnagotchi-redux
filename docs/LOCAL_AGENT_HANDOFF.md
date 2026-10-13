@@ -36,7 +36,41 @@ A cloud ChatGPT conversation cannot directly access the owner's
   `docs/LIVE_RUNTIME.md`, and the most recent workbench commits before
   changing code.
 
-## Current bootstrap blocker: SSH host-key rotation
+## Current native-radio gate — 2026-10-12 (supersedes bootstrap notes)
+
+Codex's local Pi session has **already obtained SSH access** and performed
+an explicitly approved, temporary native monitor-interface experiment.
+Do not repeat the initial host-key verification process unless SSH now
+indicates a *new* identity mismatch. Check current state; do not assume
+the older bootstrap warning remains active.
+
+The temporary native monitor interface was deleted and firmware mode restored,
+but the Pi's `wlan0` could not return to monitor mode: brcmfmac reported
+`Device or resource busy (-16)`. Live runtime was **degraded** at that
+checkpoint. The Pi's Ethernet SSH transport was not interrupted.
+
+Source commit `0f01d8066c5e625341cd698e536a0cd6b93ea817` patches the
+*Nexmon build-stage source* to release its cfg80211 monitor virtual interface
+on netdev teardown. Local unit suite reported 1,413 passed and 3 skipped,
+with GitHub CI green. **The new driver has NOT been built or deployed to
+the Pi**; the source change cannot repair the already loaded driver until
+a separately approved rebuild/reflash.
+
+A **separate operator approval** is required to stop `redux-live`, gracefully
+reload the **already installed** brcmfmac module and restart/check the
+service. If the operator grants it in the active local Codex session, verify
+Ethernet SSH and snapshot bounded/sanitized before-state, refuse forced
+unload, and do not perform a new monitor-interface experiment or driver
+deployment without fresh approval. If recovery is blocked, continue
+with independent safe source review/tests instead of idling.
+
+On this workbench, the owner's current instruction is to maximize agent
+autonomy within safe bounds; `AGENTS.md` now spells out the operating
+contract. The chat-side model can read/write GitHub, but cannot directly
+reach the owner's LAN. Codex CLI can execute remotely from Ubuntu WSL,
+but no direct chat-to-Codex bridge exists. Do not claim otherwise.
+
+## Historical bootstrap blocker: SSH host-key rotation
 
 The Pi's currently offered ED25519 SSH host-key fingerprint was reported as
 `SHA256:pKI2PuH3kxRjxJd1ys5MssupTWRV0hMnXxM5GduywJo`. WSL has an
