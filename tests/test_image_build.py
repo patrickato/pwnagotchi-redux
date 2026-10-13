@@ -493,9 +493,9 @@ bash ./00-run.sh
     native_unit = root / "etc/systemd/system/redux-fbui.service"
     assert native_unit.is_file()
     assert "ExecStart=/usr/local/bin/redux-fbui --run" in native_unit.read_text()
-    assert "ConditionPathExists=/etc/redux/fbui.env" in native_unit.read_text()
+    assert "ConditionPathExists=/captures/config/fbui.env" in native_unit.read_text()
     assert (root / "usr/share/redux/fbui.example.env").is_file()
-    assert not (root / "etc/redux/fbui.env").exists()
+    assert not (root / "captures/config/fbui.env").exists()
     assert not (root / "etc/systemd/system/multi-user.target.wants/redux-fbui.service").exists()
     assert "systemctl enable redux-fbui.service" not in (stage / "00-run.sh").read_text()
     assert not (root / "usr/share/redux/kiosk-profile").exists()
