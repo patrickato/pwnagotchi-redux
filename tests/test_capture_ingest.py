@@ -147,6 +147,40 @@ def test_converter_never_follows_post_digest_symlink(tmp_path, monkeypatch):
     assert not list(cfg.output_dir.glob("*.hc22000"))
 
 
+def test_converter_output_does_not_follow_symlink(tmp_path):
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "source.pcapng", b"fixture input")
+    unrelated = tmp_path / "outside.hc22000"
+    unrelated.write_text(REC + "\n")
+
+    def convert(cmd, **kwargs):
+        Path(cmd[2]).symlink_to(unrelated)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    with CaptureIngestor(cfg, runner=convert) as worker:
+        assert worker.ingest_file(source) == "error"
+        assert worker.rows()[0]["status"] == "error"
+        assert not list(cfg.output_dir.glob("*.hc22000"))
+    assert unrelated.read_text() == REC + "\n"
+
+
+def test_converter_output_is_bounded_before_allocation(tmp_path):
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "source.pcapng", b"fixture input")
+
+    def convert(cmd, **kwargs):
+        # Sparse output uses little disk space but exceeds the 32 MiB
+        # converted-material size ceiling.
+        with open(cmd[2], "wb") as fh:
+            fh.truncate(32 * 1024 * 1024 + 1)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    with CaptureIngestor(cfg, runner=convert) as worker:
+        assert worker.ingest_file(source) == "error"
+        assert worker.rows()[0]["status"] == "error"
+        assert not list(cfg.output_dir.glob("*.hc22000"))
+
+
 def test_converter_missing_is_retryable(tmp_path):
     cfg = settings(tmp_path)
     p = write_file(cfg.inputs[0] / "a.pcap", b"fixture-pcap-data")
