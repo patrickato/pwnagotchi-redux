@@ -18,6 +18,17 @@ cat > "$ROOTFS_DIR/usr/local/bin/redux-kiosk" <<'REDUX_KIOSK_LAUNCHER'
 PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.display.kiosk "$@"
 REDUX_KIOSK_LAUNCHER
 chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-kiosk"
+cat > "$ROOTFS_DIR/usr/local/bin/redux-fbui" <<'REDUX_FBUI_LAUNCHER'
+#!/bin/sh
+PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.display.fbui "$@"
+REDUX_FBUI_LAUNCHER
+chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-fbui"
+# The lightweight 16-bit framebuffer renderer is packaged without X11 and
+# never enabled automatically. Operators opt in after TFT pixel/touch checks.
+install -m 0644 files/redux-fbui.service \
+    "$ROOTFS_DIR/etc/systemd/system/redux-fbui.service"
+install -m 0644 files/fbui.example.env \
+    "$ROOTFS_DIR/usr/share/redux/fbui.example.env"
 cat > "$ROOTFS_DIR/usr/local/bin/redux-display-diag" <<'REDUX_DISPLAY_DIAG_LAUNCHER'
 #!/bin/sh
 PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.display.acceptance "$@"
