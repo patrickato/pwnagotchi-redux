@@ -1108,3 +1108,32 @@ a running capture engine **failed**. The next recommended investigation is
 read-only classification of the current engine-launch error and recent
 driver/interface-combination diagnostics, alongside NetworkManager's
 ownership state, before approving another physical recovery or test.
+
+### Approved regulatory restoration and automatic retry — 2026-10-12
+
+A subsequent read-only launch-error classification found
+`selected regulatory country is not active`: the image remained configured
+for US, but the kernel global domain was `00` after module reload. Wi-Fi
+rfkill was unblocked. This explains the immediate post-reload launch failure;
+it does not prove the earlier interface-lifetime fault was fixed.
+
+The operator separately approved restarting only `redux-regdom.service`
+to reapply the existing US configuration. Ethernet SSH was verified first.
+The service completed, global country US was confirmed, and the existing
+live supervisor was observed through its automatic backoff without a
+`redux-live` restart or further driver reload. Its next attempt reached
+`running` on `wlan0`, with `engine_attempts: 1`, `failure_streak: 0`,
+and an empty current runtime error. No temporary interface remained.
+
+The original radio limitation remains: `iw` reports monitor mode, while
+the packet link type is Ethernet 1 and Nexutil reports firmware monitor 0.
+No handshake or closed handoff was observed. Regulatory/service recovery
+is verified; native RF capture is **not** verified.
+
+The local monitor-cleanup tests now compile and execute synthetic host C
+fixtures with a modeled reference-counted netdev lifecycle. They cover
+32 repeated success/failure cycles, delayed final-reference release, and
+duplicate-release prevention. An unpatched negative control retains the
+stale VIF. These checks do not compile an ARM64 driver or exercise a real
+kernel's unregister path. The patcher also rejects an existing destructor
+that is unconditional or installed before registration succeeds.

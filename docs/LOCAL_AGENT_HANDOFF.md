@@ -70,6 +70,18 @@ contract. The chat-side model can read/write GitHub, but cannot directly
 reach the owner's LAN. Codex CLI can execute remotely from Ubuntu WSL,
 but no direct chat-to-Codex bridge exists. Do not claim otherwise.
 
+**Latest recovery checkpoint:** One explicitly approved graceful reload of
+the existing driver completed, but the runtime initially stayed degraded
+because the global country had returned to `00` while the image was
+configured for US. A separately approved restart of `redux-regdom.service`
+restored US; the existing live supervisor's automatic retry then reached
+`running` on `wlan0` with no current error or failure streak. The temporary
+interface is absent. Firmware monitor remains 0 and packet link type
+remains Ethernet 1, so this is service/regulatory recovery, not native RF
+capture. Do not repeat a driver reload or interface experiment based on
+the older checkpoint above. Neither driver deployment nor an ARM64 driver
+build has been approved or performed. Details are in `docs/IMAGE_BUILD.md`.
+
 ## Historical bootstrap blocker: SSH host-key rotation
 
 The Pi's currently offered ED25519 SSH host-key fingerprint was reported as

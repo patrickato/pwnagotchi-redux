@@ -114,11 +114,6 @@ def adapt_monitor_cleanup(source):
     match = matches[0]
     body = match.group(1)
     code = re.sub(r"/\*.*?\*/|//[^\n]*", "", body, flags=re.S)
-    expected = "ndev->priv_destructor = brcmf_cfg80211_free_netdev;"
-    if "priv_destructor" in code:
-        if expected not in code:
-            raise ValueError("unsupported nexmon monitor destructor")
-        return source, "monitor cleanup unchanged: cfg80211 destructor already installed"
     if (code.count("ndev->netdev_ops = &brcmf_netdev_ops_mon;") != 1
             or code.count("err = cfg80211_register_netdevice(ndev);") != 1
             or len(re.findall(r"\breturn\b", code)) != 1):
@@ -126,6 +121,17 @@ def adapt_monitor_cleanup(source):
     terminal = re.search(r"(?m)^([ \t]*)return err;\s*$", body)
     if terminal is None:
         raise ValueError("unsupported nexmon monitor attach return")
+    expected = "ndev->priv_destructor = brcmf_cfg80211_free_netdev;"
+    if "priv_destructor" in code:
+        guarded = re.search(
+            r"\bif\s*\(\s*!err\s*\)\s*ndev->priv_destructor\s*=\s*"
+            r"brcmf_cfg80211_free_netdev\s*;", code)
+        registration = code.index("err = cfg80211_register_netdevice(ndev);")
+        if (guarded is None or code.count("priv_destructor") != 1
+                or guarded.start() < registration
+                or not re.fullmatch(r"\s*return err;\s*", code[guarded.end():])):
+            raise ValueError("unsupported nexmon monitor destructor lifecycle")
+        return source, "monitor cleanup unchanged: cfg80211 destructor already installed"
     indent = terminal.group(1)
     addition = (indent + "if (!err)\n" + indent + "\t" + expected + "\n\n")
     updated = body[:terminal.start()] + addition + body[terminal.start():]

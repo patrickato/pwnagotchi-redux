@@ -223,7 +223,120 @@ def test_monitor_cleanup_only_installed_after_successful_registration():
     MONITOR_CORE.replace("cfg80211_register_netdevice", "register_netdev"),
     MONITOR_CORE.replace("return err;", "return 0;"),
     MONITOR_CORE.replace("return err;", "ndev->priv_destructor = another_destructor;\n\treturn err;"),
+    MONITOR_CORE.replace("return err;", "ndev->priv_destructor = brcmf_cfg80211_free_netdev;\n\treturn err;"),
+    MONITOR_CORE.replace("err = cfg80211_register_netdevice(ndev);",
+                         "if (!err) ndev->priv_destructor = brcmf_cfg80211_free_netdev;\n"
+                         "\terr = cfg80211_register_netdevice(ndev);"),
 ])
 def test_unknown_monitor_cleanup_lifecycle_refuses_adjustment(source):
     with pytest.raises(ValueError, match="monitor"):
         compat.adapt_monitor_cleanup(source)
+
+
+def compile_lifecycle_fixture(tmp_path, source):
+    """Execute patched C with a synthetic, reference-counted netdev owner.
+
+    This deliberately models kernel ownership; it does not compile a driver
+    or claim to exercise a real kernel's unregister_netdevice implementation.
+    """
+    import ctypes
+    import os
+    import shlex
+    import shutil
+    import subprocess
+    import sys
+    if sys.platform != "linux":
+        pytest.skip("native ELF lifecycle fixture requires Linux")
+    compiler = shlex.split(os.environ.get("CC", "cc"))
+    assert compiler and shutil.which(compiler[0]), "Lifecycle tests require a host C compiler (CC)"
+    linker = shutil.which("ld")
+    assert linker, "Lifecycle tests require the host ELF linker (ld)"
+    prefix = r'''
+struct net_device {
+    void (*priv_destructor)(struct net_device *);
+    void *netdev_ops;
+    int references;
+    int registered;
+    int vif_live;
+};
+struct brcmf_if { struct net_device *ndev; };
+static int brcmf_netdev_ops_mon;
+static int register_result, releases, duplicate_releases;
+#define bphy_err(...) ((void)0)
+static int cfg80211_register_netdevice(struct net_device *ndev) {
+    if (!register_result) ndev->registered = 1;
+    return register_result;
+}
+static void brcmf_cfg80211_free_netdev(struct net_device *ndev) {
+    if (!ndev->vif_live) { duplicate_releases++; return; }
+    ndev->vif_live = 0;
+    releases++;
+}
+static void release_netdev_reference(struct net_device *ndev) {
+    if (ndev->references && --ndev->references == 0 && ndev->priv_destructor)
+        ndev->priv_destructor(ndev);
+}
+'''
+    # Remove the unrelated function to keep -Wall -Werror useful.
+    source = source.split("static int unrelated", 1)[0]
+    suffix = r'''
+int run_lifecycle(int failure, int held_reference) {
+    int cycle;
+    register_result = failure;
+    releases = duplicate_releases = 0;
+    for (cycle = 0; cycle < 32; cycle++) {
+        struct net_device ndev = {0};
+        struct brcmf_if ifp = {&ndev};
+        ndev.references = held_reference ? 2 : 1;
+        ndev.vif_live = 1;
+        if (brcmf_net_mon_attach(&ifp) != failure) return 1;
+        if (failure) {
+            if (ndev.registered || ndev.priv_destructor) return 2;
+            /* brcmf_mon_add_vif owns failure cleanup. */
+            brcmf_cfg80211_free_netdev(&ndev);
+        } else {
+            if (!ndev.registered) return 3;
+            ndev.registered = 0;
+            release_netdev_reference(&ndev);
+            if (held_reference) {
+                if (!ndev.vif_live || releases != cycle) return 4;
+                release_netdev_reference(&ndev);
+            }
+        }
+        /* Repeated release cannot rerun a kernel-owned destructor. */
+        release_netdev_reference(&ndev);
+        if (ndev.vif_live) return 101; /* Demonstrate the original stale VIF. */
+        if (releases != cycle + 1 || duplicate_releases) return 5;
+    }
+    return 0;
+}
+'''
+    cfile = tmp_path / "lifecycle.c"
+    obj = tmp_path / "lifecycle.o"
+    library = tmp_path / "lifecycle.so"
+    cfile.write_text(prefix + source + suffix)
+    result = subprocess.run([*compiler, "-Wall", "-Werror", "-fPIC", "-c",
+                             str(cfile), "-o", str(obj)],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    result = subprocess.run([linker, "-shared", "-z", "noexecstack", "-o",
+                             str(library), str(obj)],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    lib = ctypes.CDLL(str(library))
+    lib.run_lifecycle.argtypes = [ctypes.c_int, ctypes.c_int]
+    lib.run_lifecycle.restype = ctypes.c_int
+    return lib
+
+
+@pytest.mark.parametrize("failure,held_reference", [(0, 0), (0, 1), (-52, 0), (-52, 1)])
+def test_compiled_monitor_lifetime_releases_vif_once(tmp_path, failure, held_reference):
+    updated, _ = compat.adapt_monitor_cleanup(MONITOR_CORE)
+    lib = compile_lifecycle_fixture(tmp_path, updated)
+    assert lib.run_lifecycle(failure, held_reference) == 0
+
+
+def test_compiled_lifecycle_detects_original_stale_vif(tmp_path):
+    lib = compile_lifecycle_fixture(tmp_path, MONITOR_CORE)
+    assert lib.run_lifecycle(0, 0) == 101
+    assert lib.run_lifecycle(-52, 0) == 0

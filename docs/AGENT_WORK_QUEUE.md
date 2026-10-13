@@ -103,6 +103,20 @@ Source links:
 
 ## P1 — engineer a less manual field workflow
 
+**Local progress checkpoint:** The single approved existing-driver recovery
+completed removal/reload but initially failed runtime startup on global
+country 00. A separately approved regulatory-service restart restored the
+configured US policy; automatic live retry then reached running on wlan0.
+Firmware monitor 0 and Ethernet link type 1 remain unqualified for RF.
+No further driver/interface experiment, target module build or deployment
+is authorized by those completed approvals.
+
+P0.1 now includes executable synthetic C lifecycle checks for repeated
+successful deletion, held references, registration failure and a negative
+control exposing the original stale VIF. The patcher rejects unsafe existing
+destructor placement. Actual ARM64 module compilation remains a separate
+approval gate; host simulation is not kernel/hardware evidence.
+
 - Keep physical collection **read-only by default** and driven from
   the owner's Ubuntu WSL via previously verified strict SSH.
 - Prefer one bounded diagnostic collector over multiple on-Pi commands.
