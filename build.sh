@@ -86,6 +86,12 @@ git -C "$NEXMON_DIR" checkout -q --detach FETCH_HEAD
 
 PI_GEN_DIR="$BUILD_DIR/pi-gen"
 cp -a "$REPO_DIR/image/stage-redux" "$PI_GEN_DIR/stage-redux"
+# Include a native framebuffer UI in every Lite image. It remains disabled
+# until the operator verifies the actual TFT fbN, pixel order and orientation.
+cp "$REPO_DIR/systemd/redux-fbui.service" \
+    "$PI_GEN_DIR/stage-redux/00-redux/files/redux-fbui.service"
+cp "$REPO_DIR/config/fbui.example.env" \
+    "$PI_GEN_DIR/stage-redux/00-redux/files/fbui.example.env"
 if [[ -n ${REDUX_REGULATORY_COUNTRY:-} ]]; then
     printf '%s\n' "$REDUX_REGULATORY_COUNTRY" > "$PI_GEN_DIR/stage-redux/00-redux/files/regulatory-country"
     chmod 0644 "$PI_GEN_DIR/stage-redux/00-redux/files/regulatory-country"
