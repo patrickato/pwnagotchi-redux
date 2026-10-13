@@ -148,15 +148,18 @@ the Pi, RF state, or deployed drivers:
   CI [38335386221](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38335386221)
   **passed**. This is CI evidence only, not physical Pi validation.
 
-**Further review (not yet implemented):** The external PCAP converter
-(`hcxpcapngtool`) still receives an input **pathname** after the
-ingestor's first file hash. Consider an independently tested design
-to pin or safely stage the exact input inode and hand it to the converter
-without inadvertently following a replaced symlink. Do not change the
-converter CLI, pass child file descriptors, or add new staging copies
-without targeted cross-platform/Linux tests, size limits, and checks for
-root-only capture storage behavior. Current patch does **not** claim
-to solve that last path race.
+**Converter path-race follow-up completed (source only):** Commits
+`2f8da6e` / `d34da2d` pin the original verified capture inode via a
+Linux read-only file descriptor, which `hcxpcapngtool` receives using
+`/proc/self/fd/N` with `pass_fds`, rather than reopening the mutable
+input pathname. Commits `cc398d4` / `9ad8702` bound and protect
+converter output reads. E2E contract adjustments in `d4b7be0` /
+`0d699b7` verify intended inode access. GitHub CI
+[38336910184](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38336910184)
+**passed** with synthetic fixtures; **actual hcxpcapngtool behavior on
+real ARM64 Pi capture files is not yet qualified**. Check it during the
+next approved field image validation. No change to the installed Pi was
+made by this source-only work.
 
 ## P2 — independent verification and release preparation
 
