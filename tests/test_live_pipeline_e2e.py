@@ -90,7 +90,10 @@ def test_live_capture_to_durable_hash_and_duplicate_recovery(tmp_path, monkeypat
         def converter(cmd, **kwargs):
             assert cmd[0] == "hcxpcapngtool"
             assert cmd[1] == "-o"
-            assert cmd[-1] == str(finalized)
+            assert cmd[-1].startswith("/proc/self/fd/")
+            assert kwargs["pass_fds"] == (int(cmd[-1].rsplit("/", 1)[1]),)
+            assert Path(cmd[-1]).samefile(finalized)
+            assert Path(cmd[-1]).read_bytes() == b"synthetic raw frame input, NOT valid pcap"
             Path(cmd[2]).write_text(RECORD + "\n")
             conversions.append(cmd)
             return subprocess.CompletedProcess(cmd, 0)
