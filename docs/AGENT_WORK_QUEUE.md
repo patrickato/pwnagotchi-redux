@@ -132,8 +132,7 @@ the Pi, RF state, or deployed drivers:
 - `fc1d4a6` and `ae98260`: bounded nofollow reads for direct
   `.hc22000` inputs, with swapped-symlink and oversize fixtures. Final
   CI [38335386221](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38335386221)
-  was **pending** at the time this note was authored; check conclusion
-  before treating the complete change as verified.
+  **passed**. This is CI evidence only, not physical Pi validation.
 
 **Further review (not yet implemented):** The external PCAP converter
 (`hcxpcapngtool`) still receives an input **pathname** after the
