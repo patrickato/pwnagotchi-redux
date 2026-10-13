@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import subprocess
+import sys
 import time
 
 import pytest
@@ -81,7 +82,69 @@ def test_convert_with_injected_runner(tmp_path):
     with CaptureIngestor(cfg, runner=fake_run) as ing:
         assert ing.ingest_file(p) == "ready"
     assert seen and seen[0][0][0] == "hcxpcapngtool"
+    assert seen[0][0][3].startswith("/proc/self/fd/")
+    assert seen[0][1]["pass_fds"] == (int(seen[0][0][3].rsplit("/", 1)[1]),)
     assert seen[0][1]["timeout"] == cfg.convert_timeout_seconds
+
+
+def test_converter_reads_inherited_inode_not_mutable_path(tmp_path):
+    cfg = settings(tmp_path)
+    original_bytes = b"original synthetic pcap bytes"
+    source = write_file(cfg.inputs[0] / "opened.pcapng", original_bytes)
+    outside = tmp_path / "other-data"
+    outside.write_bytes(b"unrelated sensitive bytes")
+    checked = []
+
+    def convert(cmd, **kwargs):
+        assert cmd[3].startswith("/proc/self/fd/")
+        # Replace pathname after fd pinning, before the converter reads it.
+        source.unlink()
+        source.symlink_to(outside)
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.stdout.buffer.write(open(sys.argv[1], 'rb').read())",
+             cmd[3]],
+            pass_fds=kwargs["pass_fds"], capture_output=True, check=True,
+        )
+        checked.append(result.stdout)
+        Path(cmd[2]).write_text(REC + "\n")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    with CaptureIngestor(cfg, runner=convert) as worker:
+        assert worker.ingest_file(source) == "deferred"
+        assert worker.rows() == []
+    assert checked == [original_bytes]
+    assert outside.read_bytes() == b"unrelated sensitive bytes"
+    assert not list(cfg.output_dir.glob("*.hc22000"))
+
+
+def test_converter_never_follows_post_digest_symlink(tmp_path, monkeypatch):
+    from redux.crack import ingest as module
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "swapped.pcap", b"original fixture")
+    outside = tmp_path / "unrelated"
+    outside.write_bytes(b"must not be processed")
+    original = module._digest_file
+    called = []
+
+    def swap_after_digest(path):
+        digest = original(path)
+        if Path(path) == source:
+            source.unlink()
+            source.symlink_to(outside)
+        return digest
+
+    def runner(*args, **kwargs):
+        called.append(args)
+        raise AssertionError("converter must not run after input replacement")
+
+    with CaptureIngestor(cfg, runner=runner) as worker:
+        monkeypatch.setattr(module, "_digest_file", swap_after_digest)
+        assert worker.ingest_file(source) == "error"
+        assert worker.rows()[0]["status"] == "error"
+    assert not called
+    assert outside.read_bytes() == b"must not be processed"
+    assert not list(cfg.output_dir.glob("*.hc22000"))
 
 
 def test_converter_missing_is_retryable(tmp_path):
