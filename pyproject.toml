@@ -15,7 +15,8 @@ redux-display-diag = "redux.display.acceptance:main"
 redux-boot-check = "redux.boot_readiness:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "Pillow>=9.4"]
+display = ["Pillow>=9.4"]
 # At-rest encryption (redux.vault). Optional on purpose: the core stays
 # dependency-free, and the vault reports itself unavailable (honest, fail-closed)
 # rather than storing plaintext when this isn't installed.
