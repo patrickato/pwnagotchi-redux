@@ -4,6 +4,86 @@ This is a **separate development SD-card** procedure. Never change the owner's
 working Jayofelony Pwnagotchi card. The default Redux image stays Pi OS Lite:
 the diagnostics are usable headlessly, and browser/X11 remain opt-in.
 
+## New: native RGB565 diagnostic display (no X11, no Chromium)
+
+The Redux ARM64 Lite image now **contains** `redux-fbui`, a built-in
+480×320 telemetry screen driven by the **actual** local live Redux status
+API. It shows engine state, capture radio, observed events, completed
+capture handoffs, free space and Doctor findings. Separate read-only views
+(`--page overview|captures|doctor`) can be chosen on launch. It uses the
+small bundled Python Pillow library and renders directly to the selected
+16-bit Linux framebuffer; no desktop, Chromium, SDL or X server is needed.
+
+**It does not auto-start, change TFT overlays, initialize SPI, or accept
+touch gestures yet.** The image installs an inactive
+`redux-fbui.service` and a deliberately invalid example
+`/usr/share/redux/fbui.example.env`. It does not install an active config
+or enable the unit. The original Jayofelony SD is never modified.
+
+Once the display is enumerated and the current TFT's framebuffer identity is
+confirmed (Section 1), an operator may perform this **read-only** check on
+the disposable Redux image, substituting the actual `fbN` value:
+
+```sh
+sudo redux-fbui --framebuffer /dev/fbN --check
+```
+
+The JSON report validates actual `virtual_size = 480,320`, 16 bits per
+pixel and reported stride; checks whether a Redux loopback status endpoint
+responded; and **always** sets `physical_display_verified=false` and
+`touch_verified=false`. A failure refuses to write any pixels.
+
+For the **first visible pixel test only**, after separate operator approval:
+
+```sh
+sudo redux-fbui --framebuffer /dev/fbN --once --page overview
+```
+
+This writes one real telemetry frame to that selected framebuffer; it does
+not control the radio, initialize touch, start a browser or persist config.
+If colors are wrong, the operator can try `--order bgr565`; if upside
+down on a 480×320 panel, `--rotate 180`. Do not enable a service
+until the physically visible result has been verified. A framebuffer that
+uses a different depth, stride or orientation must be diagnosed before use.
+
+For a manually supervised refresh after visual qualification:
+
+```sh
+sudo redux-fbui --framebuffer /dev/fbN --run --page overview
+```
+
+Each refresh reads `http://127.0.0.1:8080/api/status` over loopback
+with a 2-second timeout and a 64 KiB maximum response, then paints a
+480×320 frame every two seconds. An absent/old health report renders
+UNKNOWN/STALE, not a fabricated green status. It shows no raw captures
+or credentials. The app does not access a touch input node.
+
+### Optional persistent display service after acceptance
+
+Only after physical verification and explicit approval, store the chosen
+framebuffer and orientation on the writable REDUXCAP partition so the
+read-only OS overlay does not erase them on reboot:
+
+```sh
+sudo install -d -m 0700 /captures/config
+sudo install -m 0600 /usr/share/redux/fbui.example.env /captures/config/fbui.env
+sudoedit /captures/config/fbui.env
+# Replace the intentionally invalid fbN and select verified pixel order/rotation.
+sudo systemctl enable --now redux-fbui.service
+```
+
+The `redux-fbui.service` is installed but not enabled by the image.
+It starts only with the manually created config, checks the same framebuffer,
+and stops with normal systemd lifecycle controls. Operator ownership,
+correct `/captures` mount, display node permissions, verified pixel order
+and the actual TFT result remain acceptance requirements.
+
+**Limitations:** The current native renderer requires a 480×320 framebuffer
+at 16bpp (RGB565-compatible). It does not claim 320×480 rotation,
+automatic touch calibration, swipe navigation, physical frame timing,
+backlight control or cross-board graphics compatibility. Those are follow-on
+features, not green gates today.
+
 ## 1. Collect the real devices, without modifying them
 
 On a booted development board, run as the local user:
