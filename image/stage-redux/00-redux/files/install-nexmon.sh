@@ -39,6 +39,7 @@ for module_dir in /lib/modules/*; do
     fi
     printf '%s: ' "$kernel" >> /usr/share/redux/nexmon-driver-compat.txt
     python3 /usr/local/src/patch-nexmon-driver.py "$header" "$driver/cfg80211.c" \
+        --core-source "$driver/core.c" \
         --sdio-header "${header%/net/cfg80211.h}/linux/mmc/sdio_ids.h" \
         >> /usr/share/redux/nexmon-driver-compat.txt
     nexmon_build_module "$kernel" "$module_dir" "$driver"

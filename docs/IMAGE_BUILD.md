@@ -1033,3 +1033,40 @@ interface. Field acceptance requires raw 802.11 (ARPHRD 801) or radiotap
 (803); Ethernet type 1 fails even when `iw` says monitor. An older report
 without this measurement stays UNKNOWN. Log-tail text cannot supply a
 missing header measurement. These reporting changes are not deployed.
+
+### Approved native-interface experiment — 2026-10-12
+
+The operator approved a temporary native radiotap interface, live-service
+stop/start, and restoration afterward. SSH was verified to route over
+Ethernet. NetworkManager and its global supplicant service were active,
+but no supplicant session was attached to `wlan0`. NetworkManager marked
+the primary Wi-Fi interface managed but unavailable. Only test Wi-Fi
+ownership was temporarily released; Ethernet and manager services were
+left running.
+
+The driver created `reduxmon0`, but NetworkManager did not expose that
+temporary device (`nmcli` exit 10). The experiment aborted before interface
+activation or any timed capture sample. Cleanup removed the temporary
+interface and restored firmware mode 0 and the primary's managed setting.
+Returning `wlan0` to monitor mode failed with `Device or resource busy
+(-16)`, including a separate recovery attempt with NetworkManager ownership
+released. The driver logged `iface validation failed: err=-16`.
+`redux-live.service` was active afterward, but runtime was **degraded**,
+with `wlan0` managed. Restoration to the prior running state was **not**
+verified. No new RF reception, decoded sightings or handoff claim follows
+from this aborted test. Reloading the driver requires separate approval.
+
+Pinned Nexmon `core.c` inspection found that `brcmf_net_mon_attach` omits
+the `brcmf_cfg80211_free_netdev` destructor installed by normal netdev
+attachment. That destructor releases the cfg80211 VIF. A stale monitor
+VIF after netdev deletion is a plausible explanation for failed interface
+combination validation; this is source-backed reasoning, not a measured
+dump of the driver's internal VIF list.
+
+The local build patch now installs that destructor after successful
+monitor-netdev registration, preserving existing registration-failure
+cleanup. The adjustment was exercised against both pinned 6.12 and 6.18
+source files and synthetic hardware-free regression tests. No rebuilt
+ARM64 module was produced or deployed during this experiment.
+
+Source: [pinned maintained Nexmon netdev lifecycle](https://github.com/jayofelony/nexmon/blob/1654e1857766df92086dbfbed5ffd288efc9bd8c/patches/driver/brcmfmac_6.12.y-nexmon/core.c).

@@ -133,14 +133,19 @@ def test_build_entrypoint_applies_channel_error_fix(tmp_path):
     import sys
     header = tmp_path / "cfg80211.h"
     source = tmp_path / "cfg80211.c"
+    core = tmp_path / "core.c"
     header.write_text(NEW_HEADER)
     source.write_text(CHANNEL_SOURCE)
-    result = subprocess.run([sys.executable, str(path), str(header), str(source)],
+    core.write_text(MONITOR_CORE)
+    result = subprocess.run([sys.executable, str(path), str(header), str(source),
+                             "--core-source", str(core)],
                             capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr
     assert "struct net_device *redux_dev" in source.read_text()
     assert "return err;\n}" in source.read_text()
     assert "propagate firmware error" in result.stdout
+    assert "if (!err)\n\t\tndev->priv_destructor = brcmf_cfg80211_free_netdev;" in core.read_text()
+    assert "--core-source \"$driver/core.c\"" in path.with_name("install-nexmon.sh").read_text()
 
 
 @pytest.mark.parametrize("header,source", [
@@ -184,3 +189,41 @@ def test_bcmsdh_indirect_include_gets_explicit_ids_header():
 def test_unknown_sdio_mapping_or_include_fails_closed(header, source):
     with pytest.raises(ValueError):
         compat.adapt_sdio_id(header, source)
+
+
+# Synthetic lifecycle fixture for the pinned 6.12 and 6.18 monitor attach paths.
+MONITOR_CORE = '''int brcmf_net_mon_attach(struct brcmf_if *ifp)
+{
+\tstruct net_device *ndev = ifp->ndev;
+\tint err;
+\tndev->netdev_ops = &brcmf_netdev_ops_mon;
+\terr = cfg80211_register_netdevice(ndev);
+\tif (err)
+\t\tbphy_err(drvr, "Failed to register %s device\\n", ndev->name);
+\treturn err;
+}
+static int unrelated(void) {
+    return 0;
+}
+'''
+
+
+def test_monitor_cleanup_only_installed_after_successful_registration():
+    updated, reason = compat.adapt_monitor_cleanup(MONITOR_CORE)
+    assert "if (!err)\n\t\tndev->priv_destructor = brcmf_cfg80211_free_netdev;" in updated
+    assert updated.index("cfg80211_register_netdevice") < updated.index("priv_destructor")
+    assert updated.endswith("static int unrelated(void) {\n    return 0;\n}\n")
+    assert "release cfg80211 VIF" in reason
+    assert compat.adapt_monitor_cleanup(updated)[0] == updated
+
+
+@pytest.mark.parametrize("source", [
+    "/* callback missing */",
+    MONITOR_CORE + MONITOR_CORE,
+    MONITOR_CORE.replace("cfg80211_register_netdevice", "register_netdev"),
+    MONITOR_CORE.replace("return err;", "return 0;"),
+    MONITOR_CORE.replace("return err;", "ndev->priv_destructor = another_destructor;\n\treturn err;"),
+])
+def test_unknown_monitor_cleanup_lifecycle_refuses_adjustment(source):
+    with pytest.raises(ValueError, match="monitor"):
+        compat.adapt_monitor_cleanup(source)
