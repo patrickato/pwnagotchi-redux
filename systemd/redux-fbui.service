@@ -1,0 +1,29 @@
+[Unit]
+Description=Redux native 480x320 RGB565 framebuffer display (operator opt-in)
+After=redux-live.service
+Wants=redux-live.service
+ConditionPathExists=/etc/redux/fbui.env
+StartLimitIntervalSec=1800
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/redux/fbui.env
+ExecStartPre=/usr/local/bin/redux-fbui --check --framebuffer ${REDUX_FRAMEBUFFER}
+ExecStart=/usr/local/bin/redux-fbui --run --framebuffer ${REDUX_FRAMEBUFFER} --port ${REDUX_DASHBOARD_PORT} --order ${REDUX_PIXEL_ORDER} --rotate ${REDUX_ROTATE}
+Restart=on-failure
+RestartSec=8
+TimeoutStopSec=8
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=false
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
