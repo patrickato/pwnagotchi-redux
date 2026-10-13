@@ -124,8 +124,12 @@ def free_bytes(path):
 
 
 def _digest_file(path):
+    """Hash regular file bytes without following a swapped-in symlink/FIFO."""
     digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+    with os.fdopen(os.open(path, flags), "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise OSError("capture digest source is not a regular file")
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
@@ -309,8 +313,8 @@ class CaptureIngestor:
             self._assert_mount()
             after = source.lstat()
             if not stat.S_ISREG(after.st_mode) or (
-                after.st_size, after.st_mtime_ns
-            ) != (st.st_size, st.st_mtime_ns) or _digest_file(source) != sha:
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+            ) != (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns) or _digest_file(source) != sha:
                 return "deferred"
             records, bssids = normalize_22000(raw)
             if not records:
