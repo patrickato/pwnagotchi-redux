@@ -12,6 +12,7 @@ dependencies = []
 [project.scripts]
 redux = "redux.cli:main"
 redux-display-diag = "redux.display.acceptance:main"
+redux-fbui = "redux.display.fbui:main"
 redux-boot-check = "redux.boot_readiness:main"
 
 [project.optional-dependencies]
