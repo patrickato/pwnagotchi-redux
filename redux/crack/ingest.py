@@ -150,6 +150,28 @@ def _read_regular_bytes(path, limit):
         return data
 
 
+def _open_verified_capture(path, initial):
+    """Pin the original regular inode before handing it to a converter.
+
+    The child opens /proc/self/fd/N with pass_fds, not the mutable input
+    pathname. Refuse a source replaced between our first stat and open.
+    This is Linux-only; the supported Pi targets and WSL both provide /proc.
+    """
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+    descriptor = os.open(path, flags)
+    try:
+        actual = os.fstat(descriptor)
+        if not stat.S_ISREG(actual.st_mode):
+            raise OSError("capture source is not a regular file")
+        attrs = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+        if attrs(actual) != attrs(initial):
+            raise OSError("capture source changed before converter opened it")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def _atomic_write(path, data):
     fd, temporary = tempfile.mkstemp(prefix=".redux-", dir=path.parent)
     try:
@@ -311,17 +333,22 @@ class CaptureIngestor:
         try:
             self._assert_mount()
             if source.suffix.lower() == ".hc22000":
-                raw = _read_regular_bytes(source, min(self.settings.max_capture_bytes, 32 * 1024 * 1024))
+                raw = _read_regular_bytes(
+                    source, min(self.settings.max_capture_bytes, 32 * 1024 * 1024)
+                )
             else:
                 with tempfile.TemporaryDirectory(
                     prefix=".hcx-", dir=self.settings.output_dir
                 ) as temp_dir:
                     target = Path(temp_dir) / "converted.hc22000"
-                    result = self.runner(
-                        [self.settings.converter, "-o", str(target), str(source)],
-                        capture_output=True,
-                        timeout=self.settings.convert_timeout_seconds, check=False,
-                    )
+                    with os.fdopen(_open_verified_capture(source, st), "rb") as pinned:
+                        result = self.runner(
+                            [self.settings.converter, "-o", str(target),
+                             f"/proc/self/fd/{pinned.fileno()}"],
+                            capture_output=True,
+                            timeout=self.settings.convert_timeout_seconds, check=False,
+                            pass_fds=(pinned.fileno(),),
+                        )
                     if result.returncode != 0:
                         raise RuntimeError(f"hcxpcapngtool returned {result.returncode}")
                     raw = target.read_bytes() if target.exists() else b""
