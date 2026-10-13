@@ -169,11 +169,11 @@ def test_pipeline_recovery_cli_reports_and_applies_safely(tmp_path, capsys):
     cfg = settings(tmp_path)
     config = tmp_path / "pipeline.toml"
     config.write_text(
-        "[pipeline]\\n"
-        f'inputs = ["{cfg.inputs[0]}"]\\n'
-        f'output_dir = "{cfg.output_dir}"\\n'
-        f'database = "{cfg.database}"\\n'
-        "settle_seconds = 0\\n"
+        "[pipeline]\n"
+        f'inputs = ["{cfg.inputs[0]}"]\n'
+        f'output_dir = "{cfg.output_dir}"\n'
+        f'database = "{cfg.database}"\n'
+        "settle_seconds = 0\n"
     )
     source = fixture_source(cfg.inputs[0] / "record.hc22000", REC.encode())
     with CaptureIngestor(cfg) as worker:
