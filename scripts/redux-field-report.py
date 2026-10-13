@@ -112,6 +112,7 @@ def snapshot(*, full=False) -> str:
                       ("retry_delay_seconds", "retry_delay_seconds"),
                       ("retry_in_seconds", "retry_in_seconds"),
                       ("events_seen", "events_seen"),
+                      ("handshake_events", "handshake_events"),
                       ("handed_off", "handed_off")):
         lines.append(f"{name}: {clean(str(d.get(key, 'unobserved')))}")
     lines.append("bettercap_api_probe: " + api_status())

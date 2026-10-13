@@ -61,6 +61,23 @@ def test_report_summary_uses_only_synthetic_service_data(monkeypatch):
     assert "/captures/redux/bettercap-live.cap" not in text
 
 
+@pytest.mark.parametrize("handshakes, expected", [(None, "unobserved"), (0, "0"), (2, "2")])
+def test_event_activity_does_not_substitute_for_handshake_observation(
+        monkeypatch, handshakes, expected):
+    state = {"events_seen": 168, "handed_off": 0}
+    if handshakes is not None:
+        state["handshake_events"] = handshakes
+    monkeypatch.setattr(report, "read_json", lambda: state)
+    monkeypatch.setattr(report, "command", lambda *args, **kw: ["active"])
+    monkeypatch.setattr(report, "log_tail", lambda **kw: [])
+    monkeypatch.setattr(report, "api_status", lambda: "HTTP 401")
+    monkeypatch.setattr(report, "capture_mount_snapshot", lambda: (1, 2))
+    text = report.snapshot()
+    assert "events_seen: 168\n" in text
+    assert f"handshake_events: {expected}\n" in text
+    assert "handed_off: 0\n" in text
+
+
 def test_private_atomic_save_requires_verified_capture_mount(tmp_path):
     output = tmp_path / "diagnostics/latest.txt"
     with pytest.raises(RuntimeError, match="REDUXCAP"):

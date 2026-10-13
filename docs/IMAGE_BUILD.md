@@ -950,3 +950,26 @@ the processor ledger; if `handed_off` remains zero, inspect logs and
 rotation configuration without changing capture files or reflashing.
 Record the exact image SHA-256/source revision from the local build's
 manifest before associating this observation with a release artifact.
+
+### Read-only SSH follow-up — 2026-10-12
+
+After the operator independently verified the host key at the physical Pi,
+strict SSH diagnostics reported 12 field-acceptance passes, no failures,
+and one UNKNOWN (closed capture handoff). The live configuration uses
+`rotation_seconds = 300`. Both `/captures/active` and `/captures/incoming`
+were empty. The worker ledger was available with a fresh completed scan,
+zero examined files, zero artifacts and no scan error. Recent bounded
+service journal samples contained no error/failure/traceback lines.
+
+Two runtime snapshots showed `engine_attempts: 56 -> 57` and
+`events_seen: 168 -> 171`, while `handshake_events` and `handed_off`
+remained zero. The sighting database contained zero rows. This verifies
+worker execution and runtime activity, but **does not verify RF reception**.
+No completed capture was available to test handoff or conversion. The
+reason no RF sightings/captures were recorded remains unestablished;
+zero handoffs alone does not justify a pipeline repair.
+
+The local report source now includes the existing `handshake_events`
+counter, independently of general event activity. This source change was
+not deployed to the Pi. No service, radio, package, capture or installed
+software changes were made on the physical target during these diagnostics.
