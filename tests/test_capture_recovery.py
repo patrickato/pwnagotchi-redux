@@ -146,6 +146,52 @@ def test_dry_run_refuses_symlinked_ledger(tmp_path):
     assert private.read_bytes() == b"secret"
 
 
+def test_recovery_refuses_tampered_output_location(tmp_path):
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "record.hc22000", REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        worker.db.execute(
+            "UPDATE artifacts SET output_sha=?, output_path=?",
+            ("../" + "a" * 61, str(tmp_path / "outside")),
+        )
+        worker.db.commit()
+    result = recovery_report(cfg, apply=True)
+    assert result["attempted"] == result["retryable"] == 0
+    assert result["blocked"] == 1
+    assert source.exists()
+
+
+def test_pipeline_recovery_cli_reports_and_applies_safely(tmp_path, capsys):
+    import json
+    from redux.cli import main
+
+    cfg = settings(tmp_path)
+    config = tmp_path / "pipeline.toml"
+    config.write_text(
+        "[pipeline]\\n"
+        f'inputs = ["{cfg.inputs[0]}"]\\n'
+        f'output_dir = "{cfg.output_dir}"\\n'
+        f'database = "{cfg.database}"\\n'
+        "settle_seconds = 0\\n"
+    )
+    source = fixture_source(cfg.inputs[0] / "record.hc22000", REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        Path(worker.rows()[0]["output_path"]).unlink()
+
+    argv = ["pipeline", "--config", str(config), "recover"]
+    assert main(argv) == 0
+    dry = json.loads(capsys.readouterr().out)
+    assert dry["mode"] == "dry_run" and dry["retryable"] == 1
+    assert source.exists()
+    assert main(argv + ["--apply"]) == 0
+    applied = json.loads(capsys.readouterr().out)
+    assert applied["mode"] == "apply"
+    assert applied["attempted"] == 1 and applied["outcomes"] == {"ready": 1}
+    assert source.exists()
+
+
 def test_mount_is_revalidated_before_recovery_apply(tmp_path, monkeypatch):
     import redux.crack.recovery as recovery
     cfg = settings(tmp_path)
