@@ -1249,6 +1249,12 @@ def cmd_pipeline(args) -> int:
         with CaptureIngestor(Settings.load(args.config)) as worker:
             print(json.dumps(worker.scan(), indent=2))
         return 0
+    if args.pipeline_cmd == "recover":
+        from .crack.recovery import recovery_report
+        report = recovery_report(Settings.load(args.config),
+                                 apply=args.apply, max_files=args.max_files)
+        print(json.dumps(report, indent=2))
+        return 0
     if args.pipeline_cmd == "prune":
         from .crack.retention import retention_report
         report = retention_report(Settings.load(args.config),
@@ -1423,6 +1429,11 @@ def build_parser() -> argparse.ArgumentParser:
     plc = pl.add_subparsers(dest="pipeline_cmd", required=True)
     plc.add_parser("status", help="read capture conversion and audit statistics")
     plc.add_parser("ingest", help="process one bounded pass of saved captures")
+    recovery = plc.add_parser("recover", help="inspect or retry failed and incomplete capture processing (dry-run default)")
+    recovery.add_argument("--max-files", type=int, default=100,
+                          help="retry at most 1000 recorded source captures")
+    recovery.add_argument("--apply", action="store_true",
+                          help="explicitly retry failed or missing-output sources; no deletion")
     plc.add_parser("audit", help="run one opt-in scope-checked local audit job")
     retention = plc.add_parser("prune", help="report verified raw capture cleanup candidates (dry-run default)")
     retention.add_argument("--older-than-days", type=int, default=30,
