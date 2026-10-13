@@ -230,7 +230,9 @@ def test_capture_replaced_before_first_digest_is_deferred(tmp_path, monkeypatch)
 
     def swap_before_digest(path):
         if Path(path) == source:
-            source.unlink()
+            # Retain the old inode so the filesystem cannot immediately
+            # recycle its number for the replacement.
+            source.rename(tmp_path / "original-preserved.hc22000")
             source.write_bytes((REC + "\n").encode())
             os.utime(source, ns=(initial.st_atime_ns, initial.st_mtime_ns))
         return old_digest(path)
