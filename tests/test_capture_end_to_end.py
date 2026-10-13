@@ -91,7 +91,10 @@ def test_end_to_end_close_convert_and_status(tmp_path, monkeypatch):
 
     def convert(argv, **kwargs):
         assert argv[0] == "hcxpcapngtool"
-        assert argv[-1].endswith(".pcap")
+        assert argv[-1].startswith("/proc/self/fd/")
+        assert kwargs["pass_fds"] == (int(argv[-1].rsplit("/", 1)[1]),)
+        from pathlib import Path
+        assert Path(argv[-1]).read_bytes() == b"synthetic owned-AP pcap fixture"
         from pathlib import Path
         Path(argv[2]).write_text(PMKID + "\n")
         return subprocess.CompletedProcess(argv, 0)
