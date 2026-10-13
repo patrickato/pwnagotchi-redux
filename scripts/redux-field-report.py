@@ -61,6 +61,20 @@ def read_json(path=STATE) -> dict:
         return {}
 
 
+def capture_link_type(iface, *, net_root=Path("/sys/class/net")):
+    """Read the selected netdev's real packet link type, without radio changes."""
+    if (not isinstance(iface, str) or iface in (".", "..")
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", iface)):
+        return "unobserved"
+    try:
+        value = (net_root / iface / "type").read_text(encoding="ascii").strip()
+        if not value.isdecimal() or len(value) > 5 or int(value) > 65535:
+            return "unobserved"
+        return int(value)
+    except (OSError, UnicodeError):
+        return "unobserved"
+
+
 def log_tail(path=ENGINE_LOG, *, count=14) -> list[str]:
     try:
         if path.is_symlink() or path.stat().st_size > 8 * 1024 * 1024:
@@ -115,6 +129,7 @@ def snapshot(*, full=False) -> str:
                       ("handshake_events", "handshake_events"),
                       ("handed_off", "handed_off")):
         lines.append(f"{name}: {clean(str(d.get(key, 'unobserved')))}")
+    lines.append("capture_link_type: " + str(capture_link_type(d.get("iface"))))
     lines.append("bettercap_api_probe: " + api_status())
     if full:
         lines.append("== RF kill ==")

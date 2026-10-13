@@ -1009,3 +1009,27 @@ This establishes that the reported cfg80211 interface mode and firmware
 monitor setting disagree. Firmware monitor enablement and a native
 radiotap capture interface remain unverified. No `-m2` setter, interface
 creation, service restart or other radio change was performed.
+
+### Approved one-minute firmware monitor test — 2026-10-12
+
+The operator approved a bounded `nexutil -I wlan0 -m2` test followed by
+restoration to `-m0`. Firmware mode 2 was confirmed before sampling.
+Measured RX increments were 418 packets/31,676 bytes after 20 seconds,
+737 packets/63,775 bytes after 40 seconds, and 1,198 packets/101,992 bytes
+after 60 seconds. TX, RX-error and RX-drop counters stayed at zero.
+This demonstrates receive traffic after firmware monitor enablement; it
+does not verify decoded access points, handshake capture or conversion.
+
+The netdev retained Ethernet link type 1 throughout. Runtime event,
+handshake and handoff counters did not increase. The supervisor rotated
+normally during the test (`engine_attempts: 70 -> 71`); the test did not
+request that restart. The journal query returned exit 1, so its reported
+zero channel-error count is **unusable evidence**, not a passing check.
+The final firmware query confirmed restoration to `monitor: 0`.
+No native monitor interface was created and no installed software changed.
+
+The local field report now measures `capture_link_type` for the selected
+interface. Field acceptance requires raw 802.11 (ARPHRD 801) or radiotap
+(803); Ethernet type 1 fails even when `iw` says monitor. An older report
+without this measurement stays UNKNOWN. Log-tail text cannot supply a
+missing header measurement. These reporting changes are not deployed.

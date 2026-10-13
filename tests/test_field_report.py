@@ -78,6 +78,36 @@ def test_event_activity_does_not_substitute_for_handshake_observation(
     assert "handed_off: 0\n" in text
 
 
+@pytest.mark.parametrize("value,expected", [("803\n", 803), ("801\n", 801),
+                                          ("1\n", 1), ("broken", "unobserved"),
+                                          ("65536", "unobserved")])
+def test_link_type_is_measured_from_selected_interface(tmp_path, value, expected):
+    iface = tmp_path / "wlan0"
+    iface.mkdir()
+    (iface / "type").write_text(value)
+    assert report.capture_link_type("wlan0", net_root=tmp_path) == expected
+    assert report.capture_link_type("wlan1", net_root=tmp_path) == "unobserved"
+
+
+@pytest.mark.parametrize("iface", [None, "", "../wlan0", ".", "..", "wlan0;id"])
+def test_invalid_interface_cannot_select_another_link_type(tmp_path, iface):
+    (tmp_path / "type").write_text("803")
+    assert report.capture_link_type(iface, net_root=tmp_path) == "unobserved"
+
+
+def test_snapshot_reports_actual_selected_interface_link_type(monkeypatch):
+    monkeypatch.setattr(report, "read_json", lambda: {"iface": "wlan0"})
+    monkeypatch.setattr(report, "command", lambda *args, **kw: ["active"])
+    monkeypatch.setattr(report, "log_tail", lambda **kw: [])
+    monkeypatch.setattr(report, "api_status", lambda: "HTTP 401")
+    monkeypatch.setattr(report, "capture_mount_snapshot", lambda: (1, 2))
+    def probe(iface):
+        assert iface == "wlan0"
+        return 1
+    monkeypatch.setattr(report, "capture_link_type", probe)
+    assert "capture_link_type: 1\n" in report.snapshot()
+
+
 def test_private_atomic_save_requires_verified_capture_mount(tmp_path):
     output = tmp_path / "diagnostics/latest.txt"
     with pytest.raises(RuntimeError, match="REDUXCAP"):

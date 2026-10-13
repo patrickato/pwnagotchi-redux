@@ -62,6 +62,10 @@ fingerprint/host identity differs from what was expected.
   selected interface against its own `iw dev` block; unknown or missing
   interface data does not count as a pass. Verify no Wi-Fi device reports
   a software or hardware RF block. The supervisor must not disrupt Ethernet.
+- [ ] The selected interface exposes raw 802.11 or radiotap packets
+  (`capture_link_type` ARPHRD 801 or 803). An Ethernet link type (1)
+  does not pass merely because `iw` reports monitor mode. A missing
+  measurement remains UNKNOWN until the field helper is updated.
 - [ ] Bettercap is alive, and the REST interface is reachable on
   `127.0.0.1:8081`. An **unauthenticated** probe should return HTTP 401
   (authentication required); HTTP 400 is unexpected, while HTTP 200

@@ -17,7 +17,7 @@ import sys
 FIELDS = (
     "captures_ext4", "redux-live.service", "redux.service",
     "redux-capture-ingest.timer", "live_state", "capture_radio", "dashboard",
-    "bettercap_api_probe", "events_seen", "handed_off",
+    "bettercap_api_probe", "events_seen", "handed_off", "capture_link_type",
 )
 COUNTRY = re.compile(r"(?m)^\s*country\s+([A-Z]{2}|00):")
 SOFT = re.compile(r"Soft blocked:\s*(yes|no)", re.I)
@@ -30,7 +30,7 @@ def parse(report):
     result = {}
     for line in report.splitlines():
         if line.startswith("== "):
-            continue
+            break  # Only the report header supplies measured fields, never log text.
         if ": " in line:
             key, value = line.split(": ", 1)
             if key in FIELDS and key not in result:
@@ -100,6 +100,11 @@ def verdicts(data, expected_country):
           data.get("monitor_ifaces", set()) else "FAIL",
           "selected: " + (radio or "unknown") +
           "; monitors: " + (", ".join(sorted(data.get("monitor_ifaces", set()))) or "none"))
+    link = data.get("capture_link_type", "")
+    check("Monitor packet link type", "PASS" if link in ("801", "803") else
+          "FAIL" if link.isdecimal() else "UNKNOWN",
+          "ARPHRD " + link + "; expected 802.11 (801) or radiotap (803)"
+          if link.isdecimal() else "not measured; update the field report helper")
     api = data.get("bettercap_api_probe", "")
     check("Bettercap REST auth", "PASS" if api.startswith("HTTP 401") else
           "FAIL" if api.startswith(("HTTP 200", "HTTP 400", "HTTP 403", "unavailable"))

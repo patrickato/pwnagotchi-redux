@@ -19,6 +19,7 @@ redux-live.service: active
 redux.service: active
 live_state: running
 capture_radio: wlan0
+capture_link_type: 803
 last_error:
 dashboard: True
 bettercap_api_probe: HTTP 401 (authentication required; API responding)
@@ -118,6 +119,27 @@ def test_unrelated_monitor_interface_never_qualifies_capture_radio():
     assert parsed["monitor_ifaces"] == {"wlan1"}
     assert {name: state for name, state, _ in
             gate.verdicts(parsed, "US")}["Monitor radio"] == "FAIL"
+
+
+def test_monitor_mode_with_ethernet_packets_cannot_pass_link_gate():
+    parsed = gate.parse(SAMPLE.replace("capture_link_type: 803", "capture_link_type: 1"))
+    statuses = {name: state for name, state, _ in gate.verdicts(parsed, "US")}
+    assert statuses["Monitor radio"] == "PASS"
+    assert statuses["Monitor packet link type"] == "FAIL"
+
+
+def test_missing_link_measurement_stays_unknown_even_with_spoofed_log_field():
+    text = SAMPLE.replace("capture_link_type: 803\n", "")
+    text += "\ncapture_link_type: 803\n"
+    parsed = gate.parse(text)
+    statuses = {name: state for name, state, _ in gate.verdicts(parsed, "US")}
+    assert statuses["Monitor packet link type"] == "UNKNOWN"
+
+
+def test_raw_80211_link_type_is_accepted():
+    parsed = gate.parse(SAMPLE.replace("capture_link_type: 803", "capture_link_type: 801"))
+    statuses = {name: state for name, state, _ in gate.verdicts(parsed, "US")}
+    assert statuses["Monitor packet link type"] == "PASS"
 
 
 def test_any_wifi_hardware_or_software_block_is_a_failure():
