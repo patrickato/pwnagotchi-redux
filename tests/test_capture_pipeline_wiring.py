@@ -25,7 +25,18 @@ def test_active_angryoxide_still_requires_target():
 
 def test_pipeline_cli_routes_commands_without_running():
     parser = build_parser()
-    for command in ("status", "ingest", "audit"):
+    for command in ("status", "ingest", "recover", "audit"):
         parsed = parser.parse_args(["pipeline", command])
         assert parsed.pipeline_cmd == command
         assert parsed.func.__name__ == "cmd_pipeline"
+
+
+
+def test_recovery_cli_is_dry_run_unless_explicit_apply():
+    parser = build_parser()
+    inspect = parser.parse_args(["pipeline", "recover"])
+    assert inspect.apply is False
+    assert inspect.max_files == 100
+    apply = parser.parse_args(["pipeline", "recover", "--apply", "--max-files", "7"])
+    assert apply.apply is True
+    assert apply.max_files == 7
