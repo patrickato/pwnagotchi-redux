@@ -351,7 +351,8 @@ class CaptureIngestor:
                         )
                     if result.returncode != 0:
                         raise RuntimeError(f"hcxpcapngtool returned {result.returncode}")
-                    raw = target.read_bytes() if target.exists() else b""
+                    raw = (_read_regular_bytes(target, 32 * 1024 * 1024)
+                           if target.exists() else b"")
             self._assert_mount()
             after = source.lstat()
             if not stat.S_ISREG(after.st_mode) or (
