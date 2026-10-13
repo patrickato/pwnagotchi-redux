@@ -19,3 +19,4 @@ libnl-3-dev
 libnl-genl-3-dev
 pkg-config
 xxd
+fonts-dejavu-core
