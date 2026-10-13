@@ -211,6 +211,37 @@ def test_input_disappears_during_digest_is_deferred(tmp_path, monkeypatch):
         assert ing.rows() == []
 
 
+def test_digest_refuses_symlink_even_when_replaced_after_stat(tmp_path):
+    from redux.crack.ingest import _digest_file
+    private = tmp_path / "secret-not-for-ingest"
+    private.write_bytes(b"private source bytes")
+    source = tmp_path / "capture.pcap"
+    source.symlink_to(private)
+    with pytest.raises(OSError):
+        _digest_file(source)
+
+
+def test_capture_replaced_before_first_digest_is_deferred(tmp_path, monkeypatch):
+    from redux.crack import ingest as module
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "swap.hc22000", (REC + "\n").encode())
+    initial = source.stat()
+    old_digest = module._digest_file
+
+    def swap_before_digest(path):
+        if Path(path) == source:
+            source.unlink()
+            source.write_bytes((REC + "\n").encode())
+            os.utime(source, ns=(initial.st_atime_ns, initial.st_mtime_ns))
+        return old_digest(path)
+
+    with CaptureIngestor(cfg) as worker:
+        monkeypatch.setattr(module, "_digest_file", swap_before_digest)
+        assert worker.ingest_file(source) == "deferred"
+        assert worker.rows() == []
+        assert not list(cfg.output_dir.glob("*.hc22000"))
+
+
 def test_changed_capture_creates_new_record(tmp_path):
     cfg = settings(tmp_path)
     p = write_file(cfg.inputs[0] / "a.hc22000", (REC+"\n").encode())
