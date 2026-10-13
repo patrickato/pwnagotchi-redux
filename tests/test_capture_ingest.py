@@ -95,6 +95,37 @@ def test_converter_missing_is_retryable(tmp_path):
         assert ing.rows()[0]["status"] == "error"
 
 
+def test_direct_22000_read_refuses_swapped_symlink(tmp_path, monkeypatch):
+    from redux.crack import ingest as module
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "swapped.hc22000", (REC + "\n").encode())
+    outside = tmp_path / "outside-secret.hc22000"
+    outside.write_bytes(b"do not read or alter this file")
+    digest_original = module._digest_file
+
+    def substitute_after_digest(path):
+        sha = digest_original(path)
+        if Path(path) == source:
+            source.unlink()
+            source.symlink_to(outside)
+        return sha
+
+    with CaptureIngestor(cfg) as worker:
+        monkeypatch.setattr(module, "_digest_file", substitute_after_digest)
+        assert worker.ingest_file(source) == "error"
+        assert worker.rows()[0]["status"] == "error"
+        assert not list(cfg.output_dir.glob("*.hc22000"))
+        assert outside.read_bytes() == b"do not read or alter this file"
+
+
+def test_direct_22000_read_rejects_unexpected_growth(tmp_path):
+    from redux.crack.ingest import _read_regular_bytes
+    source = tmp_path / "growing.hc22000"
+    source.write_bytes(b"x" * 128)
+    with pytest.raises(ValueError, match="exceeds"):
+        _read_regular_bytes(source, 64)
+
+
 def test_defer_new_files(tmp_path):
     cfg = Settings((tmp_path / "in",), tmp_path / "out", tmp_path / "state" / "jobs.db",
                    settle_seconds=10)
