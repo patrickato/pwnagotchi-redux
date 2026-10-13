@@ -1,4 +1,4 @@
-# Redux completion scorecard — 2026-10-09
+# Redux completion scorecard — updated 2026-10-12
 
 > **Overall estimate: approximately 55% complete / 45% remaining** for the
 > ambitious **standalone Augur / Redux v1 product**, not just the capture MVP.
@@ -24,13 +24,14 @@ No percentage is promoted solely by adding passing unit tests.
 ## Demonstrated versus pending
 
 - **Demonstrated in GitHub CI:** cross-module Python tests, shell/source/image staging, structural image verifier synthetic fixtures, real driver API URL construction, artificial failure/retry and pipeline end-to-end simulation.
-- **Recorded limited physical evidence:** the repository README cites a Pi 4 passive capture test (2026-10-08) that processed 703 real frames, observing 2 APs and 3 device identities. This is *not* an end-to-end standalone Redux image boot or a Bettercap handshake qualification.
-- **Unverified hardware-dependent gates:** successful full pi-gen arm64 image creation and boot on both Pi 4 and Pi 5; native kernel/Nexmon driver behavior; startup radio transition and connected uplink preservation; live Bettercap-to-hcx conversion of a controlled owned AP sample; TFT and touch; long-term power and storage faults; OTA/UPS, SDR/CSI, optional audit hardware.
+- **Recorded Pi 4 physical evidence:** the earlier 2026-10-08 passive test processed 703 real frames, observing two APs and three identities **outside** the final standalone image. On 2026-10-12 the owner built and qualified a separate ARM64 field image, flashed a disposable card, booted it on the Pi 4 and logged in. Two on-device reports observed Redux services active, a mounted REDUXCAP ext4 partition, US regulatory domain, monitor-labeled wlan0, an authenticated Bettercap loopback listener, and event counters increasing from 6 to 12. Those reports did **not** establish native frame reception, a closed nonempty PCAP, or valid handshake material.
+- **Current Pi 4 blocker:** controlled native-interface testing subsequently failed before packet sampling; cleanup restored firmware mode but `wlan0` could not return to monitor mode because the installed brcmfmac driver reported `-16` busy. The runtime was recorded **degraded**, not restored. Nexmon source fix `0f01d80` is **not deployed**; CI only validates source logic. See `docs/IMAGE_BUILD.md` and `docs/AGENT_WORK_QUEUE.md`.
+- **Unverified hardware-dependent gates:** real 802.11/radiotap ingress in this Redux image, recovery of the current native driver, supported kernel/Nexmon compatibility, capture-to-hcx conversion against an operator-owned AP, Pi 5 image build/boot, full TFT and touch, sustained faults/restarts, OTA/UPS, SDR/CSI and optional audit hardware.
 - **Product integration remains:** user-visible control/config workflows, multi-subsystem event coherence, storage housekeeping, update/rollback, permissions, status, recovery and sustained-use quality.
 
 ## Milestones remaining (sequence, not a percentage promise)
 
-1. **Reliable passive standalone image:** complete ARM64 build, first boot, mount checks, live passive capture, ingestion and health/status with no radio competition.
+1. **Reliable passive standalone image:** ARM64 build and Pi 4 first boot now observed; finish verified native radiotap ingress, storage capture handoff, ingestion, reliable driver lifecycle/recovery, and Pi 5 boot.
 2. **Field-stable device:** physical unplug/hotplug tests, recovery after reboots and near-full SD, first-class storage management, 24–72-hour soak testing and actionable diagnostics.
 3. **Great user interface:** live dashboard and actual Pi TFT touch interaction, runtime controls, feature discovery and settings that show real telemetry and states.
 4. **Full-capability integration:** qualify remaining sensors, blue/purple features, packs, sync/OTA and all permission boundaries on real supported hardware.
@@ -38,9 +39,12 @@ No percentage is promoted solely by adding passing unit tests.
 
 ## Current development boundary
 
-Owner-driven PR [#144](https://github.com/patrickato/pwnagotchi-redux/pull/144)
-uses branch `human/redux-capture-pipeline-integration`; `main` remains
-protected and no development image is being represented as flash/field qualified.
+Active development is integrated directly on `human/redux-workbench`, shared
+by the chat-side engineering lead and the owner's WSL Codex agent.
+Do **not** merge to or push to `main`. Historical PR
+[#144](https://github.com/patrickato/pwnagotchi-redux/pull/144) is not the
+active workspace. A physically booted Pi 4 image is a meaningful but
+partial qualification, not proof of a production-ready radio/capture stack.
 
 A conservative, manual-only raw capture retention command now exists:
 
