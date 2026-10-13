@@ -64,6 +64,42 @@ def adapt_sdio_id(header, source):
     return source.replace(anchor, anchor + "\n\n" + alias, 1), "SDIO ID adapted: use renamed header identifier via nexmon 6.18 compatibility alias"
 
 
+def propagate_monitor_error(source):
+    """Do not report a successful channel change when firmware rejected it.
+
+    The pinned Nexmon callback logs its firmware error but returns zero.
+    Restrict this adjustment to that known callback and reject unfamiliar
+    bodies rather than guessing which return value is safe to substitute.
+    """
+    pattern = r"\bbrcmf_cfg80211_nexmon_set_channel\s*\([^)]*\)\s*\{(.*?)^\}"
+    callbacks = list(re.finditer(pattern, source, re.S | re.M))
+    if len(callbacks) != 1:
+        raise ValueError("cannot locate a unique nexmon channel callback body")
+    callback = callbacks[0]
+    body = callback.group(1)
+    code = re.sub(r"/\*.*?\*/|//[^\n]*", "", body, flags=re.S)
+    if (len(re.findall(r"\bs32\s+err\s*=\s*0\s*;", code)) != 1
+            or len(re.findall(
+                r'\berr\s*=\s*brcmf_fil_iovar_int_set\(ifp,\s*"chanspec",\s*chanspec\)\s*;',
+                code)) != 1):
+        raise ValueError("unsupported nexmon channel error handling")
+    terminal = re.search(r"\breturn\s+(0|err)\s*;\s*$", body)
+    if terminal is None:
+        raise ValueError("unsupported nexmon channel callback return")
+    if terminal.group(1) == "err":
+        # The pinned 6.18 callback already propagates errors and has an
+        # early unsupported-band rejection. Preserve that implementation.
+        returns = re.findall(r"\breturn\s+([^;]+);", code)
+        if any(value.strip() not in ("err", "-EINVAL") for value in returns):
+            raise ValueError("unsupported nexmon channel error handling")
+        return source, "channel callback unchanged: firmware errors already propagated"
+    if len(re.findall(r"\breturn\b", code)) != 1:
+        raise ValueError("unsupported nexmon channel error handling")
+    updated = body[:terminal.start(1)] + "err" + body[terminal.end(1):]
+    source = source[:callback.start(1)] + updated + source[callback.end(1):]
+    return source, "channel callback corrected: propagate firmware error instead of reporting success"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("header", type=Path)
@@ -73,9 +109,10 @@ def main():
     try:
         original = args.source.read_text()
         updated, reason = adapt_driver(args.header.read_text(), original)
+        updated, channel_reason = propagate_monitor_error(updated)
         if updated != original:
             args.source.write_text(updated)
-        reasons = [reason]
+        reasons = [reason, channel_reason]
         if args.sdio_header:
             sdio_header = args.sdio_header.read_text()
             for name in ("sdio.c", "bcmsdh.c"):

@@ -76,6 +76,73 @@ def test_adapter_is_idempotent():
     assert "unchanged" in reason
 
 
+CHANNEL_SOURCE = '''static s32
+brcmf_cfg80211_nexmon_set_channel(struct wiphy *wiphy,struct cfg80211_chan_def *chandef) {
+    struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
+    struct brcmf_if *ifp = netdev_priv(cfg_to_ndev(cfg));
+    s32 err = 0;
+    u16 chanspec;
+    chanspec = chandef_to_chanspec(&cfg->d11inf, chandef);
+    err = brcmf_fil_iovar_int_set(ifp, "chanspec", chanspec);
+    if (err < 0) {
+        brcmf_err("Set Channel failed: chspec=%d, %d\\n", chanspec, err);
+    }
+    return 0;
+}
+static int unrelated(void) {
+    return 0;
+}
+'''
+
+
+@pytest.mark.parametrize("header", [OLD_HEADER, NEW_HEADER])
+def test_channel_failure_is_propagated_after_kernel_api_adaptation(header):
+    source, _ = compat.adapt_driver(header, CHANNEL_SOURCE)
+    updated, reason = compat.propagate_monitor_error(source)
+    assert 'err = brcmf_fil_iovar_int_set(ifp, "chanspec", chanspec);' in updated
+    assert "return err;\n}" in updated
+    assert "static int unrelated(void) {\n    return 0;\n}" in updated
+    assert "propagate firmware error" in reason
+    assert compat.propagate_monitor_error(updated)[0] == updated
+
+
+@pytest.mark.parametrize("source", [
+    SOURCE,
+    CHANNEL_SOURCE.replace('"chanspec"', '"different_iovar"'),
+    CHANNEL_SOURCE.replace("return 0;", "return -1;", 1),
+    CHANNEL_SOURCE.replace("if (err < 0) {", "if (err < 0) { return 0;"),
+    CHANNEL_SOURCE + CHANNEL_SOURCE,
+])
+def test_unknown_channel_callback_body_refuses_adjustment(source):
+    with pytest.raises(ValueError, match="channel"):
+        compat.propagate_monitor_error(source)
+
+
+def test_existing_guarded_channel_error_propagation_is_preserved():
+    source = CHANNEL_SOURCE.replace(
+        "    chanspec =", "    /* Older code used to return 0 unconditionally. */\n"
+        "    if (!chandef->chan) { return -EINVAL; }\n    chanspec =", 1
+    ).replace("    return 0;", "    return err;", 1)
+    updated, reason = compat.propagate_monitor_error(source)
+    assert updated == source
+    assert "already propagated" in reason
+
+
+def test_build_entrypoint_applies_channel_error_fix(tmp_path):
+    import subprocess
+    import sys
+    header = tmp_path / "cfg80211.h"
+    source = tmp_path / "cfg80211.c"
+    header.write_text(NEW_HEADER)
+    source.write_text(CHANNEL_SOURCE)
+    result = subprocess.run([sys.executable, str(path), str(header), str(source)],
+                            capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert "struct net_device *redux_dev" in source.read_text()
+    assert "return err;\n}" in source.read_text()
+    assert "propagate firmware error" in result.stdout
+
+
 @pytest.mark.parametrize("header,source", [
     (NEW_HEADER.replace("struct net_device *dev", "unsigned int link_id"), SOURCE),
     (NEW_HEADER, "/* no nexmon callback definition */"),

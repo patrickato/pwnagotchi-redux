@@ -973,3 +973,30 @@ The local report source now includes the existing `handshake_events`
 counter, independently of general event activity. This source change was
 not deployed to the Pi. No service, radio, package, capture or installed
 software changes were made on the physical target during these diagnostics.
+
+### Radio-driver investigation — 2026-10-12
+
+Further strict-SSH, read-only diagnostics found `wlan0` in monitor mode on
+channel 7, with zero RX packets/bytes and zero TX packets. Bettercap was
+v2.32.0. The kernel was `6.12.109+rpt-rpi-v8`; the selected module path was
+the installed `updates/brcmfmac.ko`, with matching version metadata.
+Both installed Nexmon firmware and driver checksum manifests passed.
+These checks establish installed-file integrity, not successful frame reception.
+
+The kernel journal contained thousands of repeated
+`brcmf_cfg80211_nexmon_set_channel: Set Channel failed` errors with result
+`-52`. A bounded latest sample repeatedly reported chanspecs 53282,
+53286, 53290 and 53294. No capture processing failure is established by
+these radio errors, and their role in the absence of all received frames
+remains a hardware investigation.
+
+Inspection of the pinned upstream Nexmon source found that its 6.12 monitor
+channel callback logs firmware failure but unconditionally returns zero.
+The local image-build patch now returns the actual firmware result instead.
+The pinned 6.18 implementation already propagates errors and is preserved.
+The patch was exercised against both pinned source files and hardware-free
+regression fixtures. This is a failure-reporting correction, **not** a
+verified RF fix or proof that a new ARM64 module/image has been built.
+No replacement module was loaded and no physical Pi configuration was changed.
+
+Source: [pinned maintained Nexmon 6.12 callback](https://github.com/jayofelony/nexmon/blob/1654e1857766df92086dbfbed5ffd288efc9bd8c/patches/driver/brcmfmac_6.12.y-nexmon/cfg80211.c).
