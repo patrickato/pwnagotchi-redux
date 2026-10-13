@@ -188,6 +188,32 @@ disposable Pi image, and test volume-removal behavior during controlled
 field acceptance. Never test destructive retention against real
 unbacked captures without operator approval.
 
+## New operational capability — targeted capture recovery (2026-10-12)
+
+The standalone operator now has `redux pipeline --config
+/etc/redux/pipeline.toml recover` as an actual CLI command, with
+`recover --apply` available for explicit bounded retries. Dry run is
+read-only and suppresses sensitive filenames and capture content.
+It identifies prior conversion errors and missing prepared outputs in the
+durable SQLite ledger, skips suspicious/missing/unsettled input paths,
+and reports retry/deferred/blocked counts. Apply uses the same
+REDUXCAP-pinned ingestor and exclusive worker lock; raw captures and
+previous prepared artifacts are never deleted by recovery.
+
+Source: `redux/crack/recovery.py`, `redux/cli.py`. Tests:
+`tests/test_capture_recovery.py`, `tests/test_capture_pipeline_wiring.py`;
+Doctor now recommends this procedure for measured capture-processing
+errors. Documentation: `docs/CAPTURE_PIPELINE.md`.
+Hardware-free smoke and full CI passed at
+[38338209966](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38338209966)
+for the CLI E2E fixture; the subsequent Doctor integration CI is being
+tracked separately.
+
+**Not yet hardware accepted:** ARM64 `hcxpcapngtool` real capture conversion,
+unexpected-power-loss recovery, and Pi 4/5 packaged image smoke tests.
+These remain field gates. Do not represent a passing synthetic recovery
+test as a measured handshake or radio recovery.
+
 ## P2 — independent verification and release preparation
 
 **P0.2/P1 collector milestone:** Local source now provides
