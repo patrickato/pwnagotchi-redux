@@ -193,13 +193,13 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
             findings.append(_finding("capture processing", "degraded",
                                      "Recent capture conversion reported errors.",
                                      f"Last scan outcomes: {str(outcomes)[:160]}.",
-                                     "Inspect converter availability and worker service logs."))
+                                     "Inspect converter logs, then run redux pipeline recover (dry-run); use --apply for deliberate retries."))
         elif processing.get("by_status", {}).get("error", 0):
             findings.append(_finding("capture processing", "attention",
                                      "Capture-processing ledger contains earlier errors.",
                                      f"{processing['by_status']['error']} artifact(s) "
                                      "still marked error; last scan completed.",
-                                     "Review failed artifacts and run the ingestion worker again."))
+                                     "Run redux pipeline recover to inspect failed jobs; use --apply to retry verified candidates."))
         else:
             findings.append(_finding("capture processing", "ok",
                                      "Capture-processing worker recently completed a scan.",
