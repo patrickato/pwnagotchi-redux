@@ -95,7 +95,12 @@ def _open_retention_lock(path, *, create):
         opened = os.fstat(fd)
         if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
             raise ValueError("retention lock must be a regular, singly linked file")
-        os.fchmod(fd, 0o600)
+        if create:
+            os.fchmod(fd, 0o600)
+        elif stat.S_IMODE(opened.st_mode) != 0o600:
+            # A dry run must never change filesystem permissions. Refuse
+            # an insecure or anomalous lock instead of silently repairing it.
+            raise ValueError("retention dry-run lock must already be mode 0600")
         return os.fdopen(fd, "a+b")
     except BaseException:
         os.close(fd)
