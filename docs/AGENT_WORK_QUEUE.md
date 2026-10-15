@@ -252,6 +252,47 @@ then test manually selected swipe axis and touch latency. Never infer
 touchscreen correctness from synthetic unit tests. Do not enable
 `redux-fbui.service` until its specific hardware acceptance is complete.
 
+## P0 build provenance follow-up — unsigned Debian keyring warning (2026-10-15)
+
+The operator's active ASUS WSL image build at snapshot `0403c396`
+reported:
+
+`W: Cannot check Release signature; keyring file not available /usr/share/keyrings/debian-archive-keyring.gpg`.
+
+The **old build is not release-trust qualified** even if the pi-gen process
+finishes, produces an image, and its artifact checks are green. Those checks
+verify compressed bytes and on-disk layout, not authenticated package
+provenance. It should **not be flashed as a trusted new image**.
+
+Lead-side workbench changes (all source-only; *not* in the running snapshot):
+
+- `image/host_preflight.py`: requires a real Debian archive-keyring file
+  with the published Bookworm archive and stable-release fingerprints,
+  including valid packaged `.gpg -> .pgp` sibling aliases; checks for
+  missing `gpgv` and isolates read-only GPG inspection in a temporary home.
+  Blocks a new full build before fetching sources.
+- `image/pigen_release_auth.py`: anchors pinned pi-gen `scripts/common`
+  to inject `--force-check-gpg` and rejects upstream drift or insecure
+  overrides. Called from `build.sh` before Nexmon download.
+- `scripts/qualify-field-image.py`: refuses a finished image when the
+  staged debootstrap script lacks the mandatory signed-Release policy,
+  even if its SHA256, layout, and export gates pass.
+- Regression tests: `tests/test_host_preflight.py`,
+  `tests/test_pigen_release_auth.py`, `tests/test_image_build.py`,
+  `tests/test_field_image_qualification.py`. Full unit/image CI passed at
+  [38756359516](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38756359516).
+
+**Local Codex follow-up:** after preserving any current image output, check
+the actual build log for missing-keyring/signature warnings. Provision the
+build host's Debian archive-keyring package from its trusted Ubuntu package
+sources (requires specific owner approval for package installation). Once
+the host passes the new keyring preflight, request a **fresh, isolated,
+signed-build snapshot** from the updated workbench. Do not reuse an already
+bootstrapped unsigned rootfs. Do not reflash/reboot the Pi, reload the radio
+driver, or declare physical boot/capture acceptance by inference. Keep
+source-only work going while privileges or an approved field test are
+pending.
+
 ## P2 — independent verification and release preparation
 
 **P0.2/P1 collector milestone:** Local source now provides
