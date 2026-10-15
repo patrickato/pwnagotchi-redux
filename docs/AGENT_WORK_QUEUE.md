@@ -277,6 +277,18 @@ checkpoint reads. Do not deploy it or infer RF success from that smoke test.
 
 ## Sync protocol
 
+**2026-10-15 local checkpoint:** Strict SSH reconnected at the previous
+address without a host-key change. Services, regulatory US, worker scans
+and Bettercap authentication responded; native RF remains unqualified
+(packet type 1, firmware monitor 0, empty captures and ledger). The source
+field checker now independently rejects stale/future/invalid runtime
+checkpoints instead of trusting a durable running label. Full local tests:
+1,502 passed, 2 skipped. A fresh local image build is explicitly authorized,
+but requires the owner's interactive laptop sudo authentication; a private
+launcher is prepared. No new artifact, deployment, reflash or Pi mutation
+has occurred in this session. Continue independent safe work while that
+local credential prerequisite is pending.
+
 - Lead/chat: update priorities here, review GitHub commits and CI, do
   independent edits with collision checks, leave clear status notes.
 - Local Codex: `git pull --ff-only` only with a clean worktree,

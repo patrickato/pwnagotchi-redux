@@ -84,6 +84,10 @@ fingerprint/host identity differs from what was expected.
 - [ ] Live state reaches `running`. A listening REST port or active
   systemd service **alone does not pass this gate**. Check Doctor's
   `last_error`, attempts, failure streak, and retry countdown.
+- [ ] `Live checkpoint freshness` passes. A saved running label older
+  than 12 seconds, a future timestamp or an invalid timestamp fails this
+  check. An older report helper without freshness measurement stays
+  UNKNOWN. Compare this separately from service activity and packet reception.
 - [ ] The earlier `/root/bettercap.aliases` permission errors and
   interactive `Are you sure you want to quit` prompts do not recur in
   **new** log lines. Old lines may remain in an append-only log.

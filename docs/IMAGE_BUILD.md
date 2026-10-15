@@ -1162,3 +1162,36 @@ environment override) and `ld` in addition to Python, Bash and shellcheck.
 They compile/link the synthetic lifecycle fixture only. The preflight checks
 these tools before the test suite starts; neither this host fixture nor a
 passing image CI run builds the target ARM64 Nexmon module.
+
+### Read-only reconnect and image preparation — 2026-10-15
+
+The checkout was clean on `human/redux-workbench` and synchronized to
+`c0cb265`. The prior Pi address accepted strict SSH with the previously
+trusted host key; no discovery scan or key replacement was needed.
+The 13:05:48Z summary reported all three Redux units active, REDUXCAP
+mounted, US selected globally and in config, Wi-Fi unblocked, and Bettercap
+HTTP 401. Runtime was running with no failure streak. The selected
+monitor-labeled `wlan0` had Ethernet link type 1, and both capture directories
+and the artifact ledger were empty. No handshake/handoff was observed.
+
+At 14:33:57Z, the source collector's new freshness measurement observed
+a 1.4-second-old running checkpoint and another fresh empty worker scan.
+The interface still had link type 1, and a separate read-only Nexutil query
+returned monitor 0. Engine/event counters differed between the two
+snapshots (700/2100 versus 18/54); their reset cause was not investigated.
+Do not treat those process-local counts as monotonic RF measurements.
+No service restart, radio setting, driver reload or other Pi mutation was
+performed by this reconnect/diagnostic work.
+
+The local field checker now assesses the checkpoint timestamp independently
+of its saved state: <=12 seconds is fresh, older is stale, future/invalid
+values fail, and absent values remain UNKNOWN. The threshold matches the
+browser's existing stale-runtime indication. Synthetic tests cover stale
+running labels, boundary times, malformed/future timestamps and old helpers.
+
+Fresh image preparation is separately authorized. Read-only host preflight
+confirmed ARM64 userspace execution, all image-build dependencies, ext4 and
+ample scratch space. Local noninteractive sudo failed because interactive
+authentication is required. A private, ignored build launcher and source
+snapshot were staged locally; no new image build or qualification is claimed
+until privileged build execution and the artifact checks actually complete.

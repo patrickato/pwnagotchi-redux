@@ -18,6 +18,7 @@ FIELDS = (
     "captures_ext4", "redux-live.service", "redux.service",
     "redux-capture-ingest.timer", "live_state", "capture_radio", "dashboard",
     "bettercap_api_probe", "events_seen", "handed_off", "capture_link_type",
+    "checkpoint_freshness",
 )
 COUNTRY = re.compile(r"(?m)^\s*country\s+([A-Z]{2}|00):")
 SOFT = re.compile(r"Soft blocked:\s*(yes|no)", re.I)
@@ -83,6 +84,10 @@ def verdicts(data, expected_country):
     state = data.get("live_state", "unobserved")
     check("Live capture supervisor", "PASS" if state == "running" else "FAIL",
           state)
+    freshness = data.get("checkpoint_freshness", "unobserved")
+    check("Live checkpoint freshness", "PASS" if freshness == "fresh" else
+          "FAIL" if freshness in {"stale", "future", "invalid"} else "UNKNOWN",
+          freshness + "; saved state alone does not prove a live supervisor")
     check("Doctor dashboard", "PASS" if data.get("dashboard") == "True" else "FAIL",
           "reported live listener state")
     for title, key in (("Wi-Fi software block", "wifi_soft_blocked"),

@@ -235,6 +235,31 @@ def test_actual_checkpoint_read_stays_bounded_if_file_grows_after_stat(tmp_path,
     assert report.bounded_bytes(source, 8) is None
 
 
+@pytest.mark.parametrize("updated,expected", [
+    (None, "unobserved"), (100, "fresh"), (88, "fresh"), (87.9, "stale"),
+    (101, "future"), (True, "invalid"), ("100", "invalid"),
+    (float("nan"), "invalid"), (float("inf"), "invalid"), (-1, "invalid"),
+    (10**1000, "invalid"),
+])
+def test_checkpoint_freshness_requires_recent_real_timestamp(updated, expected):
+    value = report.checkpoint_health(updated, now=100)
+    assert value["status"] == expected
+    assert value["stale_seconds"] == 12
+    json.dumps(value, allow_nan=False)
+
+
+def test_stale_running_checkpoint_is_exposed_in_both_report_modes(monkeypatch):
+    summary_fixture(monkeypatch)
+    monkeypatch.setattr(report, "read_json", lambda: {
+        "state": "running", "updated_utc": 1, "iface": "wlan0"})
+    monkeypatch.setattr(report.time, "time", lambda: 100)
+    monkeypatch.setattr(report, "log_tail", lambda **kw: [])
+    text = report.snapshot()
+    assert "live_state: running\n" in text
+    assert "checkpoint_freshness: stale\n" in text
+    assert report.snapshot_summary()["checkpoint"]["status"] == "stale"
+
+
 def test_private_atomic_save_requires_verified_capture_mount(tmp_path):
     output = tmp_path / "diagnostics/latest.txt"
     with pytest.raises(RuntimeError, match="REDUXCAP"):

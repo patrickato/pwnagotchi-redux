@@ -16,6 +16,7 @@ import re
 import stat
 import subprocess
 import tempfile
+import time
 import tomllib
 import urllib.error
 import urllib.request
@@ -31,6 +32,7 @@ ALLOWED = frozenset(("redux.service", "redux-live.service",
                     "redux-capture-ingest.timer"))
 MAC = re.compile(r"(?i)\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b")
 CONTROL = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+CHECKPOINT_STALE_SECONDS = 12
 
 
 def clean(line: str) -> str:
@@ -136,10 +138,13 @@ def api_status(*, opener=None) -> str:
 
 def snapshot(*, full=False) -> str:
     d = read_json()
+    checkpoint = checkpoint_health(d.get("updated_utc"))
     lines = [
         "REDUX FIELD REPORT (passive, no wireless changes)",
         datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "captures_ext4: " + str(capture_mount_snapshot() is not None),
+        "checkpoint_freshness: " + checkpoint["status"],
+        "checkpoint_age_seconds: " + str(checkpoint["age_seconds"]),
     ]
     for unit in sorted(ALLOWED):
         lines.append(f"{unit}: {command(['systemctl', 'is-active', unit], limit=1)[0]}")
@@ -175,6 +180,24 @@ def number(value):
         return None
 
 
+def checkpoint_health(updated_utc, *, now=None):
+    """A saved 'running' label cannot establish that the supervisor is live."""
+    result = {"status": "unobserved", "age_seconds": None,
+              "stale_seconds": CHECKPOINT_STALE_SECONDS}
+    if updated_utc is None:
+        return result
+    if number(updated_utc) is None:
+        return {**result, "status": "invalid"}
+    current = time.time() if now is None else now
+    if number(current) is None:
+        return {**result, "status": "invalid"}
+    age = current - updated_utc
+    if age < 0:
+        return {**result, "status": "future"}
+    return {**result, "status": "fresh" if age <= CHECKPOINT_STALE_SECONDS else "stale",
+            "age_seconds": round(age, 1)}
+
+
 def capture_inventory(directory, *, limit=100):
     """Names and sizes only, from a pinned directory; never read capture bytes."""
     result = {"available": False, "files": [], "truncated": False}
@@ -204,6 +227,7 @@ def capture_inventory(directory, *, limit=100):
 def snapshot_summary(*, config=Path("/etc/redux/live.toml")):
     """Allowlisted observations only: no raw logs, RF IDs or free-text errors."""
     d = read_json()
+    checkpoint = checkpoint_health(d.get("updated_utc"))
     states = {"running", "degraded", "starting", "starting_engine", "rotating",
               "storage_paused", "telemetry_degraded", "termination_pending", "stopped"}
     state = d.get("state")
@@ -270,7 +294,7 @@ def snapshot_summary(*, config=Path("/etc/redux/live.toml")):
                             else "unobserved")
                      for unit in sorted(ALLOWED)
                      for value in [command(["systemctl", "is-active", unit], limit=1)[0]]},
-        "runtime": runtime, "radio": radio, "rotation_seconds": rotation,
+        "runtime": runtime, "checkpoint": checkpoint, "radio": radio, "rotation_seconds": rotation,
         "regulatory": {"configured_country": country, "global_country": current_country(reg) or None,
                        "wifi_unblocked": wireless_unblocked(rfkill) if rf_complete else None},
         "bettercap_http": int(http.group(1)) if http else None,

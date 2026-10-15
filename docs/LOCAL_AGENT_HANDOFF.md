@@ -82,6 +82,18 @@ capture. Do not repeat a driver reload or interface experiment based on
 the older checkpoint above. Neither driver deployment nor an ARM64 driver
 build has been approved or performed. Details are in `docs/IMAGE_BUILD.md`.
 
+**2026-10-15 reconnect:** The local checkout was clean and synchronized to
+`c0cb265`; strict SSH at the prior address still matched the trusted key.
+Read-only summaries again observed services running, global/configured US,
+unblocked Wi-Fi and Bettercap HTTP 401. The selected interface remained
+Ethernet link type 1 despite its monitor label; a separate read-only
+Nexutil query returned firmware monitor 0. Capture inventories and the
+ingestion ledger were empty, with a fresh worker heartbeat and no handoffs.
+No driver, service, country, capture or other Pi configuration changes were
+performed in this reconnect session. A fresh local image build is authorized
+by the operator, but local sudo requires interactive authentication; no
+qualified new artifact exists until that build and qualification finish.
+
 ## Historical bootstrap blocker: SSH host-key rotation
 
 The Pi's currently offered ED25519 SSH host-key fingerprint was reported as

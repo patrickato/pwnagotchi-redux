@@ -18,6 +18,7 @@ redux-capture-ingest.timer: active
 redux-live.service: active
 redux.service: active
 live_state: running
+checkpoint_freshness: fresh
 capture_radio: wlan0
 capture_link_type: 803
 last_error:
@@ -140,6 +141,20 @@ def test_raw_80211_link_type_is_accepted():
     parsed = gate.parse(SAMPLE.replace("capture_link_type: 803", "capture_link_type: 801"))
     statuses = {name: state for name, state, _ in gate.verdicts(parsed, "US")}
     assert statuses["Monitor packet link type"] == "PASS"
+
+
+def test_running_label_cannot_hide_a_stale_or_future_checkpoint():
+    for value in ("stale", "future", "invalid"):
+        parsed = gate.parse(SAMPLE.replace("checkpoint_freshness: fresh", "checkpoint_freshness: " + value))
+        statuses = {name: state for name, state, _ in gate.verdicts(parsed, "US")}
+        assert statuses["Live capture supervisor"] == "PASS"
+        assert statuses["Live checkpoint freshness"] == "FAIL"
+
+
+def test_older_helper_without_checkpoint_measurement_is_unknown():
+    parsed = gate.parse(SAMPLE.replace("checkpoint_freshness: fresh\n", ""))
+    statuses = {name: state for name, state, _ in gate.verdicts(parsed, "US")}
+    assert statuses["Live checkpoint freshness"] == "UNKNOWN"
 
 
 def test_any_wifi_hardware_or_software_block_is_a_failure():
