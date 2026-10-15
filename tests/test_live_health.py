@@ -18,6 +18,20 @@ def test_running_health_uses_actual_interface_and_storage():
     assert r["overall"] == "ok"  # explicitly checked areas passed; gaps exposed
 
 
+def test_running_ethernet_capture_interface_is_degraded_and_not_native_rf():
+    r = describe_live_health("running", iface="wlan0", capture_link_type=1,
+                             free_bytes=128_000_000, reserve_bytes=1_000_000)
+    finding_r = finding(r, "native RF link type")
+    assert finding_r["status"] == "degraded"
+    assert "Ethernet" in finding_r["summary"]
+    assert r["overall"] == "degraded"
+    correct = describe_live_health("running", iface="wlan0", capture_link_type=803)
+    assert finding(correct, "native RF link type")["status"] == "ok"
+    assert "does not prove" in finding(correct, "native RF link type")["reason"]
+    unknown = describe_live_health("running", iface="wlan0", capture_link_type=None)
+    assert not any(f["area"] == "native RF link type" for f in unknown["findings"])
+
+
 def test_running_before_first_capture_does_not_claim_verified_handoff():
     r = describe_live_health("running", iface="wlan1mon",
                              free_bytes=128_000_000, reserve_bytes=10_000_000)
