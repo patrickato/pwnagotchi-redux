@@ -25,6 +25,15 @@ def fixture(tmp_path):
     stage = workspace / "pi-gen/stage-redux/00-redux/files"
     stage.mkdir(parents=True)
     (stage / "regulatory-country").write_text("US\n")
+    common = workspace / "pi-gen/scripts/common"
+    common.parent.mkdir(parents=True)
+    common.write_text(
+        "bootstrap(){\n"
+        "\tBOOTSTRAP_ARGS+=(--arch arm64)\n"
+        "\tBOOTSTRAP_ARGS+=(--force-check-gpg)\n"
+        "\tBOOTSTRAP_ARGS+=(--include gnupg)\n"
+        "}\n"
+    )
     (stage / "redux-revision").write_text(REV + "\n")
     live = stage / "pipeline/live.toml"
     live.parent.mkdir()
@@ -69,9 +78,31 @@ def test_fresh_field_image_qualifies_without_false_physical_claim(tmp_path):
     assert report["regulatory_country"] == "US"
     assert report["source_revision"] == REV
     assert report["artifact_integrity_verified"] is True
+    assert report["checks"]["signed_debian_bootstrap_policy"] is True
     assert report["physical_boot_verified"] is False
     assert report["radio_capture_verified"] is False
     assert all(report["checks"].values())
+
+
+def test_old_unsigned_bootstrap_cannot_pass_artifact_qualification(tmp_path):
+    workspace, *_ = fixture(tmp_path)
+    script = workspace / "pi-gen/scripts/common"
+    script.write_text(script.read_text().replace(
+        "\tBOOTSTRAP_ARGS+=(--force-check-gpg)\n", ""
+    ))
+    with pytest.raises(ValueError, match="signed_debian_bootstrap_policy"):
+        accepted(workspace)
+    script.write_text(script.read_text() + "# --no-check-gpg\n")
+    with pytest.raises(ValueError, match="signed_debian_bootstrap_policy"):
+        accepted(workspace)
+
+
+def test_unknown_debootstrap_bootstrap_source_cannot_pass(tmp_path):
+    workspace, *_ = fixture(tmp_path)
+    common = workspace / "pi-gen/scripts/common"
+    common.write_text("bootstrap() { echo skipped; }\n")
+    with pytest.raises(ValueError, match="signed_debian_bootstrap_policy"):
+        accepted(workspace)
 
 
 def test_tampered_image_or_release_checksum_fails_before_publish(tmp_path):
