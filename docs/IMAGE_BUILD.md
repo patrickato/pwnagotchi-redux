@@ -36,6 +36,9 @@ New Redux builds now enforce two independent source/build-host gates:
    `scripts/common` bootstrap anchor to pass `--force-check-gpg`.
    This prevents debootstrap's missing-keyring/HTTPS fallback from silently
    weakening signature verification. A drifted upstream script stops staging.
+3. `scripts/qualify-field-image.py` rejects the final artifact if its
+   staged pi-gen bootstrap does not contain this exact mandatory signature
+   policy. A disk checksum alone cannot overrule a missing signing-key warning.
 
 On the **ASUS Ubuntu WSL host**, not the Pi, the normal packaged remedy is:
 
