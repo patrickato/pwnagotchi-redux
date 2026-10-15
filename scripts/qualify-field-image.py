@@ -90,6 +90,21 @@ def qualify(workspace: Path, *, revision: str, country: str, profile="lite"):
             and record.get("boot_tested") is False
         ),
     }
+    # A checksum proves artifact integrity, not the authenticity of Debian
+    # packages used to assemble it. Refuse any image staged by the old
+    # debootstrap script that permits an unsigned Release fallback.
+    common = regular(pi_gen / "scripts/common", limit=128*1024).read_text(
+        encoding="utf-8")
+    forced = (
+        "\tBOOTSTRAP_ARGS+=(--arch arm64)\n"
+        "\tBOOTSTRAP_ARGS+=(--force-check-gpg)\n"
+        "\tBOOTSTRAP_ARGS+=(--include gnupg)"
+    )
+    checks["signed_debian_bootstrap_policy"] = (
+        common.count(forced) == 1
+        and "--no-check-gpg" not in common
+        and "--allow-unauthenticated" not in common
+    )
     source = regular(pi_gen / "stage-redux/00-redux/files/redux-revision", limit=256)
     checks["baked_revision"] = source.read_text(encoding="ascii").strip() == revision
     selected = regular(pi_gen / "stage-redux/00-redux/files/regulatory-country", limit=8)
