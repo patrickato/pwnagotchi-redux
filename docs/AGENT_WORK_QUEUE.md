@@ -303,6 +303,36 @@ sudo authentication are pending. Full local tests: 1,519 passed, 2 skipped.
 Neither trusted artifact qualification nor physical driver behavior is
 claimed. No Pi mutation occurred.
 
+## Native monitor-path source review — 2026-10-15
+
+Review of pinned Nexmon `1654e185` distinguishes two separate paths:
+
+- `brcmf_cfg80211_change_iface` accepts MONITOR under `NEXMON_MON_IF`
+  and updates the wireless interface type; this path does not install
+  monitor netdev operations, change ARPHRD to radiotap, or enable firmware
+  monitor mode. The primary interface can therefore retain Ethernet packet
+  type despite its cfg80211 monitor label. This is consistent with measured
+  type 1 / firmware mode 0, not independent proof of the complete RF fault.
+- `brcmf_mon_add_vif` creates a separate firmware interface, installs
+  `brcmf_netdev_ops_mon`, and selects ARPHRD radiotap. Its
+  `brcmf_net_mon_open` queries firmware mode and requests mode 2 for that
+  link type. It refuses an already-enabled firmware mode. The primary
+  interface-label path is not a substitute for this lifecycle.
+- The existing VIF-destructor fix repairs teardown ownership; it does not
+  make primary-interface relabeling activate radiotap. Keep those hypotheses
+  separate during any later specifically approved hardware test.
+- New executable host C channel-callback fixtures exercise both supported
+  callback signatures with success and firmware errors (-5, -16, -95).
+  The original callback is a negative control that hides errors; the Redux
+  adaptation preserves them. Firmware calls are synthetic stubs, not RF
+  measurements. Shared native compilation/linking is also used by the
+  existing VIF lifetime fixtures.
+
+The operator has approved WSL host keyring installation and a fresh isolated
+signed image build. Noninteractive sudo still requires terminal
+authentication; a consolidated local launcher is prepared from green
+`bd0a953`. No physical Pi action is authorized by that approval.
+
 ## P2 — independent verification and release preparation
 
 **P0.2/P1 collector milestone:** Local source now provides

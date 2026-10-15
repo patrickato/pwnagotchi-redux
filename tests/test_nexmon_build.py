@@ -240,17 +240,6 @@ def compile_lifecycle_fixture(tmp_path, source):
     or claim to exercise a real kernel's unregister_netdevice implementation.
     """
     import ctypes
-    import os
-    import shlex
-    import shutil
-    import subprocess
-    import sys
-    if sys.platform != "linux":
-        pytest.skip("native ELF lifecycle fixture requires Linux")
-    compiler = shlex.split(os.environ.get("CC", "cc"))
-    assert compiler and shutil.which(compiler[0]), "Lifecycle tests require a host C compiler (CC)"
-    linker = shutil.which("ld")
-    assert linker, "Lifecycle tests require the host ELF linker (ld)"
     prefix = r'''
 struct net_device {
     void (*priv_destructor)(struct net_device *);
@@ -311,10 +300,30 @@ int run_lifecycle(int failure, int held_reference) {
     return 0;
 }
 '''
-    cfile = tmp_path / "lifecycle.c"
-    obj = tmp_path / "lifecycle.o"
-    library = tmp_path / "lifecycle.so"
-    cfile.write_text(prefix + source + suffix)
+    lib = compile_host_fixture(tmp_path, prefix + source + suffix)
+    lib.run_lifecycle.argtypes = [ctypes.c_int, ctypes.c_int]
+    lib.run_lifecycle.restype = ctypes.c_int
+    return lib
+
+
+def compile_host_fixture(tmp_path, source):
+    """Execute adapted callback logic with synthetic firmware/kernel stubs."""
+    import ctypes
+    import os
+    import shlex
+    import shutil
+    import subprocess
+    import sys
+    if sys.platform != "linux":
+        pytest.skip("native ELF callback fixture requires Linux")
+    compiler = shlex.split(os.environ.get("CC", "cc"))
+    assert compiler and shutil.which(compiler[0]), "Callback tests require a host C compiler (CC)"
+    linker = shutil.which("ld")
+    assert linker, "Callback tests require the host ELF linker (ld)"
+    cfile = tmp_path / "callback.c"
+    obj = tmp_path / "callback.o"
+    library = tmp_path / "callback.so"
+    cfile.write_text(source)
     result = subprocess.run([*compiler, "-Wall", "-Werror", "-fPIC", "-c",
                              str(cfile), "-o", str(obj)],
                             capture_output=True, text=True, timeout=15)
@@ -323,10 +332,7 @@ int run_lifecycle(int failure, int held_reference) {
                              str(library), str(obj)],
                             capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
-    lib = ctypes.CDLL(str(library))
-    lib.run_lifecycle.argtypes = [ctypes.c_int, ctypes.c_int]
-    lib.run_lifecycle.restype = ctypes.c_int
-    return lib
+    return ctypes.CDLL(str(library))
 
 
 @pytest.mark.parametrize("failure,held_reference", [(0, 0), (0, 1), (-52, 0), (-52, 1)])
@@ -340,3 +346,57 @@ def test_compiled_lifecycle_detects_original_stale_vif(tmp_path):
     lib = compile_lifecycle_fixture(tmp_path, MONITOR_CORE)
     assert lib.run_lifecycle(0, 0) == 101
     assert lib.run_lifecycle(-52, 0) == 0
+
+
+@pytest.mark.parametrize("header", [OLD_HEADER, NEW_HEADER])
+@pytest.mark.parametrize("patched", [False, True])
+def test_compiled_channel_callback_preserves_firmware_result(tmp_path, header, patched):
+    """An unpatched control demonstrates the silent-success firmware defect.
+
+    Host stubs execute the adapted C callback for both API signatures; this
+    does not exercise a radio, firmware or real kernel callback dispatch.
+    """
+    import ctypes
+    source, _ = compat.adapt_driver(header, CHANNEL_SOURCE)
+    if patched:
+        source, _ = compat.propagate_monitor_error(source)
+    source = source[:source.index("static int unrelated")]
+    prefix = r'''
+typedef int s32;
+typedef unsigned short u16;
+struct wiphy { int unused; };
+struct cfg80211_chan_def { int unused; };
+struct net_device { int unused; };
+struct brcmf_if { int unused; };
+struct brcmf_cfg80211_info { int d11inf; };
+static struct brcmf_cfg80211_info stub_cfg;
+static struct brcmf_if stub_ifp;
+static int firmware_result, calls;
+#define wiphy_to_cfg(w) (&stub_cfg)
+#define cfg_to_ndev(c) ((void)(c), &stub_ifp)
+#define netdev_priv(n) (n)
+#define chandef_to_chanspec(d, c) ((u16) 0x1234)
+#define brcmf_err(...) ((void)0)
+static int brcmf_fil_iovar_int_set(struct brcmf_if *i, const char *name, u16 chanspec)
+{
+    (void)i;
+    if (name[0] != 'c' || chanspec != 0x1234) return -999;
+    calls++;
+    return firmware_result;
+}
+'''
+    args = "0, 0, 0" if header == NEW_HEADER else "0, 0"
+    suffix = """
+int run_channel(int firmware_error) {
+    int result;
+    firmware_result = firmware_error;
+    calls = 0;
+    result = brcmf_cfg80211_nexmon_set_channel(""" + args + """);
+    return calls == 1 ? result : -998;
+}
+"""
+    lib = compile_host_fixture(tmp_path, prefix + source + suffix)
+    lib.run_channel.argtypes = [ctypes.c_int]
+    lib.run_channel.restype = ctypes.c_int
+    for error in (0, -5, -16, -95):
+        assert lib.run_channel(error) == (error if patched else 0)
