@@ -106,6 +106,17 @@ pending. Local tests at `240c51c`: 1,519 passed, 2 skipped. This supersedes
 the earlier statement that no ARM64 module compilation had occurred.
 No driver was deployed and no Pi state was changed.
 
+**Latest signed-image checkpoint — 2026-10-15:** Approved WSL host
+package installation and a fresh build have completed. Source `4f907ff`
+is independently artifact-qualified, including signed bootstrap, exact
+compressed-image checksum and actual embedded Pi 4/5 module verification.
+See [FIELD_RUN_20261015.md](FIELD_RUN_20261015.md) for the exact SHA256,
+Windows-accessible artifact directory and staged acceptance procedure.
+The image includes measured live ARPHRD/Doctor/TFT status. It has not been
+flashed or booted. Physical changes still need separate approval; retain
+the existing comparison card and unsigned diagnostic build. This checkpoint
+supersedes earlier pending host-authentication/build statements above.
+
 ## Historical bootstrap blocker: SSH host-key rotation
 
 The Pi's currently offered ED25519 SSH host-key fingerprint was reported as

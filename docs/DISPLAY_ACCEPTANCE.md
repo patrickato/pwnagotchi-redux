@@ -14,8 +14,8 @@ capture handoffs, free space and Doctor findings. Separate read-only views
 small bundled Python Pillow library and renders directly to the selected
 16-bit Linux framebuffer; no desktop, Chromium, SDL or X server is needed.
 
-**It does not auto-start, change TFT overlays, initialize SPI, or accept
-touch gestures yet.** The image installs an inactive
+**It does not auto-start, change TFT overlays, initialize SPI, or read
+touch input by default.** The image installs an inactive
 `redux-fbui.service` and a deliberately invalid example
 `/usr/share/redux/fbui.example.env`. It does not install an active config
 or enable the unit. The original Jayofelony SD is never modified.
@@ -104,7 +104,7 @@ and the actual TFT result remain acceptance requirements.
 
 **Limitations:** The current native renderer requires a 480×320 framebuffer
 at 16bpp (RGB565-compatible). It does not claim 320×480 rotation,
-automatic touch calibration, swipe navigation, physical frame timing,
+automatic touch calibration, physically qualified swipe accuracy, frame timing,
 backlight control or cross-board graphics compatibility. Those are follow-on
 features, not green gates today.
 

@@ -361,6 +361,20 @@ the running build. Include the new telemetry in the **next** fresh
 signed build when convenient, after verifying the package-signing gate
 and preserving the running Pi. Physical RF frame capture remains P0.
 
+## Signed artifact ready for approved field test — 2026-10-15
+
+The fresh `4f907ff` image completed and independently passed exported-byte,
+XZ/partition/provenance, signed-bootstrap and embedded Pi 4/5 driver checks.
+This actual snapshot includes the measured ARPHRD live/Doctor/TFT changes;
+the earlier assumption that they missed its source freeze is superseded.
+Exact evidence and prioritized hardware steps are in
+[FIELD_RUN_20261015.md](FIELD_RUN_20261015.md). READY TO FLASH means a
+spare US field-test artifact only. No flash, boot, driver reload, service
+change or further image build was performed by verification. The old
+comparison card and unsigned diagnostic artifact remain preserved.
+Next physical work requires specific approval; do not rebuild this image
+without a demonstrated artifact defect.
+
 ## P2 — independent verification and release preparation
 
 **P0.2/P1 collector milestone:** Local source now provides

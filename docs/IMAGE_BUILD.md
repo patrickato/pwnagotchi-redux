@@ -1282,3 +1282,23 @@ The old export subsequently completed: 464796704 compressed bytes, SHA-256
 only. A separate local trust-rejection record and an artifact-directory
 DO-NOT-FLASH marker explicitly reject release trust; these bytes are
 preserved solely as untrusted diagnostic output.
+
+### Fresh signed artifact independently verified — 2026-10-15
+
+The approved host-only installation and completely fresh build completed
+from `4f907ff93ce0c6bc0b2c9d4f68025ba7dd1f9a84`. Host preflight passed;
+the log confirms a valid Debian Bookworm Release signature and no earlier
+missing-keyring warning. The operator-readable exported image was rehashed
+and fully decompressed independently; its checksum, release manifest,
+partition layout, sizes and provenance match. Both actual embedded ARM64
+modules were read without mounting the image and matched the build's
+SHA256/vermagic records for `6.12.109+rpt-rpi-v8` and `-2712`.
+
+**READY TO FLASH to a spare US field-test card**, only after separate owner
+approval. Exact image, digest, Windows path, capacity, driver hashes and
+prioritized hardware procedure: [FIELD_RUN_20261015.md](FIELD_RUN_20261015.md).
+The actual image includes measured ARPHRD live/Doctor/TFT telemetry.
+Boot, RF reception, handoff/conversion, TFT and Pi 5 hardware acceptance
+remain open. The old unsigned build and existing Pi card are preserved.
+No physical Pi changes or additional image build were performed during
+this independent verification.
