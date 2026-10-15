@@ -15,7 +15,8 @@ LINK_80211 = frozenset({801, 803})
 
 def read_link_type(iface, *, sys_root=Path("/sys/class/net")):
     """Return a measured ARPHRD int, or None if unavailable or unsafe."""
-    if not isinstance(iface, str) or not _SAFE_IFACE.fullmatch(iface):
+    if (not isinstance(iface, str) or iface in (".", "..")
+            or not _SAFE_IFACE.fullmatch(iface)):
         return None
     try:
         path = Path(sys_root) / iface / "type"

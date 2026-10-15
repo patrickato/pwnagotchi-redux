@@ -19,7 +19,7 @@ def test_read_link_type_only_accepts_bounded_numeric_arphrd(tmp_path, raw, expec
 
 
 @pytest.mark.parametrize("name", [
-    "../passwd", "wlan0/type", "wlan0;command", "wlan0\n", "", None,
+    ".", "..", "../passwd", "wlan0/type", "wlan0;command", "wlan0\n", "", None,
     "not_valid_name_12345",
 ])
 def test_refuse_non_interface_names_without_filesystem_access(tmp_path, name):
@@ -69,3 +69,12 @@ def test_live_runtime_snapshot_surfaces_observed_link_type_and_doctor(tmp_path, 
         assert snap["doctor"]["overall"] in ("degraded", "action")
     finally:
         runtime.close()
+
+
+def test_dot_components_never_measure_parent_directory_as_an_interface(tmp_path):
+    root = tmp_path / "net"
+    root.mkdir()
+    (root / "type").write_text("803\n")
+    (tmp_path / "type").write_text("801\n")
+    assert read_link_type(".", sys_root=root) is None
+    assert read_link_type("..", sys_root=root) is None

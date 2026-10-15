@@ -342,3 +342,16 @@ def test_api_probe_ignores_environment_proxies(monkeypatch):
     monkeypatch.setattr(report.urllib.request, "build_opener", fake_build)
     assert "unavailable" in report.api_status()
 
+
+
+def test_report_link_probe_uses_bounded_reader_and_rejects_redirected_type(tmp_path):
+    iface = tmp_path / "wlan0"
+    iface.mkdir()
+    target = tmp_path / "other-type"
+    target.write_text("803\n")
+    entry = iface / "type"
+    entry.symlink_to(target)
+    assert report.capture_link_type("wlan0", net_root=tmp_path) == "unobserved"
+    entry.unlink()
+    entry.write_text("803" + " " * 100000)
+    assert report.capture_link_type("wlan0", net_root=tmp_path) == "unobserved"

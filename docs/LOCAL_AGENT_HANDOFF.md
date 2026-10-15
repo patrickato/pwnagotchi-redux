@@ -117,6 +117,18 @@ flashed or booted. Physical changes still need separate approval; retain
 the existing comparison card and unsigned diagnostic build. This checkpoint
 supersedes earlier pending host-authentication/build statements above.
 
+**Post-flash resume (operator report):** The owner reports that the signed
+`4f907ff` image was flashed and booted on the disposable Pi 4 8 GB and that
+local login works. On resume, the checkout was clean at `3717cf5`.
+Strict SSH detected a changed ED25519 host identity and refused login.
+The local agent requested the fingerprint from the physical Pi console;
+no known-host entry was replaced and no post-flash SSH hardware measurements
+are claimed while that independent verification is pending. Keep the old
+comparison card and Jayofelony card untouched. The new software-only
+link-probe cleanup shares the bounded ARPHRD reader between reports and
+runtime, refusing dot path components, linked type files and oversized input.
+It is not installed on the Pi by this source edit.
+
 ## Historical bootstrap blocker: SSH host-key rotation
 
 The Pi's currently offered ED25519 SSH host-key fingerprint was reported as

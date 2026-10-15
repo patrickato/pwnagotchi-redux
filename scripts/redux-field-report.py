@@ -24,6 +24,7 @@ import urllib.request
 from redux.storage_mount import capture_mount_snapshot
 from redux.core.regulatory import current_country, wireless_unblocked
 from redux.crack.ingest import read_summary
+from redux.radio.link_type import read_link_type
 
 STATE = Path("/captures/live/live.json")
 ENGINE_LOG = Path("/captures/live/bettercap.log")
@@ -90,16 +91,8 @@ def read_json(path=STATE) -> dict:
 
 def capture_link_type(iface, *, net_root=Path("/sys/class/net")):
     """Read the selected netdev's real packet link type, without radio changes."""
-    if (not isinstance(iface, str) or iface in (".", "..")
-            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", iface)):
-        return "unobserved"
-    try:
-        value = (net_root / iface / "type").read_text(encoding="ascii").strip()
-        if not value.isdecimal() or len(value) > 5 or int(value) > 65535:
-            return "unobserved"
-        return int(value)
-    except (OSError, UnicodeError):
-        return "unobserved"
+    value = read_link_type(iface, sys_root=net_root)
+    return value if value is not None else "unobserved"
 
 
 def log_tail(path=ENGINE_LOG, *, count=14) -> list[str]:
