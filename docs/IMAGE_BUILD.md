@@ -9,6 +9,56 @@ is masked so only the Redux-owned supervisor can start the capture engine.
 These services are source/CI integrated; actual boot and capture remain
 physical acceptance gates.
 
+## Signed Debian Bookworm bootstrap (required for new builds)
+
+The 2026-10-15 ASUS WSL field build reported:
+
+```text
+W: Cannot check Release signature; keyring file not available /usr/share/keyrings/debian-archive-keyring.gpg
+```
+
+This is **not** acceptable evidence for a release-quality image. The pinned
+upstream pi-gen bootstrap can continue downloading without a verified Debian
+Release signature in this situation. A completed image SHA256 and successful
+mounted-root checks do **not** retrospectively authenticate those packages.
+**Do not flash the affected image as a trusted release.**
+
+New Redux builds now enforce two independent source/build-host gates:
+
+1. `image/host_preflight.py` refuses the build **before any download** if
+   `/usr/share/keyrings/debian-archive-keyring.gpg` is missing, malformed,
+   writable by group/other, or does not contain the published Debian 12
+   archive and release signing key fingerprints. A packaged one-hop
+   `debian-archive-keyring.gpg -> debian-archive-keyring.pgp` sibling alias
+   is supported. GPG inspection uses a disposable temporary homedir;
+   the operator's keyring is not modified.
+2. `image/pigen_release_auth.py` adapts only the pinned upstream pi-gen
+   `scripts/common` bootstrap anchor to pass `--force-check-gpg`.
+   This prevents debootstrap's missing-keyring/HTTPS fallback from silently
+   weakening signature verification. A drifted upstream script stops staging.
+
+On the **ASUS Ubuntu WSL host**, not the Pi, the normal packaged remedy is:
+
+```sh
+sudo apt-get update
+sudo apt-get install debian-archive-keyring gpgv
+```
+
+Only use your configured trusted Ubuntu package repositories. Do not download
+an unauthenticated keyring from random sites or use
+`--no-check-gpg`, `--allow-unauthenticated`, insecure APT overrides,
+or a skip switch. After provisioning, run a **fresh** image build in a
+new workspace; never restart pi-gen midway through an already bootstrapped
+unsigned root and assume it became trusted. The final build's actual logs
+must show successful `InRelease` authentication and no signature warnings.
+Keyring preflight alone is **not** signature-verification evidence.
+This change cannot modify a build launched from an earlier pinned snapshot.
+
+Debian 12 public fingerprints were cross-checked against the Debian FTP
+team's [archive signing-key registry](https://ftp-master.debian.org/keys.html).
+See [debootstrap's --force-check-gpg behavior](https://manpages.debian.org/bookworm/debootstrap/debootstrap.8.en.html).
+This is a build provenance control, not a Pi firmware or radio acceptance gate.
+
 ## Mounted root-system export gate
 
 Before an exported image is unmounted or compressed, pi-gen now runs a
