@@ -117,6 +117,15 @@ def status_view(report, *, now=None):
         state = "OFFLINE"
     engine = "ACTIVE" if running and not stale else state
     count = lambda key: runtime[key] if type(runtime.get(key)) is int and runtime[key] >= 0 else None
+    link = runtime.get("capture_link_type")
+    if type(link) is not int:
+        rf_label = "RF UNVERIFIED"
+    elif link in (801, 803):
+        rf_label = f"802.11 LINK {link}"
+    elif link == 1:
+        rf_label = "ETHERNET 1 / NO NATIVE RF"
+    else:
+        rf_label = f"UNQUALIFIED LINK {link}"
     free = runtime.get("free_bytes")
     free_mb = round(free / 1048576) if type(free) is int and free >= 0 else None
     results = pipeline.get("by_status", {}) if isinstance(pipeline.get("by_status"), dict) else {}
@@ -132,6 +141,8 @@ def status_view(report, *, now=None):
     return {
         "health": health, "state": state, "engine": engine,
         "iface": _safe_text(runtime.get("iface") or "UNKNOWN", 18),
+        "rf_link_type": link if type(link) is int else None,
+        "rf_label": rf_label,
         "events": count("events_seen"),
         "handoffs": count("handed_off"),
         "storage_mb": free_mb,
@@ -180,6 +191,9 @@ def render(report, *, page="overview", now=None):
     draw.line((18, 65, 462, 65), fill=(36, 57, 69), width=2)
     draw.text((20, 78), "ENGINE  " + data["engine"], font=_font(20, bold=True), fill=accent)
     draw.text((20, 113), "RADIO  " + data["iface"], font=_font(13), fill=SUBTLE)
+    # Link-layer compatibility is not evidence of received RF frames.
+    rf_color = RED if data["rf_link_type"] == 1 else SUBTLE
+    draw.text((180, 113), data["rf_label"], font=_font(10, bold=True), fill=rf_color)
     draw.line((18, 147, 462, 147), fill=(36, 57, 69), width=1)
 
     def metric(x, label, value):
