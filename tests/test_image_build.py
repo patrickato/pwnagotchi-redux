@@ -378,6 +378,13 @@ case $1 in
       mkdir -p "$dir/export-image/05-finalise" "$dir/export-image/04-set-partuuid"
       touch "$dir/stage2/EXPORT_IMAGE"
       echo "qemu-arm-static:qemu-user-static" > "$dir/depends"
+      mkdir -p "$dir/scripts"
+      cat > "$dir/scripts/common" <<'COMMON'
+bootstrap(){
+	BOOTSTRAP_ARGS+=(--arch arm64)
+	BOOTSTRAP_ARGS+=(--include gnupg)
+}
+COMMON
       cat > "$dir/export-image/05-finalise/01-run.sh" <<'FINALISE'
 update-initramfs -k all -c
 unmount "${ROOTFS_DIR}"
@@ -430,6 +437,7 @@ def test_preparation_exports_only_redux_and_targets_pi4(prepared):
     assert (tree / "config").stat().st_mode & 0o077 == 0
     assert (tree / "stage-redux/EXPORT_IMAGE").exists()
     assert (tree / "stage-redux/00-redux/files/redux/core/boot.py").exists()
+    assert "--force-check-gpg" in (tree / "scripts/common").read_text()
     assert (tree / "stage-redux/00-redux/files/pipeline/pipeline.toml").exists()
     live_settings = tree / "stage-redux/00-redux/files/pipeline/live.toml"
     assert live_settings.exists()
