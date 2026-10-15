@@ -61,6 +61,33 @@ unassessed-area count and dashboard availability, not fictitious telemetry.
 This does not yet offer authenticated LAN access to the dashboard.
 Do not expose the Bettercap REST port or share its caplet or private files.
 
+## Native 802.11 link-layer evidence (2026-10-15 workbench)
+
+The next standalone build includes a read-only measurement of the **selected
+capture interface's** kernel ARPHRD type from
+`/sys/class/net/<iface>/type`. It is exposed as
+`runtime.capture_link_type` and `runtime.capture_link_assessment`
+in the existing loopback `/api/status` JSON and the on-disk
+`/captures/live/live.json` runtime checkpoint. The opt-in 480×320 TFT
+also displays the actual link classification next to the radio.
+
+- `1`: Ethernet framing on the selected capture interface. Even if the
+  supervisor reads `running` and `iw` says monitor, Doctor marks **native RF
+  link type DEGRADED**. This is the observed original Pi 4 failure gate.
+- `801` or `803`: kernel reports IEEE80211/radiotap framing. Doctor
+  marks **link format** compatible. This does **not** prove packets arrived,
+  that a PCAP was finalized, or that any handshake converted.
+- Missing/unreadable/out-of-range measurements: NULL / unverified. Redux
+  does not invent a successful radio reading.
+
+The measurement does **not** probe over RF, stop/start interfaces, change
+the regulatory domain, reload drivers, or invoke privileged packet capture.
+Source-only regression tests inject the measured type and confirm Doctor
+and the TFT render the correct evidence. Native packet reception, frame
+timestamps and actual conversion are separate **physical acceptance gates**.
+The running Pi is not updated until a signed, qualified image is approved
+for its disposable SD card.
+
 ## How to inspect a booted test image
 
 This is for the future **separate development SD card** only, not the current
