@@ -293,6 +293,16 @@ driver, or declare physical boot/capture acceptance by inference. Keep
 source-only work going while privileges or an approved field test are
 pending.
 
+**Local verification checkpoint:** The running `0403c39` build linked both
+ARM64 `6.12.109` target modules and advanced past vermagic checks into
+export. The local agent independently confirmed the unsigned-bootstrap
+warning, preserved its log/workspace and marked the build DO NOT FLASH.
+Updated host preflight confirms the missing keyring. A fresh isolated
+`240c51c` launcher is prepared; specific host-package approval and terminal
+sudo authentication are pending. Full local tests: 1,519 passed, 2 skipped.
+Neither trusted artifact qualification nor physical driver behavior is
+claimed. No Pi mutation occurred.
+
 ## P2 — independent verification and release preparation
 
 **P0.2/P1 collector milestone:** Local source now provides

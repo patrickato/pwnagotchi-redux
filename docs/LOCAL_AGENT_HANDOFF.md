@@ -94,6 +94,18 @@ performed in this reconnect session. A fresh local image build is authorized
 by the operator, but local sudo requires interactive authentication; no
 qualified new artifact exists until that build and qualification finish.
 
+**2026-10-15 local build update:** The operator started the isolated
+`0403c39` build. Actual ARM64 modules linked for the Pi 4 and Pi 5
+`6.12.109` kernels and passed the installer's vermagic gates. However,
+the build log confirms a missing Debian archive keyring/signature warning.
+The synchronized `240c51c` workbench adds mandatory signed-bootstrap gates;
+the old build is preserved and marked **DO NOT FLASH**, regardless of its
+older artifact helper's result. A fresh signed-build launcher is prepared;
+host-package installation approval and terminal sudo authentication are
+pending. Local tests at `240c51c`: 1,519 passed, 2 skipped. This supersedes
+the earlier statement that no ARM64 module compilation had occurred.
+No driver was deployed and no Pi state was changed.
+
 ## Historical bootstrap blocker: SSH host-key rotation
 
 The Pi's currently offered ED25519 SSH host-key fingerprint was reported as

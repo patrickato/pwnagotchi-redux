@@ -1248,3 +1248,37 @@ ample scratch space. Local noninteractive sudo failed because interactive
 authentication is required. A private, ignored build launcher and source
 snapshot were staged locally; no new image build or qualification is claimed
 until privileged build execution and the artifact checks actually complete.
+
+### Local ARM64 compilation and trust rejection — 2026-10-15
+
+The operator started the private local launcher from frozen source
+`0403c396fcf932fbfd9b5fe71f9fc9894d76b041`. Its build log records
+successful `brcmfmac.ko` links for both installed targets:
+`6.12.109+rpt-rpi-2712` and `6.12.109+rpt-rpi-v8`. The installer
+advanced through both mandatory vermagic checks, kernel holds and Redux
+service staging into image export. This is actual ARM64 compiler/linker
+evidence for the patched source, unlike the synthetic host lifecycle tests.
+It does not establish driver teardown correctness or RF reception on hardware.
+
+While export was running, the local checkout synchronized to `240c51c`,
+including the lead's signed-bootstrap gates. The local agent independently
+confirmed the exact missing Debian keyring/signature warning in the frozen
+build log. The old workspace and log are preserved, and its private build
+directory is marked `DO-NOT-FLASH.txt`. Any success reported by that old
+snapshot's qualification helper is superseded by the new trust gate; it
+cannot authenticate the earlier bootstrap. No trusted new image is claimed.
+
+The updated host preflight independently reports a missing Debian archive
+keyring plus the expected non-root privilege blocker. Other host prerequisites
+pass. A separate private source snapshot and reviewed launcher at `240c51c`
+are prepared to install the host keyring from configured Ubuntu repositories
+and run a fresh build with mandatory Release signature checks. Specific
+host-package approval and the operator's terminal sudo authentication remain
+pending. The old bootstrapped root will not be reused. Full local regressions
+at `240c51c`: **1,519 passed, 2 skipped**. No Pi changes were made.
+
+The old export subsequently completed: 464796704 compressed bytes, SHA-256
+`935824b7d544224ebcb5236eef998ade142756bd50b5e0eb7bd23db8d6f94b27`. Its old helper reported artifact integrity
+only. A separate local trust-rejection record and an artifact-directory
+DO-NOT-FLASH marker explicitly reject release trust; these bytes are
+preserved solely as untrusted diagnostic output.
