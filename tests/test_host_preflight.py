@@ -60,6 +60,50 @@ def test_symlink_keyring_is_not_trusted(tmp_path):
     assert p.report(**kw)['checks']['debian_archive_keyring']['status'] == 'blocker'
 
 
+def test_legitimate_packaged_keyring_gpg_to_pgp_alias_is_accepted(tmp_path):
+    kw = kwargs(tmp_path)
+    target = tmp_path / 'debian-archive-keyring.pgp'
+    kw['archive_keyring'].rename(target)
+    alias = tmp_path / 'debian-archive-keyring.gpg'
+    alias.symlink_to('debian-archive-keyring.pgp')
+    kw['archive_keyring'] = alias
+    result = p.report(**kw)
+    assert result['build_ready'] is True
+    assert result['checks']['debian_archive_keyring']['status'] == 'ok'
+
+
+def test_unexpected_sibling_alias_and_chained_alias_block(tmp_path):
+    kw = kwargs(tmp_path)
+    source = kw['archive_keyring']
+    target = tmp_path / 'wrong-keyring.pgp'
+    source.rename(target)
+    source.symlink_to('wrong-keyring.pgp')
+    assert 'debian_archive_keyring' in p.report(**kw)['blockers']
+    source.unlink()
+    source.symlink_to('debian-archive-keyring.pgp')
+    second = tmp_path / 'debian-archive-keyring.pgp'
+    second.symlink_to('wrong-keyring.pgp')
+    assert 'debian_archive_keyring' in p.report(**kw)['blockers']
+
+
+def test_gpg_uses_temporary_homedir_not_operator_home(tmp_path):
+    kw = kwargs(tmp_path)
+    commands = []
+    def capture(argv, **kwargs):
+        if argv[0] == 'gpg':
+            commands.append(argv)
+        return fake_runner(argv, **kwargs)
+    kw['runner'] = capture
+    assert p.report(**kw)['build_ready'] is True
+    assert len(commands) == 1
+    args = commands[0]
+    assert '--no-default-keyring' in args
+    assert '--homedir' in args
+    home = Path(args[args.index('--homedir') + 1])
+    assert not home.exists()  # the GPG scratch directory was cleaned up
+    assert str(kw['archive_keyring']) == args[-1]
+
+
 def test_malformed_or_world_writable_keyring_refused(tmp_path):
     kw = kwargs(tmp_path)
     keyring = kw['archive_keyring']
