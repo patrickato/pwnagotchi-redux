@@ -31,6 +31,7 @@ from ..engine.bettercap_driver import BettercapConfig, BettercapDriver, HttpTran
 from ..geo import SightingStore
 from ..radio import Intent, Role, decide
 from ..radio.probe import probe
+from ..radio.link_type import read_link_type, link_assessment
 from ..web.status_page import make_handler, status_payload
 from .augur import Augur
 from .boot import atomic_checkpoint
@@ -379,8 +380,13 @@ class LiveRuntime:
         failures = (self.augur._sighting_flush_failures
                     if self.augur is not None else 0)
         now = self.clock()
+        # Read only the active capture iface's kernel-reported ARPHRD.
+        # A monitor-mode label does not imply native 802.11 framing.
+        capture_link_type = read_link_type(self.iface)
         metadata = {
             "state": self.state, "iface": self.iface or "",
+            "capture_link_type": capture_link_type,
+            "capture_link_assessment": link_assessment(capture_link_type),
             "events_seen": self.created, "handshake_events": self.handshakes,
             "pid": self.process.pid if self.process is not None else None,
             "capture_file": str(self.capture_file) if self.capture_file else "",
@@ -453,7 +459,8 @@ class LiveRuntime:
         metadata["visual_sampled_utc"] = self._visual_sampled_utc if self.augur else None
         metadata["visual_revision"] = self._visual_revision if self.augur else None
         health = describe_live_health(
-            self.state, iface=self.iface or "", free_bytes=free,
+            self.state, iface=self.iface or "",
+            capture_link_type=capture_link_type, free_bytes=free,
             reserve_bytes=self.config.min_free_bytes, handoffs=self.handoffs,
             last_error=self.last_error, handoff_error=self.last_handoff_error,
             doctor_report=report,
