@@ -12,6 +12,10 @@ SPEC.loader.exec_module(p)
 
 
 def fake_runner(argv, **kwargs):
+    if argv[0] == 'gpg':
+        return subprocess.CompletedProcess(argv, 0,
+            f"fpr:::::::::{p.BOOKWORM_ARCHIVE_FPR}:\\n"
+            f"fpr:::::::::{p.BOOKWORM_RELEASE_FPR}:\\n", '')
     if argv[0] == 'arch-test':
         return subprocess.CompletedProcess(argv, 0, 'arm64\n', '')
     if argv[0] == 'findmnt':
@@ -20,9 +24,12 @@ def fake_runner(argv, **kwargs):
 
 
 def kwargs(tmp_path):
+    keyring = tmp_path / 'trusted-bookworm.gpg'
+    keyring.write_bytes(b'synthetic-openpgp-fixture' * 10)
     return dict(workspace=tmp_path/'fresh',uid=0,system='Linux',machine='x86_64',
                 which=lambda k: '/usr/bin/'+k,runner=fake_runner,
-                fs_type='ext4',available_bytes=40*p.GIB)
+                fs_type='ext4',available_bytes=40*p.GIB,
+                archive_keyring=keyring)
 
 
 def test_healthy_host_indicates_prerequisites_not_a_build(tmp_path):
@@ -32,6 +39,60 @@ def test_healthy_host_indicates_prerequisites_not_a_build(tmp_path):
     assert result['image_built'] is False
     assert result['physical_boot_verified'] is False
     assert result['network_sources_fetched'] is False
+    assert result['checks']['debian_archive_keyring']['status'] == 'ok'
+
+
+def test_missing_bookworm_keyring_blocks_before_network(tmp_path):
+    kw = kwargs(tmp_path)
+    kw['archive_keyring'].unlink()
+    result = p.report(**kw)
+    assert 'debian_archive_keyring' in result['blockers']
+    assert result['network_sources_fetched'] is False
+    assert not kw['workspace'].exists()
+
+
+def test_symlink_keyring_is_not_trusted(tmp_path):
+    kw = kwargs(tmp_path)
+    trusted = kw['archive_keyring']
+    alias = tmp_path / 'alias.gpg'
+    alias.symlink_to(trusted)
+    kw['archive_keyring'] = alias
+    assert p.report(**kw)['checks']['debian_archive_keyring']['status'] == 'blocker'
+
+
+def test_malformed_or_world_writable_keyring_refused(tmp_path):
+    kw = kwargs(tmp_path)
+    keyring = kw['archive_keyring']
+    keyring.write_bytes(b'bad')
+    assert 'debian_archive_keyring' in p.report(**kw)['blockers']
+    keyring.write_bytes(b'synthetic' * 30)
+    keyring.chmod(0o666)
+    assert 'debian_archive_keyring' in p.report(**kw)['blockers']
+
+
+def test_keyring_missing_required_debian_signing_fingerprint(tmp_path):
+    kw = kwargs(tmp_path)
+    kw['runner'] = lambda argv, **kwargs: (
+        subprocess.CompletedProcess(argv, 0,
+            f'fpr:::::::::{p.BOOKWORM_ARCHIVE_FPR}:\\n', '')
+        if argv[0] == 'gpg' else fake_runner(argv, **kwargs))
+    result = p.report(**kw)
+    assert result['build_ready'] is False
+    evidence = result['checks']['debian_archive_keyring']['evidence']
+    assert evidence['has_bookworm_archive'] is True
+    assert evidence['has_bookworm_release'] is False
+
+
+def test_keyring_gpg_failure_blocks_and_missing_gpgv_blocks(tmp_path):
+    kw = kwargs(tmp_path)
+    kw['runner'] = lambda argv, **kwargs: (
+        subprocess.CompletedProcess(argv, 2, '', 'untrusted input')
+        if argv[0] == 'gpg' else fake_runner(argv, **kwargs))
+    assert 'debian_archive_keyring' in p.report(**kw)['blockers']
+    kw = kwargs(tmp_path)
+    kw['which'] = lambda name: None if name == 'gpgv' else '/usr/bin/'+name
+    assert 'debian_archive_keyring' in p.report(**kw)['blockers']
+    assert 'gpgv' in p.report(**kw)['checks']['dependencies']['evidence']['missing']
 
 
 def test_missing_tools_are_named_and_block(tmp_path):
