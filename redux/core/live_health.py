@@ -79,7 +79,7 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
     # packet counter. A running engine with an Ethernet ARPHRD interface
     # has NOT shown a native 802.11/radiotap interface.
     if iface and state == "running":
-        if capture_link_type == 1:
+        if type(capture_link_type) is int and capture_link_type == 1:
             findings.append(_finding(
                 "native RF link type", "degraded",
                 "Capture radio still exposes Ethernet frames, not native 802.11.",
