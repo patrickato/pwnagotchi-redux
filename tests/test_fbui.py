@@ -90,6 +90,23 @@ def test_doctor_live_findings_and_missing_pipeline_data():
     assert data["errors"] is None
 
 
+def test_native_tft_shows_rf_link_type_not_just_running_engine():
+    frame = valid_report()
+    frame["runtime"]["capture_link_type"] = 1
+    current = fbui.status_view(frame, now=101)
+    assert current["engine"] == "ACTIVE"
+    assert current["rf_link_type"] == 1
+    assert current["rf_label"] == "ETHERNET 1 / NO NATIVE RF"
+    assert fbui.render(frame, now=101).size == (480, 320)
+    frame["runtime"]["capture_link_type"] = 803
+    observed = fbui.status_view(frame, now=101)
+    assert "802.11 LINK 803" == observed["rf_label"]
+    frame["runtime"]["capture_link_type"] = None
+    assert fbui.status_view(frame, now=101)["rf_label"] == "RF UNVERIFIED"
+    frame["runtime"]["capture_link_type"] = True
+    assert fbui.status_view(frame, now=101)["rf_label"] == "RF UNVERIFIED"
+
+
 def test_native_tft_renders_all_pages_from_real_report():
     for page in ("overview", "captures", "doctor"):
         image = fbui.render(valid_report(), page=page, now=101)
