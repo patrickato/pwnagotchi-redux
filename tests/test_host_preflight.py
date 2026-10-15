@@ -14,8 +14,8 @@ SPEC.loader.exec_module(p)
 def fake_runner(argv, **kwargs):
     if argv[0] == 'gpg':
         return subprocess.CompletedProcess(argv, 0,
-            f"fpr:::::::::{p.BOOKWORM_ARCHIVE_FPR}:\\n"
-            f"fpr:::::::::{p.BOOKWORM_RELEASE_FPR}:\\n", '')
+            f"fpr:::::::::{p.BOOKWORM_ARCHIVE_FPR}:\n"
+            f"fpr:::::::::{p.BOOKWORM_RELEASE_FPR}:\n", '')
     if argv[0] == 'arch-test':
         return subprocess.CompletedProcess(argv, 0, 'arm64\n', '')
     if argv[0] == 'findmnt':
@@ -74,7 +74,7 @@ def test_keyring_missing_required_debian_signing_fingerprint(tmp_path):
     kw = kwargs(tmp_path)
     kw['runner'] = lambda argv, **kwargs: (
         subprocess.CompletedProcess(argv, 0,
-            f'fpr:::::::::{p.BOOKWORM_ARCHIVE_FPR}:\\n', '')
+            f'fpr:::::::::{p.BOOKWORM_ARCHIVE_FPR}:\n', '')
         if argv[0] == 'gpg' else fake_runner(argv, **kwargs))
     result = p.report(**kw)
     assert result['build_ready'] is False
