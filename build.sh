@@ -68,6 +68,9 @@ checkout_source "$PI_GEN_URL" "$PI_GEN_REV" "$BUILD_DIR/pi-gen"
 python3 "$REPO_DIR/image/pinned_pigen_contract.py" "$BUILD_DIR/pi-gen"
 # Adapt the pinned ARMHF QEMU dependency only after ARM64 execution verifies.
 python3 "$REPO_DIR/image/pigen_dependencies.py" "$BUILD_DIR/pi-gen"
+# The pinned upstream debootstrap wrapper otherwise tolerates missing Release
+# signature verification. Hard-stop rather than accepting untrusted packages.
+python3 "$REPO_DIR/image/pigen_release_auth.py" "$BUILD_DIR/pi-gen"
 # Fetch nexmon lazily: use the distro compiler, excluding bundled compilers.
 NEXMON_DIR="$BUILD_DIR/nexmon"
 git init -q "$NEXMON_DIR"
