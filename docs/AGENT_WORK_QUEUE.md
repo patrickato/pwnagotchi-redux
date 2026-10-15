@@ -333,6 +333,34 @@ signed image build. Noninteractive sudo still requires terminal
 authentication; a consolidated local launcher is prepared from green
 `bd0a953`. No physical Pi action is authorized by that approval.
 
+## RF evidence integrated into live Doctor and native TFT — 2026-10-15
+
+While the local agent conducts the signed ASUS image build, the chat-side
+lead added read-only kernel ARPHRD capture-interface measurement
+(`redux/radio/link_type.py`) to `redux-live`'s real status snapshots,
+Doctor health and native RGB565 display:
+
+- `runtime.capture_link_type`: measured decimal ARPHRD or null.
+- `runtime.capture_link_assessment`: `ethernet_link_type`,
+  `80211_link_type`, `other_link_type`, or `unverified`.
+- When Bettercap is `running` but the **selected** interface reports
+  type **1**, Doctor marks `native RF link type` **degraded**, and the
+  TFT explicitly reads `ETHERNET 1 / NO NATIVE RF`. The running label
+  no longer hides this real field blocker.
+- Types **801/803** establish only suitable packet framing, **not**
+  measured frame reception or a successful capture/handoff. Unknown
+  values remain unknown; no radio configuration changes are made.
+- Tests: `tests/test_radio_link_type.py`,
+  `tests/test_live_health.py`, `tests/test_fbui.py`; full CI
+  [38761496007](https://github.com/patrickato/pwnagotchi-redux/actions/runs/38761496007)
+  **passed**. Documentation: `docs/LIVE_RUNTIME.md`.
+
+**Important for Codex:** This is committed to the shared workbench after
+the host image build snapshot was frozen. Do **not** interrupt or alter
+the running build. Include the new telemetry in the **next** fresh
+signed build when convenient, after verifying the package-signing gate
+and preserving the running Pi. Physical RF frame capture remains P0.
+
 ## P2 — independent verification and release preparation
 
 **P0.2/P1 collector milestone:** Local source now provides
