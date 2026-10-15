@@ -24,7 +24,8 @@ def _finding(area, status, summary, reason="", remediation=""):
     }
 
 
-def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
+def describe_live_health(state, *, iface="", capture_link_type=None,
+                         free_bytes=None, reserve_bytes=0,
                          handoffs=0, last_error="", handoff_error="",
                          doctor_report=None, dashboard_enabled=False,
                          dashboard_active=False, dashboard_error="",
@@ -73,6 +74,33 @@ def describe_live_health(state, *, iface="", free_bytes=None, reserve_bytes=0,
                                  (last_error or f"Live runtime state: {state}.")
                                  + retry_note,
                                  "Review redux-live.service and the read-only device preflight."))
+
+    # This is a measured kernel packet-header contract, not an inferred
+    # packet counter. A running engine with an Ethernet ARPHRD interface
+    # has NOT shown a native 802.11/radiotap interface.
+    if iface and state == "running":
+        if capture_link_type == 1:
+            findings.append(_finding(
+                "native RF link type", "degraded",
+                "Capture radio still exposes Ethernet frames, not native 802.11.",
+                "Kernel ARPHRD type 1 on the selected capture interface.",
+                "Verify Nexmon driver, monitor virtual interface and actual "
+                "link-layer type before claiming native RF reception."))
+        elif type(capture_link_type) is int and capture_link_type in (801, 803):
+            findings.append(_finding(
+                "native RF link type", "ok",
+                "802.11-capable link-layer header observed.",
+                f"Kernel ARPHRD type {capture_link_type}; this does not prove "
+                "that any packets were actually received."))
+        elif type(capture_link_type) is int:
+            findings.append(_finding(
+                "native RF link type", "attention",
+                "Unexpected capture interface link-layer type.",
+                f"Kernel ARPHRD type {capture_link_type}; 801 or 803 required "
+                "for native IEEE80211/radiotap header evidence.",
+                "Inspect the selected radio and driver; avoid assuming native capture works."))
+        # Absent measurements remain unknown in runtime metadata. Legacy
+        # software-only fixtures need not fabricate a new green finding.
 
     if capture_mount_ok is False:
         findings.append(_finding("capture storage", "action",
