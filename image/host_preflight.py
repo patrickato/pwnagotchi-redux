@@ -13,6 +13,7 @@ import platform
 import shutil
 import subprocess
 import stat
+import tempfile
 
 GIB = 1024 ** 3
 REQUIRED_TOOLS = (
@@ -57,10 +58,20 @@ def check_debian_archive_keyring(path=DEBIAN_ARCHIVE_KEYRING, *,
     path = Path(path)
     try:
         metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode):
+            # Debian itself can package debian-archive-keyring.gpg as a
+            # sibling alias for debian-archive-keyring.pgp. Accept only one
+            # relative, in-directory hop; never follow arbitrary paths.
+            alias = path.readlink()
+            if (alias.is_absolute() or len(alias.parts) != 1
+                    or alias.name != "debian-archive-keyring.pgp"):
+                return item("blocker", "Debian archive keyring alias points outside packaged keyring",
+                            keyring=str(path))
+            metadata = (path.parent / alias).lstat()
         if (not stat.S_ISREG(metadata.st_mode) or metadata.st_size < 128
                 or metadata.st_size > 8 * 1024 * 1024
                 or metadata.st_mode & 0o022):
-            return item("blocker", "Debian archive keyring missing, linked, or not a safe regular file",
+            return item("blocker", "Debian archive keyring is not a safe regular file",
                         keyring=str(path))
     except OSError:
         return item("blocker", "Debian archive keyring missing; install debian-archive-keyring",
@@ -69,10 +80,14 @@ def check_debian_archive_keyring(path=DEBIAN_ARCHIVE_KEYRING, *,
         return item("blocker", "gpg and gpgv required to verify Debian archive keys",
                     keyring=str(path))
     try:
-        proc = runner([
-            "gpg", "--batch", "--no-options", "--no-default-keyring",
-            "--with-colons", "--show-keys", "--fingerprint", str(path),
-        ], capture_output=True, text=True, timeout=10, check=False)
+        # GPG normally initializes ~/.gnupg even for --show-keys. An
+        # isolated temporary home prevents changes to the operator's keys.
+        with tempfile.TemporaryDirectory(prefix="redux-archive-keyring-") as home:
+            proc = runner([
+                "gpg", "--batch", "--no-options", "--homedir", home,
+                "--no-default-keyring", "--with-colons", "--show-keys",
+                "--fingerprint", str(path),
+            ], capture_output=True, text=True, timeout=10, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return item("blocker", "unable to inspect Debian archive keyring",
                     keyring=str(path))
