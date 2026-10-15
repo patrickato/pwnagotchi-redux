@@ -12,6 +12,7 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
+import stat
 
 GIB = 1024 ** 3
 REQUIRED_TOOLS = (
@@ -19,7 +20,7 @@ REQUIRED_TOOLS = (
     "rsync", "losetup", "blkid", "mount", "umount", "debootstrap",
     "bsdtar", "capsh", "lsmod", "mke2fs",
     "mkfs.ext4", "mkfs.vfat", "xz", "zip", "zerofree", "arch-test",
-    "findmnt", "gpg", "pigz", "curl", "file", "xxd", "bc", "mkdosfs",
+    "findmnt", "gpg", "gpgv", "pigz", "curl", "file", "xxd", "bc", "mkdosfs",
 )
 
 
@@ -38,9 +39,66 @@ def nearest_parent(path: Path) -> Path:
     return current
 
 
+# Fingerprints published by Debian's FTP team for Debian 12/bookworm.
+# GnuPG output is checked, not an untrusted file name or arbitrary key UID.
+BOOKWORM_ARCHIVE_FPR = "B8B80B5B623EAB6AD8775C45B7C5D7D6350947F8"
+BOOKWORM_RELEASE_FPR = "4D64FEC119C2029067D6E791F8D2585B8783D481"
+DEBIAN_ARCHIVE_KEYRING = Path("/usr/share/keyrings/debian-archive-keyring.gpg")
+
+
+def check_debian_archive_keyring(path=DEBIAN_ARCHIVE_KEYRING, *,
+                                 which=shutil.which, runner=subprocess.run):
+    """Fail closed on missing/untrusted Bookworm release-verification keys.
+
+    This is a host trust-anchor presence/fingerprint check, *not* a claim
+    that debootstrap actually verified a specific InRelease signature.
+    The latter must be evidenced separately in a fresh build log.
+    """
+    path = Path(path)
+    try:
+        metadata = path.lstat()
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_size < 128
+                or metadata.st_size > 8 * 1024 * 1024
+                or metadata.st_mode & 0o022):
+            return item("blocker", "Debian archive keyring missing, linked, or not a safe regular file",
+                        keyring=str(path))
+    except OSError:
+        return item("blocker", "Debian archive keyring missing; install debian-archive-keyring",
+                    keyring=str(path))
+    if not which("gpg") or not which("gpgv"):
+        return item("blocker", "gpg and gpgv required to verify Debian archive keys",
+                    keyring=str(path))
+    try:
+        proc = runner([
+            "gpg", "--batch", "--no-options", "--no-default-keyring",
+            "--with-colons", "--show-keys", "--fingerprint", str(path),
+        ], capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return item("blocker", "unable to inspect Debian archive keyring",
+                    keyring=str(path))
+    fingerprints = {
+        fields[9].upper() for line in proc.stdout.splitlines()
+        if (fields := line.split(":")) and len(fields) > 9
+        and fields[0] == "fpr" and len(fields[9]) == 40
+        and all(c in "0123456789ABCDEFabcdef" for c in fields[9])
+    }
+    if proc.returncode or not {
+        BOOKWORM_ARCHIVE_FPR, BOOKWORM_RELEASE_FPR
+    }.issubset(fingerprints):
+        return item("blocker",
+                    "Debian archive keyring lacks verified Bookworm archive/release keys",
+                    keyring=str(path), has_bookworm_archive=BOOKWORM_ARCHIVE_FPR in fingerprints,
+                    has_bookworm_release=BOOKWORM_RELEASE_FPR in fingerprints)
+    return item("ok", "Debian 12 archive and release signing keys available on build host",
+                keyring=str(path), has_bookworm_archive=True,
+                has_bookworm_release=True,
+                note="Key presence only; require signed InRelease verification in fresh build")
+
+
 def report(workspace, *, uid=None, system=None, machine=None,
            which=shutil.which, runner=subprocess.run,
-           statvfs=os.statvfs, fs_type=None, available_bytes=None):
+           statvfs=os.statvfs, fs_type=None, available_bytes=None,
+           archive_keyring=DEBIAN_ARCHIVE_KEYRING):
     """Evaluate without writes. Injectable probes make failure paths testable."""
     root = Path(os.path.abspath(workspace))
     owner = os.geteuid() if uid is None else uid
@@ -101,6 +159,8 @@ def report(workspace, *, uid=None, system=None, machine=None,
         missing=missing, examined=list(REQUIRED_TOOLS + emulators),
         qemu_emulator=emulator,
     )
+    checks["debian_archive_keyring"] = check_debian_archive_keyring(
+        archive_keyring, which=which, runner=runner)
     if os_name != "Linux":
         checks["arm64_execution"] = item("blocker", "arm64 chroot requires Linux")
     elif not which("arch-test"):
