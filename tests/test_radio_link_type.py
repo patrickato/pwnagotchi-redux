@@ -58,7 +58,7 @@ def test_live_runtime_snapshot_surfaces_observed_link_type_and_doctor(tmp_path, 
         monkeypatch.setattr(live, "read_link_type", lambda _iface: 1)
         runtime.iface = "wlan0"
         runtime.state = "running"
-        runtime._snapshot_status()
+        runtime._checkpoint()
         snap = runtime._snapshot
         assert snap["runtime"]["capture_link_type"] == 1
         assert snap["runtime"]["capture_link_assessment"] == "ethernet_link_type"
