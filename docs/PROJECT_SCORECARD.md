@@ -27,10 +27,13 @@ image freeze are **not** deployed merely by passing GitHub CI.
 
 ## Shortest safe critical path to a genuinely usable Pi 4
 
-1. **P0 RF:** Ask the operator to approve one strictly bounded native monitor
-   VIF lifecycle test. Codex owns the Ethernet-SSH execution and rollback;
-   the lead reviews evidence. A driver reload, repeat, service restart outside
-   the approved test, RF injection, or reboot needs a new approval.
+1. **P0 RF:** The first approved native VIF test **stopped safely before
+   mutation**: NetworkManager still claimed `wlan0` (managed=yes, state20)
+   and supplicant ownership was not proven absent. Review
+   [NATIVE_VIF_OWNERSHIP_PLAN.md](NATIVE_VIF_OWNERSHIP_PLAN.md) and ask the
+   operator for a **separate approval** before the proposed runtime-only,
+   per-device NetworkManager isolation followed by one VIF test. No global
+   manager stop, driver reload, repeated test, RF injection or reboot.
 2. **P0 capture:** If native 802.11/radiotap framing and *decoded packets*
    are measured, then validate closed PCAP rotation/handoff and honest
    ingest/conversion status using only the operator's test AP. Empty scans
