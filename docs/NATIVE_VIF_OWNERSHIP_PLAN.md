@@ -297,3 +297,15 @@ The candidate still needs a **fresh source review, green CI including
 transition/partial-cleanup tests, Codex read-only re-preflight, and a new
 specific operator approval** before any further Pi mutation. No new approval
 is implied by the previous attempt, this document or a passing CI run.
+
+
+### Exit status for a future approved candidate
+
+The candidate's process status now makes the test and rollback outcomes
+explicit: `0` means the bounded experiment completed and its prior state was
+verified restored (**not** proof of decoded reception); `2` means it
+stopped/aborted with verified restoration; `3` means restoration could **not**
+be verified. Read-only preflight returns `0` only when prerequisites pass,
+otherwise `2`. Always inspect the sanitized phase report regardless of
+return code, and never retry automatically. The previous trial's historical
+exit-0-on-incomplete-restoration behavior must not be trusted.
