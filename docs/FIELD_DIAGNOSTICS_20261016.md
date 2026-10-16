@@ -125,3 +125,22 @@ commands/measurements, invalid interface names, private text exclusion and
 regular-file versus Unix-socket metadata. Full local suite: **1,584 passed,
 2 skipped**. It was exercised read-only from stdin on the Pi with bytecode
 writes disabled, not installed or saved there.
+
+## Ownership-isolation preparation (read-only) — 2026-10-16
+
+Remaining D-Bus checks found NetworkManager Managed=true/State20 with no
+active connection, but an empty supplicant Interfaces array and no wlan0
+control socket. nmcli 1.42.4's installed help/manual confirms per-device
+managed syntax. The prepared runner's read-only mode passes current static
+prerequisites: original Ethernet/radio identities, expected image/module,
+US, storage, unbound supplicant and fresh live state. This does not prove
+that changing NM state will isolate successfully; that gate, native reception
+and rollback remain untested pending approval.
+
+Exact commands, phase checks, timeouts, partial-failure cleanup, console
+fallback and offline qualification are in
+[NATIVE_VIF_OWNERSHIP_PLAN.md](NATIVE_VIF_OWNERSHIP_PLAN.md). The executable
+`scripts/native-vif-isolation.py` defaults to read-only. Its mutation flag
+has not been used, no Pi file was installed, and no radio/service/ownership
+state was changed during preparation. Offline full suite: 1,620 passed,
+2 skipped before integrating concurrent unrelated TFT updates.

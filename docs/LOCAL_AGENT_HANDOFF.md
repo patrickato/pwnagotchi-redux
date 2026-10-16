@@ -152,6 +152,16 @@ See the final section of [FIELD_DIAGNOSTICS_20261016.md](FIELD_DIAGNOSTICS_20261
 Source summaries now expose sanitized NM ownership observations, without
 changing manager/radio state or claiming exclusive ownership.
 
+**Ownership procedure ready for approval — 2026-10-16:** Independent D-Bus
+checks show NM claims wlan0 but no active connection, and the supplicant
+has zero bound interfaces. nmcli is 1.42.4. The prepared
+`scripts/native-vif-isolation.py` passes its default read-only preflight;
+its explicit execution flag has NOT been used. Exact operations, failure
+checks, rollback and console fallback are documented in
+[NATIVE_VIF_OWNERSHIP_PLAN.md](NATIVE_VIF_OWNERSHIP_PLAN.md). Current static
+prerequisites pass; runtime isolation/reception/restoration remain approval
+and hardware gates. No ownership/service/VIF changes or image build occurred.
+
 ## Historical bootstrap blocker: SSH host-key rotation
 
 The Pi's currently offered ED25519 SSH host-key fingerprint was reported as
