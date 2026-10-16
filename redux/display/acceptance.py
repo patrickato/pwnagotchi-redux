@@ -225,11 +225,12 @@ def sample_touch(device: str, *, seconds=12, max_taps=12,
 
 def report(*, framebuffer=None, touch_device=None, seconds=12,
            graphics=Path("/sys/class/graphics"),
-           inputs=Path("/sys/class/input"), environ=None, uid=None) -> dict:
+           inputs=Path("/sys/class/input"),
+           spi=Path("/sys/bus/spi/devices"), environ=None, uid=None) -> dict:
     """Snapshot truthfully separated into observed and unassessed evidence."""
     env = os.environ if environ is None else environ
     effective_uid = os.geteuid() if uid is None else uid
-    overview = inventory(graphics=graphics, inputs=inputs)
+    overview = inventory(graphics=graphics, inputs=inputs, spi=spi)
     result = {"schema": 1, "timestamp_utc": datetime.now(timezone.utc).isoformat(),
               "framebuffer_candidates": overview["framebuffers"],
               "input_candidates": overview["input_devices"],
