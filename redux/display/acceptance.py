@@ -30,8 +30,11 @@ _BTN_TOUCH, _ABS_X, _ABS_Y = 330, 0, 1
 
 
 def _read(path: Path, limit=256) -> str | None:
+    """Read at most a small sysfs attribute; never load unbounded data."""
     try:
-        return path.read_bytes()[:limit].decode("utf-8", "replace").strip("\x00\r\n ")
+        with path.open("rb") as stream:
+            raw = stream.read(limit)
+        return raw.decode("utf-8", "replace").strip("\x00\r\n ")
     except OSError:
         return None
 
