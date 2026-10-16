@@ -240,3 +240,60 @@ rxv5e16a901 monitor VIF, samples at most 60 seconds passively, then performs
 only the gated down/delete/NM-flag/service restoration above. Keep the local
 console available. Global managers, persistent network settings, eth0,
 country, drivers, power and SD contents remain outside that authorization.
+
+
+## Revised candidate after measured NM primary-mode side effect — 2026-10-16
+
+**SOURCE-ONLY REVISION; NOT APPROVED TO EXECUTE.** The **one authorized
+attempt was consumed** and stopped after NM `managed=no` changed `wlan0`
+from **monitor/UP** to **managed/DOWN**. A distinct, separately approved
+recovery subsequently restored monitor/UP, NM managed=yes/state20 and a fresh
+running Redux service. See [NATIVE_VIF_TRIAL_20261016.md](NATIVE_VIF_TRIAL_20261016.md).
+
+The initial command table above is historical and **must not be used as the
+next execution procedure**. It incorrectly assumed the NM ownership change
+would leave the original primary interface mode and UP flag intact.
+
+The source-only candidate `scripts/native-vif-isolation.py` now models the
+measured transition *without conflating it with the independent safety
+conditions* (verified Ethernet return route, country, immutable radio identity,
+driver/module, storage, supplicant, exclusive processes and no unexpected
+interfaces). For any proposed next test the exact sequence must be:
+
+1. Reverify baseline: only original `wlan0`, monitor/UP, NM yes/state20,
+   firmware monitor0, active Redux with fresh checkpoint, strict Ethernet
+   and the exact signed image. No VIF or other radio owner.
+2. Stop only `redux-live` and confirm Bettercap released the radio.
+3. Temporarily set **only** `wlan0` NM managed=no; require the **observed
+   managed/DOWN** mode/link side effect, NM no/state10, firmware0, unchanged
+   primary ifindex/PHY and all surrounding safety conditions.
+4. Only if all preceding conditions match, create at most one named VIF.
+   Require independently measured proper 802.11/radiotap ARPHRD, absence of
+   any NM/supplicant claim and matching PHY/ifindex. Activate it once and
+   require firmware monitor2. Sample only aggregate receive-only 802.11
+   headers for at most 60 seconds. Stop on any unexpected state.
+5. Tear down/remove only the verified test VIF. Require original interface
+   set, firmware0 and unchanged peripheral safety baseline **before**
+   altering the primary interface or manager state.
+6. While the primary is still NM unmanaged, use exactly the same **observed
+   recovery order that worked on this Pi**: set original `wlan0` type back to
+   monitor if managed/DOWN, check identity and mode, bring it UP if still
+   DOWN, then re-check country, firmware, PHY and Ethernet. Do not assume
+   returning the NM flag alone restores the kernel mode.
+7. Only after original monitor/UP is verified, restore original NM yes/state20.
+   Check mode/UP have not changed again. Start only previously active
+   `redux-live` and require a new fresh running checkpoint and matching
+   previously degraded RF Doctor status. Failure leaves restoration
+   **unverified**, with no driver reload, global manager restart or reboot.
+
+The candidate is intentionally strict: **any side effect other than exactly
+the measured managed/DOWN transition blocks VIF creation**. If the temporary
+VIF is not conclusively observed as unmanaged by NM, that remains UNKNOWN,
+not a reason to proceed. Partial operations use one bounded cleanup attempt,
+with explicit checks and no force/reset fallback. A local Pi console should
+be ready throughout.
+
+The candidate still needs a **fresh source review, green CI including
+transition/partial-cleanup tests, Codex read-only re-preflight, and a new
+specific operator approval** before any further Pi mutation. No new approval
+is implied by the previous attempt, this document or a passing CI run.
