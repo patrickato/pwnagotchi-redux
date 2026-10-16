@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -91,21 +92,33 @@ def _safe_text(value, max_len=55):
     return "".join(ch if 32 <= ord(ch) < 127 else " " for ch in text)[:max_len]
 
 
+def _valid_utc_clock(value):
+    """A non-finite or malformed clock can never prove live telemetry."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value) and value >= 0
+    except (OverflowError, ValueError):
+        return False
+
+
 def status_view(report, *, now=None):
     """Conservative display model with no synthetic success values."""
     now = time.time() if now is None else now
     runtime = report.get("runtime", {}) if isinstance(report, dict) else {}
     doctor = report.get("doctor", {}) if isinstance(report, dict) else {}
     pipeline = report.get("capture_processing", {}) if isinstance(report, dict) else {}
-    updated = runtime.get("updated_utc")
-    stale = (type(updated) not in (int, float) or updated > now + 30
-             or now - updated > 20)
+    # Validate structure and both clocks before comparing ages. In particular
+    # NaN compares false in *both* directions and otherwise looks fresh.
     if not isinstance(runtime, dict):
         runtime = {}
     if not isinstance(doctor, dict):
         doctor = {}
     if not isinstance(pipeline, dict):
         pipeline = {}
+    updated = runtime.get("updated_utc")
+    stale = (not _valid_utc_clock(updated) or not _valid_utc_clock(now)
+             or updated > now + 30 or now - updated > 20)
     health = doctor.get("overall", "unknown")
     if health not in ("ok", "attention", "degraded", "action"):
         health = "unknown"
