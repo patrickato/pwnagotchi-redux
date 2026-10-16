@@ -205,7 +205,10 @@ class PiOps:
         _, devices = self.command(['nmcli', '-g', 'DEVICE', 'device', 'status'])
         if iface not in devices.splitlines():
             if absent_ok:
-                return False, None
+                # Absence from NM discovery is NOT evidence of a device
+                # being explicitly unmanaged. Wait for an observed 'no'
+                # rather than activating a VIF under uncertain ownership.
+                return None, None
             raise Stop('original NM device missing')
         _, raw = self.command(['nmcli', '-g', 'GENERAL.NM-MANAGED,GENERAL.STATE', 'device', 'show', iface])
         lines = raw.splitlines()
