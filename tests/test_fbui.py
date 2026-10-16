@@ -140,6 +140,31 @@ def test_native_tft_shows_rf_link_type_not_just_running_engine():
     assert fbui.status_view(frame, now=101)["rf_label"] == "RF UNVERIFIED"
 
 
+def test_native_tft_never_displays_historical_rf_as_current():
+    report = valid_report(now=100)
+    report["runtime"]["capture_link_type"] = 803
+    fresh = fbui.status_view(report, now=101)
+    assert fresh["rf_label"] == "802.11 LINK 803"
+    assert fresh["rf_link_type"] == 803
+    expired = fbui.status_view(report, now=130)
+    assert expired["rf_label"] == "RF NOT CURRENT"
+    assert expired["rf_link_type"] is None
+    assert expired["engine"] == "STALE"
+    # Ethernet framing is also a historical observation, not a current one.
+    report["runtime"]["capture_link_type"] = 1
+    assert fbui.status_view(report, now=130)["rf_label"] == "RF NOT CURRENT"
+
+
+@pytest.mark.parametrize("link", [-1, 65536, 10 ** 5000, "803", 803.0, True, None])
+def test_native_tft_bounds_bad_rf_link_values_and_cannot_crash(link):
+    report = valid_report(now=100)
+    report["runtime"]["capture_link_type"] = link
+    status = fbui.status_view(report, now=101)
+    assert status["rf_label"] == "RF UNVERIFIED"
+    assert status["rf_link_type"] is None
+    assert fbui.render(report, now=101).size == (480, 320)
+
+
 def test_native_tft_renders_all_pages_from_real_report():
     for page in ("overview", "captures", "doctor"):
         image = fbui.render(valid_report(), page=page, now=101)
