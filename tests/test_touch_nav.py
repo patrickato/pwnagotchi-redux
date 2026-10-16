@@ -108,7 +108,10 @@ def test_syn_dropped_ignores_all_unsynced_events_until_syn_report():
     assert tracker.desynced is True
     # The kernel says events before SYN_REPORT may be corrupted, including a
     # *complete-looking* BTN_TOUCH and swipe. It must not navigate.
-    invalid = swipe(3100, 900)
+    invalid = (event(t.EV_KEY, t.BTN_TOUCH, 1)
+               + event(t.EV_ABS, t.ABS_X, 3100)
+               + event(t.EV_ABS, t.ABS_X, 900)
+               + event(t.EV_KEY, t.BTN_TOUCH, 0))
     assert t.consume(invalid, tracker)[0] == []
     assert tracker.desynced is True
     assert t.consume(event(t.EV_SYN, 0, 0), tracker)[0] == []
