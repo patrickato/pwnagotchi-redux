@@ -1,6 +1,11 @@
 # Raspberry Pi 4 native-monitor ownership isolation — approval request
 
-**Status: REVIEW ONLY — NOT AUTHORIZED TO EXECUTE.** This is the next
+**CURRENT STATUS: the separately approved 2b540ad attempt stopped; restoration
+is incomplete. Do not repeat it. See [NATIVE_VIF_TRIAL_20261016.md](NATIVE_VIF_TRIAL_20261016.md).**
+
+The plan below is historical preparation, not renewed authorization.
+
+**Original status: REVIEW ONLY — NOT AUTHORIZED TO EXECUTE.** This is the next
 candidate experiment after the 2026-10-16 read-only ownership stop. It changes
 the running disposable Redux field card if and only if the owner grants
 **separate, explicit permission** for the sequence below. The original

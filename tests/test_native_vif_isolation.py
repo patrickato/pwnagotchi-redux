@@ -25,7 +25,7 @@ class Fake:
                       supplicant=[], live='active', capture_process=True,
                       firmware=0, primary_type=1, phy='phy0', temp_index=None,
                       temp_type=None, temp_phy=None, temp_monitor=False,
-                      temp_nm_managed=None, primary_ifindex=3, primary_up=True,
+                      temp_nm_managed=None, primary_ifindex=3, primary_up=True, primary_mode='monitor',
                       runtime_fresh=True, runtime_state='running', runtime_error=False,
                       health='degraded')
 
@@ -281,3 +281,24 @@ def test_singleton_guard_blocks_parallel_trials_without_a_lock_file():
                 pytest.fail("second trial must not enter")
     with trial.single_trial_lock():
         pass
+
+
+
+def test_nm_unmanage_primary_mode_transition_is_reported_without_relaxing_guards():
+    # Hardware-observed transition: managed=no also took wlan0 down and
+    # changed its kernel mode. It is NOT safe to assume a flag-only change.
+    class PrimaryTransition(Fake):
+        def change(self, args):
+            super().change(args)
+            if args[0] == 'nmcli' and args[-1] == 'no':
+                self.s.update(primary_mode='managed', primary_up=False, safe=False)
+    ops = PrimaryTransition()
+    result = trial.run_trial(ops, NAME, approved=True)
+    assert result['restored'] is False
+    assert result['isolation']['managed'] is False
+    assert result['isolation']['primary_mode'] == 'managed'
+    assert result['cleanup_observed']['primary_up'] is False
+    assert 'runtime isolation not confirmed' in result['test']['stopped']
+    assert not any(cmd[:2] == ['iw', 'phy'] for cmd in ops.commands)
+    assert ['systemctl', 'start', 'redux-live.service'] not in ops.commands
+    assert ['nmcli', '--wait', '5', 'device', 'set', 'wlan0', 'managed', 'yes'] not in ops.commands

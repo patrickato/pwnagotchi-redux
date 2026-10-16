@@ -162,6 +162,20 @@ checks, rollback and console fallback are documented in
 prerequisites pass; runtime isolation/reception/restoration remain approval
 and hardware gates. No ownership/service/VIF changes or image build occurred.
 
+**LATEST — approved 2b540ad attempt STOPPED, restoration incomplete:** The
+single newly approved attempt stopped redux-live and set only wlan0 runtime
+managed=no. NM also changed primary wlan0 to managed mode/DOWN. The safety
+gate stopped before VIF creation; no reception was sampled. Cleanup refused
+to restore NM/live because the original radio invariant no longer held.
+**Current Pi:** strict Ethernet SSH works, US/storage intact, only wlan0
+ifindex3/type1/firmware0 exists, NM unmanaged/state10, redux-live INACTIVE;
+other Redux/NM/supplicant services active and supplicant unbound. Do not
+repeat the test or infer restoration. Exact evidence and a new-approval-only
+primary mode/UP recovery proposal:
+[NATIVE_VIF_TRIAL_20261016.md](NATIVE_VIF_TRIAL_20261016.md).
+No further Pi changes have occurred. Earlier healthy-service/readiness
+checkpoints above are historical, not the current state.
+
 ## Historical bootstrap blocker: SSH host-key rotation
 
 The Pi's currently offered ED25519 SSH host-key fingerprint was reported as

@@ -104,6 +104,7 @@ def run_trial(ops, name, *, approved=False):
         changed = True
         ops.change(['nmcli', '--wait', '5', 'device', 'set', 'wlan0', 'managed', 'no'])
         s = ops.observe(name)
+        log['isolation'] = ops.public(s)
         if not s['safe'] or s['managed'] is not False or s['nm_state'] != 10 or s['supplicant'] != []:
             raise Stop('runtime isolation not confirmed')
         created_attempt = True
@@ -142,6 +143,7 @@ def run_trial(ops, name, *, approved=False):
                     except Stop:
                         log['cleanup'].append('temporary interface cleanup command failed')
                 s = ops.observe(name)
+            log['cleanup_observed'] = ops.public(s)
             if (not s['safe'] or s['interfaces'] != before['interfaces']
                     or s['firmware'] != before['firmware']
                     or s['primary_type'] != before['primary_type']
@@ -298,6 +300,7 @@ class PiOps:
              'primary_type': int(Path('/sys/class/net/wlan0/type').read_text()),
              'primary_ifindex': int(Path('/sys/class/net/wlan0/ifindex').read_text()),
              'primary_up': bool(int(Path('/sys/class/net/wlan0/flags').read_text().strip(), 16) & 1),
+             'primary_mode': mode.group(1) if mode and mode.group(1) in {'monitor', 'managed'} else None,
              'runtime_fresh': runtime_fresh, 'runtime_state': runtime.get('state'),
              'runtime_error': bool(runtime.get('last_error') or runtime.get('failure_streak')),
              'health': runtime.get('health') if runtime.get('health') in {'ok','attention','degraded','action','unknown'} else None,
@@ -337,7 +340,7 @@ class PiOps:
     def public(s):
         return {k: s[k] for k in ('safe', 'interfaces', 'managed', 'nm_state', 'supplicant',
                                   'live', 'capture_process', 'firmware', 'primary_type', 'phy',
-                                  'primary_up', 'primary_ifindex', 'runtime_fresh', 'health')}
+                                  'primary_up', 'primary_mode', 'primary_ifindex', 'runtime_fresh', 'health')}
 
     def restored_ownership(self, name, before):
         for _ in range(5):
