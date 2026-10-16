@@ -73,6 +73,39 @@ def test_status_truth_and_staleness():
     assert offline["events"] is None and offline["storage_mb"] is None
 
 
+@pytest.mark.parametrize("updated", [
+    float("nan"), float("inf"), float("-inf"), True, "101",
+    None, {}, -1, 10 ** 1000,
+])
+def test_tft_never_calls_invalid_runtime_timestamp_live(updated):
+    state = valid_report(now=101)
+    state["runtime"]["updated_utc"] = updated
+    view = fbui.status_view(state, now=101)
+    assert view["health"] == "unknown"
+    assert view["state"] == "STALE"
+    assert view["engine"] != "ACTIVE"
+    assert view["stale"] is True
+
+
+@pytest.mark.parametrize("now", [
+    float("nan"), float("inf"), float("-inf"), -1, True, "101", 10 ** 1000,
+])
+def test_tft_invalid_local_clock_never_fakes_live_reading(now):
+    view = fbui.status_view(valid_report(now=101), now=now)
+    assert view["health"] == "unknown"
+    assert view["engine"] != "ACTIVE"
+    assert view["stale"] is True
+
+
+@pytest.mark.parametrize("runtime", [None, [], "running", True, 42])
+def test_tft_malformed_runtime_is_unknown_not_an_exception(runtime):
+    frame = valid_report(now=101)
+    frame["runtime"] = runtime
+    assert fbui.status_view(frame, now=101)["engine"] != "ACTIVE"
+    assert fbui.status_view(frame, now=101)["health"] == "unknown"
+    assert fbui.render(frame, now=101).size == (480, 320)
+
+
 def test_doctor_live_findings_and_missing_pipeline_data():
     status = valid_report()
     status["doctor"] = {
