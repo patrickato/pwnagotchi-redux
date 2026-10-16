@@ -42,6 +42,8 @@ class Fake:
                  'start' if args[:2] == ['systemctl', 'start'] else
                  'managed_' + args[-1] if args[0] == 'nmcli' else
                  'create' if args[:2] == ['iw', 'phy'] else
+                 'primary_monitor' if args[:4] == ['iw', 'dev', 'wlan0', 'set'] else
+                 'primary_up' if args[:5] == ['ip', 'link', 'set', 'dev', 'wlan0'] else
                  'delete' if args[-1] == 'del' else args[-1])
         failure = label == self.fail
         if failure and not self.partial:
@@ -53,6 +55,13 @@ class Fake:
         elif label.startswith('managed_'):
             value = args[-1] == 'yes'
             self.s.update(managed=value, nm_state=20 if value else 10)
+            if not value:
+                # Reproduce the Pi observation on 2026-10-16.
+                self.s.update(primary_mode='managed', primary_up=False)
+        elif label == 'primary_monitor':
+            self.s['primary_mode'] = 'monitor'
+        elif label == 'primary_up':
+            self.s['primary_up'] = True
         elif label == 'create':
             self.s.update(interfaces=['wlan0', NAME], temp_index=9, temp_phy='phy0',
                           temp_monitor=True, temp_type=803, temp_nm_managed=False)
@@ -108,6 +117,8 @@ def test_successful_trial_has_one_create_and_exact_narrow_rollback():
         ['ip', 'link', 'set', 'dev', NAME, 'up'],
         ['ip', 'link', 'set', 'dev', NAME, 'down'],
         ['iw', 'dev', NAME, 'del'],
+        ['iw', 'dev', 'wlan0', 'set', 'type', 'monitor'],
+        ['ip', 'link', 'set', 'dev', 'wlan0', 'up'],
         ['nmcli', '--wait', '5', 'device', 'set', 'wlan0', 'managed', 'yes'],
         ['systemctl', 'start', 'redux-live.service']]
 
@@ -125,7 +136,9 @@ def test_partial_failures_cleanup_once_without_driver_or_manager_restart(failure
     assert all('eth0' not in cmd for cmd in ops.commands)
 
 
-@pytest.mark.parametrize('failure', ['down', 'delete', 'managed_yes', 'start'])
+@pytest.mark.parametrize('failure', [
+    'down', 'delete', 'primary_monitor', 'primary_up', 'managed_yes', 'start'
+])
 def test_failed_cleanup_never_claims_restoration_or_retries(failure):
     ops = Fake(failure)
     result = trial.run_trial(ops, NAME, approved=True)
