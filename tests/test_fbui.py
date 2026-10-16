@@ -106,6 +106,46 @@ def test_tft_malformed_runtime_is_unknown_not_an_exception(runtime):
     assert fbui.render(frame, now=101).size == (480, 320)
 
 
+def test_native_tft_rejects_unbounded_counters_and_nonstring_labels():
+    report = valid_report(now=100)
+    overflow = 10 ** 5000
+    report["runtime"].update({
+        "events_seen": overflow, "handed_off": overflow, "free_bytes": overflow,
+        "iface": overflow,
+    })
+    report["capture_processing"]["by_status"] = {
+        "ready": overflow, "error": overflow,
+    }
+    report["doctor"]["findings"] = [{
+        "status": "attention",
+        "summary": overflow,
+        "remediation": {"nested": "not a display label"},
+    }]
+    view = fbui.status_view(report, now=101)
+    assert view["events"] is None
+    assert view["handoffs"] is None
+    assert view["storage_mb"] is None
+    assert view["processed"] is None and view["errors"] is None
+    assert view["iface"] == "UNKNOWN"
+    assert view["finding"] == "UNKNOWN"
+    assert view["detail"] == "UNKNOWN"
+    assert fbui.render(report, now=101).size == (480, 320)
+
+
+def test_native_tft_ignores_negative_boolean_and_fractional_metrics():
+    report = valid_report(now=100)
+    report["runtime"].update({
+        "events_seen": True, "handed_off": -1, "free_bytes": 1.5,
+    })
+    report["capture_processing"]["by_status"] = {
+        "ready": True, "error": -2,
+    }
+    view = fbui.status_view(report, now=101)
+    assert all(view[key] is None for key in (
+        "events", "handoffs", "storage_mb", "processed", "errors",
+    ))
+
+
 def test_doctor_live_findings_and_missing_pipeline_data():
     status = valid_report()
     status["doctor"] = {
