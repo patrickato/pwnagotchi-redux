@@ -83,7 +83,8 @@ def isolated_primary(s):
     return (s['safe'] is True and s['managed'] is False
             and s['nm_state'] == 10 and s['supplicant'] == []
             and primary_is(s, 'managed', False)
-            and s['primary_type'] == 1)
+            and s['primary_type'] == 1
+            and s['live'] == 'inactive' and s['capture_process'] is False)
 
 
 def baseline_ok(s):
@@ -167,7 +168,11 @@ def run_trial(ops, name, *, approved=False):
                     or s['primary_ifindex'] != before['primary_ifindex']
                     or s['supplicant'] != []):
                 raise Stop('radio baseline not restored; leave manager/service unchanged')
+            if changed and (s['live'] != 'inactive' or s['capture_process']):
+                raise Stop('capture owner returned; leave manager/service unchanged')
             if changed and s['managed'] is False:
+                if s['nm_state'] != 10:
+                    raise Stop('unmanaged ownership state uncertain; leave primary unchanged')
                 # NM's runtime release *actually* changed wlan0 to managed
                 # mode and DOWN on the field Pi. Restore the kernel baseline
                 # explicitly, exactly once per necessary step, BEFORE
@@ -176,7 +181,9 @@ def run_trial(ops, name, *, approved=False):
                     ops.change(['iw', 'dev', 'wlan0', 'set', 'type', 'monitor'])
                     s = ops.observe(name)
                     if (not s['safe'] or s['interfaces'] != before['interfaces']
-                            or s['managed'] is not False
+                            or s['managed'] is not False or s['nm_state'] != 10
+                            or s['live'] != 'inactive' or s['capture_process']
+                            or s['primary_type'] != before['primary_type']
                             or s['firmware'] != before['firmware']
                             or s['primary_mode'] != 'monitor'
                             or s['primary_ifindex'] != before['primary_ifindex']):
@@ -186,13 +193,19 @@ def run_trial(ops, name, *, approved=False):
                     s = ops.observe(name)
                 if (not s['safe'] or s['interfaces'] != before['interfaces']
                         or not primary_is(s, 'monitor', True)
-                        or s['managed'] is not False
+                        or s['managed'] is not False or s['nm_state'] != 10
+                        or s['live'] != 'inactive' or s['capture_process']
+                        or s['primary_type'] != before['primary_type']
                         or s['firmware'] != before['firmware']
                         or s['primary_ifindex'] != before['primary_ifindex']):
                     raise Stop('original wlan0 link state not restored')
                 ops.change(['nmcli', '--wait', '5', 'device', 'set', 'wlan0', 'managed', 'yes'])
             s = ops.restored_ownership(name, before)
-            if (not s['safe'] or s['managed'] != before['managed'] or s['nm_state'] != before['nm_state']
+            if (not s['safe'] or s['interfaces'] != before['interfaces']
+                    or s['firmware'] != before['firmware']
+                    or s['primary_type'] != before['primary_type']
+                    or s['primary_ifindex'] != before['primary_ifindex']
+                    or s['managed'] != before['managed'] or s['nm_state'] != before['nm_state']
                     or not primary_is(s, before['primary_mode'], before['primary_up'])
                     or s['supplicant'] != []):
                 raise Stop('manager ownership baseline not restored; leave live stopped')

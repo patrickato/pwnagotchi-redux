@@ -234,7 +234,7 @@ def test_sampler_ignores_outgoing_packets_and_has_no_transmit_api(monkeypatch):
     ops.deadline = 210
     ops.observe = lambda _name: dict(safe=True, managed=False, nm_state=10,
                                     primary_mode='managed', primary_up=False, primary_type=1,
-                                    supplicant=[], temp_nm_managed=False, temp_type=803,
+                                    supplicant=[], live='inactive', capture_process=False, temp_nm_managed=False, temp_type=803,
                                     firmware=2, temp_index=9)
     result = ops.sample(NAME, 803, seconds=999)
     assert result['header_counts']['management'] == 1
@@ -279,7 +279,7 @@ def test_sampler_detects_new_manager_claim_before_reading_frames(monkeypatch):
         calls.append(True)
         return dict(safe=True, managed=False, nm_state=10,
                     primary_mode='managed', primary_up=False, primary_type=1,
-                    supplicant=[], temp_nm_managed=len(calls)>1,
+                    supplicant=[], live='inactive', capture_process=False, temp_nm_managed=len(calls)>1,
                     temp_type=803, firmware=2, temp_index=9)
     ops.observe = observe
     with pytest.raises(trial.Stop, match='isolation changed'):
@@ -336,3 +336,92 @@ def test_readonly_preflight_exit_status_reports_unready_gate():
     assert trial.trial_exit_code({'prerequisites_satisfied': True}) == 0
     assert trial.trial_exit_code({'prerequisites_satisfied': False}) == 2
     assert trial.trial_exit_code({}) == 2
+
+
+@pytest.mark.parametrize('stage', ['create', 'up'])
+def test_returning_capture_owner_aborts_without_primary_or_manager_changes(stage):
+    class ReturningOwner(Fake):
+        def change(self, args):
+            super().change(args)
+            if (stage == 'create' and args[:2] == ['iw', 'phy']) or (
+                    stage == 'up' and args == ['ip', 'link', 'set', 'dev', NAME, 'up']):
+                self.s.update(live='active', capture_process=True)
+    ops = ReturningOwner()
+    result = trial.run_trial(ops, NAME, approved=True)
+    assert 'stopped' in result['test'] and result['restored'] is False
+    assert ['iw', 'dev', NAME, 'del'] in ops.commands
+    assert ['iw', 'dev', 'wlan0', 'set', 'type', 'monitor'] not in ops.commands
+    assert not any(cmd[0] == 'nmcli' and cmd[-1] == 'yes' for cmd in ops.commands)
+    if stage == 'create':
+        assert ['ip', 'link', 'set', 'dev', NAME, 'up'] not in ops.commands
+
+
+@pytest.mark.parametrize(('field', 'value'), [
+    ('interfaces', ['wlan0', 'unexpected']), ('firmware', 2),
+    ('primary_type', 803), ('primary_ifindex', 999),
+])
+def test_post_nm_radio_drift_blocks_live_start(field, value):
+    class Drift(Fake):
+        def change(self, args):
+            super().change(args)
+            if args[0] == 'nmcli' and args[-1] == 'yes':
+                self.s[field] = value
+    ops = Drift()
+    result = trial.run_trial(ops, NAME, approved=True)
+    assert result['restored'] is False
+    assert ['systemctl', 'start', 'redux-live.service'] not in ops.commands
+
+
+@pytest.mark.parametrize('failure', ['down', 'delete', 'primary_monitor', 'primary_up', 'managed_yes', 'start'])
+def test_partial_cleanup_failure_is_not_retried(failure):
+    ops = Fake(failure, partial=True)
+    result = trial.run_trial(ops, NAME, approved=True)
+    # Down/delete errors may still leave a conclusively restored baseline;
+    # errors in later restoration commands stop without further mutations.
+    assert result['restored'] is (failure in ('down', 'delete'))
+    assert len(ops.commands) == len({tuple(cmd) for cmd in ops.commands})
+
+
+def test_uncertain_unmanaged_state_blocks_primary_restoration():
+    class Uncertain(Fake):
+        def begin_cleanup(self):
+            super().begin_cleanup()
+            self.s['nm_state'] = 30
+    ops = Uncertain()
+    result = trial.run_trial(ops, NAME, approved=True)
+    assert result['restored'] is False
+    assert ['iw', 'dev', 'wlan0', 'set', 'type', 'monitor'] not in ops.commands
+
+
+def test_subprocess_timeout_is_sanitized_and_deadline_prevents_invocation(monkeypatch):
+    ops = object.__new__(trial.PiOps)
+    ops.deadline = trial.time.monotonic() + 10
+    def timeout(*args, **kwargs):
+        assert 0 < kwargs['timeout'] <= 6
+        raise trial.subprocess.TimeoutExpired('private-command', 6, stderr='private-data')
+    monkeypatch.setattr(trial.subprocess, 'run', timeout)
+    with pytest.raises(trial.Stop, match='bounded command unavailable or timed out'):
+        ops.command(['synthetic'])
+    ops.deadline = 0
+    with pytest.raises(trial.Stop, match='phase deadline reached'):
+        ops.command(['synthetic'])
+
+
+@pytest.mark.parametrize('stage', ['primary_monitor', 'primary_up'])
+@pytest.mark.parametrize(('field', 'value'), [
+    ('live', 'active'), ('capture_process', True), ('nm_state', 30), ('primary_type', 803),
+])
+def test_primary_restoration_rechecks_exclusive_ownership_after_each_step(stage, field, value):
+    class Drift(Fake):
+        def change(self, args):
+            super().change(args)
+            if (stage == 'primary_monitor' and args == ['iw', 'dev', 'wlan0', 'set', 'type', 'monitor']) or (
+                    stage == 'primary_up' and args == ['ip', 'link', 'set', 'dev', 'wlan0', 'up']):
+                self.s[field] = value
+    ops = Drift()
+    result = trial.run_trial(ops, NAME, approved=True)
+    assert result['restored'] is False
+    assert not any(cmd[0] == 'nmcli' and cmd[-1] == 'yes' for cmd in ops.commands)
+    assert ['systemctl', 'start', 'redux-live.service'] not in ops.commands
+    if stage == 'primary_monitor':
+        assert ['ip', 'link', 'set', 'dev', 'wlan0', 'up'] not in ops.commands

@@ -309,3 +309,43 @@ be verified. Read-only preflight returns `0` only when prerequisites pass,
 otherwise `2`. Always inspect the sanitized phase report regardless of
 return code, and never retry automatically. The previous trial's historical
 exit-0-on-incomplete-restoration behavior must not be trusted.
+
+### Independent source audit of da02546 and follow-up — 2026-10-16
+
+Source-only review found and corrected two safety gaps before any new trial:
+
+- Isolation previously permitted redux-live/its Bettercap child to reappear
+  after the initial stop check. Creation/activation/sampling now require
+  live inactive and no capture process. If an owner returns, cleanup may
+  remove only the identified trial VIF; it refuses primary/NM/service changes.
+- Returning NM ownership could change the interface inventory, firmware,
+  link type or original ifindex without blocking the subsequent service start.
+  All four are now checked before restarting Redux. Primary mode/UP recovery
+  also rechecks NM state10, capture-owner absence and original link type
+  after each step; uncertain ownership stops further restoration commands.
+
+Synthetic regressions cover returning capture owners, drift after NM return,
+partial failures in every cleanup command, uncertain unmanaged state, command
+six-second timeout/deadline handling and drift during primary restoration.
+Main-phase failures, interrupts and command timeouts enter the same cleanup;
+cleanup failures never trigger retries. The 210-second main deadline and
+90-second cleanup budget bound subprocess observations; a hung kernel,
+SIGKILL, power loss or lost SSH cannot guarantee software rollback. Keep the
+local console available. A failed observation stops remaining cleanup rather
+than guessing at ownership. No remaining source blocker was identified in
+this bounded review; actual VIF lifecycle and reception are still UNKNOWN.
+
+**New approval scope, not authorization:** after fresh strict Ethernet,
+image/driver, US, storage and ownership preflight, one supervised attempt
+using this reviewed successor: stop only redux-live; temporarily set only
+wlan0 NM managed=no; require measured managed/DOWN isolation; create/up only
+rxv5e16a901 and passively count decoded MAC headers for at most 60 seconds;
+then down/delete only that identified VIF, restore original wlan0 monitor/UP
+while unmanaged, restore NM managed=yes/state20, and start only redux-live
+behind the documented gates. One attempt, no automatic retry or escalation
+of recovery; no persistent settings, driver reload, reboot, reflash or build.
+The previous execution and separate recovery approvals remain consumed.
+
+Offline results for this audit: **60 runner tests passed; full suite 1,676
+passed, 2 skipped**. These fixtures do not establish physical monitor-mode
+operation, actual reception, capture handoff or hardware restoration.
