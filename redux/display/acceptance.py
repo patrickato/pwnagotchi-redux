@@ -40,7 +40,8 @@ def _read(path: Path, limit=256) -> str | None:
 
 
 def inventory(*, graphics=Path("/sys/class/graphics"),
-              inputs=Path("/sys/class/input")) -> dict:
+              inputs=Path("/sys/class/input"),
+              spi=Path("/sys/bus/spi/devices")) -> dict:
     """Report kernel-exposed framebuffers and input devices, never guess fbN."""
     screens = []
     for fb in sorted(graphics.glob("fb[0-9]*"), key=lambda p: p.name):
@@ -59,7 +60,22 @@ def inventory(*, graphics=Path("/sys/class/graphics"),
                         "abs_bits": _read(node / "capabilities/abs"),
                         "key_bits": _read(node / "capabilities/key"),
                         "properties": _read(node / "properties")})
-    return {"framebuffers": screens, "input_devices": devices}
+    # SPI evidence is independent of the framebuffer. A bound ILI9486
+    # controller can exist without a usable fbN and vice versa; never infer
+    # physically visible pixels from a device-tree compatible string.
+    spi_devices = []
+    for node in sorted(spi.glob("spi*"), key=lambda p: p.name)[:32]:
+        if not re.fullmatch(r"spi[0-9]{1,3}\.[0-9]{1,3}", node.name):
+            continue
+        driver = node / "driver"
+        spi_devices.append({
+            "sysfs_device": node.name,
+            "modalias": _read(node / "modalias", 128),
+            "compatible": (_read(node / "of_node" / "compatible", 128) or "").replace("\x00", " ").strip() or None,
+            "driver": driver.resolve().name if driver.is_symlink() else None,
+        })
+    return {"framebuffers": screens, "input_devices": devices,
+            "spi_devices": spi_devices}
 
 
 def xinput_probe(display: str, *, which=shutil.which,
@@ -217,6 +233,7 @@ def report(*, framebuffer=None, touch_device=None, seconds=12,
     result = {"schema": 1, "timestamp_utc": datetime.now(timezone.utc).isoformat(),
               "framebuffer_candidates": overview["framebuffers"],
               "input_candidates": overview["input_devices"],
+              "spi_candidates": overview["spi_devices"],
               "selected_framebuffer": None, "x11": None, "x11_geometry": None,
               "xinput": None, "touch_sample": None,
               "physical_display_verified": False, "touch_verified": False,
