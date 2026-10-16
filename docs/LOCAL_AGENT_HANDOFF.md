@@ -141,6 +141,17 @@ PASS/FAIL/UNKNOWN evidence and a separately gated next-test proposal:
 No Pi mutations or new build occurred. This supersedes the pending SSH
 verification statement above. Do not repeat prior recovery approvals.
 
+**Native-VIF approval preflight — 2026-10-16:** The newly approved bounded
+test stopped before any mutation: NetworkManager still explicitly claims
+wlan0 managed=yes/state20, with manager and supplicant daemons active.
+Exclusive ownership was not established. redux-live was not stopped and no
+VIF was created; no cleanup was needed. Final read-only summary reconfirmed
+healthy services/US/storage but the original RF limitation. A new specific
+ownership-isolation decision is required before hardware experimentation.
+See the final section of [FIELD_DIAGNOSTICS_20261016.md](FIELD_DIAGNOSTICS_20261016.md).
+Source summaries now expose sanitized NM ownership observations, without
+changing manager/radio state or claiming exclusive ownership.
+
 ## Historical bootstrap blocker: SSH host-key rotation
 
 The Pi's currently offered ED25519 SSH host-key fingerprint was reported as

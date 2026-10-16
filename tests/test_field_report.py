@@ -355,3 +355,47 @@ def test_report_link_probe_uses_bounded_reader_and_rejects_redirected_type(tmp_p
     entry.unlink()
     entry.write_text("803" + " " * 100000)
     assert report.capture_link_type("wlan0", net_root=tmp_path) == "unobserved"
+
+
+@pytest.mark.parametrize("managed,expected", [("yes", True), ("no", False), ("PRIVATE", None)])
+def test_ownership_reports_nm_claim_without_private_connection_details(monkeypatch, tmp_path, managed, expected):
+    def command(args, **kwargs):
+        if args[0] == "nmcli":
+            assert args[2] == "GENERAL.STATE,GENERAL.NM-MANAGED"
+            return ["20 (unavailable)", managed]
+        return ["active"]
+    monkeypatch.setattr(report, "command", command)
+    value = report.radio_ownership("wlan0", socket_root=tmp_path)
+    assert value == {"networkmanager_active": True, "wpa_supplicant_active": True,
+                     "nm_managed": expected, "nm_state_code": 20,
+                     "supplicant_interface_socket": False}
+    assert "PRIVATE" not in json.dumps(value)
+
+
+def test_ownership_unavailable_is_unknown_and_invalid_interface_is_not_queried(monkeypatch, tmp_path):
+    calls = []
+    def command(args, **kwargs):
+        calls.append(args)
+        return ["unavailable: PRIVATE_ERROR"]
+    monkeypatch.setattr(report, "command", command)
+    value = report.radio_ownership("../private", socket_root=tmp_path)
+    assert all(v is None for v in value.values())
+    assert not any(args[0] == "nmcli" for args in calls)
+    value = report.radio_ownership("wlan0", socket_root=tmp_path)
+    assert value["nm_managed"] is None and value["nm_state_code"] is None
+    assert "PRIVATE" not in json.dumps(value)
+
+
+
+def test_supplicant_socket_measurement_does_not_treat_regular_marker_as_socket(monkeypatch, tmp_path):
+    import socket
+    if not hasattr(socket, "AF_UNIX"):
+        pytest.skip("Unix-domain socket metadata")
+    monkeypatch.setattr(report, "command", lambda *args, **kw: ["inactive"])
+    marker = tmp_path / "wlan0"
+    marker.write_text("not a socket")
+    assert report.radio_ownership("wlan0", socket_root=tmp_path)["supplicant_interface_socket"] is False
+    marker.unlink()
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.bind(str(marker))
+        assert report.radio_ownership("wlan0", socket_root=tmp_path)["supplicant_interface_socket"] is True

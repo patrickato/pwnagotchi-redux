@@ -84,3 +84,44 @@ remained empty, handshakes/handoffs/artifacts stayed zero, and the worker
 recorded another fresh empty scan without error. This confirms continued
 service/rotation activity with no observed capture handoff; reception and
 conversion remain unqualified. No Pi state was changed by either collection.
+
+## Approved native-VIF experiment stopped at ownership preflight — 2026-10-16
+
+The operator approved one bounded native-monitor lifecycle experiment, with
+an explicit requirement to stop if radio isolation could not be established.
+The agent reread both field procedures and synchronized the clean workbench
+before checking strict Ethernet SSH, image/driver identity, country, storage,
+interfaces, processes and network-management ownership. A sanitized baseline
+was saved privately in the WSL build directory, not on the Pi.
+
+| Phase / gate | Result | Observation |
+|---|---|---|
+| BEFORE: transport, Pi, image and driver | PASS | Strict verified SSH via eth0; Pi 4, expected 4f907ff image, 6.12.109 kernel and matching patched driver digest |
+| BEFORE: country, storage and radio inventory | PASS | US configured/global, no RF block, REDUXCAP ext4 rw with 472,977,408 free bytes; only wlan0 |
+| BEFORE: process ownership inventory | PASS | Bettercap belongs to redux-live; no other sampled capture tools observed; NetworkManager and wpa_supplicant active |
+| BEFORE: exclusive radio isolation | FAIL | NetworkManager explicitly reports wlan0 managed=yes, state 20/unavailable; disconnected status and absent per-interface supplicant socket do not prove exclusive ownership |
+| TEST: temporary VIF / firmware activation / reception | UNKNOWN | Not attempted: ownership stop condition reached before stopping redux-live or creating any VIF |
+| AFTER: unchanged services, country and captures | PASS | Final read-only snapshot at 11:15:59Z: three Redux units active, US, fresh running checkpoint, no error/failure streak, empty inventories and zero handoffs |
+| AFTER: cleanup | PASS | No mutation occurred, so no VIF teardown, service restart or other cleanup was needed |
+
+The final snapshot still measured primary wlan0 ARPHRD 1 and firmware mode
+was 0 at baseline. NetworkManager's managed=yes/state20 claim persisted.
+Channel/attempt counters can advance through the existing supervisor's
+normal operation; the agent issued no radio command. This result neither
+passes nor fails the patched native-VIF lifecycle: the experiment did not
+reach it. No driver reload, permanent configuration change, reboot, reflash,
+active RF operation, capture artifact or image build was performed.
+
+Further hardware testing needs a separately reviewed, specifically approved
+ownership-isolation plan. Do not treat this approval as permission to disable
+NetworkManager, change its policy or affect the Ethernet uplink. Do not
+blindly retry VIF creation while its safety prerequisite remains unresolved.
+
+The source-only summary collector now reports allowlisted manager service
+activity, nm_managed, numeric NM state and actual per-interface supplicant
+socket presence. It excludes connection names, SSIDs, credentials and free
+text errors, and makes no claim of exclusive ownership. Tests cover missing
+commands/measurements, invalid interface names, private text exclusion and
+regular-file versus Unix-socket metadata. Full local suite: **1,584 passed,
+2 skipped**. It was exercised read-only from stdin on the Pi with bytecode
+writes disabled, not installed or saved there.

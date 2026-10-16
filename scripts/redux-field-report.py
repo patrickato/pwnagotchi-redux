@@ -95,6 +95,35 @@ def capture_link_type(iface, *, net_root=Path("/sys/class/net")):
     return value if value is not None else "unobserved"
 
 
+def radio_ownership(iface, *, socket_root=Path("/run/wpa_supplicant")):
+    """Report observed manager claims, never infer exclusive radio ownership."""
+    def active(unit):
+        value = command(["systemctl", "is-active", unit], limit=1)[0]
+        return True if value == "active" else False if value in {"inactive", "failed"} else None
+    result = {"networkmanager_active": active("NetworkManager.service"),
+              "wpa_supplicant_active": active("wpa_supplicant.service"),
+              "nm_managed": None, "nm_state_code": None,
+              "supplicant_interface_socket": None}
+    if (not isinstance(iface, str) or iface in (".", "..")
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", iface)):
+        return result
+    lines = command(["nmcli", "-g", "GENERAL.STATE,GENERAL.NM-MANAGED",
+                     "device", "show", iface], limit=2)
+    state = re.fullmatch(r"([0-9]{1,3})(?: \([^\n]*\))?", lines[0])
+    if state and int(state.group(1)) <= 120:
+        result["nm_state_code"] = int(state.group(1))
+    if len(lines) > 1 and lines[1] in {"yes", "no"}:
+        result["nm_managed"] = lines[1] == "yes"
+    try:
+        metadata = (socket_root / iface).lstat()
+        result["supplicant_interface_socket"] = stat.S_ISSOCK(metadata.st_mode)
+    except FileNotFoundError:
+        result["supplicant_interface_socket"] = False
+    except OSError:
+        pass
+    return result
+
+
 def log_tail(path=ENGINE_LOG, *, count=14) -> list[str]:
     try:
         if path.is_symlink() or path.stat().st_size > 8 * 1024 * 1024:
@@ -287,7 +316,8 @@ def snapshot_summary(*, config=Path("/etc/redux/live.toml")):
                             else "unobserved")
                      for unit in sorted(ALLOWED)
                      for value in [command(["systemctl", "is-active", unit], limit=1)[0]]},
-        "runtime": runtime, "checkpoint": checkpoint, "radio": radio, "rotation_seconds": rotation,
+        "runtime": runtime, "checkpoint": checkpoint, "radio": radio,
+        "radio_ownership": radio_ownership(iface), "rotation_seconds": rotation,
         "regulatory": {"configured_country": country, "global_country": current_country(reg) or None,
                        "wifi_unblocked": wireless_unblocked(rfkill) if rf_complete else None},
         "bettercap_http": int(http.group(1)) if http else None,
