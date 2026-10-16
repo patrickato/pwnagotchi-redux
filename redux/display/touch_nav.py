@@ -41,6 +41,7 @@ class SwipeTracker:
     pressed: bool = False
     start: int | None = None
     position: int | None = None
+    desynced: bool = False
 
     def __post_init__(self):
         if self.axis not in ("x", "y") or not 20 <= self.threshold <= 8192:
@@ -82,11 +83,16 @@ def consume(buffer: bytes, tracker: SwipeTracker):
         _, _, type_code, code, value = _EVENT.unpack_from(buffer, offset)
         offset += _EVENT.size
         if type_code == EV_SYN and code == 3:
-            # SYN_DROPPED means the kernel dropped events; never produce a
-            # gesture with stale start coordinates.
+            # Kernel input stream lost events. Until the next SYN_REPORT the
+            # intervening records are unsynchronised and cannot form a swipe.
+            tracker.desynced = True
             tracker.pressed = False
             tracker.start = None
             tracker.position = None
+        elif tracker.desynced:
+            if type_code == EV_SYN and code == 0:
+                tracker.desynced = False
+            # The subsequent contact must supply its own touch/axis records.
         else:
             gesture = tracker.feed(type_code, code, value)
             if gesture:
