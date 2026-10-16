@@ -318,3 +318,21 @@ def test_unrelated_safety_drift_still_aborts_even_with_expected_nm_side_effect()
     assert not any(cmd[:2] == ['iw', 'phy'] for cmd in ops.commands)
     assert ['systemctl', 'start', 'redux-live.service'] not in ops.commands
     assert ['nmcli', '--wait', '5', 'device', 'set', 'wlan0', 'managed', 'yes'] not in ops.commands
+
+
+@pytest.mark.parametrize(('result', 'expected'), [
+    ({'restored': True, 'test': {'arphrd': 803, 'reception': {'header_counts': {}}}}, 0),
+    ({'restored': True, 'test': {'stopped': 'runtime isolation not confirmed'}}, 2),
+    ({'restored': False, 'test': {'stopped': 'rollback blocked'}}, 3),
+    ({'restored': False, 'test': {'arphrd': 803, 'reception': {}}}, 3),
+    ({'restored': True, 'test': 'not_started'}, 2),
+    ({'restored': True, 'test': {}}, 2),
+])
+def test_native_vif_exit_status_distinguishes_trial_and_rollback(result, expected):
+    assert trial.trial_exit_code(result, execution=True) == expected
+
+
+def test_readonly_preflight_exit_status_reports_unready_gate():
+    assert trial.trial_exit_code({'prerequisites_satisfied': True}) == 0
+    assert trial.trial_exit_code({'prerequisites_satisfied': False}) == 2
+    assert trial.trial_exit_code({}) == 2
