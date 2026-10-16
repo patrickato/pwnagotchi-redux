@@ -99,6 +99,36 @@ def test_syn_dropped_refuses_partial_gesture():
     assert t.consume(data, tracker)[0] == []
 
 
+def test_syn_dropped_ignores_all_unsynced_events_until_syn_report():
+    tracker = t.SwipeTracker()
+    partial = (event(t.EV_KEY, t.BTN_TOUCH, 1)
+               + event(t.EV_ABS, t.ABS_X, 3100)
+               + event(t.EV_SYN, 3, 0))
+    assert t.consume(partial, tracker)[0] == []
+    assert tracker.desynced is True
+    # The kernel says events before SYN_REPORT may be corrupted, including a
+    # *complete-looking* BTN_TOUCH and swipe. It must not navigate.
+    invalid = swipe(3100, 900)
+    assert t.consume(invalid, tracker)[0] == []
+    assert tracker.desynced is True
+    assert t.consume(event(t.EV_SYN, 0, 0), tracker)[0] == []
+    assert tracker.desynced is False
+    # A genuinely fresh post-resync gesture still works.
+    assert t.consume(swipe(3100, 900), tracker)[0] == [1]
+
+
+def test_syn_dropped_across_partial_records_stays_desynced():
+    tracker = t.SwipeTracker()
+    records = event(t.EV_SYN, 3, 0) + swipe(3100, 900)
+    first, fragment = t.consume(records[:37], tracker)
+    assert first == [] and tracker.desynced
+    second, fragment = t.consume(fragment + records[37:], tracker)
+    assert second == [] and fragment == b""
+    # Only SYN_REPORT exits the lost-event region.
+    t.consume(event(t.EV_SYN, 0, 0), tracker)
+    assert t.consume(swipe(3100, 900), tracker)[0] == [1]
+
+
 def test_touch_options_cannot_read_input_during_check_or_once(monkeypatch):
     from redux.display import fbui
     calls = []
