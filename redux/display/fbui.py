@@ -21,6 +21,8 @@ import time
 import urllib.error
 import urllib.request
 
+from .local_http import open_status
+
 FB_PATTERN = re.compile(r"/dev/fb[0-9]{1,2}\Z")
 RESOLUTION = (480, 320)
 MAX_STATUS = 65536
@@ -65,12 +67,13 @@ def framebuffer_info(device, *, sys_root=Path("/sys/class/graphics"),
     return info
 
 
-def read_status(port=8080, *, opener=urllib.request.urlopen):
-    """A bounded read of the existing loopback API; no remote URLs."""
+def read_status(port=8080, *, opener=None):
+    """A bounded, proxy-free, no-redirect read of the local Redux API."""
     if not 1 <= port <= 65535:
         raise ValueError("invalid status port")
+    request = open_status if opener is None else opener
     try:
-        with opener(f"http://127.0.0.1:{port}/api/status", timeout=2) as response:
+        with request(f"http://127.0.0.1:{port}/api/status", timeout=2) as response:
             payload = response.read(MAX_STATUS + 1)
         if len(payload) > MAX_STATUS:
             raise ValueError("status response is oversized")
