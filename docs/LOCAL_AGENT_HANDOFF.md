@@ -129,6 +129,18 @@ link-probe cleanup shares the bounded ARPHRD reader between reports and
 runtime, refusing dot path components, linked type files and oversized input.
 It is not installed on the Pi by this source edit.
 
+**Verified post-flash diagnostics — 2026-10-16:** Console verification and
+single-host known_hosts replacement are complete; strict Ethernet SSH works.
+The Pi's baked `4f907ff`, Pi 4 `6.12.109` kernel, installed module digest,
+loaded srcversion and firmware digest agree with the signed image. Services,
+US, storage, Bettercap and worker scans pass, but native RF remains blocked:
+only wlan0, ARPHRD 1, firmware monitor 0, no captures/handoffs. Doctor correctly
+reports degraded RF health. No 480x320 framebuffer is enumerated. Exact
+PASS/FAIL/UNKNOWN evidence and a separately gated next-test proposal:
+[FIELD_DIAGNOSTICS_20261016.md](FIELD_DIAGNOSTICS_20261016.md).
+No Pi mutations or new build occurred. This supersedes the pending SSH
+verification statement above. Do not repeat prior recovery approvals.
+
 ## Historical bootstrap blocker: SSH host-key rotation
 
 The Pi's currently offered ED25519 SSH host-key fingerprint was reported as

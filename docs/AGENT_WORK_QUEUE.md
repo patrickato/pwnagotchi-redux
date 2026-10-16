@@ -375,6 +375,19 @@ comparison card and unsigned diagnostic artifact remain preserved.
 Next physical work requires specific approval; do not rebuild this image
 without a demonstrated artifact defect.
 
+## Post-flash read-only checkpoint — 2026-10-16
+
+Strict Ethernet SSH and the signed image's Pi 4 module/kernel/firmware
+provenance are verified. Services/US/storage/empty worker scans pass.
+Native RF still fails (primary wlan0 type 1, firmware monitor 0); reception,
+handoff/conversion and 480x320 TFT remain unqualified. See
+[FIELD_DIAGNOSTICS_20261016.md](FIELD_DIAGNOSTICS_20261016.md) for the
+consolidated report and bounded native-VIF test proposal requiring new
+specific approval. No Pi changes or image build occurred. A source-only
+Doctor fix now explicitly lists unmeasured native-link health as UNKNOWN
+instead of omitting that coverage gap. Continue safe source work; do not
+repeat a physical test, driver reload or deployment based on old approvals.
+
 ## P2 — independent verification and release preparation
 
 **P0.2/P1 collector milestone:** Local source now provides

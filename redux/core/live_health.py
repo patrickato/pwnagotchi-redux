@@ -92,15 +92,19 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
                 "802.11-capable link-layer header observed.",
                 f"Kernel ARPHRD type {capture_link_type}; this does not prove "
                 "that any packets were actually received."))
-        elif type(capture_link_type) is int:
+        elif type(capture_link_type) is int and 0 <= capture_link_type <= 65535:
             findings.append(_finding(
                 "native RF link type", "attention",
                 "Unexpected capture interface link-layer type.",
                 f"Kernel ARPHRD type {capture_link_type}; 801 or 803 required "
                 "for native IEEE80211/radiotap header evidence.",
                 "Inspect the selected radio and driver; avoid assuming native capture works."))
-        # Absent measurements remain unknown in runtime metadata. Legacy
-        # software-only fixtures need not fabricate a new green finding.
+        else:
+            findings.append(_finding(
+                "native RF link type", "unknown",
+                "Capture interface packet framing has not been measured.",
+                "No valid kernel ARPHRD measurement is available for the selected interface.",
+                "Read the selected interface's sysfs type before assessing native RF framing."))
 
     if capture_mount_ok is False:
         findings.append(_finding("capture storage", "action",

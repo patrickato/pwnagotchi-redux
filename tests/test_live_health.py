@@ -1,4 +1,6 @@
 """Doctor/live bridge: only actual observations can turn a field green."""
+import pytest
+
 from redux.core.live_health import describe_live_health
 
 
@@ -29,7 +31,8 @@ def test_running_ethernet_capture_interface_is_degraded_and_not_native_rf():
     assert finding(correct, "native RF link type")["status"] == "ok"
     assert "does not prove" in finding(correct, "native RF link type")["reason"]
     unknown = describe_live_health("running", iface="wlan0", capture_link_type=None)
-    assert not any(f["area"] == "native RF link type" for f in unknown["findings"])
+    assert finding(unknown, "native RF link type")["status"] == "unknown"
+    assert "native RF link type" in unknown["coverage"]["not_assessed"]
 
 
 def test_running_before_first_capture_does_not_claim_verified_handoff():
@@ -206,3 +209,18 @@ def test_doctor_does_not_claim_retries_when_engine_is_running():
     engine = finding(report, "live engine")
     assert engine["status"] == "ok"
     assert "retry" not in engine["reason"]
+
+
+@pytest.mark.parametrize("value", [None, True, False, 803.0, "803", -1, 65536])
+def test_invalid_or_missing_native_link_measurement_is_a_doctor_coverage_gap(value):
+    result = describe_live_health("running", iface="wlan0", capture_link_type=value,
+                                  free_bytes=100000, reserve_bytes=1000)
+    assert finding(result, "native RF link type")["status"] == "unknown"
+    assert "native RF link type" in result["coverage"]["not_assessed"]
+    assert "native RF link type" not in result["coverage"]["assessed"]
+
+
+def test_unusual_but_valid_native_link_measurement_is_assessed():
+    result = describe_live_health("running", iface="wlan0", capture_link_type=42)
+    assert finding(result, "native RF link type")["status"] == "attention"
+    assert "native RF link type" in result["coverage"]["assessed"]
