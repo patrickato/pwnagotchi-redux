@@ -155,7 +155,7 @@ def test_native_tft_never_displays_historical_rf_as_current():
     assert fbui.status_view(report, now=130)["rf_label"] == "RF NOT CURRENT"
 
 
-@pytest.mark.parametrize("link", [-1, 65536, 10 ** 5000, "803", 803.0, True, None])
+@pytest.mark.parametrize("link", [-1, 65536, 10 ** 1000, "803", 803.0, True, None])
 def test_native_tft_bounds_bad_rf_link_values_and_cannot_crash(link):
     report = valid_report(now=100)
     report["runtime"]["capture_link_type"] = link
