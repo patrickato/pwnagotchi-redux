@@ -232,8 +232,9 @@ def test_sampler_ignores_outgoing_packets_and_has_no_transmit_api(monkeypatch):
     monkeypatch.setattr(trial.select, 'select', lambda readable, *_: (readable, [], []))
     ops = object.__new__(trial.PiOps)
     ops.deadline = 210
-    ops.observe = lambda _name: dict(safe=True, managed=False, supplicant=[],
-                                    temp_nm_managed=False, temp_type=803,
+    ops.observe = lambda _name: dict(safe=True, managed=False, nm_state=10,
+                                    primary_mode='managed', primary_up=False, primary_type=1,
+                                    supplicant=[], temp_nm_managed=False, temp_type=803,
                                     firmware=2, temp_index=9)
     result = ops.sample(NAME, 803, seconds=999)
     assert result['header_counts']['management'] == 1
@@ -276,7 +277,9 @@ def test_sampler_detects_new_manager_claim_before_reading_frames(monkeypatch):
     calls = []
     def observe(_name):
         calls.append(True)
-        return dict(safe=True, managed=False, supplicant=[], temp_nm_managed=len(calls)>1,
+        return dict(safe=True, managed=False, nm_state=10,
+                    primary_mode='managed', primary_up=False, primary_type=1,
+                    supplicant=[], temp_nm_managed=len(calls)>1,
                     temp_type=803, firmware=2, temp_index=9)
     ops.observe = observe
     with pytest.raises(trial.Stop, match='isolation changed'):
@@ -297,7 +300,7 @@ def test_singleton_guard_blocks_parallel_trials_without_a_lock_file():
 
 
 
-def test_nm_unmanage_primary_mode_transition_is_reported_without_relaxing_guards():
+def test_unrelated_safety_drift_still_aborts_even_with_expected_nm_side_effect():
     # Hardware-observed transition: managed=no also took wlan0 down and
     # changed its kernel mode. It is NOT safe to assume a flag-only change.
     class PrimaryTransition(Fake):
@@ -311,7 +314,7 @@ def test_nm_unmanage_primary_mode_transition_is_reported_without_relaxing_guards
     assert result['isolation']['managed'] is False
     assert result['isolation']['primary_mode'] == 'managed'
     assert result['cleanup_observed']['primary_up'] is False
-    assert 'runtime isolation not confirmed' in result['test']['stopped']
+    assert 'expected managed/DOWN isolation not confirmed' in result['test']['stopped']
     assert not any(cmd[:2] == ['iw', 'phy'] for cmd in ops.commands)
     assert ['systemctl', 'start', 'redux-live.service'] not in ops.commands
     assert ['nmcli', '--wait', '5', 'device', 'set', 'wlan0', 'managed', 'yes'] not in ops.commands
