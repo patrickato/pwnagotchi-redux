@@ -1,7 +1,8 @@
 # Reviewed native-monitor isolation attempt — 2026-10-16
 
-**Outcome: STOPPED; RESTORATION INCOMPLETE.** No VIF was created and no
-receive sample ran. Do not repeat the trial or infer RF reception.
+**Trial outcome: STOPPED before VIF creation. Baseline was subsequently
+RESTORED under separate operator approval (see final section).** No receive
+sample ran. Do not repeat the trial or infer RF reception.
 
 The operator approved exactly one attempt with local console recovery
 available and explicitly required reviewed runner `2b540ad` or a verified
@@ -96,3 +97,42 @@ A minimal separately approved baseline recovery would:
 These are proposed operations only. They were NOT executed. Recovery restores
 service baseline, not native radiotap/RF acceptance. A revised native-VIF
 experiment is a later separate decision, not bundled into this recovery.
+
+## Separately approved baseline recovery — completed
+
+After the incomplete-restoration report, the operator explicitly approved
+baseline recovery only, with local console available. A distinct, bounded
+recovery script rechecked the actual stopped state, then ran exactly once:
+
+```text
+iw dev wlan0 set type monitor
+ip link set dev wlan0 up
+nmcli --wait 5 device set wlan0 managed yes
+systemctl start redux-live.service
+```
+
+Each next command was gated on fresh checks of Ethernet, country, storage,
+module identity, original interface identity, absence of a VIF, unbound
+supplicant and prior step's measured result. No trial was repeated.
+
+| Recovery verification | Result | Evidence |
+|---|---|---|
+| Primary radio baseline | PASS | Only wlan0, original ifindex 3, monitor mode/UP, ARPHRD 1, firmware monitor 0 |
+| Manager baseline | PASS | NM managed=true/state20, no supplicant binding |
+| Ethernet/country/storage | PASS | Original eth0 route/address identity preserved, US unchanged, REDUXCAP identity/rw/free-space checks pass |
+| Service/runtime baseline | PASS | redux-live active with Bettercap; new fresh running checkpoint, failure streak 0, no current engine error |
+| Original Doctor health | PASS for restoration | Original degraded RF status restored; native RF is not qualified |
+| No experimental interface | PASS | No VIF created during the failed trial or this recovery |
+
+Independent final summary at **2026-10-16T17:05:37Z** confirms all three
+Redux units active, global/configured US, unblocked Wi-Fi, REDUXCAP mounted,
+Bettercap unauthenticated loopback HTTP 401, 2.6-second-old running
+checkpoint, engine_attempts 1/events 3, zero failure streak/errors, and fresh
+empty worker scans. Both capture inventories remain empty, with zero
+handshakes/handoffs/artifacts. These new-process counters do not prove RF.
+
+Sanitized recovery progress/final output is retained privately alongside the
+trial log in WSL. **The Pi is no longer left stopped/unmanaged.** No driver
+reload, global manager restart, permanent edit, reboot, reflash, packet file
+or further native-VIF attempt occurred. Further RF testing remains a separate
+review/approval gate, informed by NM's demonstrated primary-mode side effect.

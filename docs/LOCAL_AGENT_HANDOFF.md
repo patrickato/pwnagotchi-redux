@@ -162,7 +162,7 @@ checks, rollback and console fallback are documented in
 prerequisites pass; runtime isolation/reception/restoration remain approval
 and hardware gates. No ownership/service/VIF changes or image build occurred.
 
-**LATEST — approved 2b540ad attempt STOPPED, restoration incomplete:** The
+**Historical initial outcome — 2b540ad attempt stopped, initially unrestored:** The
 single newly approved attempt stopped redux-live and set only wlan0 runtime
 managed=no. NM also changed primary wlan0 to managed mode/DOWN. The safety
 gate stopped before VIF creation; no reception was sampled. Cleanup refused
@@ -175,6 +175,19 @@ primary mode/UP recovery proposal:
 [NATIVE_VIF_TRIAL_20261016.md](NATIVE_VIF_TRIAL_20261016.md).
 No further Pi changes have occurred. Earlier healthy-service/readiness
 checkpoints above are historical, not the current state.
+
+**LATEST — separately approved baseline recovery COMPLETE:** The owner
+subsequently approved direct restoration of primary wlan0 monitor/UP, then
+its original runtime NM flag and redux-live, each behind fresh safety gates.
+All four approved commands succeeded once. The final independent summary
+at 2026-10-16T17:05:37Z confirms original wlan0 ifindex3/monitor/UP/type1,
+firmware0, NM managed=true/state20, unbound supplicant, Ethernet/US/storage,
+all Redux services active and fresh running runtime with zero failures.
+Doctor remains degraded for native RF; captures/handoffs remain empty.
+No native VIF was ever created; do not repeat the experiment or infer RF
+success. The prior stopped/unmanaged checkpoint is historical.
+[NATIVE_VIF_TRIAL_20261016.md](NATIVE_VIF_TRIAL_20261016.md) records both
+the failed isolation and the separately approved successful recovery.
 
 ## Historical bootstrap blocker: SSH host-key rotation
 

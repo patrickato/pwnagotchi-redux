@@ -1,7 +1,8 @@
 # Raspberry Pi 4 native-monitor ownership isolation — approval request
 
-**CURRENT STATUS: the separately approved 2b540ad attempt stopped; restoration
-is incomplete. Do not repeat it. See [NATIVE_VIF_TRIAL_20261016.md](NATIVE_VIF_TRIAL_20261016.md).**
+**CURRENT STATUS: the separately approved 2b540ad attempt stopped before VIF
+creation. Baseline was restored under subsequent separate approval. Do not
+repeat the trial. See [NATIVE_VIF_TRIAL_20261016.md](NATIVE_VIF_TRIAL_20261016.md).**
 
 The plan below is historical preparation, not renewed authorization.
 

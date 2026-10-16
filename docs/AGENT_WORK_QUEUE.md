@@ -388,7 +388,7 @@ Doctor fix now explicitly lists unmeasured native-link health as UNKNOWN
 instead of omitting that coverage gap. Continue safe source work; do not
 repeat a physical test, driver reload or deployment based on old approvals.
 
-## Current hardware stop — approved 2b540ad trial, 2026-10-16
+## Historical isolation stop and subsequent recovery — 2026-10-16
 
 The single approved attempt stopped at NM isolation, BEFORE VIF creation:
 managed=no also changed primary wlan0 to managed mode/DOWN. The runner's
@@ -399,6 +399,14 @@ Read [NATIVE_VIF_TRIAL_20261016.md](NATIVE_VIF_TRIAL_20261016.md), which contain
 the complete phase report and a new-approval-only primary mode/UP recovery
 proposal. A source-only regression models the observed side effect and
 improves phase diagnostics without relaxing any safety gate.
+
+**Latest recovery supersedes the initial stop:** A separately approved
+baseline-only recovery restored primary monitor/UP, NM managed=true/state20
+and redux-live. Final 17:05:37Z summary confirms services/US/Ethernet/storage
+and fresh running checkpoint, with firmware0/type1 and no handoffs. No VIF
+was created, no native reception proved, and no test repeated. See the same
+trial report's final recovery section. Future RF work needs a revised
+ownership plan accounting for NM changing the primary mode/UP state.
 
 ## P2 — independent verification and release preparation
 
