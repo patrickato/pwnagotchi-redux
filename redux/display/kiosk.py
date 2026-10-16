@@ -22,6 +22,8 @@ import time
 import urllib.error
 import urllib.request
 
+from .local_http import open_status
+
 _FB = re.compile(r"/dev/fb[0-9]{1,2}\Z")
 _ALLOWED = {(480, 320), (320, 480)}
 
@@ -58,11 +60,12 @@ def framebuffer_probe(device: str, *, sys_graphics: Path = Path("/sys/class/grap
     return result
 
 
-def dashboard_probe(port: int, *, opener=urllib.request.urlopen) -> dict:
-    """Only ever connect to Redux's literal loopback listener."""
+def dashboard_probe(port: int, *, opener=None) -> dict:
+    """Probe the literal loopback listener without inherited HTTP proxies."""
     result = {"ok": False, "reason": ""}
+    request = open_status if opener is None else opener
     try:
-        with opener(f"http://127.0.0.1:{port}/api/status", timeout=2) as response:
+        with request(f"http://127.0.0.1:{port}/api/status", timeout=2) as response:
             # Bound response memory: rejecting an unbounded/misrouted endpoint
             # is more useful than simply accepting any server on the port.
             data = response.read(65537)
@@ -155,7 +158,7 @@ def x11_geometry_probe(display: str, *, which=shutil.which,
 def preflight(framebuffer: str, port: int = 8080, *,
               environ=None, uid=None, which=shutil.which,
               sys_graphics: Path = Path("/sys/class/graphics"),
-              statter=os.stat, opener=urllib.request.urlopen,
+              statter=os.stat, opener=None,
               x11_check=x11_probe, x11_geometry_check=x11_geometry_probe) -> dict:
     env = os.environ if environ is None else environ
     effective_uid = os.geteuid() if uid is None else uid
