@@ -43,6 +43,42 @@ def test_inventory_keeps_framebuffer_and_event_identity_explicit(tmp_path):
     }]
 
 
+def test_spi_inventory_exposes_controller_evidence_without_claiming_pixels(tmp_path):
+    graphics = tmp_path / "graphics"
+    graphics.mkdir()
+    (graphics / "fb0").mkdir()
+    (graphics / "fb0" / "name").write_text("vc4drmfb")
+    (graphics / "fb0" / "virtual_size").write_text("1920,1080")
+    inputs = tmp_path / "input"
+    inputs.mkdir()
+    spi = tmp_path / "spi"
+    device = spi / "spi0.0"
+    (device / "of_node").mkdir(parents=True)
+    (device / "modalias").write_text("spi:ili9486\n")
+    (device / "of_node" / "compatible").write_bytes(b"ilitek,ili9486\x00")
+    driver = tmp_path / "drivers" / "fb_ili9486"
+    driver.mkdir(parents=True)
+    (device / "driver").symlink_to(driver, target_is_directory=True)
+    (spi / "spi_bad").mkdir()
+    item = acceptance.inventory(graphics=graphics, inputs=inputs, spi=spi)
+    assert item["spi_devices"] == [{
+        "sysfs_device": "spi0.0", "modalias": "spi:ili9486",
+        "compatible": "ilitek,ili9486", "driver": "fb_ili9486",
+    }]
+    state = acceptance.report(graphics=graphics, inputs=inputs, spi=spi,
+                              environ={}, uid=1000)
+    assert state["spi_candidates"] == item["spi_devices"]
+    assert state["framebuffer_candidates"][0]["virtual_size"] == "1920,1080"
+    assert state["physical_display_verified"] is False
+    assert state["touch_verified"] is False
+
+
+def test_display_sysfs_reader_is_bounded_before_decode(tmp_path):
+    file = tmp_path / "attribute"
+    file.write_bytes(b"x" * 4096)
+    assert acceptance._read(file, 128) == "x" * 128
+
+
 def test_raw_single_touch_parser_across_partial_reads_and_normalization():
     decoder = acceptance.TapDecoder({"min": 10, "max": 210}, {"min": 20, "max": 420})
     data = tap(110, 220)
