@@ -136,6 +136,23 @@ It will add actual X11 socket, authenticated root geometry and optional
 \`xinput\` device inventory. Those checks do **not** prove the Xorg
 framebuffer target or physical pixels.
 
+### Read-only SPI controller evidence (source workbench)
+
+The current source workbench also includes a bounded `spi_candidates`
+inventory in `redux-display-diag`. For each kernel-enumerated SPI device it
+reports the sysfs device name, modalias, Device Tree compatible string (if
+available), and bound driver name (if available). These values help separate
+a missing SPI/overlay device from a controller that enumerates but still
+does **not** expose a compatible `/dev/fbN`.
+
+This evidence is **not** physical display acceptance: SPI enumeration alone
+does not verify the framebuffer, actual pixels, backlight or touch. The first
+signed field image was built before this inventory extension; it is
+**source-only until a future qualified image is deployed**. On that existing
+image, inspect the same kernel information with read-only sysfs tools rather
+than enabling or guessing a TFT overlay. Only an operator-approved panel
+configuration change may create a new framebuffer.
+
 ## 2. Sample raw touch presses (explicit opt-in)
 
 After visually identifying the touchscreen's \`/dev/input/eventN\` in the
