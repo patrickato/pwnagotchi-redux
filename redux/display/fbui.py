@@ -26,6 +26,7 @@ from .local_http import open_status
 FB_PATTERN = re.compile(r"/dev/fb[0-9]{1,2}\Z")
 RESOLUTION = (480, 320)
 MAX_STATUS = 65536
+MAX_MEASURED_COUNT = (1 << 63) - 1
 INK = (223, 236, 242)
 SUBTLE = (126, 153, 171)
 TEAL = (64, 218, 186)
@@ -89,10 +90,16 @@ def read_status(port=8080, *, opener=None):
 
 
 def _safe_text(value, max_len=55):
-    if value is None:
+    # Live API labels must be strings. Never stringify untrusted nested
+    # objects or enormous integers in the refresh/render hot path.
+    if not isinstance(value, str):
         return "UNKNOWN"
-    text = str(value)
-    return "".join(ch if 32 <= ord(ch) < 127 else " " for ch in text)[:max_len]
+    return "".join(ch if 32 <= ord(ch) < 127 else " " for ch in value[:max_len])
+
+
+def _bounded_count(value):
+    """Only measured unsigned 64-bit-range counters may become TFT metrics."""
+    return value if type(value) is int and 0 <= value <= MAX_MEASURED_COUNT else None
 
 
 def _valid_utc_clock(value):
@@ -132,7 +139,7 @@ def status_view(report, *, now=None):
     if not report:
         state = "OFFLINE"
     engine = "ACTIVE" if running and not stale else state
-    count = lambda key: runtime[key] if type(runtime.get(key)) is int and runtime[key] >= 0 else None
+    count = lambda key: _bounded_count(runtime.get(key))
     raw_link = runtime.get("capture_link_type")
     # Treat link-type metadata as measured only when the whole runtime sample
     # is fresh. Old radiotap evidence must never look like current RF status.
@@ -150,10 +157,10 @@ def status_view(report, *, now=None):
         rf_label = "ETHERNET 1 / NO NATIVE RF"
     else:
         rf_label = f"UNQUALIFIED LINK {link}"
-    free = runtime.get("free_bytes")
-    free_mb = round(free / 1048576) if type(free) is int and free >= 0 else None
+    free = _bounded_count(runtime.get("free_bytes"))
+    free_mb = round(free / 1048576) if free is not None else None
     results = pipeline.get("by_status", {}) if isinstance(pipeline.get("by_status"), dict) else {}
-    errors = results.get("error") if type(results.get("error")) is int else None
+    errors = _bounded_count(results.get("error"))
     findings = doctor.get("findings", [])
     if not isinstance(findings, list):
         findings = []
@@ -170,7 +177,7 @@ def status_view(report, *, now=None):
         "events": count("events_seen"),
         "handoffs": count("handed_off"),
         "storage_mb": free_mb,
-        "processed": (results.get("ready") if type(results.get("ready")) is int else None),
+        "processed": _bounded_count(results.get("ready")),
         "errors": errors, "pipeline_available": pipeline.get("available") is True,
         "finding": _safe_text(actionable.get("summary"), 55) if actionable else
                    ("No actionable findings" if health == "ok" else "No verified health detail"),
