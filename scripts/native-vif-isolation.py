@@ -73,11 +73,25 @@ def decode_header(packet, arphrd):
     return label if len(packet) >= needed else 'invalid'
 
 
+def primary_is(s, mode, up):
+    """Kernel mode/UP is a separate assertion from stable-device safety."""
+    return s['primary_mode'] == mode and s['primary_up'] is up
+
+
+def isolated_primary(s):
+    """Only the *measured* NM side effect is supported in this candidate."""
+    return (s['safe'] is True and s['managed'] is False
+            and s['nm_state'] == 10 and s['supplicant'] == []
+            and primary_is(s, 'managed', False)
+            and s['primary_type'] == 1)
+
+
 def baseline_ok(s):
     return (s['safe'] is True and s['interfaces'] == ['wlan0']
             and s['managed'] is True and s['nm_state'] == 20
             and s['supplicant'] == [] and s['live'] == 'active'
             and s['firmware'] == 0 and s['primary_type'] == 1
+            and primary_is(s, 'monitor', True)
             and s['runtime_fresh'] and s['runtime_state'] == 'running' and not s['runtime_error'])
 
 
@@ -99,26 +113,29 @@ def run_trial(ops, name, *, approved=False):
         stopped = True  # record intent BEFORE a possibly partial operation
         ops.change(['systemctl', 'stop', 'redux-live.service'])
         s = ops.observe(name)
-        if not s['safe'] or s['live'] != 'inactive' or s['capture_process']:
-            raise Stop('capture owner did not release radio')
+        if (not s['safe'] or not primary_is(s, 'monitor', True)
+                or s['live'] != 'inactive' or s['capture_process']
+                or s['managed'] is not True or s['nm_state'] != 20):
+            raise Stop('capture owner did not release radio cleanly')
         changed = True
         ops.change(['nmcli', '--wait', '5', 'device', 'set', 'wlan0', 'managed', 'no'])
         s = ops.observe(name)
         log['isolation'] = ops.public(s)
-        if not s['safe'] or s['managed'] is not False or s['nm_state'] != 10 or s['supplicant'] != []:
-            raise Stop('runtime isolation not confirmed')
+        if (not isolated_primary(s) or s['interfaces'] != before['interfaces']
+                or s['firmware'] != 0 or s['capture_process']):
+            raise Stop('expected managed/DOWN isolation not confirmed')
         created_attempt = True
         ops.change(['iw', 'phy', before['phy'], 'interface', 'add', name, 'type', 'monitor'])
         s = ops.observe(name)
         owned_index = ops.temp_index(s, name, before['phy'])
-        if (owned_index is None or not s['safe'] or s['managed'] is not False
-                or s['temp_nm_managed'] is not False or s['supplicant'] != []
+        if (owned_index is None or not isolated_primary(s)
+                or s['temp_nm_managed'] is not False
                 or s['temp_type'] not in (801, 803) or s['firmware'] != 0):
             raise Stop('temporary interface isolation not confirmed')
         ops.event('created', temporary_vif=name, ifindex=owned_index, phy=before['phy'])
         ops.change(['ip', 'link', 'set', 'dev', name, 'up'])
         s = ops.observe(name)
-        if (not s['safe'] or s['managed'] is not False or s['supplicant'] != []
+        if (not isolated_primary(s)
                 or ops.temp_index(s, name, before['phy']) != owned_index
                 or s['temp_nm_managed'] is not False or s['temp_type'] not in (801, 803)
                 or s['firmware'] != 2):
@@ -151,10 +168,33 @@ def run_trial(ops, name, *, approved=False):
                     or s['supplicant'] != []):
                 raise Stop('radio baseline not restored; leave manager/service unchanged')
             if changed and s['managed'] is False:
+                # NM's runtime release *actually* changed wlan0 to managed
+                # mode and DOWN on the field Pi. Restore the kernel baseline
+                # explicitly, exactly once per necessary step, BEFORE
+                # returning control to NM and BEFORE restarting Bettercap.
+                if primary_is(s, 'managed', False):
+                    ops.change(['iw', 'dev', 'wlan0', 'set', 'type', 'monitor'])
+                    s = ops.observe(name)
+                    if (not s['safe'] or s['interfaces'] != before['interfaces']
+                            or s['managed'] is not False
+                            or s['firmware'] != before['firmware']
+                            or s['primary_mode'] != 'monitor'
+                            or s['primary_ifindex'] != before['primary_ifindex']):
+                        raise Stop('original wlan0 monitor mode was not restored')
+                if s['primary_mode'] == 'monitor' and s['primary_up'] is False:
+                    ops.change(['ip', 'link', 'set', 'dev', 'wlan0', 'up'])
+                    s = ops.observe(name)
+                if (not s['safe'] or s['interfaces'] != before['interfaces']
+                        or not primary_is(s, 'monitor', True)
+                        or s['managed'] is not False
+                        or s['firmware'] != before['firmware']
+                        or s['primary_ifindex'] != before['primary_ifindex']):
+                    raise Stop('original wlan0 link state not restored')
                 ops.change(['nmcli', '--wait', '5', 'device', 'set', 'wlan0', 'managed', 'yes'])
             s = ops.restored_ownership(name, before)
             if (not s['safe'] or s['managed'] != before['managed'] or s['nm_state'] != before['nm_state']
-                    or s['primary_up'] != before['primary_up'] or s['supplicant'] != []):
+                    or not primary_is(s, before['primary_mode'], before['primary_up'])
+                    or s['supplicant'] != []):
                 raise Stop('manager ownership baseline not restored; leave live stopped')
             if stopped and s['live'] == 'inactive':
                 ops.change(['systemctl', 'start', 'redux-live.service'])
@@ -319,7 +359,7 @@ class PiOps:
                          and Path('/etc/redux/regulatory-country').read_text().strip() == 'US'
                          and not re.search(r'(Soft|Hard) blocked:\s*yes', rf)
                          and not re.search(r'^\s*Connected to', connected, re.M)
-                         and mode and mode.group(1) == 'monitor' and phy and not conflict
+                         and s['primary_mode'] is not None and phy and not conflict
                          and supplicant_count == 1 and manager_count == 1
                          and set(interfaces) <= {'wlan0', name})
         if name in interfaces:
@@ -362,7 +402,8 @@ class PiOps:
             if (s['safe'] and s['interfaces'] == before['interfaces'] and s['managed'] == before['managed']
                     and s['nm_state'] == before['nm_state'] and s['live'] == before['live']
                     and s['firmware'] == before['firmware'] and s['primary_type'] == before['primary_type']
-                    and s['primary_up'] == before['primary_up'] and s['primary_ifindex'] == before['primary_ifindex']
+                    and s['primary_up'] == before['primary_up'] and s['primary_mode'] == before['primary_mode']
+                    and s['primary_ifindex'] == before['primary_ifindex']
                     and s['health'] == before['health'] and s['capture_process']
                     and fresh and d.get('state') == 'running' and not d.get('failure_streak') and not d.get('last_error')):
                 return self.public(s)
@@ -383,7 +424,7 @@ class PiOps:
             while time.monotonic() < end and sum(counts.values()) < 10000:
                 if time.monotonic() >= next_check:
                     state = self.observe(name)
-                    if (not state['safe'] or state['managed'] is not False or state['supplicant'] != []
+                    if (not isolated_primary(state)
                             or state['temp_nm_managed'] is not False or state['temp_type'] != arphrd
                             or state['firmware'] != 2 or state['temp_index'] != index):
                         raise Stop('isolation changed during receive-only sample')
