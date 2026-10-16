@@ -134,6 +134,28 @@ def test_failed_cleanup_never_claims_restoration_or_retries(failure):
     assert sum(cmd == ['systemctl', 'start', 'redux-live.service'] for cmd in ops.commands) <= 1
 
 
+def test_networkmanager_absent_temp_device_is_unknown_not_unmanaged():
+    ops = object.__new__(trial.PiOps)
+    ops.command = lambda args, **kw: (0, "wlan0\n")
+    assert ops.nm(NAME, absent_ok=True) == (None, None)
+    with pytest.raises(trial.Stop, match='original NM device missing'):
+        ops.nm(NAME)
+
+
+def test_unobserved_temp_networkmanager_ownership_blocks_activation():
+    class NotEnumerated(Fake):
+        def change(self, args):
+            super().change(args)
+            if args[:2] == ['iw', 'phy']:
+                self.s['temp_nm_managed'] = None
+    ops = NotEnumerated()
+    result = trial.run_trial(ops, NAME, approved=True)
+    assert 'stopped' in result['test']
+    assert 'temporary interface isolation not confirmed' in result['test']['stopped']
+    assert ['ip', 'link', 'set', 'dev', NAME, 'up'] not in ops.commands
+    assert result['restored'] is True
+
+
 def test_manager_claiming_temporary_vif_aborts_before_activation():
     class Claimed(Fake):
         def change(self, args):
