@@ -130,8 +130,16 @@ def status_view(report, *, now=None):
         state = "OFFLINE"
     engine = "ACTIVE" if running and not stale else state
     count = lambda key: runtime[key] if type(runtime.get(key)) is int and runtime[key] >= 0 else None
-    link = runtime.get("capture_link_type")
-    if type(link) is not int:
+    raw_link = runtime.get("capture_link_type")
+    # Treat link-type metadata as measured only when the whole runtime sample
+    # is fresh. Old radiotap evidence must never look like current RF status.
+    # Constrain malformed values before formatting; huge integers can raise
+    # during decimal conversion and must not crash a physical dashboard.
+    link = (raw_link if type(raw_link) is int and 0 <= raw_link <= 65535
+            and not stale else None)
+    if stale:
+        rf_label = "RF NOT CURRENT"
+    elif link is None:
         rf_label = "RF UNVERIFIED"
     elif link in (801, 803):
         rf_label = f"802.11 LINK {link}"
@@ -154,7 +162,7 @@ def status_view(report, *, now=None):
     return {
         "health": health, "state": state, "engine": engine,
         "iface": _safe_text(runtime.get("iface") or "UNKNOWN", 18),
-        "rf_link_type": link if type(link) is int else None,
+        "rf_link_type": link,
         "rf_label": rf_label,
         "events": count("events_seen"),
         "handoffs": count("handed_off"),
