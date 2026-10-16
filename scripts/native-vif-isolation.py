@@ -442,6 +442,25 @@ class PiOps:
         return {'header_counts': counts, 'decoded_payloads': False, 'persistent_capture': False}
 
 
+def trial_exit_code(result, *, execution=False):
+    """Classify actual experiment outcome, never infer success from cleanup alone.
+
+    0: read-only preflight, or completed trial with verified restoration;
+    2: experiment stopped with verified restoration, or preflight declined;
+    3: restoration unverified; operator intervention may be needed.
+    A successful experiment may still receive zero RF frames; this is NOT
+    native capture acceptance.
+    """
+    if not execution:
+        return 0 if result.get('prerequisites_satisfied') is True else 2
+    if result.get('restored') is not True:
+        return 3
+    test = result.get('test')
+    if not isinstance(test, dict) or 'stopped' in test:
+        return 2
+    return 0 if ('arphrd' in test and 'reception' in test) else 2
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--execute-approved', action='store_true')
@@ -465,7 +484,7 @@ def main():
         s = ops.observe(args.vif)
         result = {'read_only': True, 'prerequisites_satisfied': baseline_ok(s), 'baseline': ops.public(s)}
     print(json.dumps(result, sort_keys=True, indent=2))
-    return 0
+    return trial_exit_code(result, execution=args.execute_approved)
 
 
 if __name__ == '__main__':
