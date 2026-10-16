@@ -71,3 +71,16 @@ interface had no usable ARPHRD measurement. New source explicitly adds an
 UNKNOWN finding/coverage gap for missing, boolean, non-integer and out-of-range
 values; valid unexpected integer types still receive ATTENTION. This is a
 source-only improvement with synthetic regressions, not a deployed Pi fix.
+
+## Full rotation interval follow-up — 2026-10-16T11:02:45Z
+
+A second read-only summary 313 seconds after the first spans the configured
+300-second rotation interval. Engine attempts advanced 188 to 189 and
+runtime events 564 to 567. Services stayed active, US remained applied,
+checkpoint age was 5.1 seconds, and failure streak stayed zero. The supervisor
+had changed channel to 104; the diagnostics issued no channel command.
+The selected wlan0 still had Ethernet ARPHRD 1. Active/incoming directories
+remained empty, handshakes/handoffs/artifacts stayed zero, and the worker
+recorded another fresh empty scan without error. This confirms continued
+service/rotation activity with no observed capture handoff; reception and
+conversion remain unqualified. No Pi state was changed by either collection.
