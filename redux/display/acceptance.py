@@ -149,6 +149,12 @@ class TapDecoder:
                         self.taps.append({"raw_x": x, "raw_y": y,
                                           "x_percent": _percentage(x, self.bounds["x"]),
                                           "y_percent": _percentage(y, self.bounds["y"])})
+                    # A subsequent contact must report its own ABS_X and ABS_Y.
+                    # Otherwise a second BTN_TOUCH pair would be incorrectly
+                    # counted as another tap at the previous finger's location.
+                    # Reset on release (not press): some controllers send their
+                    # initial ABS coordinates immediately before BTN_TOUCH.
+                    self.axes = {"x": None, "y": None}
 
 
 def sample_touch(device: str, *, seconds=12, max_taps=12,
