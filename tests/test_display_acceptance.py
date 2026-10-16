@@ -54,6 +54,26 @@ def test_raw_single_touch_parser_across_partial_reads_and_normalization():
     assert not decoder.desynced
 
 
+def test_touch_decoder_does_not_reuse_previous_contacts_coordinates():
+    decoder = acceptance.TapDecoder()
+    decoder.feed(tap(100, 200))
+    assert len(decoder.taps) == 1
+    # A press/release pair without any current-contact ABS readings must
+    # never fabricate another tap from the previous contact's coordinates.
+    decoder.feed(event(1, 330, 1) + event(1, 330, 0))
+    assert len(decoder.taps) == 1
+    # A half-sampled contact must not steal the old X coordinate either.
+    decoder.feed(event(1, 330, 1) + event(3, 1, 300) + event(1, 330, 0))
+    assert len(decoder.taps) == 1
+    # Some controllers send initial coordinates immediately before BTN_TOUCH;
+    # preserving that ordering still produces a legitimate second tap.
+    decoder.feed(event(3, 0, 310) + event(3, 1, 410)
+                 + event(1, 330, 1) + event(1, 330, 0))
+    assert len(decoder.taps) == 2
+    assert decoder.taps[-1]["raw_x"] == 310
+    assert decoder.taps[-1]["raw_y"] == 410
+
+
 def test_missing_axes_unsynced_events_and_stray_release_not_counted():
     decoder = acceptance.TapDecoder()
     decoder.feed(event(1, 330, 0))
