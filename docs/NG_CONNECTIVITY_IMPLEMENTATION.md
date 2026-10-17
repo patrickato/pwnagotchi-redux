@@ -14,16 +14,19 @@ Source: `redux/radio/dual_radio.py`, tested in
 
 - Consumes existing capability-probe `Radio` records and explicit,
   independently observed `RadioEvidence`.
-- Reserves the confirmed onboard radio exclusively for a verified
-  **connected, NM-owned management link**.
+- Reserves the positively identified onboard Wi-Fi PHY from capture.
+  Management may use either an independently verified connected/NM-owned
+  onboard uplink **or a separately verified Ethernet return route**.
+  Neither path is presumed from interface names alone.
 - Only considers externally attached, monitor-capable radios on a
   **different, positively identified PHY** as capture candidates.
 - A mere `iw type monitor` or ARPHRD 803 label does **not** prove
   reception. `receive_verified` requires monitor mode, positive
   ownership, native packet link type, and **strictly positive received,
   decoded 802.11 frame count**.
-- No external radio, missing management evidence, duplicate PHY/iface,
-  disconnected uplink or invalid observation fails closed. Removing
+- No external radio, missing management-path evidence, duplicate PHY/iface,
+  disconnected uplink without verified Ethernet, or invalid observation
+  fails closed. Removing
   the USB adapter does not silently promote/retune the management
   radio. Planning never issues `iw`, `ip`, NM, RF or service commands.
 - Every returned plan has `activation_authorized=False`: operator
@@ -48,6 +51,11 @@ evidence = {
 plan = plan_dual_radio(inventory, evidence)
 assert plan.state == "candidate" and not plan.activation_authorized
 ```
+
+The optional `ethernet_management_verified=True` argument is only
+for callers that have **independently proven** the Ethernet connection
+and return path (e.g., the Pi's already-verified strict Ethernet SSH
+preflight). A missing, untrusted or string-valued proof stays blocked.
 
 This is a conservative preflight component, **not yet wired to Bettercap,
 udev hotplug or a systemd service**. External capture remains untested
@@ -87,7 +95,11 @@ the actual Bluetooth PAN/BlueZ pairing agent or data transport.
    consume split decisions. A change that drives hardware must not
    assume `Radio.inject` from driver-name heuristics means injection
    or actual receive works. Make radio role transitions transactional
-   and fail closed if an interface mode command fails.
+   and fail closed if an interface mode command fails. The current
+   `RadioManager` now rejects OS command failures/timeouts, prevents
+   publishing an unapplied role assignment and marks partially applied
+   transitions out of sync until a fresh observed reprobe. This is
+   source-tested but not yet deployed on the Pi.
 3. Add a narrowly scoped BlueZ adapter whose own pairable/discoverable
    settings have an explicit expiring owner-triggered gate. Use a
    time-bounded pairing agent, authenticated bond identity, encrypted
