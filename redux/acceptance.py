@@ -37,8 +37,12 @@ def usb_presence(root=Path('/sys/bus/usb/devices')):
     return {'device_count_including_hubs': len(before), 'inventory_stable': True}
 
 
-def report(peer, *, run=None, collector=collect, pan=None):
-    run = run or BoundedReader(seconds=35)
+def report(peer, *, run=None, collector=collect, pan=None, dual_radio=False):
+    if dual_radio:
+        from .radio.readiness import Reader, collect_readiness
+        run = run or Reader(seconds=35)
+    else:
+        run = run or BoundedReader(seconds=35)
     result = {'format': 'redux-readonly-acceptance-v1', 'hardware_changes': False,
               'gates': {}, 'radios': [], 'pan': pan_gates({})}
     def check(name, action):
@@ -107,12 +111,15 @@ def report(peer, *, run=None, collector=collect, pan=None):
             result['pan'] = pan_gates(collect_pan(run, pan[0], pan[1], adapter=pan[2]))
         except (Unavailable, OSError, ValueError, KeyError, TypeError, IndexError):
             pass
+    if dual_radio:
+        result['dual_radio_readiness']=collect_readiness(peer,run=run)
     return result
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--management-peer', required=True)
+    parser.add_argument('--dual-radio', action='store_true', help='read-only loaded policy, NM and framing evidence')
     parser.add_argument('--pan-peer', help='private pinned BlueZ Device1 path; no discovery')
     parser.add_argument('--pan-route-peer', help='private already-provisioned phone IP')
     parser.add_argument('--pan-adapter', default='/org/bluez/hci0')
@@ -126,7 +133,7 @@ def main(argv=None):
         parser.error('valid IP addresses required')
     if bool(args.pan_peer) != bool(args.pan_route_peer):
         parser.error('PAN requires both pinned peer and route peer')
-    value = report(args.management_peer, pan=(args.pan_peer, args.pan_route_peer, args.pan_adapter)
+    value = report(args.management_peer, dual_radio=args.dual_radio, pan=(args.pan_peer, args.pan_route_peer, args.pan_adapter)
                    if args.pan_peer else None)
     print(json.dumps(value, sort_keys=True))
     return 0 if all(v == 'PASS' for v in value['gates'].values()) else 2

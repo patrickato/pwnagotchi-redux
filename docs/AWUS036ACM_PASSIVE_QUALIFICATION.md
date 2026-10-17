@@ -63,7 +63,7 @@ the test. The runner will not edit config or restart live to make this gate pass
 6. Otherwise the *only proposed companion isolation*, needing named approval,
    is for original NM yes with disconnected/unavailable state20/30, managed/DOWN,
    no frequency, no USB IP/route/connection and **existing per-device
-   GENERAL.AUTOCONNECT=no**. Measure original ownership/state/autoconnect and
+   Device.Autoconnect=false**. Measure original ownership/state/autoconnect and
    identity first. No active connection is disconnected to make the test fit.
    Behind a fresh pinned-identity/Ethernet/onboard/runtime gate, run **once**:
 
@@ -229,3 +229,11 @@ receive alarms/budgets, late frames, failed/uncertain rollback and sanitized
 remaining-state reports; default CLI nonexecution and required image payloads.
 These counts are software evidence, not measured RF reception or physical
 restoration. The source-generated image contracts add no autostart configuration.
+
+## Current read-only readiness finding
+
+The Alfa is now present and the running Bettercap actually owns it; NM Managed
+and Device.Autoconnect are both true. The onboard assignment and isolated USB
+preconditions fail. See [DUAL_RADIO_READINESS_20261017.md](DUAL_RADIO_READINESS_20261017.md)
+for measured facts and the separate configuration-handoff/policy boundaries.
+The original runner gates remain unchanged; do not run it in the current state.

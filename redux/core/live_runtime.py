@@ -38,6 +38,7 @@ from ..web.status_page import make_handler, status_payload
 from .augur import Augur
 from .boot import atomic_checkpoint
 from .live_health import describe_live_health
+from .runtime_identity import configuration_checkpoint
 from .regulatory import read_country, verify_country
 from .signals import Signal
 
@@ -577,7 +578,9 @@ class LiveRuntime:
         self._snapshot = snapshot
         if mount_ok and (self.state != self.saved_state or self.clock() - self.last_saved >= 5):
             try:
-                atomic_checkpoint(self.config.state_dir / "live.json", metadata)
+                private_metadata = dict(metadata)
+                private_metadata["configuration_identity"] = configuration_checkpoint(self.config)
+                atomic_checkpoint(self.config.state_dir / "live.json", private_metadata)
             except OSError as error:
                 # Storage becoming read-only must not abandon a running child
                 # or spin systemd restart loops. Keep the live snapshot usable.

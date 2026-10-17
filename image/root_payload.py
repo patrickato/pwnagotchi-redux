@@ -16,6 +16,8 @@ import tomllib
 _MUST_EXIST = (
     "opt/redux/redux/core/boot.py",
     "opt/redux/redux/core/live_runtime.py",
+    "opt/redux/redux/core/runtime_identity.py",
+    "opt/redux/redux/radio/readiness.py",
     "opt/redux/redux/radio/live_lease.py",
     "opt/redux/redux/radio/local_evidence.py",
     "opt/redux/redux/radio/frame_headers.py",

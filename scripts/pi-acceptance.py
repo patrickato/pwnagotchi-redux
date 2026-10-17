@@ -22,12 +22,12 @@ from redux.radio.local_evidence import BoundedReader, Unavailable  # noqa: E402
 MODULES = ('redux.acceptance', 'redux.radio.local_evidence', 'redux.radio.live_lease',
            'redux.radio.probe', 'redux.radio.orchestrator', 'redux.radio.dual_radio',
            'redux.radio.split_integration', 'redux.connectivity.bluez_pan',
-           'redux.connectivity.pan_preflight')
+           'redux.connectivity.pan_preflight', 'redux.radio.readiness', 'redux.core.runtime_identity')
 
 
 def bundle(root=ROOT):
     sources = {n: (root/(n.replace('.', '/')+'.py')).read_text() for n in MODULES}
-    for name in ('redux', 'redux.radio', 'redux.connectivity'):
+    for name in ('redux', 'redux.radio', 'redux.connectivity', 'redux.core'):
         # Namespace-only parents intentionally avoid importing optional live code.
         sources[name] = ''
     encoded = base64.b64encode(json.dumps(sources, sort_keys=True).encode()).decode()
@@ -36,7 +36,7 @@ sources=json.loads(base64.b64decode("ENCODED"))
 class MemorySource(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def find_spec(self, name, path=None, target=None):
         if name in sources:
-            return importlib.util.spec_from_loader(name, self, is_package=name in ('redux','redux.radio','redux.connectivity'))
+            return importlib.util.spec_from_loader(name, self, is_package=name in ('redux','redux.radio','redux.connectivity','redux.core'))
     def create_module(self, spec): return None
     def exec_module(self, module): exec(compile(sources[module.__name__], '<readonly-acceptance>', 'exec'), module.__dict__)
 sys.meta_path.insert(0, MemorySource())
@@ -83,6 +83,7 @@ def fetch(args, source, *, reader_factory=None):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--host', required=True)
+    p.add_argument('--dual-radio', action='store_true')
     p.add_argument('--identity', type=Path, default=Path.home()/'.ssh/redux_field_ed25519')
     p.add_argument('--pan-peer')
     p.add_argument('--pan-route-peer')
@@ -96,6 +97,7 @@ def main(argv=None):
     if bool(a.pan_peer) != bool(a.pan_route_peer):p.error('both PAN peer and route peer required')
     pan = ['--pan-peer', a.pan_peer, '--pan-route-peer', a.pan_route_peer,
            '--pan-adapter', a.pan_adapter] if a.pan_peer else []
+    if a.dual_radio:pan += ['--dual-radio']
     source = bundle()
     try:
         value = fetch(command(a.host, a.identity, pan), source)
