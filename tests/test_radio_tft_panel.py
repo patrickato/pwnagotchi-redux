@@ -91,5 +91,5 @@ def test_oversized_numeric_inputs_fail_closed():
 
 def test_swipe_navigation_includes_fourth_page_and_wraps():
     assert touch_nav.navigate("doctor", 1) == "radios"
-    assert touch_nav.navigate("radios", 1) == "overview"
-    assert touch_nav.navigate("overview", -1) == "radios"
+    assert touch_nav.navigate("radios", 1) == "trends"
+    assert touch_nav.navigate("overview", -1) == "trends"
