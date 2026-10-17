@@ -60,6 +60,7 @@ def test_no_inventory_does_not_infer_usb_from_other_fields():
     lambda i: i["radios"][0].update(transport="ethernet"),
     lambda i: i["radios"][0].update(arphrd=True),
     lambda i: i["radios"][1].update(driver="../../etc/passwd"),
+    lambda i: i["radios"][1].update(iface="../../etc/passwd"),
     lambda i: i["radios"][1].update(kernel_mode="transmitting"),
 ])
 def test_invalid_or_stale_radio_inventory_rejected_atomically(change):
