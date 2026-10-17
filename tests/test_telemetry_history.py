@@ -218,3 +218,11 @@ def test_trend_legend_shows_latest_observed_rates():
     assert "EVENTS 300" in draw.labels
     assert "HS EVENTS 0.0" in draw.labels
     assert "HANDOFFS 0.0" in draw.labels
+
+
+@pytest.mark.parametrize("pid", [None, True, 0, -1, "47", 10**1000])
+def test_trend_requires_positive_measured_engine_pid(pid):
+    h = history.TelemetryWindow()
+    assert not h.ingest(report(1000, events=1, pid=pid), now=1000)
+    assert h.state == "UNQUALIFIED"
+    assert not h.samples and not h.rates
