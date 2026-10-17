@@ -173,18 +173,71 @@ def test_native_tft_shows_rf_link_type_not_just_running_engine():
     assert fbui.render(frame, now=101).size == (480, 320)
     frame["runtime"]["capture_link_type"] = 803
     observed = fbui.status_view(frame, now=101)
-    assert "802.11 LINK 803" == observed["rf_label"]
+    assert "802.11 803 / RX UNVERIFIED" == observed["rf_label"]
     frame["runtime"]["capture_link_type"] = None
     assert fbui.status_view(frame, now=101)["rf_label"] == "RF UNVERIFIED"
     frame["runtime"]["capture_link_type"] = True
     assert fbui.status_view(frame, now=101)["rf_label"] == "RF UNVERIFIED"
 
 
+@pytest.mark.parametrize(("state", "link", "error", "minimum_health"), [
+    ("running", 1, "", "degraded"),
+    ("degraded", None, "", "degraded"),
+    ("storage_paused", None, "", "action"),
+    ("starting", None, "", "attention"),
+    ("rotating", None, "", "attention"),
+    ("stopped", None, "", "attention"),
+    ("running", None, "current engine failure", "degraded"),
+])
+def test_tft_measured_runtime_faults_cannot_be_overruled_by_green_doctor(
+        state, link, error, minimum_health):
+    report = valid_report(now=100)
+    report["runtime"].update(state=state, capture_link_type=link, last_error=error)
+    report["doctor"]["overall"] = "ok"
+    current = fbui.status_view(report, now=101)
+    rank = {"unknown": -1, "ok": 0, "attention": 1, "degraded": 2, "action": 3}
+    assert rank[current["health"]] >= rank[minimum_health]
+    assert fbui.render(report, now=101).size == (480, 320)
+
+
+def test_tft_does_not_claim_reception_from_link_type_or_generic_events():
+    report = valid_report(now=100)
+    report["runtime"].update(
+        capture_link_type=803, events_seen=10000, handed_off=0,
+    )
+    view = fbui.status_view(report, now=101)
+    assert view["rf_link_type"] == 803
+    assert view["rf_label"] == "802.11 803 / RX UNVERIFIED"
+    assert view["events"] == 10000
+    assert "RX UNVERIFIED" in view["rf_label"]
+    # Doctor can be OK for a measured header type; actual RF receive is
+    # still an independent hardware-acceptance gate.
+    assert view["health"] == "ok"
+
+
+def test_tft_stale_report_does_not_display_old_measurement_as_current_fault():
+    report = valid_report(now=100)
+    report["runtime"].update(capture_link_type=1, last_error="historical failure")
+    report["doctor"]["overall"] = "ok"
+    view = fbui.status_view(report, now=131)
+    assert view["health"] == "unknown"
+    assert view["rf_label"] == "RF NOT CURRENT"
+    assert view["engine"] == "STALE"
+
+
+def test_tft_failure_streak_is_not_ignored_on_a_running_engine():
+    report = valid_report(now=100)
+    report["runtime"]["failure_streak"] = 3
+    assert fbui.status_view(report, now=101)["health"] == "degraded"
+    report["runtime"]["failure_streak"] = 0
+    assert fbui.status_view(report, now=101)["health"] == "ok"
+
+
 def test_native_tft_never_displays_historical_rf_as_current():
     report = valid_report(now=100)
     report["runtime"]["capture_link_type"] = 803
     fresh = fbui.status_view(report, now=101)
-    assert fresh["rf_label"] == "802.11 LINK 803"
+    assert fresh["rf_label"] == "802.11 803 / RX UNVERIFIED"
     assert fresh["rf_link_type"] == 803
     expired = fbui.status_view(report, now=130)
     assert expired["rf_label"] == "RF NOT CURRENT"
