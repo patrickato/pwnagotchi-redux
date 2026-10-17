@@ -63,8 +63,12 @@ class PhoneSession:
         self._trusted = False
 
     def _clock(self, now: float) -> float:
-        if (type(now) not in (float, int) or not math.isfinite(now)
-                or now < self._last_now or now < 0):
+        # Reject oversized clocks *before* converting to float: integer
+        # conversion can overflow, and a huge finite float plus the pairing
+        # window could become infinity (never-expiring discoverability).
+        if (type(now) not in (float, int)
+                or not 0 <= now <= 1_000_000_000_000
+                or now < self._last_now):
             raise ValueError("invalid/non-monotonic phone-management time")
         self._last_now = float(now)
         return self._last_now
