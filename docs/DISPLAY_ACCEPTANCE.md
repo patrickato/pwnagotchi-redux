@@ -218,9 +218,12 @@ worker scan. A fresh runtime reading older than 20 seconds is STALE, and its
 ledger counters are suppressed. Even if the runtime is fresh, a worker scan
 older than five minutes is independently STALE; old per-pass results are
 suppressed. A recent scan shows files examined plus per-pass ready, failed and
-deferred outcomes where measured. Unknown counters are shown as `--`, never
-fabricated zeros. A successfully opened ledger without any recorded scan
-reports NO COMPLETED SCAN.
+deferred outcomes where measured. The worker's real
+`paused_low_storage` heartbeat appears as **PAUSED STORAGE**, not as a
+successful scan; inconsistent per-pass totals appear as INVALID. Stale,
+invalid, and storage-paused worker states are rendered in amber. Unknown
+counters are shown as `--`, never fabricated zeros. A successfully opened
+ledger without any recorded scan reports NO COMPLETED SCAN.
 
 This is a read-only UI. The numbers originate in the same live-status payload
 already used by Redux. The screen never opens captures, the SQLite database,
