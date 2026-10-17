@@ -306,3 +306,15 @@ native reception remains unproven. The combined temporary gate did not log
 its individual measurements, so its precise failed predicate is UNKNOWN.
 No retries or extra recovery. This approval is consumed; see
 [NATIVE_VIF_TRIAL_20261017.md](NATIVE_VIF_TRIAL_20261017.md).
+
+## Latest 02080f0 approved attempt — 2026-10-17
+
+One newly approved supervised attempt (console confirmed) used exact reviewed
+runner bytes after pulling b208834. Preflight/isolation passed; one temporary
+VIF had correct monitor identity, ifindex5/phy0 and ARPHRD803, firmware0.
+The sole post-create failure was temporary_nm_unmanaged: NM discovery did
+not enumerate it, yielding UNKNOWN/null, not affirmative unmanaged state.
+No activation/sample followed. Approved cleanup fully verified restoration;
+independent summary 2026-10-17T14:32:25Z reconfirmed services/US/storage and
+fresh running runtime. No retries; approval consumed. See
+[NATIVE_VIF_TRIAL_02080F0_20261017.md](NATIVE_VIF_TRIAL_02080F0_20261017.md).
