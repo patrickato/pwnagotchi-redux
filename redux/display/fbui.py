@@ -328,6 +328,9 @@ def main(argv=None):
                         help="operator-confirmed software rotation")
     parser.add_argument("--touch-device",
                         help="opt-in, physically verified /dev/input/eventN (run mode only)")
+    parser.add_argument("--calibration-file", help="absolute five-point JSON file; run mode only")
+    parser.add_argument("--confirm-touch-calibration", action="store_true",
+                        help="operator confirms visible 480x320 panel and physical touch mapping")
     parser.add_argument("--swipe-axis", choices=("x", "y"), default="x",
                         help="actual raw horizontal swipe axis; use display diagnostics")
     parser.add_argument("--swipe-reverse", action="store_true",
@@ -341,6 +344,14 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.touch_device and not args.run:
         parser.error("--touch-device requires --run; --once and --check never read touch")
+    if args.calibration_file and (not args.run or not args.touch_device
+                                  or not args.confirm_touch_calibration):
+        parser.error("calibrated touch requires --run, --touch-device and explicit confirmation")
+    if args.confirm_touch_calibration and not args.calibration_file:
+        parser.error("--confirm-touch-calibration requires --calibration-file")
+    if args.calibration_file and (args.swipe_axis != "x" or args.swipe_reverse
+                                  or args.swipe_threshold != 300):
+        parser.error("manual swipe orientation/threshold flags conflict with calibration")
     fb = framebuffer_info(args.framebuffer)
     if args.check:
         print(json.dumps({"framebuffer": fb,
@@ -358,10 +369,20 @@ def main(argv=None):
     page = args.page
     if args.touch_device:
         from . import touch_nav
-        tracker = touch_nav.SwipeTracker(
-            axis=args.swipe_axis, threshold=args.swipe_threshold,
-            reverse=args.swipe_reverse,
-        )
+        if args.calibration_file:
+            from .calibration_file import load_calibration
+            from .calibrated_nav import swipe_from_calibration
+            try:
+                calibration = load_calibration(args.calibration_file)
+                tracker = swipe_from_calibration(calibration, physically_verified=True)
+            except (OSError, ValueError, TypeError) as exc:
+                print(f"Touch calibration refused: {type(exc).__name__}", file=sys.stderr)
+                return 2
+        else:
+            tracker = touch_nav.SwipeTracker(
+                axis=args.swipe_axis, threshold=args.swipe_threshold,
+                reverse=args.swipe_reverse,
+            )
         touch_fd = touch_nav.open_touch(args.touch_device)
 
     def stop(_signum, _frame):
