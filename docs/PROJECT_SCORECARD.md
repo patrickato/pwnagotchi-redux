@@ -13,11 +13,21 @@ The native 480×320 renderer now has **five** pages: Overview, Captures,
 Doctor, Radios and **Trends**. The Trends page uses the *existing* Augur
 runtime counters to build a private, bounded 151-sample, five-minute history
 of actual status events, handshake-event notifications and completed file
-handoffs. It discards stale/duplicate data, counter rollback, engine changes,
+handoffs. The ring requires a positive measured engine PID, retains 150
+intervals at the normal two-second cadence, and shows each latest rate beside
+the graph. It discards stale/duplicate data, counter rollback, engine changes,
 unexpected gaps and malformed measurements; it **never** labels these counts
-verified 802.11 reception or valid handshake captures. Touchscreen footer
-selection, physical acceptance, and source/UI screenshot regression coverage
-were extended without enabling the real TFT or changing the Pi.
+verified 802.11 reception or valid handshake captures. Overview now shows
+fresh retry/failure/start and REDUXCAP mount diagnostics. The Radios page
+visually separates Bettercap's capture interface from onboard and USB adapter
+observations, while explicitly leaving reception and USB process ownership
+unverified. That page can only show live adapter rows when a separately
+measured `radio_inventory` is supplied; this UI change does not fabricate or
+automatically collect one. Touchscreen navigation, previews, and regression
+coverage were extended without enabling the real TFT or changing the Pi.
+
+The combined GitHub CI run `39064412864` passed **2,365 software tests and
+648 image-contract checks**. This is source-level verification only.
 
 The source work is meaningful progress in usability but **does not justify
 raising the weighted ~62% overall score**. The standalone radio, real capture,
