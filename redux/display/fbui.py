@@ -269,10 +269,23 @@ def render(report, *, page="overview", now=None):
     draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
     draw.text((20, 250), "DOCTOR / " + data["finding"], font=_font(12, bold=True), fill=accent)
     draw.text((20, 272), data["detail"], font=_font(10), fill=SUBTLE)
-    draw.line((18, 301, 462, 301), fill=(36, 57, 69), width=1)
-    draw.text((20, 304), f"VIEW {page.upper()}  /  READ-ONLY", font=_font(10), fill=SUBTLE)
+    # The footer's three equal touch targets share exact coordinates with
+    # gesture_nav.TAB_TOP/TAB_WIDTH. Visual tabs do not activate touch.
+    from .gesture_nav import PAGES, TAB_TOP, TAB_WIDTH
+    draw.rectangle((0, TAB_TOP, 479, 319), fill=(15, 24, 35))
+    for index, tab in enumerate(PAGES):
+        left = index * TAB_WIDTH
+        selected = tab == page
+        if selected:
+            draw.rectangle((left + 2, TAB_TOP, left + TAB_WIDTH - 3, 319),
+                           fill=(30, 60, 67))
+            draw.rectangle((left + 6, TAB_TOP, left + TAB_WIDTH - 7, TAB_TOP + 2),
+                           fill=TEAL)
+        label = tab.upper()
+        draw.text((left + 12, TAB_TOP + 6), label,
+                  font=_font(11, bold=selected), fill=INK if selected else SUBTLE)
     if data["stale"]:
-        draw.text((349, 304), "NOT VERIFIED", font=_font(10, bold=True), fill=AMBER)
+        draw.text((185, 43), "NOT VERIFIED", font=_font(10, bold=True), fill=AMBER)
     return img
 
 
@@ -371,10 +384,11 @@ def main(argv=None):
         from . import touch_nav
         if args.calibration_file:
             from .calibration_file import load_calibration
-            from .calibrated_nav import swipe_from_calibration
+            from .gesture_nav import NavigationGestures
             try:
                 calibration = load_calibration(args.calibration_file)
-                tracker = swipe_from_calibration(calibration, physically_verified=True)
+                tracker = NavigationGestures(
+                    calibration, physically_verified=True, rotation=args.rotate)
             except (OSError, ValueError, TypeError) as exc:
                 print(f"Touch calibration refused: {type(exc).__name__}", file=sys.stderr)
                 return 2
@@ -423,10 +437,18 @@ def main(argv=None):
                 fragment += chunk
                 if len(fragment) > 8192:
                     raise OSError("unexpected unbounded touch input")
-                directions, fragment = touch_nav.consume(fragment, tracker)
-                if directions:
-                    page = touch_nav.navigate(page, directions[-1])
-                    break  # redraw new page immediately
+                if args.calibration_file:
+                    from .gesture_nav import consume_gestures
+                    actions, fragment = consume_gestures(fragment, tracker)
+                    if actions:
+                        action, value = actions[-1]
+                        page = value if action == "page" else touch_nav.navigate(page, value)
+                        break  # redraw selected page immediately
+                else:
+                    directions, fragment = touch_nav.consume(fragment, tracker)
+                    if directions:
+                        page = touch_nav.navigate(page, directions[-1])
+                        break  # redraw new page immediately
     finally:
         if touch_fd is not None:
             os.close(touch_fd)
