@@ -284,7 +284,8 @@ class LiveRuntime:
     """Owner of one Bettercap subprocess, its Augur event loop, and local UI."""
 
     def __init__(self, config: LiveConfig, *, radio_probe=probe, executor=subprocess.run,
-                 spawn=subprocess.Popen, clock=time.monotonic, lease_guard=None):
+                 spawn=subprocess.Popen, clock=time.monotonic, lease_guard=None,
+                 radio_inventory_provider=None):
         config.validate()
         self.config = config
         self.capture_mount_required = any(
@@ -302,6 +303,9 @@ class LiveRuntime:
         if not self._capture_mount_ok():
             raise RuntimeError("REDUXCAP ext4 partition is not mounted at /captures")
         self.radio_probe = radio_probe
+        self.radio_inventory_provider = radio_inventory_provider
+        self._radio_inventory = None
+        self._radio_inventory_sampled_at = float("-inf")
         self.executor = executor
         self.spawn = spawn
         self.clock = clock
@@ -449,6 +453,24 @@ class LiveRuntime:
                 or (self.capture_mount_identity is not None
                     and capture_mount_snapshot() == self.capture_mount_identity))
 
+    def _refresh_radio_inventory(self, now):
+        """Sample optional read-only radio metadata no more often than every 10s."""
+        provider = self.radio_inventory_provider
+        if provider is None:
+            return
+        if now >= self._radio_inventory_sampled_at and now - self._radio_inventory_sampled_at < 10:
+            return
+        self._radio_inventory_sampled_at = now
+        try:
+            sample = provider()
+            if not isinstance(sample, dict) or sample.get("schema") != 1:
+                raise ValueError("invalid radio inventory sample")
+            self._radio_inventory = sample
+        except Exception as error:
+            # Keep the last timestamped sample. The UI itself expires it after
+            # 20 seconds, so a failed refresh cannot make old hardware look live.
+            _LOG.debug("read-only radio inventory unavailable: %s", type(error).__name__)
+
     def _observe(self, emission):
         event = emission.payload.get("event")
         # Accumulate events without triggering an expensive full-table visual
@@ -475,6 +497,7 @@ class LiveRuntime:
         failures = (self.augur._sighting_flush_failures
                     if self.augur is not None else 0)
         now = self.clock()
+        self._refresh_radio_inventory(now)
         # Read only the active capture iface's kernel-reported ARPHRD.
         # A monitor-mode label does not imply native 802.11 framing.
         capture_link_type = read_link_type(self.iface)
@@ -574,6 +597,8 @@ class LiveRuntime:
         metadata["health"] = health["overall"]
         metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])
         snapshot["doctor"] = health
+        if self._radio_inventory is not None:
+            snapshot["radio_inventory"] = self._radio_inventory
         self._snapshot = snapshot
         if mount_ok and (self.state != self.saved_state or self.clock() - self.last_saved >= 5):
             try:
@@ -1239,7 +1264,14 @@ def main(argv=None):
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    run_forever(config, stop=shutdown)
+    def runtime_factory(settings):
+        # Explicitly provision the optional read-only collector only for the
+        # installed service entrypoint. Unit tests and alternate embeddings do
+        # not start shell/sysfs probes unless they inject this provider.
+        from ..radio.display_inventory import collect
+        return LiveRuntime(settings, radio_inventory_provider=collect)
+
+    run_forever(config, stop=shutdown, runtime_factory=runtime_factory)
 
 
 if __name__ == "__main__":
