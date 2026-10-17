@@ -95,6 +95,12 @@ class NavigationGestures:
         dx, dy = ex - sx, ey - sy
         if abs(dx) >= self.swipe_pixels and abs(dy) <= abs(dx) * 0.6:
             return ("swipe", 1 if dx < 0 else -1)
+        # Vertical gestures inside the diagnostic content viewport change
+        # the *view*, never any underlying device or Doctor state. A footer
+        # drag or diagonal contact cannot become an accidental scroll.
+        if (abs(dy) >= self.swipe_pixels and abs(dx) <= abs(dy) * 0.6
+                and 155 <= sy < TAB_TOP and 155 <= ey < TAB_TOP):
+            return ("scroll", 1 if dy < 0 else -1)
         if self.maximum_motion > self.tap_slop_pixels:
             return None
         if sy < TAB_TOP or ey < TAB_TOP:
