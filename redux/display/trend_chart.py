@@ -27,7 +27,7 @@ def points(view):
     if not isinstance(view, dict) or view.get("state") != "TRACKING":
         return []
     data = view.get("points")
-    if not isinstance(data, list) or not 1 <= len(data) <= 47:
+    if not isinstance(data, list) or not 1 <= len(data) <= 150:
         return []
     out = []
     previous_age = float("inf")
