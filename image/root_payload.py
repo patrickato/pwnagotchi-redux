@@ -18,6 +18,7 @@ _MUST_EXIST = (
     "opt/redux/redux/core/live_runtime.py",
     "opt/redux/redux/radio/live_lease.py",
     "opt/redux/redux/radio/local_evidence.py",
+    "opt/redux/redux/radio/display_inventory.py",
     "opt/redux/redux/radio/frame_headers.py",
     "opt/redux/redux/radio/passive_qualification.py",
     "opt/redux/redux/radio/awus036acm.py",
