@@ -43,6 +43,7 @@ _MUST_EXIST = (
     "opt/redux/redux/display/calibrated_nav.py",
     "opt/redux/redux/display/gesture_nav.py",
     "opt/redux/redux/display/capture_panel.py",
+    "opt/redux/redux/display/radio_panel.py",
     "etc/systemd/system/redux-fbui.service",
     "usr/share/redux/fbui.example.env",
     "usr/local/bin/redux-live-diag",
