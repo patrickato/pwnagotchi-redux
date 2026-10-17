@@ -357,7 +357,8 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
                   font=_font(10, bold=True), fill=INK if usb["state"] == "OBSERVED" else AMBER)
         draw.text((20, 278), "MODE " + usb["mode"] + " / LINK " +
                   (str(usb["link"]) if usb["link"] is not None else "--") +
-                  " / RX UNVERIFIED", font=_font(9), fill=AMBER)
+                  " / RX UNVERIFIED / OWNER UNVERIFIED",
+                  font=_font(8), fill=AMBER)
     else:
         draw.text((20, 160), "DOCTOR / ACTIONABLE FINDINGS",
                   font=_font(12, bold=True), fill=SUBTLE)
