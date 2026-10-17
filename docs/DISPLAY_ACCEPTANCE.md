@@ -247,7 +247,7 @@ Trends reads the ordinary existing Redux status API's `runtime` fields:
 counter telemetry**, not a monitor-mode packet decoder, crack success
 indicator, or evidence that Bettercap received valid 802.11 frames.
 
-A source-only 48-sample volatile ring computes **observed counter differences
+A source-only 151-sample volatile ring computes **observed counter differences
 divided by actual sample time** and displays event, handshake-event and
 handoff rates per minute in a fixed five-minute graph. There are no seeded
 points, artificial wiggles, or archived files. Counters must be valid
