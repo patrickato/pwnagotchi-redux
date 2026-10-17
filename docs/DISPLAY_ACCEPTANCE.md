@@ -249,7 +249,7 @@ indicator, or evidence that Bettercap received valid 802.11 frames.
 
 A source-only 151-sample volatile ring computes **observed counter differences
 divided by actual sample time** and displays event, handshake-event and
-handoff rates per minute in a fixed five-minute graph. There are no seeded
+handoff rates per minute in a fixed five-minute graph, with the latest measured rate for each series shown in the legend. There are no seeded
 points, artificial wiggles, or archived files. Counters must be valid
 nonnegative integers and the snapshot must be fresh. Duplicate timestamps
 never create a second interval. When engine identity changes, counters
