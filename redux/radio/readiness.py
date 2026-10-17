@@ -160,6 +160,7 @@ def nm_policy(run,iface):
 
 
 def packet_bindings(proc,child,onboard_index,usb_indices=()):
+    usb_indices=set(usb_indices)
     owned=set()
     for n,fd in enumerate((proc/str(child[0])/'fd').iterdir()):
         if n>=1024:raise Unavailable('fd_overflow')
@@ -177,7 +178,8 @@ def packet_bindings(proc,child,onboard_index,usb_indices=()):
         if int(row[8])in owned:bound.append(int(row[4]))
     if process_identity(child[0],proc)!=child:raise Unavailable('process_replaced')
     return dict(bettercap_packet_sockets=len(bound),onboard_bound=sum(v==onboard_index for v in bound),
-                wildcard_bound=bound.count(0),usb_bound=sum(v in usb_indices for v in bound),other_bound=sum(v not in (0,onboard_index)for v in bound))
+                wildcard_bound=bound.count(0),usb_bound=sum(v in usb_indices for v in bound),
+                other_bound=sum(v not in usb_indices and v not in (0,onboard_index)for v in bound))
 
 
 def capture_counts(root=Path('/captures')):

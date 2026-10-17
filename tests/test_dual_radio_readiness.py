@@ -145,7 +145,7 @@ def test_packet_inode_binding_reports_usb_and_rejects_pid_reuse(host):
     (proc/'net').mkdir();(proc/'net/packet').write_text('sk RefCnt Type Proto Iface R Rmem User Inode\n000 3 3 0003 9 1 0 0 222\n')
     identity=r.process_identity(21,proc)
     facts=r.packet_bindings(proc,identity,3,(9,))
-    assert facts['usb_bound']==1 and facts['onboard_bound']==0
+    assert facts['usb_bound']==1 and facts['onboard_bound']==0 and facts['other_bound']==0
     (proc/'21/stat').write_text('21 (bettercap) S '+'0 '*18+'999 0')
     with pytest.raises(Unavailable):r.packet_bindings(proc,identity,3,(9,))
 
