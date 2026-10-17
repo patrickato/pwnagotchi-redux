@@ -101,15 +101,18 @@ def publish(directory: str, images: dict[str, bytes]) -> list[str]:
         os.close(dirfd)
 
 
-def build(*, report=None, pages=PAGES, rotate=0) -> dict[str, bytes]:
+def build(*, report=None, pages=PAGES, rotate=0, doctor_offset=0) -> dict[str, bytes]:
     """Render exactly the same source pixels as the actual framebuffer path."""
     if rotate not in (0, 180):
         raise ValueError("rotation must be 0 or 180")
+    if type(doctor_offset) is not int or not 0 <= doctor_offset <= 61:
+        raise ValueError("invalid bounded Doctor scroll offset")
     if not pages or len(set(pages)) != len(pages) or not set(pages).issubset(PAGES):
         raise ValueError("unsupported pages")
     output = {}
     for page in pages:
-        img = fbui.render(report, page=page)
+        img = (fbui.render(report, page=page, doctor_offset=doctor_offset)
+               if page == "doctor" else fbui.render(report, page=page))
         if rotate == 180:
             from PIL import Image
             img = img.transpose(Image.Transpose.ROTATE_180)
@@ -127,10 +130,16 @@ def main(argv=None) -> int:
     source.add_argument("--live", action="store_true", help="read current loopback Redux API only")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--page", choices=PAGES, help="one page; default: all available pages")
+    parser.add_argument("--doctor-offset", type=int, default=0,
+                        help="preview a scrolled Doctor finding window (0-61)")
     parser.add_argument("--rotate", type=int, choices=(0, 180), default=0)
     args = parser.parse_args(argv)
     if args.port < 1 or args.port > 65535:
         parser.error("invalid port")
+    if args.doctor_offset and args.page != "doctor":
+        parser.error("--doctor-offset requires --page doctor")
+    if not 0 <= args.doctor_offset <= 61:
+        parser.error("--doctor-offset must be 0-61")
     if args.acceptance_json and args.page not in (None, "radios"):
         parser.error("historical acceptance can preview only the Radios page")
     try:
@@ -153,7 +162,8 @@ def main(argv=None) -> int:
                           ("radios",) if args.acceptance_json else PAGES)
         names = publish(args.output_dir, build(report=report,
                                               pages=selected_pages,
-                                              rotate=args.rotate))
+                                              rotate=args.rotate,
+                                              doctor_offset=args.doctor_offset))
     except (OSError, ValueError, TypeError) as exc:
         parser.error(f"preview refused: {type(exc).__name__}")
     print(json.dumps({"source": source_name, "files": names, "resolution": [480, 320],
