@@ -317,7 +317,9 @@ def render(report, *, page="overview", now=None):
         scan_label = "WORKER / " + scan
         if scan == "RECENT":
             scan_label += f" / {capture['scan_age_seconds']}s ago"
-        draw.text((20, 266), scan_label, font=_font(11), fill=SUBTLE)
+        draw.text((20, 266), scan_label, font=_font(11),
+                  fill=AMBER if scan in ("STALE", "PAUSED STORAGE", "INVALID")
+                  else SUBTLE)
         if scan == "RECENT":
             draw.text((20, 282),
                       "PASS " + compact_count(capture["scan_files"]) +
