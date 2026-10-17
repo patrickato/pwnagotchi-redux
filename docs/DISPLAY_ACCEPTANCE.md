@@ -256,7 +256,7 @@ never create a second interval. When engine identity changes, counters
 decrease, runtime exits running, samples become stale, or gaps exceed
 45 seconds, the trend restarts instead of connecting unrelated periods.
 There is no persistence or continuous sensor processing between UI polls.
-The graph is empty until **two distinct qualifying samples** arrive, and
+At the two-second dashboard cadence, 151 snapshots retain 150 intervals (five minutes). The graph is empty until **two distinct qualifying samples** arrive, and
 clears after an unacceptable reading.
 
 The `python3 -m redux.display.preview --page trends ...` path uses the
