@@ -43,6 +43,40 @@ class LeaseObservation:
     ethernet_verified: bool = False
 
 
+def validate_receipt(d, boot_id):
+    """Strict local transport schema; qualification still requires live checks."""
+    if (type(d) is not dict or d.get('boot_id') != boot_id
+            or type(d.get('ethernet_verified')) is not bool
+            or type(d.get('sampled_monotonic')) not in (int, float)
+            or not 0 <= d['sampled_monotonic'] <= 1e12 or not math.isfinite(d['sampled_monotonic'])
+            or type(d.get('radios')) is not list or not 1 <= len(d['radios']) <= 32):
+        raise ValueError('invalid receipt')
+    names, indices = set(), set()
+    for row in d['radios']:
+        if (type(row) is not dict
+                or not isinstance(row.get('iface'), str)
+                or not re.fullmatch(r'[A-Za-z0-9_-]{1,15}', row['iface'])
+                or not isinstance(row.get('phy'), str) or not re.fullmatch(r'phy[0-9]+', row['phy'])
+                or type(row.get('ifindex')) is not int or row['ifindex'] <= 0
+                or type(row.get('monitor')) is not bool
+                or type(row.get('owner_verified')) is not bool
+                or row.get('mode') not in ('monitor', 'managed', 'unknown')
+                or row.get('transport') not in ('usb', 'onboard', 'unknown')
+                or row.get('owner') not in ('unknown', 'capture_exclusive', 'networkmanager')
+                or type(row.get('bands', [])) is not list
+                or any(b not in ('2.4', '5', '6') for b in row.get('bands', []))
+                or row.get('arphrd') is not None and (type(row['arphrd']) is not int or not 0 < row['arphrd'] <= 65535)
+                or row.get('decoded_frames') is not None and (type(row['decoded_frames']) is not int or row['decoded_frames'] < 0)):
+            raise ValueError('invalid radio observation')
+        required = {'iface', 'phy', 'ifindex', 'monitor', 'mode', 'arphrd',
+                    'decoded_frames', 'owner_verified', 'owner', 'transport'}
+        if not required <= row.keys() or row['iface'] in names or row['ifindex'] in indices:
+            raise ValueError('ambiguous radio identity')
+        names.add(row['iface'])
+        indices.add(row['ifindex'])
+    return d
+
+
 class FileLeaseEvidence:
     """Bounded, no-follow collector contract. Monotonic age checked by guard."""
     def __init__(self, path):
@@ -62,9 +96,7 @@ class FileLeaseEvidence:
             os.close(fd)
         try:
             d = json.loads(raw)
-            if (type(d) is not dict or not 1 <= len(d['radios']) <= 32
-                    or d.get('boot_id') != Path('/proc/sys/kernel/random/boot_id').read_text().strip()):
-                raise ValueError
+            validate_receipt(d, Path('/proc/sys/kernel/random/boot_id').read_text().strip())
             radios = []
             for row in d['radios']:
                 r = Radio(row['iface'], phy=row['phy'], monitor=row['monitor'],

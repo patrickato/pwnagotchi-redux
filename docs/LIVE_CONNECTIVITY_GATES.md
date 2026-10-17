@@ -45,9 +45,11 @@ Receipts must be atomically refreshed by a separately qualified local collector;
 observations older than three seconds, future samples, old boots or clock
 regression are rejected. A metadata file or driver allowlist cannot manufacture
 receive qualification. There is **no fabricated receive count, capture socket
-or automatic ownership-acquisition collector** in this integration. Until a
-real collector/field observation supplier is provisioned and qualified, the
-path deliberately stays blocked. The Python UsbLeaseGuard provider interface
+or automatic ownership-acquisition collector** in this integration. A read-only metadata/exclusion supplier and memory-only SSH acceptance launcher
+now exist; see [READONLY_HARDWARE_ACCEPTANCE.md](READONLY_HARDWARE_ACCEPTANCE.md).
+They deliberately leave decoded reception and authenticated ownership unknown.
+Until independent physical qualification and supplier provisioning, the path
+stays blocked. The Python UsbLeaseGuard provider interface
 also supports an in-process measured collector without a receipt file.
 
 Each acquisition independently verifies current kernel ifindex, PHY, sysfs
@@ -178,3 +180,7 @@ agent sender/expiry denial, trust revocation, late replies, owner/object changes
 partial PAN/property errors, reconnect timeout, other-client races, image disabled
 defaults, and DOWN-only command/AST/rollback restrictions. These are software and
 synthetic fixtures, not RF, PAN or physical rollback acceptance evidence.
+
+The read-only toolkit adds strict receipt-schema validation and assembled-root
+requirements for the collector, acceptance module and PAN preflight. Its source
+tests are synthetic; no physical USB/PAN qualification is implied.

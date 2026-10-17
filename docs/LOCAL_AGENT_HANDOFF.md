@@ -334,3 +334,23 @@ this implementation iteration. Read [LIVE_CONNECTIVITY_GATES.md](LIVE_CONNECTIVI
 and [DOWN_ONLY_VIF_OBSERVATION.md](DOWN_ONLY_VIF_OBSERVATION.md) before proposing
 new physical execution. Earlier approvals remain consumed; NM 1.42.4 findings
 and the last restored physical baseline are unchanged.
+
+## Read-only evidence toolkit — 2026-10-17
+
+The workbench adds `scripts/pi-acceptance.py` (strict verified SSH, memory-only
+source imports) and `python -m redux.acceptance`, an independent local metadata/
+exclusion supplier, explicit root-owned atomic receipt publishing API, strict
+lease receipt schema and non-mutating PAN provisioning gates. Acceptance never
+publishes receipts or calls the USB/PAN/native-VIF executors. Reception and
+independently authenticated ownership/bond/application facts remain UNKNOWN;
+no metadata-based lease qualification. See
+[READONLY_HARDWARE_ACCEPTANCE.md](READONLY_HARDWARE_ACCEPTANCE.md) for usage,
+failure semantics, sanitized measured checkpoint and separately approved future
+USB reception/runtime/hotplug/PAN procedures.
+
+The read-only checkpoint at 2026-10-17 16:53:55 UTC verified strict Ethernet,
+Pi/ARM64, installed module vermagic/loaded srcversion, US, captures storage/free
+space and active Redux services. One SDIO onboard brcmfmac netdev remained
+monitor-labeled but ARPHRD1, NM managed/state20; no USB Wi-Fi netdev enumerated.
+No decoded RF or PAN qualification, Pi mutation, installation, receipt write,
+physical trial or image build. Prior hardware approvals remain consumed.
