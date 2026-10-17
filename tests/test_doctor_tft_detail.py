@@ -57,3 +57,19 @@ def test_three_distinct_native_pages_render_from_one_measured_status():
     frames = [fbui.render(report, page=p, now=101).tobytes()
               for p in ("overview", "captures", "doctor")]
     assert len(set(frames)) == 3
+
+
+def test_ok_summary_cannot_mask_fresh_critical_finding():
+    report = status()
+    report["doctor"]["overall"] = "ok"
+    report["doctor"]["findings"] = [
+        {"status": "attention", "summary": "Warnings"},
+        {"status": "action", "summary": "Capture storage disconnected"},
+    ]
+    current = fbui.status_view(report, now=101)
+    assert current["health"] == "action"
+    assert current["doctor_rows"][0]["status"] == "action"
+    assert fbui.render(report, page="doctor", now=101).size == (480, 320)
+    historical = fbui.status_view(report, now=300)
+    assert historical["health"] == "unknown"
+    assert historical["doctor_rows"] == []
