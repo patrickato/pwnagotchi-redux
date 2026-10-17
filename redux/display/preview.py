@@ -67,7 +67,7 @@ def publish(directory: str, images: dict[str, bytes]) -> list[str]:
     if not images or not set(images).issubset(PAGES):
         raise ValueError("unrecognized preview pages")
     for name, data in images.items():
-        if not isinstance(data, bytes) or not data.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+        if not isinstance(data, bytes) or not data.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ValueError("invalid PNG data")
         if len(data) > 2_000_000:
             raise ValueError("preview exceeds size limit")
