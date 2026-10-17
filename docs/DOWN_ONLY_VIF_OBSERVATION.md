@@ -1,6 +1,6 @@
 # Prepared DOWN-only native VIF ownership observation
 
-**Preparation only. NOT AUTHORIZED; no experiment executed.** Keep this
+**Execution profile implemented and offline-tested. NOT AUTHORIZED; no experiment executed.** Keep this
 separate from split-radio/phone development. Pinned NM 1.42.4 factory and
 udev findings remain in [NATIVE_VIF_NM_EVIDENCE.md](NATIVE_VIF_NM_EVIDENCE.md).
 Missing nmcli/GetAllDevices enumeration is never managed=false.
@@ -54,11 +54,49 @@ unexpected interface/process. Abort before mutation on any failed gate.
 
 Use the reviewed runner's 210-second main/90-second cleanup limits and
 single-trial lock model, with explicit intent flags for partial commands.
-**The existing runner cannot execute this variant:** it contains an UP and
-sample stage. Before requesting approval, implement and offline-review a
-separate DOWN-only state machine or explicitly bounded mode with regression
-coverage proving no UP/sample path, deadline cleanup and identity refusal.
-This document is a reviewable command plan, not a ready execution launcher.
+The runner now selects a separate `DownOnlyPiOps` backend with
+`--down-only`. Default invocation remains read-only; mutation still requires
+both this flag and `--execute-approved` **after new specific operator approval**.
+Only rxv5e16a901/phy0 is permitted. The legacy RF-capable profile is separate
+and its NM ownership activation gate remains unchanged.
+
+The DOWN-only backend has two independent command barriers: raw `command()`
+accepts only an exact read-only query list, and `change()` accepts only the
+phase-specific setup/rollback list, once per command. VIF-UP, packet sampling,
+channel changes, module operations, udev triggers, global manager operations
+and retargeting are refused. Its sample method unconditionally raises before
+any packet socket can be created. The AF_UNIX singleton lock is not a packet
+socket. Primary wlan0 UP is allowed **only during verified rollback**.
+
+The read-only ownership window is capped at ten seconds, each command at two
+seconds; two bounded observations retain GetDevices/GetAllDevices target
+matches and allowlisted udev classifications. Empty NM discovery remains
+UNKNOWN and cannot authorize activation. Deadline/fault stops the observation;
+there is no deadline retry. A direct positive NM claim stops it as unexpected.
+Identity/type/flags/firmware and surrounding safety are rechecked through the
+window and before cleanup. If create partially fails before its ifindex was
+conclusively recorded, this stricter profile refuses deletion and reports
+unverified restoration. It never guesses which netdev belongs to the trial.
+
+Future invocation shape (documentation only; **do not execute yet**):
+
+```sh
+ssh <strict verified Ethernet options> pi@<verified-address> \
+  'sudo -n python3 -B - --down-only --execute-approved --vif rxv5e16a901 "$SSH_CONNECTION"' \
+  < scripts/native-vif-isolation.py
+```
+
+Read-only preflight uses `--down-only` without `--execute-approved`. Phase
+reports identify the selected profile. Exit status 0 means observation
+completed and restoration verified; 2 means stopped with verified restoration;
+3 means restoration unverified. None proves RF activation or reception.
+
+Offline tests in `tests/test_native_vif_down_only.py` cover unknown ownership,
+unsafe flags/type/firmware/PHY, partial failures, identity refusal, direct-command
+bypass attempts, phase/retry restrictions and AST inspection excluding socket/
+sample calls from the DOWN-only backend. The original activation regressions
+also run, preserving the separate gate.
+
 
 The observation can establish actual per-VIF DBus/udev facts and test the
 source hypothesis. It cannot qualify RF reception or waive unknown ownership.

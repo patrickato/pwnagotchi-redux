@@ -246,3 +246,13 @@ split/Ethernet/phone/manager/Bettercap lifecycle regressions and new measured
 bridge, lease reuse/removal, explicit owner roles, PAN outcome/privacy,
 finite pairing properties, timeout/cancel and USB sysfs tests. No source
 change in this stage was installed on the Pi.
+
+## Live integration implemented — latest source checkpoint
+
+USB lease startup/operation/teardown, opt-in BlueZ PAN executor/agent and the
+separate DOWN-only execution profile are now source-implemented and covered by
+offline fault tests. See [LIVE_CONNECTIVITY_GATES.md](LIVE_CONNECTIVITY_GATES.md)
+for exact configuration, receipt/provisioning contracts, interlock recovery,
+remaining platform/hardware limits and acceptance gates. This supersedes the
+older not-yet-wired statements above, not the recorded hardware observations.
+All new paths ship disabled; no physical operation or image build occurred.

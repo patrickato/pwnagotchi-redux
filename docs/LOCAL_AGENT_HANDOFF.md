@@ -318,3 +318,19 @@ No activation/sample followed. Approved cleanup fully verified restoration;
 independent summary 2026-10-17T14:32:25Z reconfirmed services/US/storage and
 fresh running runtime. No retries; approval consumed. See
 [NATIVE_VIF_TRIAL_02080F0_20261017.md](NATIVE_VIF_TRIAL_02080F0_20261017.md).
+
+## Latest source-only live connectivity integration
+
+The workbench now integrates USB capture leases with Bettercap startup, tick,
+driver operations, termination and handoff. Lease faults persist an interlock
+across runtime restarts; USB cannot fall through to unleased legacy retuning.
+Opt-in BlueZ PAN executor/agent uses a pinned long-lived bus/peer, outgoing
+numeric pairing only, no trust grants, bounded reconnect and verified cleanup.
+The separate --down-only native-VIF backend is implemented with read/mutation
+allowlists, no temporary UP/sample path and conservative pinned rollback.
+All these changes are **source-only**, disabled by default and NOT deployed.
+No Pi connection, hardware mutation, RF experiment or image build occurred in
+this implementation iteration. Read [LIVE_CONNECTIVITY_GATES.md](LIVE_CONNECTIVITY_GATES.md)
+and [DOWN_ONLY_VIF_OBSERVATION.md](DOWN_ONLY_VIF_OBSERVATION.md) before proposing
+new physical execution. Earlier approvals remain consumed; NM 1.42.4 findings
+and the last restored physical baseline are unchanged.

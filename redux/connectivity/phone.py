@@ -123,6 +123,16 @@ class PhoneSession:
         self._trusted = authenticated is True and trusted is True
         return (PhoneIntent.STOP_DISCOVERABLE,)
 
+    def admit_verified_bond(self, *, owner_authorized: bool, authenticated: bool,
+                            trusted: bool, now: float) -> tuple[PhoneIntent, ...]:
+        """Admit separately verified existing bond; never pair or grant trust."""
+        self._clock(now)
+        if (self.phase is not PhonePhase.IDLE or owner_authorized is not True
+                or authenticated is not True or trusted is not True):
+            raise PermissionError('explicit authenticated trusted bond evidence required')
+        self._trusted = True
+        return ()
+
     def link_connected(self, *, authenticated: bool, trusted: bool,
                        now: float) -> tuple[PhoneIntent, ...]:
         self._clock(now)

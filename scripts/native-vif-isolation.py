@@ -98,7 +98,7 @@ def vif_gate_snapshot(s, name, phy, *, stage, expected_index=None):
     observed = {key: s.get(key) for key in (
         'safe', 'managed', 'nm_state', 'primary_mode', 'primary_up',
         'primary_type', 'live', 'capture_process', 'firmware',
-        'temp_index', 'temp_type', 'temp_monitor', 'temp_nm_managed',
+        'temp_index', 'temp_type', 'temp_monitor', 'temp_nm_managed', 'temp_up',
     )}
     # Never serialize arbitrary interface names/paths from the environment.
     observed['temp_present'] = name in s.get('interfaces', ())
@@ -129,17 +129,21 @@ def baseline_ok(s):
             and s['runtime_fresh'] and s['runtime_state'] == 'running' and not s['runtime_error'])
 
 
-def run_trial(ops, name, *, approved=False):
+def run_trial(ops, name, *, approved=False, down_only=False):
     """Bounded state machine; backend injection tests the real rollback logic."""
     if not approved:
         raise Stop('execution requires explicit operator approval')
     if not re.fullmatch(r'rxv[0-9a-f]{8}', name):
         raise Stop('invalid temporary VIF name')
+    if down_only and getattr(ops, 'down_only', False) is not True:
+        raise Stop('DOWN-only backend required')
     before = ops.observe(name)
+    if down_only and before['phy'] != 'phy0':
+        raise Stop('DOWN-only profile requires verified phy0')
     if not baseline_ok(before):
         raise Stop('baseline prerequisites not satisfied')
     log = {'before': ops.public(before), 'test': 'not_started', 'cleanup': [],
-           'temporary_vif': name}
+           'temporary_vif': name, 'profile': 'down_only' if down_only else 'native_monitor'}
     stopped = changed = created_attempt = False
     owned_index = None
     ops.event('baseline', baseline=ops.public(before), temporary_vif=name)
@@ -162,20 +166,30 @@ def run_trial(ops, name, *, approved=False):
         ops.change(['iw', 'phy', before['phy'], 'interface', 'add', name, 'type', 'monitor'])
         s = ops.observe(name)
         log['post_create'] = vif_gate_snapshot(s, name, before['phy'], stage='created')
-        ops.event('post_create', gate=log['post_create'])
         owned_index = ops.temp_index(s, name, before['phy'])
-        if log['post_create']['failed_checks']:
-            raise Stop('temporary interface isolation not confirmed')
-        ops.event('created', temporary_vif=name, ifindex=owned_index, phy=before['phy'])
-        ops.change(['ip', 'link', 'set', 'dev', name, 'up'])
-        s = ops.observe(name)
-        log['post_activate'] = vif_gate_snapshot(
-            s, name, before['phy'], stage='activated', expected_index=owned_index)
-        ops.event('post_activate', gate=log['post_activate'])
-        if log['post_activate']['failed_checks']:
-            raise Stop('native monitor activation did not pass')
-        log['test'] = {'arphrd': s['temp_type'], 'firmware': s['firmware'],
-                       'reception': ops.sample(name, s['temp_type'], seconds=60)}
+        ops.event('post_create', gate=log['post_create'])
+        if down_only:
+            # Unknown NM discovery is evidence to observe, never permission
+            # to activate. All identity/link/firmware gates still apply.
+            failures = set(log['post_create']['failed_checks']) - {'temporary_nm_unmanaged'}
+            if failures or s.get('temp_up') is not False or s['temp_nm_managed'] is True:
+                raise Stop('DOWN-only interface prerequisites failed')
+            log['test'] = {'down_only': True, 'arphrd': s['temp_type'],
+                           'firmware': s['firmware'],
+                           'ownership': ops.observe_down(name, owned_index, before['phy'])}
+        else:
+            if log['post_create']['failed_checks']:
+                raise Stop('temporary interface isolation not confirmed')
+            ops.event('created', temporary_vif=name, ifindex=owned_index, phy=before['phy'])
+            ops.change(['ip', 'link', 'set', 'dev', name, 'up'])
+            s = ops.observe(name)
+            log['post_activate'] = vif_gate_snapshot(
+                s, name, before['phy'], stage='activated', expected_index=owned_index)
+            ops.event('post_activate', gate=log['post_activate'])
+            if log['post_activate']['failed_checks']:
+                raise Stop('native monitor activation did not pass')
+            log['test'] = {'arphrd': s['temp_type'], 'firmware': s['firmware'],
+                           'reception': ops.sample(name, s['temp_type'], seconds=60)}
     except BaseException as exc:
         # Never publish command stderr, frames, connection names or arbitrary exceptions.
         log['test'] = {'stopped': str(exc) if isinstance(exc, Stop) else type(exc).__name__}
@@ -184,6 +198,8 @@ def run_trial(ops, name, *, approved=False):
         try:
             s = ops.observe(name)
             if created_attempt and name in s['interfaces']:
+                if down_only and owned_index is None:
+                    raise Stop('DOWN-only created identity was not pinned; refuse deletion')
                 current_index = ops.temp_index(s, name, before['phy'])
                 if current_index is None or (owned_index is not None and current_index != owned_index):
                     raise Stop('temporary interface identity changed; refuse deletion')
@@ -266,7 +282,7 @@ class PiOps:
         if time.monotonic() >= self.deadline:
             raise Stop('phase deadline reached')
         try:
-            p = subprocess.run(args, capture_output=True, text=True, timeout=min(6, max(0.001, self.deadline-time.monotonic())), check=False,
+            p = subprocess.run(args, capture_output=True, text=True, timeout=min(getattr(self, "command_limit", 6), max(0.001, self.deadline-time.monotonic())), check=False,
                                env={**os.environ, 'LC_ALL': 'C'})
         except (OSError, subprocess.TimeoutExpired):
             raise Stop('bounded command unavailable or timed out') from None
@@ -392,7 +408,7 @@ class PiOps:
              'health': runtime.get('health') if runtime.get('health') in {'ok','attention','degraded','action','unknown'} else None,
              'phy': 'phy' + phy.group(1) if phy else None,
              'temp_index': None, 'temp_type': None, 'temp_phy': None, 'temp_monitor': False,
-             'temp_nm_managed': None}
+             'temp_nm_managed': None, 'temp_up': None}
         primary_identity = (s['primary_ifindex'], s['phy'])
         self.primary = self.primary or primary_identity
         name_collision = Path('/sys/class/net', name).exists() and name not in interfaces
@@ -412,6 +428,7 @@ class PiOps:
             _, info = self.command(['iw', 'dev', name, 'info'])
             p = re.search(r'(?m)^\s*wiphy (\d+)\s*$', info)
             s.update(temp_index=int(Path('/sys/class/net', name, 'ifindex').read_text()),
+                     temp_up=bool(int(Path('/sys/class/net', name, 'flags').read_text().strip(), 16) & 1),
                      temp_type=int(Path('/sys/class/net', name, 'type').read_text()),
                      temp_phy='phy' + p.group(1) if p else None,
                      temp_monitor=bool(re.search(r'(?m)^\s*type monitor\s*$', info)),
@@ -488,6 +505,142 @@ class PiOps:
         return {'header_counts': counts, 'decoded_payloads': False, 'persistent_capture': False}
 
 
+class DownOnlyPiOps(PiOps):
+    """Capability-limited profile: no temporary UP, packet sockets or repeats."""
+    down_only = True
+
+    def __init__(self, connection):
+        super().__init__(connection)
+        self.attempted = set()
+
+    def change(self, args):
+        name = 'rxv5e16a901'
+        setup = [
+            ['systemctl', 'stop', 'redux-live.service'],
+            ['nmcli', '--wait', '5', 'device', 'set', 'wlan0', 'managed', 'no'],
+            ['iw', 'phy', 'phy0', 'interface', 'add', name, 'type', 'monitor'],
+        ]
+        cleanup = [
+            ['ip', 'link', 'set', 'dev', name, 'down'], ['iw', 'dev', name, 'del'],
+            ['iw', 'dev', 'wlan0', 'set', 'type', 'monitor'],
+            ['ip', 'link', 'set', 'dev', 'wlan0', 'up'],
+            ['nmcli', '--wait', '5', 'device', 'set', 'wlan0', 'managed', 'yes'],
+            ['systemctl', 'start', 'redux-live.service'],
+        ]
+        allowed = cleanup if self.cleaning else setup
+        key = tuple(args)
+        if args not in allowed or key in self.attempted:
+            raise Stop('DOWN-only command outside one-attempt profile')
+        self.attempted.add(key)  # intent before partial side effects
+        PiOps.command(self, args)
+
+    def command(self, args, *, required=True):
+        # Direct commands are read-only. Mutations can reach PiOps.command
+        # only through change()'s exact phase/one-attempt allowlist above.
+        fixed = [
+            ['ip', '-j', 'route', 'get', self.peer],
+            ['ip', '-j', 'address', 'show', 'dev', 'eth0'],
+            ['findmnt', '-rn', '-T', '/captures', '-o', 'TARGET,FSTYPE,OPTIONS'],
+            ['iw', 'reg', 'get'], ['rfkill', 'list'], ['iw', 'dev'],
+            ['modinfo', '-n', 'brcmfmac'], ['modinfo', '-F', 'srcversion', 'brcmfmac'],
+            ['ps', '-eo', 'comm=,cgroup='],
+            ['journalctl', '-k', '-b', '-n', '200', '--no-pager', '-o', 'cat'],
+            ['nmcli', '-g', 'DEVICE', 'device', 'status'],
+            ['udevadm', 'info', '--query=property', '--path=/sys/class/net/rxv5e16a901'],
+        ]
+        for unit in ('NetworkManager.service', 'wpa_supplicant.service', 'redux-live.service'):
+            fixed.append(['systemctl', 'is-active', unit])
+        for iface in ('wlan0', 'rxv5e16a901'):
+            for query in ('info', 'link'):
+                fixed.append(['iw', 'dev', iface, query])
+            fixed.append(['nexutil', '-I', iface, '-m'])
+            fixed.append(['nmcli', '-g', 'GENERAL.NM-MANAGED,GENERAL.STATE', 'device', 'show', iface])
+        bus = ['busctl', '--system', '--auto-start=no']
+        fixed.append(bus + ['get-property', 'fi.w1.wpa_supplicant1',
+            '/fi/w1/wpa_supplicant1', 'fi.w1.wpa_supplicant1', 'Interfaces'])
+        for method in ('GetDevices', 'GetAllDevices'):
+            fixed.append(bus + ['call', 'org.freedesktop.NetworkManager',
+                '/org/freedesktop/NetworkManager', 'org.freedesktop.NetworkManager', method])
+        device_property = (len(args) == 8 and args[:5] == bus + ['get-property', 'org.freedesktop.NetworkManager']
+            and re.fullmatch(r'/org/freedesktop/NetworkManager/Devices/[0-9]+', args[5])
+            and args[6] == 'org.freedesktop.NetworkManager.Device' and args[7] in ('Interface','Managed','State'))
+        if args not in fixed and not device_property:
+            raise Stop('command forbidden in DOWN-only read profile')
+        return super().command(args, required=required)
+
+    def sample(self, *args, **kwargs):
+        raise Stop('packet sampling forbidden in DOWN-only profile')
+
+    def observe_down(self, name, index, phy):
+        if name != 'rxv5e16a901' or type(index) is not int or index <= 0:
+            raise Stop('DOWN-only identity unavailable')
+        original_deadline = self.deadline
+        self.deadline = min(self.deadline, time.monotonic() + 10)
+        self.command_limit = 2
+        snapshots = []
+        try:
+            for _ in range(2):
+                state = self.observe(name)
+                if (not isolated_primary(state) or self.temp_index(state, name, phy) != index
+                        or state['temp_up'] is not False or state['firmware'] != 0
+                        or state['temp_type'] not in (801, 803)
+                        or state['temp_nm_managed'] is True):
+                    raise Stop('DOWN-only identity or safety changed')
+                inventories = {}
+                for method in ('GetDevices', 'GetAllDevices'):
+                    _, raw = self.command(['busctl', '--system', '--auto-start=no', 'call',
+                        'org.freedesktop.NetworkManager', '/org/freedesktop/NetworkManager',
+                        'org.freedesktop.NetworkManager', method])
+                    # Validate complete busctl ao output before using object paths.
+                    match = re.fullmatch(r'ao ([0-9]+)((?: \"/org/freedesktop/NetworkManager/Devices/[0-9]+\")*)\s*', raw)
+                    if not match:
+                        raise Stop('invalid bounded D-Bus inventory')
+                    paths = re.findall(r'\"([^\"]+)\"', match[2])
+                    if len(paths) != int(match[1]) or len(paths) > 64:
+                        raise Stop('D-Bus inventory exceeds bound')
+                    found = []
+                    for path in paths:
+                        base = ['busctl', '--system', '--auto-start=no', 'get-property',
+                                'org.freedesktop.NetworkManager', path, 'org.freedesktop.NetworkManager.Device']
+                        _, raw_iface = self.command(base + ['Interface'])
+                        if not raw_iface.startswith('s '):
+                            raise Stop('invalid D-Bus interface measurement')
+                        if json.loads(raw_iface[2:]) != name:
+                            continue
+                        _, managed = self.command(base + ['Managed'])
+                        _, nm_state = self.command(base + ['State'])
+                        if managed.strip() not in ('b true', 'b false') or not re.fullmatch(r'u [0-9]+\s*', nm_state):
+                            raise Stop('invalid D-Bus ownership measurement')
+                        found.append({'managed': managed.strip() == 'b true', 'state': int(nm_state[2:])})
+                    inventories[method] = {'device_count': len(paths), 'matches': found}
+                _, properties = self.command(['udevadm', 'info', '--query=property',
+                                                '--path=/sys/class/net/' + name])
+                # Expose only fixed classifications, never arbitrary udev values.
+                vals = {}
+                for key in ('NM_UNMANAGED', 'ID_NET_MANAGED_BY'):
+                    entries = [line.split('=', 1)[1] for line in properties.splitlines() if line.startswith(key+'=')]
+                    value = entries[0].lower() if len(entries) == 1 else None
+                    vals[key] = ('absent' if not entries else 'true' if key == 'NM_UNMANAGED' and value in ('1','true')
+                                 else 'false' if key == 'NM_UNMANAGED' and value in ('0','false')
+                                 else 'present_uninterpreted')
+                item = {'inventories': inventories, 'udev': vals, 'ifindex': index,
+                        'arphrd': state['temp_type'], 'firmware': 0, 'up': False}
+                snapshots.append(item)
+                self.event('down_only_evidence', evidence=item)
+                # Any positive manager claim stops observation, never activates.
+                if any(m['managed'] for inv in inventories.values() for m in inv['matches']):
+                    raise Stop('NM claimed DOWN-only temporary interface')
+                time.sleep(min(1, max(0, self.deadline-time.monotonic())))
+            final = self.observe(name)
+            if (not isolated_primary(final) or self.temp_index(final, name, phy) != index
+                    or final['temp_up'] is not False or final['firmware'] != 0):
+                raise Stop('DOWN-only final identity changed')
+            return snapshots
+        finally:
+            self.deadline = original_deadline
+            self.command_limit = 6
+
+
 def trial_exit_code(result, *, execution=False):
     """Classify actual experiment outcome, never infer success from cleanup alone.
 
@@ -504,12 +657,13 @@ def trial_exit_code(result, *, execution=False):
     test = result.get('test')
     if not isinstance(test, dict) or 'stopped' in test:
         return 2
-    return 0 if ('arphrd' in test and 'reception' in test) else 2
+    return 0 if ('arphrd' in test and ('reception' in test or (test.get('down_only') is True and 'ownership' in test))) else 2
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--execute-approved', action='store_true')
+    parser.add_argument('--down-only', action='store_true', help='bounded DOWN-only ownership observation; no RF activation')
     parser.add_argument('--vif', default='rxv5e16a901')
     parser.add_argument('ssh_connection')
     args = parser.parse_args()
@@ -517,7 +671,9 @@ def main():
         parser.error('invalid temporary VIF name')
     if os.geteuid() != 0:
         parser.error('root required for read-only driver/ownership inspection')
-    ops = PiOps(args.ssh_connection)
+    if args.down_only and args.vif != 'rxv5e16a901':
+        parser.error('DOWN-only profile uses only rxv5e16a901')
+    ops = (DownOnlyPiOps if args.down_only else PiOps)(args.ssh_connection)
     def stop_signal(_signum, _frame):
         raise Stop('session signal or overall deadline')
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGALRM):
@@ -525,10 +681,10 @@ def main():
     signal.alarm(210)
     if args.execute_approved:
         with single_trial_lock():
-            result = run_trial(ops, args.vif, approved=True)
+            result = run_trial(ops, args.vif, approved=True, down_only=args.down_only)
     else:
         s = ops.observe(args.vif)
-        result = {'read_only': True, 'prerequisites_satisfied': baseline_ok(s), 'baseline': ops.public(s)}
+        result = {'read_only': True, 'profile': 'down_only' if args.down_only else 'native_monitor', 'prerequisites_satisfied': baseline_ok(s), 'baseline': ops.public(s)}
     print(json.dumps(result, sort_keys=True, indent=2))
     return trial_exit_code(result, execution=args.execute_approved)
 

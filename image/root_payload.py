@@ -16,6 +16,13 @@ import tomllib
 _MUST_EXIST = (
     "opt/redux/redux/core/boot.py",
     "opt/redux/redux/core/live_runtime.py",
+    "opt/redux/redux/radio/live_lease.py",
+    "opt/redux/redux/radio/split_integration.py",
+    "opt/redux/redux/radio/dual_radio.py",
+    "opt/redux/redux/connectivity/bluez_pan.py",
+    "opt/redux/redux/connectivity/bluez_executor.py",
+    "opt/redux/redux/connectivity/bluez_bus.py",
+    "opt/redux/redux/connectivity/phone.py",
     "opt/redux/redux/core/regulatory.py",
     "opt/redux/redux/crack/ingest.py",
     "opt/redux/redux/storage_mount.py",
@@ -166,6 +173,8 @@ def capture_contract(root, profile, *, expected_country=None):
             )
     if live_config.get("allow_connected_capture") is not False:
         raise ValueError("image must preserve passive-by-default uplink policy")
+    if live_config.get("require_usb_lease") is not False or live.get("phone", {}).get("enabled") is not False:
+        raise ValueError("image must keep unqualified USB lease and Bluetooth PAN paths disabled")
     if pipeline.get("audit", {}).get("enabled") is not False:
         raise ValueError("image must ship with capture audit disabled")
     for name in ("live.toml", "pipeline.toml"):

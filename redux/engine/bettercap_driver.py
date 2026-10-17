@@ -280,11 +280,15 @@ class BettercapDriver:
         transport: Transport | None = None,
         allowlist: Allowlist | None = None,
         log: Callable[[str], None] | None = None,
+        operation_guard: Callable[[], None] | None = None,
+        capture_iface: str | None = None,
     ):
         self.config = config or BettercapConfig()
         self.transport = transport or HttpTransport(self.config)
         self.allowlist = allowlist or Allowlist()
         self._log = log or (lambda msg: None)
+        self._operation_guard = operation_guard
+        self._capture_iface = capture_iface
 
     @property
     def base_url(self) -> str:
@@ -293,29 +297,43 @@ class BettercapDriver:
     def _say(self, reason: str) -> None:
         self._log(reason)
 
+    def _guard(self):
+        if self._operation_guard is not None:
+            self._operation_guard()
+
+    def _run(self, command):
+        self._guard()
+        result = self.transport.run(command)
+        self._guard()
+        return result
+
     # --- lifecycle / control (passive, open) ------------------------------- #
 
     def set_interface(self, iface: str) -> dict:
         """Point bettercap at the interface the Radio Orchestrator chose."""
+        if self._capture_iface is not None and iface != self._capture_iface:
+            raise BettercapUnavailable("capture lease refuses interface reassignment")
         self._say(f"bettercap: binding wifi to {iface}")
-        return self.transport.run(f"set wifi.interface {iface}")
+        return self._run(f"set wifi.interface {iface}")
 
     def recon(self, on: bool = True) -> dict:
         self._say(f"bettercap: wifi.recon {'on' if on else 'off'}")
-        return self.transport.run(f"wifi.recon {'on' if on else 'off'}")
+        return self._run(f"wifi.recon {'on' if on else 'off'}")
 
     def set_channels(self, channels: list) -> dict:
         chans = ",".join(str(c) for c in channels)
         self._say(f"bettercap: restricting recon to channels {chans}")
-        return self.transport.run(f"wifi.recon.channel {chans}")
+        return self._run(f"wifi.recon.channel {chans}")
 
     def set_handshake_file(self, path: str) -> dict:
         self._say(f"bettercap: writing handshakes to {path}")
-        return self.transport.run(f"set wifi.handshakes.file {path}")
+        return self._run(f"set wifi.handshakes.file {path}")
 
     def poll_events(self, clear: bool = True) -> list:
         """Fetch + normalize bettercap events into glass-box Events."""
+        self._guard()
         raw = self.transport.events(clear=clear)
+        self._guard()
         return [normalize_event(e) for e in raw]
 
     def stream_events(self, interval: float = 1.0, _max_polls: int | None = None) -> Iterator[Event]:
@@ -344,4 +362,4 @@ class BettercapDriver:
             self._say(reason)
             raise FiringRefused(reason)
         self._say(f"bettercap: deauth {bssid} (authorized)")
-        return self.transport.run(f"wifi.deauth {bssid}")
+        return self._run(f"wifi.deauth {bssid}")

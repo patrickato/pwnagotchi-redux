@@ -31,6 +31,8 @@ from ..engine.bettercap_driver import BettercapConfig, BettercapDriver, HttpTran
 from ..geo import SightingStore
 from ..radio import Intent, Role, decide
 from ..radio.probe import probe
+from ..radio.live_lease import UsbLeaseGuard, FileLeaseEvidence, KernelUsbVerifier, LeaseLost, usb_attached
+from ..radio.split_integration import CaptureLease
 from ..radio.link_type import read_link_type, link_assessment
 from ..web.status_page import make_handler, status_payload
 from .augur import Augur
@@ -62,6 +64,9 @@ class LiveConfig:
     pipeline_stale_seconds: int = 180
     status_sample_seconds: int = 5
     allow_connected_capture: bool = False
+    require_usb_lease: bool = False
+    usb_evidence_file: Path | None = None
+    usb_management_peer: str = ""
     require_regulatory_country: bool = False
     regulatory_country_file: Path = Path("/etc/redux/regulatory-country")
 
@@ -88,6 +93,9 @@ class LiveConfig:
             pipeline_stale_seconds=int(values.get("pipeline_stale_seconds", 180)),
             status_sample_seconds=int(values.get("status_sample_seconds", 5)),
             allow_connected_capture=values.get("allow_connected_capture", False),
+            require_usb_lease=values.get("require_usb_lease", False),
+            usb_evidence_file=Path(values["usb_evidence_file"]) if values.get("usb_evidence_file") else None,
+            usb_management_peer=values.get("usb_management_peer", ""),
             require_regulatory_country=values.get("require_regulatory_country", False),
             regulatory_country_file=Path(values.get("regulatory_country_file",
                                                     "/etc/redux/regulatory-country")),
@@ -126,6 +134,15 @@ class LiveConfig:
             raise ValueError("enable_web must be a boolean")
         if type(self.allow_connected_capture) is not bool:
             raise ValueError("allow_connected_capture must be a boolean")
+        if type(self.require_usb_lease) is not bool:
+            raise ValueError("require_usb_lease must be a boolean")
+        if self.require_usb_lease:
+            import ipaddress
+            ipaddress.ip_address(self.usb_management_peer)
+            if not self.preferred_iface or self.allow_connected_capture:
+                raise ValueError("USB lease needs a pinned interface without connected-capture override")
+            if self.usb_evidence_file is None or not self.usb_evidence_file.is_absolute():
+                raise ValueError("USB lease requires an absolute evidence path")
         if type(self.require_regulatory_country) is not bool:
             raise ValueError("require_regulatory_country must be a boolean")
         if self.regulatory_country_file != Path("/etc/redux/regulatory-country"):
@@ -267,7 +284,7 @@ class LiveRuntime:
     """Owner of one Bettercap subprocess, its Augur event loop, and local UI."""
 
     def __init__(self, config: LiveConfig, *, radio_probe=probe, executor=subprocess.run,
-                 spawn=subprocess.Popen, clock=time.monotonic):
+                 spawn=subprocess.Popen, clock=time.monotonic, lease_guard=None):
         config.validate()
         self.config = config
         self.capture_mount_required = any(
@@ -288,6 +305,12 @@ class LiveRuntime:
         self.executor = executor
         self.spawn = spawn
         self.clock = clock
+        self.lease_guard = None
+        if config.require_usb_lease:
+            self.lease_guard = lease_guard or UsbLeaseGuard(
+                FileLeaseEvidence(config.usb_evidence_file),
+                KernelUsbVerifier(config.usb_management_peer, run=executor), clock=clock)
+        self._lease_interlock = False
         self.process = None
         self.augur = None
         self.driver = None
@@ -348,6 +371,78 @@ class LiveRuntime:
         except BlockingIOError:
             self._lock.close()
             raise RuntimeError("another Redux live runtime already owns the radio")
+        self._load_lease_interlock()
+
+    def _load_lease_interlock(self):
+        if self.lease_guard is None:
+            return
+        path = self.config.state_dir / 'usb-lease-interlock.json'
+        try:
+            if path.is_symlink() or path.stat().st_size > 4096:
+                raise ValueError
+            d = json.loads(path.read_text())
+            if not isinstance(d, dict):
+                raise ValueError
+            if d.get('blocked') is not False:
+                raise ValueError
+            identity = d.get('identity')
+            if identity:
+                if (not isinstance(identity, dict) or set(identity) != {'iface','phy','ifindex'}
+                        or type(identity['ifindex']) is not int or identity['ifindex'] <= 0
+                        or not isinstance(identity['iface'], str) or not _IFACE.fullmatch(identity['iface'])
+                        or not isinstance(identity['phy'], str) or not re.fullmatch(r'phy[0-9]+', identity['phy'])):
+                    raise ValueError
+                self.lease_guard.expected = CaptureLease(**identity)
+            kernel_identity = d.get('kernel_identity')
+            if kernel_identity is not None and (not isinstance(kernel_identity, list)
+                    or len(kernel_identity) != 2 or not all(type(x) is int and x > 0 for x in kernel_identity)):
+                raise ValueError
+            if kernel_identity is not None and hasattr(self.lease_guard.verify_kernel, 'net_identity'):
+                self.lease_guard.verify_kernel.net_identity = tuple(kernel_identity)
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError, TypeError):
+            self._lease_interlock = self.lease_guard.blocked = True
+
+    def _save_lease_interlock(self, blocked):
+        if self.lease_guard is None:
+            return
+        from dataclasses import asdict
+        self._lease_interlock = blocked
+        self.lease_guard.blocked = blocked
+        try:
+            atomic_checkpoint(self.config.state_dir / 'usb-lease-interlock.json', {
+                'blocked': blocked,
+                'identity': asdict(self.lease_guard.expected) if self.lease_guard.expected else None,
+                'kernel_identity': getattr(self.lease_guard.verify_kernel, 'net_identity', None),
+            })
+        except Exception:
+            self._lease_interlock = self.lease_guard.blocked = True
+            raise LeaseLost('USB interlock persistence unavailable') from None
+
+    def _check_usb_lease(self):
+        if self.lease_guard is None and self.iface and usb_attached(self.iface):
+            raise LeaseLost("USB capture requires explicit lease configuration")
+        if self.lease_guard is not None:
+            try:
+                self.lease_guard.check(owner_pid=getattr(self.process, 'pid', None))
+            except BaseException:
+                try:
+                    self._save_lease_interlock(True)
+                except LeaseLost:
+                    pass
+                raise
+
+    def rearm_usb_capture(self, *, owner_authorized=False):
+        """Explicit local operator integration hook; never an automatic retry."""
+        if self.process is not None or self.augur is not None or owner_authorized is not True:
+            raise LeaseLost('re-arm requires explicit approval and a reaped writer')
+        if self.lease_guard is None:
+            raise LeaseLost('USB lease mode disabled')
+        self.lease_guard.rearm(owner_authorized=True)
+        self._save_lease_interlock(False)
+        self.state = 'degraded'
+        self.next_try = self.clock()
 
     def _capture_mount_ok(self):
         return (not self.capture_mount_required
@@ -591,8 +686,15 @@ class LiveRuntime:
         if self.config.require_regulatory_country:
             country = read_country(self.config.regulatory_country_file)
             verify_country(country, runner=self.executor)
-        ensure_monitor(iface, run=self.executor,
-                       allow_connected=self.config.allow_connected_capture)
+        if self.lease_guard is not None:
+            self.lease_guard.acquire(iface)
+            self._save_lease_interlock(False)
+            self._check_usb_lease()  # USB mode never retunes or acquires an NM-owned device.
+        else:
+            if usb_attached(iface):
+                raise LeaseLost("USB capture requires explicit lease configuration")
+            ensure_monitor(iface, run=self.executor,
+                           allow_connected=self.config.allow_connected_capture)
         credentials = secrets.token_hex(24)
         self.transport = HttpTransport(BettercapConfig(
             host="127.0.0.1", port=self.config.api_port,
@@ -622,6 +724,9 @@ class LiveRuntime:
         # A restart-only rename previously let a healthy process fill the SD.
         self.log_handle = self._open_engine_log()
         self.engine_attempts += 1
+        self._check_usb_lease()
+        if self.lease_guard is None and usb_attached(iface):
+            raise LeaseLost("USB interface appeared without a qualified lease")
         self.process = self.spawn(
             [self.config.bettercap_binary, "-iface", iface, "-caplet", str(caplet),
              "-no-history", "-env-file", "", "-no-colors", "-silent"],
@@ -639,10 +744,15 @@ class LiveRuntime:
         self.iface = iface
         self.started = self.clock()
         self.state = "starting_engine"
+        self._check_usb_lease()
 
     def _connect(self):
+        self._check_usb_lease()
         self.transport.session()  # authenticated readiness probe
-        driver = LiveDriver(config=self.transport.config, transport=self.transport)
+        self._check_usb_lease()
+        driver = LiveDriver(config=self.transport.config, transport=self.transport,
+                            operation_guard=self._check_usb_lease,
+                            capture_iface=self.iface if self.lease_guard is not None else None)
         driver.set_handshake_file(str(self.capture_file))
         radios = [r for r in self.radio_probe() if r.iface == self.iface]
         if not radios:
@@ -746,8 +856,16 @@ class LiveRuntime:
             self.log_handle = None
         self.iface = None
         if self.capture_file is not None:
-            self._handoff(self.capture_file)
+            queued = self._handoff(self.capture_file)
+            if self.lease_guard is not None and not queued:
+                try:
+                    if self.capture_file.is_file() and self.capture_file.stat().st_size > 0:
+                        self._save_lease_interlock(True)
+                except (OSError, LeaseLost):
+                    self._lease_interlock = self.lease_guard.blocked = True
         self.capture_file = None
+        if self.lease_guard is not None:
+            self.lease_guard.release()
         return True
 
     def _handoff(self, source):
@@ -881,6 +999,22 @@ class LiveRuntime:
                 self._schedule_retry(now)
             self._checkpoint()
             return self.state
+        if self.lease_guard is not None:
+            try:
+                if self.process is not None:
+                    self._check_usb_lease()
+                if self._lease_interlock or self.lease_guard.blocked:
+                    raise LeaseLost('USB capture interlocked')
+            except Exception:
+                try:
+                    self._save_lease_interlock(True)
+                except LeaseLost:
+                    pass
+                if self._drop():
+                    self.state = 'lease_blocked'
+                    self.last_error = 'USB lease lost; explicit re-arm and fresh qualification required'
+                self._checkpoint()
+                return self.state
         if self.process is not None and self.process.poll() is not None:
             self.last_error = "Bettercap exited unexpectedly"
             if not self._drop():
@@ -919,7 +1053,7 @@ class LiveRuntime:
                 if self.state == "telemetry_degraded":
                     self.state = "running"
                     self.last_error = ""
-                if now - self.last_probe >= self.config.probe_seconds:
+                if self.lease_guard is None and now - self.last_probe >= self.config.probe_seconds:
                     radio = choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
                                               run=self.executor,
                                               allow_connected=self.config.allow_connected_capture)
@@ -962,13 +1096,19 @@ class LiveRuntime:
             try:
                 if free_bytes(self.config.active_dir) < self.config.min_free_bytes:
                     raise RuntimeError("capture partition is below free-space reserve")
-                iface = choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
-                                               run=self.executor,
-                                               allow_connected=self.config.allow_connected_capture)
+                iface = (self.config.preferred_iface if self.lease_guard is not None else
+                         choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
+                                           run=self.executor,
+                                           allow_connected=self.config.allow_connected_capture))
                 if not iface:
                     raise RuntimeError("no monitor-capable Wi-Fi interface detected")
                 self._launch(iface)
             except Exception as error:
+                if self.lease_guard is not None and self.lease_guard.blocked:
+                    try:
+                        self._save_lease_interlock(True)
+                    except LeaseLost:
+                        pass
                 self.last_error = f"engine launch: {str(error)[:150]}"
                 _LOG.warning("%s", self.last_error)
                 if not self._drop():
@@ -1000,7 +1140,7 @@ class LiveRuntime:
 
 def preflight(config, *, which=shutil.which, radio_probe=probe,
               radio_run=subprocess.run, is_mount=os.path.ismount,
-              available_bytes=free_bytes):
+              available_bytes=free_bytes, lease_guard=None):
     """Read-only hardware/OS readiness check. Never changes a network interface."""
     errors, warnings = [], []
     try:
@@ -1042,9 +1182,19 @@ def preflight(config, *, which=shutil.which, radio_probe=probe,
         errors.append(f"capture free-space probe failed: {type(error).__name__}")
     try:
         ifaces = list(radio_probe())
-        iface = choose_safe_radio(ifaces, config.preferred_iface,
-                                  run=radio_run,
-                                  allow_connected=config.allow_connected_capture)
+        if config.require_usb_lease:
+            guard = lease_guard or UsbLeaseGuard(FileLeaseEvidence(config.usb_evidence_file),
+                KernelUsbVerifier(config.usb_management_peer, run=radio_run))
+            iface = guard.acquire(config.preferred_iface).iface
+            guard.check()
+            guard.release()
+            checks['usb_lease'] = True
+        else:
+            iface = choose_safe_radio(ifaces, config.preferred_iface,
+                                      run=radio_run,
+                                      allow_connected=config.allow_connected_capture)
+        if iface and not config.require_usb_lease and usb_attached(iface):
+            errors.append("USB capture requires explicit lease configuration")
         checks["capture_interface_found"] = bool(iface)
         if not iface:
             errors.append("no safe monitor-capable capture radio detected (connected or unavailable)")

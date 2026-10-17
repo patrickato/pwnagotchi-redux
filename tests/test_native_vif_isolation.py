@@ -246,7 +246,7 @@ def test_valid_vif_snapshots_only_allowlist_never_arbitrary_identifiers():
         assert set(snapshot['observed']) == {
             'safe', 'managed', 'nm_state', 'primary_mode', 'primary_up',
             'primary_type', 'live', 'capture_process', 'firmware',
-            'temp_index', 'temp_type', 'temp_monitor', 'temp_nm_managed',
+            'temp_index', 'temp_type', 'temp_monitor', 'temp_nm_managed', 'temp_up',
             'temp_present', 'temp_phy_matches',
         }
         assert snapshot['observed']['temp_type'] == 803

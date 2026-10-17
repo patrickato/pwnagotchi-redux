@@ -44,8 +44,10 @@ def slot(tmp_path, name="lite", profile="lite"):
         '[live]\nstate_dir = "/captures/live"\n'
         'capture_dir = "/captures/incoming"\nactive_dir = "/captures/active"\n'
         'pipeline_database = "/captures/jobs.db"\nallow_connected_capture = false\n'
+        'require_usb_lease = false\n'
         'require_regulatory_country = true\n'
         'regulatory_country_file = "/etc/redux/regulatory-country"\n'
+        '[phone]\nenabled = false\n'
     )
     pipe = config / "pipeline.toml"
     pipe.write_text(
@@ -380,3 +382,15 @@ def test_root_payload_cli_rejects_mismatched_country(tmp_path):
     result = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert result.returncode != 0
     assert "country mismatch" in result.stderr
+
+
+@pytest.mark.parametrize('old,new', [
+    ('require_usb_lease = false', 'require_usb_lease = true'),
+    ('enabled = false', 'enabled = true'),
+])
+def test_image_keeps_unqualified_connectivity_disabled(tmp_path, old, new):
+    root = slot(tmp_path)
+    config = root / 'etc/redux/live.toml'
+    config.write_text(config.read_text().replace(old, new))
+    with pytest.raises(ValueError, match='disabled'):
+        gate.verify(root)
