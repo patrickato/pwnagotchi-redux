@@ -82,6 +82,65 @@ qualified. This first native implementation provides swipe navigation
 only; its systemd service intentionally leaves touch **off** until the
 operator separately validates input and decides to enable it.
 
+### Calibrated touchscreen tabs — source-only until a new image is qualified
+
+The native 480×320 dashboard now draws three footer tabs: **Overview**,
+**Captures**, and **Doctor**. When a physical five-point calibration has been
+observed and explicitly confirmed, classic single-touch taps inside those
+footer regions select the visible page. Horizontal gestures still advance or
+reverse pages. A diagonal drag, unqualified multi-touch stream, or lost evdev
+synchronization cannot be promoted to a tap. Uncalibrated operation retains the
+original opt-in swipe-only behavior.
+
+This feature is **not** available on the already-flashed October 15 image
+unless a separately approved image update is installed. Never enable a TFT or
+input service just because the offline tests passed. Before using it, first
+complete the framebuffer/pixel and raw tap acceptance steps below.
+
+Create a **private** absolute JSON file on the writable REDUXCAP partition
+containing the five **actually observed** raw X/Y pairs, correctly labeled
+by the corresponding physical corner or center of the displayed 480×320
+surface. The sample structure is:
+
+```json
+{
+  "schema": 1,
+  "points": [
+    {"raw_x": 0, "raw_y": 0, "pixel_x": 0, "pixel_y": 0},
+    {"raw_x": 0, "raw_y": 0, "pixel_x": 479, "pixel_y": 0},
+    {"raw_x": 0, "raw_y": 0, "pixel_x": 0, "pixel_y": 319},
+    {"raw_x": 0, "raw_y": 0, "pixel_x": 479, "pixel_y": 319},
+    {"raw_x": 0, "raw_y": 0, "pixel_x": 239.5, "pixel_y": 159.5}
+  ]
+}
+```
+
+**The raw zeros above are placeholders, never measurements.** Substitute
+each of them with the actual values from your observed physical touches;
+the placeholder file deliberately fails fitting. Do not copy example values
+into a supposedly qualified mapping. The input reader caps the file at
+8 KiB, rejects leaf symlinks, malformed values, missing target samples,
+ambiguous orientation and unacceptable fit residuals.
+
+Only **after** physically verifying the five touches, the actual framebuffer
+and the displayed UI orientation, an explicitly approved supervised run can
+use the following template (replace both actual device numbers):
+
+```sh
+sudo redux-fbui --framebuffer /dev/fbN --run \
+  --touch-device /dev/input/eventN \
+  --calibration-file /captures/config/touch-calibration.json \
+  --confirm-touch-calibration
+```
+
+If visible framebuffer pixels are deliberately rotated 180 degrees, also
+supply `--rotate 180`. The gesture decoder transforms physical coordinates
+back into logical UI coordinates for the three touch targets and swipe direction.
+Calibration confirmation is an **operator assertion**, not proof created by
+the software. Check all three tabs and both swipe directions in person. The
+feature does not change kernel calibration, create event devices, grab input,
+enable a service, or modify network state.
+
 ### Optional persistent display service after acceptance
 
 Only after physical verification and explicit approval, store the chosen
