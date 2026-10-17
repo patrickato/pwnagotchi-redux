@@ -11,9 +11,9 @@ from math import hypot, isfinite
 from .calibration import Calibration
 from .touch_nav import _EVENT, EV_ABS, EV_KEY, EV_SYN, ABS_X, ABS_Y, BTN_TOUCH
 
-PAGES = ("overview", "captures", "doctor", "radios")
+PAGES = ("overview", "captures", "doctor", "radios", "trends")
 TAB_TOP = 296
-TAB_WIDTH = 120
+TAB_WIDTH = 480 // len(PAGES)
 _SYN_REPORT = 0
 _SYN_DROPPED = 3
 
