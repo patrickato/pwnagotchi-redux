@@ -231,9 +231,10 @@ always rendered as **SAVED INVENTORY / HISTORICAL - NOT LIVE**, even if
 the file was generated seconds earlier. No file modification time or
 laptop clock is substituted for an authenticated observation timestamp.
 It does not connect to the Pi, monitor live state, or change any radio.
-The pending independent live-status supplier remains a separate hardware
-and runtime integration gate; this screenshot tool is not that supplier.
-Do not share captured identifiers or the unreviewed raw report publicly.
+The installed live-service entrypoint now has a separate read-only radio
+inventory supplier; this historical screenshot tool is not that supplier,
+and no physical acceptance is implied. Do not share captured identifiers or
+the unreviewed raw report publicly.
 
 ## Radio page role separation
 
@@ -339,27 +340,30 @@ optional independently sampled **radio inventory**. If no current radio
 inventory was supplied, the USB section explicitly reports NOT REPORTED,
 even when a USB adapter was previously seen by a separate hardware tool.
 
-The optional, source-only `radio_inventory` status extension is:
+The live-service entrypoint now supplies the optional
+`radio_inventory` status extension through `redux.radio.display_inventory`:
 ```json
 {
   "schema": 1,
   "sampled_utc": 0,
   "radios": [
-    {"transport": "onboard", "driver": "brcmfmac", "kernel_mode": "monitor",
-     "arphrd": 1, "identity_stable": true},
-    {"transport": "usb", "driver": "mt76x2u", "kernel_mode": "monitor",
-     "arphrd": 803, "identity_stable": true}
+    {"transport": "onboard", "iface": "wlan0", "driver": "brcmfmac",
+     "kernel_mode": "managed", "arphrd": 1, "identity_stable": true},
+    {"transport": "usb", "iface": "wlan1", "driver": "mt76x2u",
+     "kernel_mode": "monitor", "arphrd": 803, "identity_stable": true}
   ]
 }
 ```
 **The zero timestamp and these radio records are format examples, not a live
-reading or hardware attestation.** The current runtime does **not** produce
-this extension yet. A future independent source must supply bounded,
-same-boot evidence and actual timestamps before this field can be used
-operationally. Until then the UI shows the active capture's *real* link-type
-metadata from `runtime` and leaves the USB inventory unreported. There is
-no automatic sysfs/USB inspection, packet reader, mode change, or process
-attachment in the renderer.
+reading or hardware attestation.** The installed entrypoint schedules a
+read-only sample on a daemon worker at most every 10 seconds. It reads
+`/sys/class/net` identity twice around one bounded `iw dev` query, checks
+ifindex/PHY agreement, groups virtual interfaces by physical adapter, and
+rejects unknown transport or multiple physical radios on the same supported
+transport. A failed refresh keeps the original timestamp, so the UI marks it
+stale after 20 seconds. It never changes radio modes, attaches a process, reads
+RF frames, or qualifies reception/ownership. Direct `LiveRuntime` embeddings
+and `--check` do not start this provider unless explicitly configured.
 
 Even for a recent record, ARPHRD801/803 and monitor mode are only kernel
 metadata. The Radios page always labels decoded RF reception **UNVERIFIED**,
