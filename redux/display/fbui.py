@@ -290,8 +290,14 @@ def render(report, *, page="overview", now=None):
     elif page == "radios":
         from .radio_panel import model as radio_model
         radios = radio_model(report, now=now)
+        snapshot_only = radios["inventory"] == "SAVED SNAPSHOT"
+        draw.text((20, 132),
+                  "SAVED INVENTORY / HISTORICAL - NOT LIVE" if snapshot_only
+                  else "INVENTORY / " + radios["inventory"],
+                  font=_font(10, bold=True),
+                  fill=AMBER if snapshot_only else SUBTLE)
         radio_capture = radios["capture"]
-        draw.text((20, 160), "CURRENT CAPTURE / " + radio_capture["iface"],
+        draw.text((20, 160), "CAPTURE / " + radio_capture["iface"],
                   font=_font(13, bold=True), fill=INK)
         draw.text((20, 183), radio_capture["state"] + " / " + radio_capture["framing"],
                   font=_font(11), fill=SUBTLE)
