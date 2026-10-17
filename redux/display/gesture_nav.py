@@ -11,9 +11,9 @@ from math import hypot, isfinite
 from .calibration import Calibration
 from .touch_nav import _EVENT, EV_ABS, EV_KEY, EV_SYN, ABS_X, ABS_Y, BTN_TOUCH
 
-PAGES = ("overview", "captures", "doctor", "radios")
+PAGES = ("overview", "captures", "doctor", "radios", "trends")
 TAB_TOP = 296
-TAB_WIDTH = 120
+TAB_WIDTH = 480 // len(PAGES)
 _SYN_REPORT = 0
 _SYN_DROPPED = 3
 
@@ -27,6 +27,7 @@ class NavigationGestures:
     tap_slop_pixels: int = 18
     pressed: bool = False
     desynced: bool = False
+    awaiting_release: bool = False
     invalid: bool = False
     raw: dict = field(default_factory=lambda: {"x": None, "y": None})
     start: tuple | None = None
@@ -95,6 +96,12 @@ class NavigationGestures:
         dx, dy = ex - sx, ey - sy
         if abs(dx) >= self.swipe_pixels and abs(dy) <= abs(dx) * 0.6:
             return ("swipe", 1 if dx < 0 else -1)
+        # Vertical gestures inside the diagnostic content viewport change
+        # the *view*, never any underlying device or Doctor state. A footer
+        # drag or diagonal contact cannot become an accidental scroll.
+        if (abs(dy) >= self.swipe_pixels and abs(dx) <= abs(dy) * 0.6
+                and 155 <= sy < TAB_TOP and 155 <= ey < TAB_TOP):
+            return ("scroll", 1 if dy < 0 else -1)
         if self.maximum_motion > self.tap_slop_pixels:
             return None
         if sy < TAB_TOP or ey < TAB_TOP:
@@ -109,10 +116,19 @@ class NavigationGestures:
         if event_type == EV_SYN and code == _SYN_DROPPED:
             self._clear()
             self.desynced = True
+            self.awaiting_release = True
             return None
         if self.desynced:
             if event_type == EV_SYN and code == _SYN_REPORT:
                 self.desynced = False
+            return None
+        if self.awaiting_release:
+            # After missing kernel events the physical BTN_TOUCH state is
+            # unknown. A SYN_REPORT alone cannot establish a fresh contact.
+            # Require a post-resync release before honoring any coordinates.
+            if event_type == EV_KEY and code == BTN_TOUCH and value == 0:
+                self._clear()
+                self.awaiting_release = False
             return None
         if event_type == EV_ABS:
             if code in (ABS_X, ABS_Y):

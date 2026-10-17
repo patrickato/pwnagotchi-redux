@@ -582,6 +582,70 @@ def test_unrecoverable_database_write_reports_uncommitted_count(tmp_path, monkey
     assert area["status"] == "action"
 
 
+def test_readonly_radio_inventory_provider_is_cached_and_attached(tmp_path, monkeypatch):
+    clock = [100.0]
+    sample = {"schema": 1, "sampled_utc": 1000.0, "radios": [
+        {"transport": "onboard", "identity_stable": True, "iface": "wlan0",
+         "driver": "brcmfmac", "kernel_mode": "managed", "arphrd": 1}]}
+    calls = []
+    def provider():
+        calls.append(clock[0])
+        return dict(sample, sampled_utc=1000.0 + clock[0] - 100.0)
+    runtime = live.LiveRuntime(
+        cfg(tmp_path, status_sample_seconds=5), radio_probe=lambda: [],
+        clock=lambda: clock[0], radio_inventory_provider=provider)
+    try:
+        runtime._checkpoint()
+        runtime._radio_inventory_thread.join(timeout=2)
+        assert not runtime._radio_inventory_thread.is_alive()
+        runtime._checkpoint()  # publish the completed worker result atomically
+        assert calls == [100.0]
+        assert runtime._snapshot["radio_inventory"]["radios"][0]["iface"] == "wlan0"
+        clock[0] = 105.0
+        runtime._checkpoint()
+        assert calls == [100.0]
+        clock[0] = 110.0
+        runtime._checkpoint()
+        runtime._radio_inventory_thread.join(timeout=2)
+        assert not runtime._radio_inventory_thread.is_alive()
+        runtime._checkpoint()
+        assert calls == [100.0, 110.0]
+        assert runtime._snapshot["radio_inventory"]["sampled_utc"] == 1010.0
+    finally:
+        runtime.close()
+
+
+def test_failed_radio_inventory_refresh_keeps_timestamped_sample_not_freshening_it(tmp_path):
+    clock = [100.0]
+    calls = []
+    def provider():
+        calls.append(clock[0])
+        if len(calls) > 1:
+            raise OSError("synthetic read-only probe failure")
+        return {"schema": 1, "sampled_utc": 1000.0, "radios": [
+            {"transport": "usb", "identity_stable": True, "iface": "wlan1",
+             "driver": "mt76x2u", "kernel_mode": "monitor", "arphrd": 803}]}
+    runtime = live.LiveRuntime(
+        cfg(tmp_path, status_sample_seconds=5), radio_probe=lambda: [],
+        clock=lambda: clock[0], radio_inventory_provider=provider)
+    try:
+        runtime._checkpoint()
+        runtime._radio_inventory_thread.join(timeout=2)
+        assert not runtime._radio_inventory_thread.is_alive()
+        runtime._checkpoint()
+        first = runtime._snapshot["radio_inventory"]
+        clock[0] = 110.0
+        runtime._checkpoint()
+        runtime._radio_inventory_thread.join(timeout=2)
+        assert not runtime._radio_inventory_thread.is_alive()
+        runtime._checkpoint()
+        assert calls == [100.0, 110.0]
+        assert runtime._snapshot["radio_inventory"] is first
+        assert runtime._snapshot["radio_inventory"]["sampled_utc"] == 1000.0
+    finally:
+        runtime.close()
+
+
 def test_live_status_reuses_one_processing_ledger_read(tmp_path, monkeypatch):
     from redux.crack import ingest
     def spawn(*args, **kwargs):

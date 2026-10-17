@@ -23,7 +23,7 @@ def contact(start, end=None, *, prepress=False):
     return begin + ev(EV_SYN, 0, 0) + pos(end) + ev(EV_KEY, BTN_TOUCH, 0)
 
 
-@pytest.mark.parametrize("x,page", [(35, "overview"), (175, "captures"), (295, "doctor"), (423, "radios")])
+@pytest.mark.parametrize("x,page", [(35, "overview"), (175, "captures"), (245, "doctor"), (335, "radios"), (423, "trends")])
 def test_footer_taps_select_exact_pages(x, page):
     tracker = NavigationGestures(calibration(), physically_verified=True)
     actions, tail = consume_gestures(contact((x, 308)), tracker)
@@ -49,7 +49,7 @@ def test_swipes_have_screen_relative_direction(dx, step):
 def test_rotation_180_maps_visible_footer_and_swipes():
     tracker = NavigationGestures(calibration(), physically_verified=True, rotation=180)
     # Physical top-left is displayed logical bottom-right after screen rotation.
-    assert consume_gestures(contact((55, 11)), tracker)[0] == [("page", "radios")]
+    assert consume_gestures(contact((55, 11)), tracker)[0] == [("page", "trends")]
     assert consume_gestures(contact((320, 170), (120, 170)), tracker)[0] == [
         ("swipe", -1)]
 
@@ -69,9 +69,11 @@ def test_syn_dropped_aborts_contact_and_does_not_reuse_coordinates():
             ev(EV_ABS, ABS_Y, 309) + ev(EV_KEY, BTN_TOUCH, 0))
     assert consume_gestures(data, tracker)[0] == []
     assert tracker.desynced
-    # SYN_REPORT resynchronizes, and only a fresh contact then qualifies.
+    # Require an observed post-resync lift before a new contact.
     assert consume_gestures(ev(EV_SYN, 0, 0) +
-                            contact((180, 309)), tracker)[0] == [
+                            contact((180, 309)), tracker)[0] == []
+    assert tracker.awaiting_release is False
+    assert consume_gestures(contact((180, 309)), tracker)[0] == [
         ("page", "captures")]
 
 
@@ -89,7 +91,7 @@ def test_fragmented_read_and_duplicate_release():
     actions, fragment = consume_gestures(data[:13], tracker)
     assert actions == []
     actions, fragment = consume_gestures(fragment + data[13:], tracker)
-    assert actions == [("page", "radios")] and fragment == b""
+    assert actions == [("page", "trends")] and fragment == b""
     assert consume_gestures(ev(EV_KEY, BTN_TOUCH, 0), tracker)[0] == []
 
 
@@ -103,3 +105,41 @@ def test_unverified_calibration_and_invalid_dimensions_refused():
     with pytest.raises(ValueError):
         consume_gestures(b"x" * 8193,
                          NavigationGestures(calibration(), physically_verified=True))
+
+
+@pytest.mark.parametrize("start,end,step", [
+    ((180, 270), (184, 192), 1),
+    ((180, 175), (184, 253), -1),
+])
+def test_doctor_vertical_swipes_are_separate_from_horizontal_navigation(start, end, step):
+    tracker = NavigationGestures(calibration(), physically_verified=True)
+    actions, leftover = consume_gestures(contact(start, end), tracker)
+    assert actions == [("scroll", step)]
+    assert leftover == b""
+
+
+def test_rotated_panel_scroll_direction_uses_logical_coordinates():
+    tracker = NavigationGestures(calibration(), physically_verified=True, rotation=180)
+    # Physical down means logical up on a rotated panel.
+    actions, _ = consume_gestures(contact((240, 75), (240, 145)), tracker)
+    assert actions == [("scroll", 1)]
+
+
+@pytest.mark.parametrize("start,end", [
+    ((180, 310), (180, 220)),
+    ((180, 270), (180, 305)),
+    ((180, 270), (260, 195)),
+    ((180, 270), (180, 215)),  # below deliberate 60 px threshold
+])
+def test_footer_diagonal_and_short_vertical_contacts_never_scroll(start, end):
+    tracker = NavigationGestures(calibration(), physically_verified=True)
+    assert consume_gestures(contact(start, end), tracker)[0] == []
+
+
+def test_lost_evdev_sync_cannot_generate_ghost_scroll():
+    tracker = NavigationGestures(calibration(), physically_verified=True)
+    data = ev(EV_SYN, 3, 0) + contact((180, 265), (180, 175))
+    assert consume_gestures(data, tracker)[0] == []
+    assert tracker.desynced is False  # SYN_REPORT in contact explicitly resynchronizes
+    assert consume_gestures(contact((180, 265), (180, 175)), tracker)[0] == [
+        ("scroll", 1)]

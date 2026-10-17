@@ -33,12 +33,38 @@ def _safe_label(value, pattern):
     return value if isinstance(value, str) and pattern.fullmatch(value) else "UNKNOWN"
 
 
+def _historical(payload):
+    """Render offline evidence as SAVED, never as CURRENT or receive-qualified."""
+    if (not isinstance(payload, dict) or payload.get("schema") != 1
+            or payload.get("source") != "historical_readonly_acceptance"):
+        return None
+    rows = payload.get("radios")
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 4:
+        return None
+    selected = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        transport = row.get("transport")
+        driver = row.get("driver")
+        arphrd = _link(row.get("arphrd"))
+        mode = row.get("mode")
+        if (transport not in ("onboard", "usb") or transport in selected
+                or not isinstance(driver, str) or not _DRIVER.fullmatch(driver)
+                or arphrd is None or mode not in ("MONITOR", "MANAGED", "UNKNOWN")):
+            return None
+        selected[transport] = {"state": "SAVED", "iface": "UNKNOWN",
+                               "driver": driver, "mode": mode, "link": arphrd,
+                               "reception": "UNVERIFIED"}
+    return selected
+
+
 def model(report, *, now=None):
     """Display only current measured metadata; leave reception unverified.
 
-    Optional radio_inventory is a future, separately provisioned, independently
-    sampled status field. It must have a fresh explicit sampling clock and
-    stable identities to be displayed. No caller-supplied flag can qualify RF.
+    Optional radio_inventory is supplied by the live runtime's bounded,
+    read-only display collector. It must have a fresh sample clock and stable
+    identities to be displayed. No inventory field or flag can qualify RF.
     """
     now = time.time() if now is None else now
     current = _clock(now)
@@ -67,11 +93,15 @@ def model(report, *, now=None):
             capture["framing"] = "OTHER LINK TYPE"
 
     inventory = root.get("radio_inventory")
-    usb = {"state": "NOT REPORTED", "driver": "UNKNOWN",
+    usb = {"state": "NOT REPORTED", "iface": "UNKNOWN", "driver": "UNKNOWN",
            "mode": "UNKNOWN", "link": None, "reception": "UNVERIFIED"}
-    onboard = {"state": "NOT REPORTED", "driver": "UNKNOWN",
+    onboard = {"state": "NOT REPORTED", "iface": "UNKNOWN", "driver": "UNKNOWN",
                "mode": "UNKNOWN", "link": None, "reception": "UNVERIFIED"}
     if not isinstance(inventory, dict) or inventory.get("schema") != 1:
+        history = _historical(root.get("radio_acceptance_snapshot"))
+        if history is not None:
+            return {"capture": capture, "onboard": history.get("onboard", onboard),
+                    "usb": history.get("usb", usb), "inventory": "SAVED SNAPSHOT"}
         return {"capture": capture, "onboard": onboard, "usb": usb,
                 "inventory": "NOT REPORTED"}
     sampled = _clock(inventory.get("sampled_utc"))
@@ -96,14 +126,16 @@ def model(report, *, now=None):
         seen.add(transport)
         mode = entry.get("kernel_mode")
         driver = entry.get("driver")
+        iface = entry.get("iface", "UNKNOWN")
         arphrd = _link(entry.get("arphrd"))
         if (mode not in ("monitor", "managed", "unknown")
                 or not isinstance(driver, str) or not _DRIVER.fullmatch(driver)
+                or not isinstance(iface, str) or not _IFACE.fullmatch(iface)
                 or arphrd is None):
             return {"capture": capture, "onboard": onboard, "usb": usb,
                     "inventory": "INVALID"}
-        selected[transport] = {"state": "OBSERVED", "driver": driver,
-                               "mode": mode.upper(), "link": arphrd,
-                               "reception": "UNVERIFIED"}
+        selected[transport] = {"state": "OBSERVED", "iface": iface,
+                               "driver": driver, "mode": mode.upper(),
+                               "link": arphrd, "reception": "UNVERIFIED"}
     return {"capture": capture, "onboard": selected.get("onboard", onboard),
             "usb": selected.get("usb", usb), "inventory": "CURRENT"}

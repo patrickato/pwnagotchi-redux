@@ -101,6 +101,15 @@ def _bounded_count(value):
     """Only measured unsigned 64-bit-range counters may become TFT metrics."""
     return value if type(value) is int and 0 <= value <= MAX_MEASURED_COUNT else None
 
+def _bounded_seconds(value):
+    """Accept only finite, bounded retry durations from a fresh status report."""
+    if type(value) not in (int, float):
+        return None
+    try:
+        return round(value) if math.isfinite(value) and 0 <= value <= 86400 else None
+    except (OverflowError, ValueError, TypeError):
+        return None
+
 
 def _valid_utc_clock(value):
     """A non-finite or malformed clock can never prove live telemetry."""
@@ -221,14 +230,37 @@ def status_view(report, *, now=None):
         "storage_mb": free_mb,
         "processed": _bounded_count(results.get("ready")),
         "errors": errors, "pipeline_available": pipeline.get("available") is True,
+        "retry_seconds": _bounded_seconds(runtime.get("retry_in_seconds")) if not stale else None,
+        "failure_streak": _bounded_count(runtime.get("failure_streak")) if not stale else None,
+        "engine_attempts": _bounded_count(runtime.get("engine_attempts")) if not stale else None,
+        "capture_mount": runtime.get("capture_mount") if not stale and type(runtime.get("capture_mount")) is bool else None,
         "finding": _safe_text(actionable.get("summary"), 55) if actionable else
                    ("No actionable findings" if health == "ok" else "No verified health detail"),
         "detail": _safe_text(actionable.get("remediation"), 67) if actionable else
                   ("Live readings" if not stale else "Waiting for fresh live telemetry"),
         "doctor_rows": doctor_rows[:3],
+        "doctor_all": doctor_rows,
         "doctor_more": max(0, len(doctor_rows) - 3),
         "stale": stale,
     }
+
+
+def doctor_window(view, offset=0):
+    """Bound scrolling to current verified findings; no stale detail replay."""
+    if type(offset) is not int or offset < 0:
+        raise ValueError("doctor offset must be a nonnegative integer")
+    if not isinstance(view, dict):
+        raise TypeError("doctor view must be a mapping")
+    if view.get("stale") is not False:
+        return {"rows": [], "start": 0, "total": 0, "more": 0}
+    rows = view.get("doctor_all", [])
+    if not isinstance(rows, list):
+        return {"rows": [], "start": 0, "total": 0, "more": 0}
+    rows = rows[:64]
+    total = len(rows)
+    first = min(offset, max(0, total - 3))
+    return {"rows": rows[first:first + 3], "start": first, "total": total,
+            "more": max(0, total - first - 3)}
 
 
 def _font(size=13, *, bold=False):
@@ -241,10 +273,11 @@ def _font(size=13, *, bold=False):
         return ImageFont.load_default()
 
 
-def render(report, *, page="overview", now=None):
+def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
     """Pillow RGB image, no placeholder activity, no radio-facing operations."""
     from PIL import Image, ImageDraw
     data = status_view(report, now=now)
+    doctor = doctor_window(data, doctor_offset) if page == "doctor" else None
     from .gesture_nav import PAGES
     if page not in PAGES:
         raise ValueError("unknown framebuffer page")
@@ -287,40 +320,64 @@ def render(report, *, page="overview", now=None):
         metric(20, "PREPARED", compact_count(capture["ready"]))
         metric(180, "FAILED", compact_count(capture["errors"]))
         metric(350, "HASH ROWS", compact_count(capture["hash_records"]))
+    elif page == "trends":
+        from .trend_chart import draw_trends
+        draw_trends(draw, trends, font=_font, ink=INK, subtle=SUBTLE,
+                    teal=TEAL, amber=AMBER, blue=BLUE)
     elif page == "radios":
         from .radio_panel import model as radio_model
         radios = radio_model(report, now=now)
+        snapshot_only = radios["inventory"] == "SAVED SNAPSHOT"
+        draw.text((20, 132),
+                  "SAVED INVENTORY / HISTORICAL - NOT LIVE" if snapshot_only
+                  else "INVENTORY / " + radios["inventory"],
+                  font=_font(10, bold=True),
+                  fill=AMBER if snapshot_only else SUBTLE)
         radio_capture = radios["capture"]
-        draw.text((20, 160), "CURRENT CAPTURE / " + radio_capture["iface"],
-                  font=_font(13, bold=True), fill=INK)
-        draw.text((20, 183), radio_capture["state"] + " / " + radio_capture["framing"],
-                  font=_font(11), fill=SUBTLE)
-        draw.text((20, 204), "KERNEL TYPE " +
+        draw.text((20, 153), "BETTERCAP / " + radio_capture["iface"],
+                  font=_font(12, bold=True), fill=INK)
+        draw.text((20, 173), radio_capture["state"] + " / " + radio_capture["framing"],
+                  font=_font(10), fill=SUBTLE)
+        draw.text((20, 191), "KERNEL TYPE " +
                   (str(radio_capture["link"]) if radio_capture["link"] is not None else "--") +
-                  " / RX UNVERIFIED", font=_font(11), fill=AMBER)
-        draw.line((18, 229, 462, 229), fill=(36, 57, 69), width=1)
+                  " / RX UNVERIFIED", font=_font(10), fill=AMBER)
+        draw.line((18, 210, 462, 210), fill=(36, 57, 69), width=1)
+        onboard = radios["onboard"]
+        draw.text((20, 217), "ONBOARD / " + onboard["iface"] + " / " +
+                  onboard["state"] + " / " + onboard["driver"],
+                  font=_font(10, bold=True),
+                  fill=INK if onboard["state"] == "OBSERVED" else AMBER)
+        draw.text((20, 236), "MODE " + onboard["mode"] + " / LINK " +
+                  (str(onboard["link"]) if onboard["link"] is not None else "--") +
+                  " / RX UNVERIFIED", font=_font(9), fill=AMBER)
+        draw.line((18, 252, 462, 252), fill=(36, 57, 69), width=1)
         usb = radios["usb"]
-        draw.text((20, 241), "USB / " + usb["state"] + "  " + usb["driver"],
-                  font=_font(12, bold=True), fill=INK if usb["state"] == "OBSERVED" else AMBER)
-        draw.text((20, 267), "MODE " + usb["mode"] + " / LINK " +
+        draw.text((20, 258), "USB / " + usb["iface"] + " / " +
+                  usb["state"] + " / " + usb["driver"],
+                  font=_font(10, bold=True), fill=INK if usb["state"] == "OBSERVED" else AMBER)
+        draw.text((20, 278), "MODE " + usb["mode"] + " / LINK " +
                   (str(usb["link"]) if usb["link"] is not None else "--") +
-                  " / RX UNVERIFIED", font=_font(10), fill=SUBTLE)
+                  " / RX UNVERIFIED / OWNER UNVERIFIED",
+                  font=_font(8), fill=AMBER)
     else:
         draw.text((20, 160), "DOCTOR / ACTIONABLE FINDINGS",
                   font=_font(12, bold=True), fill=SUBTLE)
         if data["stale"]:
             draw.text((20, 194), "REPORT STALE / NO VERIFIED FINDINGS",
                       font=_font(12), fill=AMBER)
-        elif data["doctor_rows"]:
-            for index, finding in enumerate(data["doctor_rows"]):
+        elif doctor["rows"]:
+            for index, finding in enumerate(doctor["rows"]):
                 y = 190 + index * 30
                 color = colors[finding["status"]]
                 draw.ellipse((20, y + 5, 28, y + 13), fill=color)
                 draw.text((35, y), finding["status"].upper() + " / " + finding["summary"],
                           font=_font(11), fill=INK)
-            if data["doctor_more"]:
-                draw.text((35, 278), f"+{data['doctor_more']} additional findings",
-                          font=_font(10), fill=SUBTLE)
+            if doctor["total"] > 3:
+                visible = doctor["start"] + len(doctor["rows"])
+                draw.text((35, 282),
+                          f"FINDINGS {doctor['start'] + 1}-{visible} / {doctor['total']}"
+                          "  SWIPE UP/DOWN",
+                          font=_font(9), fill=SUBTLE)
         else:
             message = ("No actionable findings" if data["health"] == "ok"
                        else "No verified findings")
@@ -350,8 +407,18 @@ def render(report, *, page="overview", now=None):
         draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
         draw.text((20, 250), "DOCTOR / " + data["finding"], font=_font(12, bold=True), fill=accent)
         draw.text((20, 272), data["detail"], font=_font(10), fill=SUBTLE)
-    # The footer's three equal touch targets share exact coordinates with
-    # gesture_nav.TAB_TOP/TAB_WIDTH. Visual tabs do not activate touch.
+        retry = f"{data['retry_seconds']}s" if data["retry_seconds"] is not None else "--"
+        failures = value(data["failure_streak"])
+        attempts = value(data["engine_attempts"])
+        mount = ("OK" if data["capture_mount"] is True else
+                 "MISSING" if data["capture_mount"] is False else "UNKNOWN")
+        runtime_color = (AMBER if data["failure_streak"] not in (None, 0)
+                         or data["capture_mount"] is False else SUBTLE)
+        draw.text((20, 285),
+                  f"RETRY {retry} / FAILURES {failures} / STARTS {attempts} / REDUXCAP {mount}",
+                  font=_font(8), fill=runtime_color)
+    # Footer tabs share geometry with gesture_nav.TAB_TOP/TAB_WIDTH.
+    # They are visual only until the physical touch path is opted in.
     from .gesture_nav import PAGES, TAB_TOP, TAB_WIDTH
     draw.rectangle((0, TAB_TOP, 479, 319), fill=(15, 24, 35))
     for index, tab in enumerate(PAGES):
@@ -462,6 +529,9 @@ def main(argv=None):
     tracker = None
     fragment = b""
     page = args.page
+    doctor_offset = 0
+    from .telemetry_history import TelemetryWindow
+    history = TelemetryWindow()
     if args.touch_device:
         from . import touch_nav
         if args.calibration_file:
@@ -493,7 +563,23 @@ def main(argv=None):
     try:
         while running:
             report = read_status(args.port)
-            image = render(report, page=page)
+            sampled_at = time.time()
+            # Only genuine, independently updated live status counters advance
+            # the bounded in-memory chart; the UI never synthesizes activity.
+            history.ingest(report, now=sampled_at)
+            if page == "doctor":
+                current_doctor = status_view(report, now=sampled_at)
+                if current_doctor["stale"]:
+                    doctor_offset = 0
+                else:
+                    doctor_offset = doctor_window(current_doctor, doctor_offset)["start"]
+                image = render(report, page=page, now=sampled_at,
+                               doctor_offset=doctor_offset)
+            elif page == "trends":
+                image = render(report, page=page, now=sampled_at,
+                               trends=history.snapshot(now=sampled_at))
+            else:
+                image = render(report, page=page, now=sampled_at)
             if args.rotate == 180:
                 from PIL import Image
                 image = image.transpose(Image.Transpose.ROTATE_180)
@@ -524,8 +610,22 @@ def main(argv=None):
                     actions, fragment = consume_gestures(fragment, tracker)
                     if actions:
                         action, value = actions[-1]
-                        page = value if action == "page" else touch_nav.navigate(page, value)
-                        break  # redraw selected page immediately
+                        if action == "scroll":
+                            if page != "doctor":
+                                continue
+                            count = len(status_view(report)["doctor_all"])
+                            doctor_offset = min(max(0, count - 3),
+                                                max(0, doctor_offset + value * 3))
+                        elif action == "page":
+                            if value != page:
+                                doctor_offset = 0
+                            page = value
+                        elif action == "swipe":
+                            page = touch_nav.navigate(page, value)
+                            doctor_offset = 0
+                        else:
+                            continue
+                        break  # redraw selected page or Doctor scroll immediately
                 else:
                     directions, fragment = touch_nav.consume(fragment, tracker)
                     if directions:

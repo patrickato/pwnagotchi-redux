@@ -13,7 +13,7 @@ from redux.display import fbui, preview
 
 def test_offline_preview_uses_actual_renderer_and_never_claims_live_hardware():
     frames = preview.build()
-    assert list(frames) == ["overview", "captures", "doctor", "radios"]
+    assert list(frames) == ["overview", "captures", "doctor", "radios", "trends"]
     for data in frames.values():
         assert data.startswith(bytes.fromhex("89504e470d0a1a0a"))
         assert len(data) < 2_000_000
@@ -33,7 +33,7 @@ def test_page_layout_is_distinct_and_rotation_changes_pixels():
 
 def test_private_export_creates_exact_four_files(tmp_path):
     names = preview.publish(str(tmp_path), preview.build())
-    assert names == ["redux-overview.png", "redux-captures.png", "redux-doctor.png", "redux-radios.png"]
+    assert names == ["redux-overview.png", "redux-captures.png", "redux-doctor.png", "redux-radios.png", "redux-trends.png"]
     for name in names:
         target = tmp_path / name
         assert stat.S_IMODE(target.stat().st_mode) == 0o600
@@ -103,7 +103,7 @@ def test_no_status_probes_or_pi_devices_touched_by_offline_cli(tmp_path, monkeyp
     assert result["source"] == "offline_unverified"
     assert result["physical_display_verified"] is False
     assert result["touch_verified"] is False
-    assert len(result["files"]) == 4
+    assert len(result["files"]) == 5
 
 
 def test_live_unavailable_fails_without_fake_offline_preview(tmp_path, monkeypatch):

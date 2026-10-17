@@ -31,9 +31,9 @@ def test_footer_is_rendered_in_shared_four_tab_geometry():
     from redux.display import fbui
     image = fbui.render(None, page="captures")
     assert image.size == (480, 320)
-    assert TAB_TOP == 296 and TAB_WIDTH * 4 == 480
+    assert TAB_TOP == 296 and TAB_WIDTH * 5 == 480
     # Selected tab has a distinct filled background.
-    assert image.getpixel((250, 305)) != image.getpixel((410, 305))
+    assert image.getpixel((140, 300)) != image.getpixel((410, 300))
 
 
 def test_calibrated_tap_redraws_selected_page_without_opening_radio(tmp_path, monkeypatch):
@@ -42,7 +42,7 @@ def test_calibrated_tap_redraws_selected_page_without_opening_radio(tmp_path, mo
                         lambda *_a: {"ok": True, "stride": 960})
     monkeypatch.setattr(fbui, "read_status", lambda *_a: None)
     pages = []
-    monkeypatch.setattr(fbui, "render", lambda *_a, page: pages.append(page) or object())
+    monkeypatch.setattr(fbui, "render", lambda *_a, page, **_kw: pages.append(page) or object())
     monkeypatch.setattr(fbui, "rgb565_bytes", lambda *_a, **_k: b"frame")
     writes = []
     def writer(_device, _frame):
@@ -62,7 +62,7 @@ def test_calibrated_tap_redraws_selected_page_without_opening_radio(tmp_path, mo
                    "--touch-device", "/dev/input/event4",
                    "--calibration-file", str(path),
                    "--confirm-touch-calibration"])
-    assert pages == ["overview", "radios"]
+    assert pages == ["overview", "trends"]
     assert closed == [123]
 
 

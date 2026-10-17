@@ -203,6 +203,129 @@ automatic touch calibration, physically qualified swipe accuracy, frame timing,
 backlight control or cross-board graphics compatibility. Those are follow-on
 features, not green gates today.
 
+## Offline view of a saved read-only hardware acceptance report
+
+The `redux-ui-preview` source tool can now render the existing sanitized
+`redux-readonly-acceptance-v1` report into the **actual Radios-page pixels**.
+For example, from a trusted laptop checkout with Pillow installed, after
+capturing an acceptance report locally:
+
+```sh
+cd ~/redux-workbench-src
+out="$HOME/redux-radio-review-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$out"
+python3 -m redux.display.preview \
+  --acceptance-json /absolute/path/to/saved-readonly-acceptance.json \
+  --output-dir "$out"
+```
+
+This produces exactly one private file, `redux-radios.png`. It displays
+the previously observed sanitized onboard/USB drivers, modes and kernel
+link types. It requires a fresh *at-collection* inventory report with
+stable identities and an Ethernet management PASS, and refuses private
+unexpected fields, incompatible report schemas and claims of authenticated
+ownership or decoded reception in the v1 format.
+
+**This report lacks an authenticated collection timestamp** and is therefore
+always rendered as **SAVED INVENTORY / HISTORICAL - NOT LIVE**, even if
+the file was generated seconds earlier. No file modification time or
+laptop clock is substituted for an authenticated observation timestamp.
+It does not connect to the Pi, monitor live state, or change any radio.
+The installed live-service entrypoint now has a separate read-only radio
+inventory supplier; this historical screenshot tool is not that supplier,
+and no physical acceptance is implied. Do not share captured identifiers or
+the unreviewed raw report publicly.
+
+## Radio page role separation
+
+The radio page renders three distinct observations: the live Bettercap
+capture interface and link framing, the independently sampled onboard radio,
+and the independently sampled USB radio. Driver, kernel mode, and link type
+remain observation-only. Every radio row continues to say RX UNVERIFIED;
+the USB driver's presence does not claim that AngryOxide owns or is currently
+using it, and the onboard monitor label does not establish packet reception.
+Missing or stale inventory displays NOT REPORTED or STALE rather than filling
+in a presumed adapter.
+
+## Engine telemetry trends — real counters, no invented RF
+
+The native TFT now includes a fifth page, **Trends**, with five equal
+96-pixel footer tabs (Overview / Captures / Doctor / Radios / Trends).
+Calibrated taps and horizontal swipes share the same page order.
+
+Trends reads the ordinary existing Redux status API's `runtime` fields:
+`updated_utc`, `events_seen`, `handshake_events`, `handed_off`,
+`state`, `iface`, and a positive measured engine `pid`. This is **live engine
+counter telemetry**, not a monitor-mode packet decoder, crack success
+indicator, or evidence that Bettercap received valid 802.11 frames.
+
+A source-only 151-sample volatile ring computes **observed counter differences
+divided by actual sample time** and displays event, handshake-event and
+handoff rates per minute in a fixed five-minute graph, with the latest measured rate for each series shown in the legend. There are no seeded
+points, artificial wiggles, or archived files. Counters must be valid
+nonnegative integers and the snapshot must be fresh. Duplicate timestamps
+never create a second interval. When engine identity changes, counters
+decrease, runtime exits running, samples become stale, or gaps exceed
+45 seconds, the trend restarts instead of connecting unrelated periods.
+There is no persistence or continuous sensor processing between UI polls.
+At the two-second dashboard cadence, 151 snapshots retain 150 intervals (five minutes). The graph is empty until **two distinct qualifying samples** arrive, and
+clears after an unacceptable reading.
+
+The `python3 -m redux.display.preview --page trends ...` path uses the
+identical renderer and honestly says NO VERIFIED RATE HISTORY because a
+single saved status record cannot establish a real rate. Live progression
+requires the intentionally enabled framebuffer `--run` loop and a real
+accessible loopback status source. The screenshot tool does not generate
+mock data to make a graph look populated. The still-unqualified 480×320
+TFT and touch hardware do not become validated by these tests.
+
+## Overview runtime diagnostics
+
+The Overview page also shows the live supervisor retry delay, consecutive
+failure streak, engine start attempts, and REDUXCAP mount state. Values are
+read from the existing runtime status response and are displayed only when
+that entire sample is fresh. Retry durations and counters are strictly
+bounded; malformed values become `--` or `UNKNOWN`, never zero. A missing
+mount field is not treated as mounted, and a reported unmounted capture
+volume highlights the diagnostic line. This is a read-only display; it does
+not restart the engine, remount storage, or modify any service.
+
+## Scrollable Doctor findings on the 480×320 panel
+
+The native Doctor screen is no longer limited to its first three diagnostic
+findings. A physically confirmed classic single-touch vertical swipe inside
+the Doctor **content viewport** advances one group of three findings, and a
+reverse swipe moves back. Footer taps still select Overview, Captures, Doctor
+or Radios; horizontal swipes still change pages. The viewport requires an
+approximately 60-pixel, directionally dominant vertical gesture that begins
+and ends inside the content area. Diagonal touches and footer drags do not
+scroll. Display rotation 180° is mapped into logical screen coordinates.
+
+Finding navigation is entirely read-only. The model sorts up to 64 fresh
+actionable findings by severity and clamps every offset to the available
+entries. Stale or unavailable Doctor telemetry hides historical findings
+rather than replaying them as current. Switching pages resets Doctor to the
+first finding. After any kernel `SYN_DROPPED` event, the decoder now requires
+a new **BTN_TOUCH release after synchronization** before accepting gestures
+again; no stale finger coordinates can navigate a page.
+
+For hardware-free inspection of a real Doctor status JSON report, the
+preview CLI can render a specific visible window:
+
+```sh
+python3 -m redux.display.preview \
+  --status-json /absolute/path/to/status.json \
+  --output-dir /absolute/existing/private/directory \
+  --page doctor --doctor-offset 3
+```
+
+The `--doctor-offset` argument accepts 0–61, and the renderer clamps it to
+the actual fresh findings. A saved status report whose runtime timestamp is
+already stale will show no verified findings, regardless of offset; this
+is intentional. Source CI tests are **not** confirmation of the actual
+ILI9486 pixels, ADS7846 touch wiring, scrolling ergonomics or performance.
+Do not enable the touchscreen service before physical qualification.
+
 ## Four-page native navigation and independent radio reporting
 
 Redux now supports four native pages — **Overview, Captures, Doctor and Radios** —
@@ -217,27 +340,30 @@ optional independently sampled **radio inventory**. If no current radio
 inventory was supplied, the USB section explicitly reports NOT REPORTED,
 even when a USB adapter was previously seen by a separate hardware tool.
 
-The optional, source-only `radio_inventory` status extension is:
+The live-service entrypoint now supplies the optional
+`radio_inventory` status extension through `redux.radio.display_inventory`:
 ```json
 {
   "schema": 1,
   "sampled_utc": 0,
   "radios": [
-    {"transport": "onboard", "driver": "brcmfmac", "kernel_mode": "monitor",
-     "arphrd": 1, "identity_stable": true},
-    {"transport": "usb", "driver": "mt76x2u", "kernel_mode": "monitor",
-     "arphrd": 803, "identity_stable": true}
+    {"transport": "onboard", "iface": "wlan0", "driver": "brcmfmac",
+     "kernel_mode": "managed", "arphrd": 1, "identity_stable": true},
+    {"transport": "usb", "iface": "wlan1", "driver": "mt76x2u",
+     "kernel_mode": "monitor", "arphrd": 803, "identity_stable": true}
   ]
 }
 ```
 **The zero timestamp and these radio records are format examples, not a live
-reading or hardware attestation.** The current runtime does **not** produce
-this extension yet. A future independent source must supply bounded,
-same-boot evidence and actual timestamps before this field can be used
-operationally. Until then the UI shows the active capture's *real* link-type
-metadata from `runtime` and leaves the USB inventory unreported. There is
-no automatic sysfs/USB inspection, packet reader, mode change, or process
-attachment in the renderer.
+reading or hardware attestation.** The installed entrypoint schedules a
+read-only sample on a daemon worker at most every 10 seconds. It reads
+`/sys/class/net` identity twice around one bounded `iw dev` query, checks
+ifindex/PHY and driver-symlink agreement, groups virtual interfaces by physical adapter, and
+rejects unknown transport or multiple physical radios on the same supported
+transport. A failed refresh keeps the original timestamp, so the UI marks it
+stale after 20 seconds. It never changes radio modes, attaches a process, reads
+RF frames, or qualifies reception/ownership. Direct `LiveRuntime` embeddings
+and `--check` do not start this provider unless explicitly configured.
 
 Even for a recent record, ARPHRD801/803 and monitor mode are only kernel
 metadata. The Radios page always labels decoded RF reception **UNVERIFIED**,

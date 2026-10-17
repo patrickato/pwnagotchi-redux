@@ -11,9 +11,9 @@ def measured(now=1000):
             "radio_inventory": {
                 "schema":1, "sampled_utc":now,
                 "radios":[
-                    {"transport":"onboard","identity_stable":True,
+                    {"transport":"onboard","identity_stable":True,"iface":"wlan0",
                      "kernel_mode":"monitor","arphrd":1,"driver":"brcmfmac"},
-                    {"transport":"usb","identity_stable":True,
+                    {"transport":"usb","identity_stable":True,"iface":"wlan1",
                      "kernel_mode":"monitor","arphrd":803,"driver":"mt76x2u"},
                 ],
             }}
@@ -60,6 +60,7 @@ def test_no_inventory_does_not_infer_usb_from_other_fields():
     lambda i: i["radios"][0].update(transport="ethernet"),
     lambda i: i["radios"][0].update(arphrd=True),
     lambda i: i["radios"][1].update(driver="../../etc/passwd"),
+    lambda i: i["radios"][1].update(iface="../../etc/passwd"),
     lambda i: i["radios"][1].update(kernel_mode="transmitting"),
 ])
 def test_invalid_or_stale_radio_inventory_rejected_atomically(change):
@@ -91,5 +92,27 @@ def test_oversized_numeric_inputs_fail_closed():
 
 def test_swipe_navigation_includes_fourth_page_and_wraps():
     assert touch_nav.navigate("doctor", 1) == "radios"
-    assert touch_nav.navigate("radios", 1) == "overview"
-    assert touch_nav.navigate("overview", -1) == "radios"
+    assert touch_nav.navigate("radios", 1) == "trends"
+    assert touch_nav.navigate("overview", -1) == "trends"
+
+
+def test_radio_tft_shows_bettercap_onboard_and_usb_rows_separately(monkeypatch):
+    import PIL.ImageDraw as image_draw
+    labels = []
+    real_draw = image_draw.Draw
+    class Recorder:
+        def __init__(self, image):
+            self.inner = real_draw(image)
+        def text(self, xy, label, *args, **kwargs):
+            labels.append(label)
+            return self.inner.text(xy, label, *args, **kwargs)
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+    monkeypatch.setattr(image_draw, "Draw", Recorder)
+    frame = fbui.render(measured(), page="radios", now=1001)
+    assert frame.size == (480, 320)
+    assert "BETTERCAP / wlan0" in labels
+    assert "ONBOARD / wlan0 / OBSERVED / brcmfmac" in labels
+    assert "MODE MONITOR / LINK 1 / RX UNVERIFIED" in labels
+    assert "USB / wlan1 / OBSERVED / mt76x2u" in labels
+    assert "MODE MONITOR / LINK 803 / RX UNVERIFIED / OWNER UNVERIFIED" in labels
