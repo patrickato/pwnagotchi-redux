@@ -46,3 +46,21 @@ def test_candidate_does_not_claim_hardware_verified():
     fit = evaluate(measured())
     assert fit.project(-100, 500)[0] < 0
     assert not hasattr(fit, "hardware_verified")
+
+
+def test_invalid_types_fail_closed_instead_of_crashing():
+    points = measured()
+    assert evaluate(points, width=True) is None
+    assert evaluate(points, tolerance_px="12") is None
+    invalid = points.copy()
+    invalid[0] = TouchPoint(None, 300, 0, 0)
+    assert evaluate(invalid) is None
+    invalid[0] = TouchPoint(True, 300, 0, 0)
+    assert evaluate(invalid) is None
+
+
+def test_five_targets_must_have_five_distinct_samples():
+    points = measured()
+    # Tiny panel target windows overlap, while raw points can be perfectly
+    # separated; candidate must still reject insufficient labeled evidence.
+    assert evaluate(points[:4] + [points[0]], width=2, height=2) is None
