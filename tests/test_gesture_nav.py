@@ -103,3 +103,41 @@ def test_unverified_calibration_and_invalid_dimensions_refused():
     with pytest.raises(ValueError):
         consume_gestures(b"x" * 8193,
                          NavigationGestures(calibration(), physically_verified=True))
+
+
+@pytest.mark.parametrize("start,end,step", [
+    ((180, 270), (184, 192), 1),
+    ((180, 175), (184, 253), -1),
+])
+def test_doctor_vertical_swipes_are_separate_from_horizontal_navigation(start, end, step):
+    tracker = NavigationGestures(calibration(), physically_verified=True)
+    actions, leftover = consume_gestures(contact(start, end), tracker)
+    assert actions == [("scroll", step)]
+    assert leftover == b""
+
+
+def test_rotated_panel_scroll_direction_uses_logical_coordinates():
+    tracker = NavigationGestures(calibration(), physically_verified=True, rotation=180)
+    # Physical down means logical up on a rotated panel.
+    actions, _ = consume_gestures(contact((240, 100), (240, 170)), tracker)
+    assert actions == [("scroll", 1)]
+
+
+@pytest.mark.parametrize("start,end", [
+    ((180, 310), (180, 220)),
+    ((180, 270), (180, 305)),
+    ((180, 270), (260, 195)),
+    ((180, 270), (180, 215)),  # below deliberate 60 px threshold
+])
+def test_footer_diagonal_and_short_vertical_contacts_never_scroll(start, end):
+    tracker = NavigationGestures(calibration(), physically_verified=True)
+    assert consume_gestures(contact(start, end), tracker)[0] == []
+
+
+def test_lost_evdev_sync_cannot_generate_ghost_scroll():
+    tracker = NavigationGestures(calibration(), physically_verified=True)
+    data = ev(EV_SYN, 3, 0) + contact((180, 265), (180, 175))
+    assert consume_gestures(data, tracker)[0] == []
+    assert tracker.desynced is False  # SYN_REPORT in contact explicitly resynchronizes
+    assert consume_gestures(contact((180, 265), (180, 175)), tracker)[0] == [
+        ("scroll", 1)]
