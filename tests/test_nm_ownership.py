@@ -1,0 +1,100 @@
+"""Offline ownership evidence: missing NM discovery never means unmanaged."""
+import pytest
+
+from redux.radio.nm_ownership import assess_ownership, udev_ownership_policy
+
+
+@pytest.mark.parametrize(("properties", "expected"), [
+    (None, "unknown"),
+    ("", "not_declared"),
+    ("DEVPATH=/devices/private\nID_NET_MANAGED_BY=org.freedesktop.NetworkManager\n",
+     "names_networkmanager"),
+    ("ID_NET_MANAGED_BY=io.systemd.Network\n", "names_other_manager"),
+    ("ID_NET_MANAGED_BY=io.systemd.Network\nNM_UNMANAGED=true\n",
+     "udev_requests_unmanaged_overridable"),
+    ("NM_UNMANAGED=1\n", "udev_requests_unmanaged_overridable"),
+    ("NM_UNMANAGED=no\nID_NET_MANAGED_BY=io.systemd.Network\n", "unknown"),
+    ("ID_NET_MANAGED_BY=foreign\nID_NET_MANAGED_BY=other\n", "unknown"),
+    ("NM_UNMANAGED=true\nNM_UNMANAGED=false\n", "unknown"),
+    ("ID_NET_MANAGED_BY=io.systemd.Network\nNM_UNMANAGED=0\n",
+     "names_other_manager"),
+    ("SSID=my private network\nBSSID=00:11:22:33:44:55\n", "not_declared"),
+])
+def test_only_allowlisted_udev_fields_affect_policy(properties, expected):
+    assert udev_ownership_policy(properties) == expected
+
+
+def evaluate(**change):
+    data = dict(
+        nm_managed=None,
+        nm_state=None,
+        dbus_enumerated=False,
+        udev_properties=None,
+        kernel_interface_present=True,
+    )
+    data.update(change)
+    return assess_ownership(**data)
+
+
+def test_october_pi_report_classifies_missing_nm_as_unknown():
+    evidence = evaluate()
+    assert evidence.status == "not_enumerated_unknown"
+    assert evidence.nm_enumerated is False
+    assert evidence.permits_activation is False
+
+
+def test_dbus_inventory_missing_is_not_proof_even_with_nmcli_absence():
+    evidence = evaluate(dbus_enumerated=None)
+    assert evidence.status == "unknown"
+    assert evidence.permits_activation is False
+
+
+def test_both_nm_paths_absent_with_explicit_non_nm_udev_policy():
+    evidence = evaluate(udev_properties=(
+        "ID_NET_MANAGED_BY=io.systemd.Network\nDEVPATH=/private/device\n"))
+    assert evidence.status == "udev_policy_not_nm"
+    assert evidence.permits_activation is False
+    assert "private" not in repr(evidence)
+    assert "io.systemd.Network" not in repr(evidence)
+
+
+def test_udev_unmanaged_can_be_overridden_by_nm_runtime():
+    evidence = evaluate(
+        udev_properties="NM_UNMANAGED=1\nID_NET_MANAGED_BY=other\n")
+    assert evidence.status == "udev_unmanaged_overridable"
+    assert evidence.permits_activation is False
+
+
+@pytest.mark.parametrize(("managed", "state", "dbus", "expected"), [
+    (True, 20, True, "nm_managed"),
+    (False, 10, True, "nm_explicitly_unmanaged"),
+    (False, 10, None, "nm_explicitly_unmanaged"),
+    (False, 30, True, "inconsistent"),
+    (False, 10, False, "inconsistent"),
+    (None, None, True, "nm_dbus_visible_unknown"),
+])
+def test_live_manager_claim_wins_over_udev_policy(managed, state, dbus, expected):
+    evidence = evaluate(nm_managed=managed, nm_state=state,
+                        dbus_enumerated=dbus,
+                        udev_properties="ID_NET_MANAGED_BY=other\n")
+    assert evidence.status == expected
+    assert evidence.permits_activation is False
+
+
+def test_no_kernel_device_never_accepts_ownership_proof():
+    evidence = evaluate(
+        nm_managed=False, nm_state=10, dbus_enumerated=True,
+        kernel_interface_present=False)
+    assert evidence.status == "no_kernel_interface"
+    assert evidence.permits_activation is False
+
+
+def test_udev_property_output_never_exposes_identifiers():
+    evidence = evaluate(udev_properties=(
+        "ID_NET_MANAGED_BY=org.freedesktop.NetworkManager\n"
+        "DEVPATH=/sensitive/private/asset\n"
+        "ID_NET_NAME_MAC=enx001122334455\n"
+        "CONNECTION_ID=customer\n"))
+    assert evidence.status == "not_enumerated_unknown"
+    for sensitive in ("private", "customer", "001122334455"):
+        assert sensitive not in repr(evidence)
