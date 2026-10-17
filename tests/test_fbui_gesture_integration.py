@@ -33,7 +33,7 @@ def test_footer_is_rendered_in_shared_four_tab_geometry():
     assert image.size == (480, 320)
     assert TAB_TOP == 296 and TAB_WIDTH * 5 == 480
     # Selected tab has a distinct filled background.
-    assert image.getpixel((250, 305)) != image.getpixel((410, 305))
+    assert image.getpixel((140, 300)) != image.getpixel((410, 300))
 
 
 def test_calibrated_tap_redraws_selected_page_without_opening_radio(tmp_path, monkeypatch):
