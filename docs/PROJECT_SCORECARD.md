@@ -7,6 +7,25 @@
 > do not substitute for physical acceptance. The nearer-term **Pi 4 usable
 > capture MVP** has different, stricter pass/fail gates below.
 
+## October 17 source-only UI increment (percentage unchanged)
+
+The native 480×320 renderer now has **five** pages: Overview, Captures,
+Doctor, Radios and **Trends**. The Trends page uses the *existing* Augur
+runtime counters to build a private, bounded 48-sample, five-minute history
+of actual status events, handshake-event notifications and completed file
+handoffs. It discards stale/duplicate data, counter rollback, engine changes,
+unexpected gaps and malformed measurements; it **never** labels these counts
+verified 802.11 reception or valid handshake captures. Touchscreen footer
+selection, physical acceptance, and source/UI screenshot regression coverage
+were extended without enabling the real TFT or changing the Pi.
+
+The source work is meaningful progress in usability but **does not justify
+raising the weighted ~62% overall score**. The standalone radio, real capture,
+480×320 panel and Pi 5 gates are still open. Codex's separately implemented
+Alfa passive qualification runner is synthetically tested, not approved for
+hardware execution; see `docs/AWUS036ACM_PASSIVE_QUALIFICATION.md`.
+The workbench remains ahead of the field-flashed Oct 15 image.
+
 ## Current physical evidence (supersedes older checkpoints in this file)
 
 The signed ARM64 `4f907ff` image was independently qualified and **booted on
