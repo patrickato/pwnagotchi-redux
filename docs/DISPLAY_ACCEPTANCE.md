@@ -358,7 +358,7 @@ The live-service entrypoint now supplies the optional
 reading or hardware attestation.** The installed entrypoint schedules a
 read-only sample on a daemon worker at most every 10 seconds. It reads
 `/sys/class/net` identity twice around one bounded `iw dev` query, checks
-ifindex/PHY agreement, groups virtual interfaces by physical adapter, and
+ifindex/PHY and driver-symlink agreement, groups virtual interfaces by physical adapter, and
 rejects unknown transport or multiple physical radios on the same supported
 transport. A failed refresh keeps the original timestamp, so the UI marks it
 stale after 20 seconds. It never changes radio modes, attaches a process, reads
