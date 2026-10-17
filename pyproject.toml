@@ -13,6 +13,7 @@ dependencies = []
 redux = "redux.cli:main"
 redux-display-diag = "redux.display.acceptance:main"
 redux-fbui = "redux.display.fbui:main"
+redux-ui-preview = "redux.display.preview:main"
 redux-acceptance = "redux.acceptance:main"
 redux-phone = "redux.connectivity.bluez_executor:main"
 redux-boot-check = "redux.boot_readiness:main"
