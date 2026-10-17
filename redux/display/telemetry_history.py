@@ -71,8 +71,7 @@ class TelemetryWindow:
         pid = runtime.get("pid")
         if (not isinstance(iface, str) or not 1 <= len(iface) <= 15
                 or not all(ch.isascii() and (ch.isalnum() or ch in "_.-") for ch in iface)
-                or type(pid) not in (int, type(None)) or
-                (pid is not None and not 1 <= pid <= _MAX_COUNT)):
+                or type(pid) is not int or not 1 <= pid <= _MAX_COUNT):
             self.clear("UNQUALIFIED")
             return False
         counters = tuple(_counter(runtime.get(key)) for key in _KEYS)
