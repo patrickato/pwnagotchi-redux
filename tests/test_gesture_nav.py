@@ -69,9 +69,11 @@ def test_syn_dropped_aborts_contact_and_does_not_reuse_coordinates():
             ev(EV_ABS, ABS_Y, 309) + ev(EV_KEY, BTN_TOUCH, 0))
     assert consume_gestures(data, tracker)[0] == []
     assert tracker.desynced
-    # SYN_REPORT resynchronizes, and only a fresh contact then qualifies.
+    # Require an observed post-resync lift before a new contact.
     assert consume_gestures(ev(EV_SYN, 0, 0) +
-                            contact((180, 309)), tracker)[0] == [
+                            contact((180, 309)), tracker)[0] == []
+    assert tracker.awaiting_release is False
+    assert consume_gestures(contact((180, 309)), tracker)[0] == [
         ("page", "captures")]
 
 
@@ -119,7 +121,7 @@ def test_doctor_vertical_swipes_are_separate_from_horizontal_navigation(start, e
 def test_rotated_panel_scroll_direction_uses_logical_coordinates():
     tracker = NavigationGestures(calibration(), physically_verified=True, rotation=180)
     # Physical down means logical up on a rotated panel.
-    actions, _ = consume_gestures(contact((240, 100), (240, 170)), tracker)
+    actions, _ = consume_gestures(contact((240, 75), (240, 145)), tracker)
     assert actions == [("scroll", 1)]
 
 
