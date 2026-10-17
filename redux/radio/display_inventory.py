@@ -84,8 +84,12 @@ def collect(*, sys_root=Path("/sys/class/net"), run=None,
             "arphrd": chosen["arphrd"],
         }
     sampled = wall_clock()
-    if (type(sampled) not in (int, float) or not math.isfinite(sampled)
-            or not 0 <= sampled <= 1e12):
+    try:
+        clock_valid = (type(sampled) in (int, float) and math.isfinite(sampled)
+                       and 0 <= sampled <= 1e12)
+    except (OverflowError, ValueError, TypeError):
+        clock_valid = False
+    if not clock_valid:
         raise Unavailable("radio_sample_clock_invalid")
     return {"schema": 1, "sampled_utc": float(sampled),
             "radios": [selected[key] for key in ("onboard", "usb") if key in selected]}
