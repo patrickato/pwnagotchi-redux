@@ -101,6 +101,15 @@ def _bounded_count(value):
     """Only measured unsigned 64-bit-range counters may become TFT metrics."""
     return value if type(value) is int and 0 <= value <= MAX_MEASURED_COUNT else None
 
+def _bounded_seconds(value):
+    """Accept only finite, bounded retry durations from a fresh status report."""
+    if type(value) not in (int, float):
+        return None
+    try:
+        return round(value) if math.isfinite(value) and 0 <= value <= 86400 else None
+    except (OverflowError, ValueError, TypeError):
+        return None
+
 
 def _valid_utc_clock(value):
     """A non-finite or malformed clock can never prove live telemetry."""
@@ -221,6 +230,10 @@ def status_view(report, *, now=None):
         "storage_mb": free_mb,
         "processed": _bounded_count(results.get("ready")),
         "errors": errors, "pipeline_available": pipeline.get("available") is True,
+        "retry_seconds": _bounded_seconds(runtime.get("retry_in_seconds")) if not stale else None,
+        "failure_streak": _bounded_count(runtime.get("failure_streak")) if not stale else None,
+        "engine_attempts": _bounded_count(runtime.get("engine_attempts")) if not stale else None,
+        "capture_mount": runtime.get("capture_mount") if not stale and type(runtime.get("capture_mount")) is bool else None,
         "finding": _safe_text(actionable.get("summary"), 55) if actionable else
                    ("No actionable findings" if health == "ok" else "No verified health detail"),
         "detail": _safe_text(actionable.get("remediation"), 67) if actionable else
@@ -383,6 +396,16 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
         draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
         draw.text((20, 250), "DOCTOR / " + data["finding"], font=_font(12, bold=True), fill=accent)
         draw.text((20, 272), data["detail"], font=_font(10), fill=SUBTLE)
+        retry = f"{data['retry_seconds']}s" if data["retry_seconds"] is not None else "--"
+        failures = value(data["failure_streak"])
+        attempts = value(data["engine_attempts"])
+        mount = ("OK" if data["capture_mount"] is True else
+                 "MISSING" if data["capture_mount"] is False else "UNKNOWN")
+        runtime_color = (AMBER if data["failure_streak"] not in (None, 0)
+                         or data["capture_mount"] is False else SUBTLE)
+        draw.text((20, 285),
+                  f"RETRY {retry} / FAILURES {failures} / STARTS {attempts} / REDUXCAP {mount}",
+                  font=_font(8), fill=runtime_color)
     # Footer tabs share geometry with gesture_nav.TAB_TOP/TAB_WIDTH.
     # They are visual only until the physical touch path is opted in.
     from .gesture_nav import PAGES, TAB_TOP, TAB_WIDTH
