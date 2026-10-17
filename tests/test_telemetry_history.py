@@ -163,12 +163,14 @@ def test_five_page_swipe_wraps_correctly():
 
 
 def test_native_refresh_loop_accumulates_real_status_samples(monkeypatch):
-    responses = [report(1000, events=2), report(1002, events=6)]
+    from time import time
+    current = time()
+    responses = [report(current - 2, events=2),
+                 report(current, events=6)]
     shown = []
     monkeypatch.setattr(fbui, "framebuffer_info",
                         lambda *_a: {"ok": True, "stride": 960})
     monkeypatch.setattr(fbui, "read_status", lambda *_a: responses.pop(0))
-    monkeypatch.setattr(fbui.time, "time", iter((1000, 1002)).__next__)
     monkeypatch.setattr(fbui.time, "monotonic", iter((0, 3)).__next__)
     renderer = fbui.render
     def draw(record, *, page, **kw):
