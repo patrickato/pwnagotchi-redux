@@ -86,8 +86,11 @@ def test_reconnect_uses_bounded_backoff_without_public_discovery():
     p.connect_failed(now=28)
     assert p.status(now=28)["retry_seconds_left"] == 20
     assert p.status(now=28)["discoverable"] is False
-    assert p.link_connected(authenticated=True, trusted=True, now=29) == ()
-    assert p.status(now=29)["last_failure_count"] == 0
+    with pytest.raises(PermissionError):
+        p.link_connected(authenticated=True, trusted=True, now=29)
+    assert p.tick(now=48) == (PhoneIntent.CONNECT_TRUSTED,)
+    assert p.link_connected(authenticated=True, trusted=True, now=49) == ()
+    assert p.status(now=49)["last_failure_count"] == 0
 
 
 def test_retry_capped_and_not_repeated_inside_single_tick():
