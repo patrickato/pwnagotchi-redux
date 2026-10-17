@@ -23,7 +23,7 @@ def contact(start, end=None, *, prepress=False):
     return begin + ev(EV_SYN, 0, 0) + pos(end) + ev(EV_KEY, BTN_TOUCH, 0)
 
 
-@pytest.mark.parametrize("x,page", [(35, "overview"), (235, "captures"), (423, "doctor")])
+@pytest.mark.parametrize("x,page", [(35, "overview"), (175, "captures"), (295, "doctor"), (423, "radios")])
 def test_footer_taps_select_exact_pages(x, page):
     tracker = NavigationGestures(calibration(), physically_verified=True)
     actions, tail = consume_gestures(contact((x, 308)), tracker)
@@ -33,7 +33,7 @@ def test_footer_taps_select_exact_pages(x, page):
 
 def test_accepts_prepress_coordinates_but_never_replays_old_contact():
     tracker = NavigationGestures(calibration(), physically_verified=True)
-    assert consume_gestures(contact((240, 305), prepress=True), tracker)[0] == [
+    assert consume_gestures(contact((180, 305), prepress=True), tracker)[0] == [
         ("page", "captures")]
     assert consume_gestures(ev(EV_KEY, BTN_TOUCH, 1) +
                             ev(EV_KEY, BTN_TOUCH, 0), tracker)[0] == []
@@ -49,14 +49,14 @@ def test_swipes_have_screen_relative_direction(dx, step):
 def test_rotation_180_maps_visible_footer_and_swipes():
     tracker = NavigationGestures(calibration(), physically_verified=True, rotation=180)
     # Physical top-left is displayed logical bottom-right after screen rotation.
-    assert consume_gestures(contact((55, 11)), tracker)[0] == [("page", "doctor")]
+    assert consume_gestures(contact((55, 11)), tracker)[0] == [("page", "radios")]
     assert consume_gestures(contact((320, 170), (120, 170)), tracker)[0] == [
         ("swipe", -1)]
 
 
 def test_drag_diagonal_offscreen_and_crossing_tabs_are_not_taps():
     tracker = NavigationGestures(calibration(), physically_verified=True)
-    assert consume_gestures(contact((135, 309), (175, 309)), tracker)[0] == []
+    assert consume_gestures(contact((110, 309), (145, 309)), tracker)[0] == []
     assert consume_gestures(contact((200, 200), (310, 290)), tracker)[0] == []
     assert consume_gestures(contact((5, 305), (-5, 305)), tracker)[0] == []
 
@@ -71,7 +71,7 @@ def test_syn_dropped_aborts_contact_and_does_not_reuse_coordinates():
     assert tracker.desynced
     # SYN_REPORT resynchronizes, and only a fresh contact then qualifies.
     assert consume_gestures(ev(EV_SYN, 0, 0) +
-                            contact((240, 309)), tracker)[0] == [
+                            contact((180, 309)), tracker)[0] == [
         ("page", "captures")]
 
 
@@ -89,7 +89,7 @@ def test_fragmented_read_and_duplicate_release():
     actions, fragment = consume_gestures(data[:13], tracker)
     assert actions == []
     actions, fragment = consume_gestures(fragment + data[13:], tracker)
-    assert actions == [("page", "doctor")] and fragment == b""
+    assert actions == [("page", "radios")] and fragment == b""
     assert consume_gestures(ev(EV_KEY, BTN_TOUCH, 0), tracker)[0] == []
 
 
