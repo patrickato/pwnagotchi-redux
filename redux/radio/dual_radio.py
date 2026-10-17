@@ -31,6 +31,7 @@ class SplitPlan:
     state: str                         # blocked | candidate | receive_verified
     reasons: tuple[str, ...]
     activation_authorized: bool = False  # always: execution is a separate reviewed gate
+    management_path: str = "onboard_wifi"
 
 
 def _valid(radio: Radio) -> bool:
@@ -41,7 +42,8 @@ def _valid(radio: Radio) -> bool:
 
 def plan_dual_radio(radios: Sequence[Radio],
                     observations: Mapping[str, RadioEvidence],
-                    *, management_iface: str = "wlan0") -> SplitPlan:
+                    *, management_iface: str = "wlan0",
+                    ethernet_management_verified: bool = False) -> SplitPlan:
     """Plan *only*: never take management down to gain capture.
 
     Refuse duplicate netdev/PHY identities and management data with uncertain
@@ -63,9 +65,16 @@ def plan_dual_radio(radios: Sequence[Radio],
     seen_mgmt = observations.get(management_iface)
     if not isinstance(seen_mgmt, RadioEvidence) or seen_mgmt.phy != mgmt.phy:
         return blocked("onboard management PHY identity not verified")
-    if (seen_mgmt.mode != "managed" or not seen_mgmt.owner_verified
-            or not seen_mgmt.management_connected):
-        return blocked("onboard management connectivity/ownership not verified")
+    onboard_connected = (seen_mgmt.mode == "managed"
+                         and seen_mgmt.owner_verified is True
+                         and seen_mgmt.management_connected is True)
+    # Ethernet is accepted only when a separate strict route/SSH check has
+    # *positively* proven that path. A false or missing claim never unlocks it.
+    management_path = ("onboard_wifi" if onboard_connected else
+                       "verified_ethernet" if ethernet_management_verified is True
+                       else None)
+    if management_path is None:
+        return blocked("management path not independently verified")
 
     candidates = [r for r in devices if r.iface != mgmt.iface
                   and r.phy != mgmt.phy and not r.onboard and r.monitor]
@@ -86,7 +95,8 @@ def plan_dual_radio(radios: Sequence[Radio],
     if not qualified(capture):
         return SplitPlan(management_iface, capture.iface, "candidate", (
             "external capture PHY separate; receive framing, decoded packets "
-            "or ownership remain unverified",))
+            "or ownership remain unverified",), management_path=management_path)
     return SplitPlan(management_iface, capture.iface, "receive_verified", (
         "independent management link and measured external 802.11 reception; "
-        "capture handoff and persistence remain separate acceptance gates",))
+        "capture handoff and persistence remain separate acceptance gates",),
+        management_path=management_path)
