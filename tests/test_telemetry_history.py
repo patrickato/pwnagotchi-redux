@@ -99,9 +99,10 @@ def test_bounded_memory_and_five_minute_immutable_rate_history():
         assert h.ingest(report(at, events=i * 2), now=at)
     assert len(h.samples) == 151
     assert len(h.rates) == 150
-    snapshot = h.snapshot(now=1198)
+    snapshot = h.snapshot(now=1398)
     assert len(snapshot["points"]) == 150
     assert all(0 <= row["age_seconds"] <= 300 for row in snapshot["points"])
+    assert snapshot["points"][0]["age_seconds"] >= 295
     assert snapshot["last"]["events_per_min"] == 60
     snapshot["points"].clear()
     assert len(h.rates) == 150
