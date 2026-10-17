@@ -27,6 +27,7 @@ class NavigationGestures:
     tap_slop_pixels: int = 18
     pressed: bool = False
     desynced: bool = False
+    awaiting_release: bool = False
     invalid: bool = False
     raw: dict = field(default_factory=lambda: {"x": None, "y": None})
     start: tuple | None = None
@@ -115,10 +116,19 @@ class NavigationGestures:
         if event_type == EV_SYN and code == _SYN_DROPPED:
             self._clear()
             self.desynced = True
+            self.awaiting_release = True
             return None
         if self.desynced:
             if event_type == EV_SYN and code == _SYN_REPORT:
                 self.desynced = False
+            return None
+        if self.awaiting_release:
+            # After missing kernel events the physical BTN_TOUCH state is
+            # unknown. A SYN_REPORT alone cannot establish a fresh contact.
+            # Require a post-resync release before honoring any coordinates.
+            if event_type == EV_KEY and code == BTN_TOUCH and value == 0:
+                self._clear()
+                self.awaiting_release = False
             return None
         if event_type == EV_ABS:
             if code in (ABS_X, ABS_Y):
