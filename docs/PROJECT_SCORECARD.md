@@ -31,8 +31,8 @@ it does not change radios or establish packet reception. Touchscreen
 navigation, previews, runtime diagnostics, and regression coverage were
 extended without enabling the real TFT or changing the Pi.
 
-The combined GitHub CI run `39064412864` passed **2,365 software tests and
-648 image-contract checks**. This is source-level verification only.
+The combined GitHub CI run `39065192399` passed **2,377 software tests and
+651 image-contract checks**. This is source-level verification only.
 
 The source work is meaningful progress in usability but **does not justify
 raising the weighted ~62% overall score**. The standalone radio, real capture,
