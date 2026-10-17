@@ -61,6 +61,18 @@ def test_collect_reports_stable_onboard_and_usb_radios_without_rx_claims(tmp_pat
     assert "decoded_reception" not in result["radios"][1]
     assert "owner_verified" not in result["radios"][1]
 
+    from redux.display import fbui, radio_panel
+    report = {"runtime": {"state": "running", "iface": "wlan0",
+                          "capture_link_type": 1, "updated_utc": 1000.0},
+              "doctor": {"overall": "ok", "findings": []},
+              "radio_inventory": result}
+    model = radio_panel.model(report, now=1001.0)
+    assert model["inventory"] == "CURRENT"
+    assert model["onboard"]["iface"] == "wlan0"
+    assert model["usb"]["iface"] == "wlan1"
+    assert model["onboard"]["reception"] == model["usb"]["reception"] == "UNVERIFIED"
+    assert fbui.render(report, page="radios", now=1001.0).size == (480, 320)
+
 
 def test_same_physical_radio_collapses_to_current_monitor_vif(tmp_path):
     root = tmp_path / "sys" / "class" / "net"
