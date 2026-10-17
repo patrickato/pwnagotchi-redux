@@ -64,3 +64,16 @@ def test_five_targets_must_have_five_distinct_samples():
     # Tiny panel target windows overlap, while raw points can be perfectly
     # separated; candidate must still reject insufficient labeled evidence.
     assert evaluate(points[:4] + [points[0]], width=2, height=2) is None
+
+
+def test_absurdly_large_numeric_values_fail_closed_without_overflow():
+    points = measured()
+    giant = 10 ** 1000
+    assert evaluate(points, width=giant) is None
+    assert evaluate(points, height=giant) is None
+    assert evaluate(points, tolerance_px=giant) is None
+    corrupted = points.copy()
+    corrupted[0] = TouchPoint(giant, 200, 0, 0)
+    assert evaluate(corrupted) is None
+    corrupted[0] = TouchPoint(100, giant, 0, 0)
+    assert evaluate(corrupted) is None
