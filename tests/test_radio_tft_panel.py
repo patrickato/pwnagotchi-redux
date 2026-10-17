@@ -114,4 +114,4 @@ def test_radio_tft_shows_bettercap_onboard_and_usb_rows_separately(monkeypatch):
     assert "ONBOARD / wlan0 / OBSERVED / brcmfmac" in labels
     assert "MODE MONITOR / LINK 1 / RX UNVERIFIED" in labels
     assert "USB / wlan1 / OBSERVED / mt76x2u" in labels
-    assert "MODE MONITOR / LINK 803 / RX UNVERIFIED" in labels
+    assert "MODE MONITOR / LINK 803 / RX UNVERIFIED / OWNER UNVERIFIED" in labels
