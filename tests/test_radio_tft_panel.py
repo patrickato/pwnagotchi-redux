@@ -11,9 +11,9 @@ def measured(now=1000):
             "radio_inventory": {
                 "schema":1, "sampled_utc":now,
                 "radios":[
-                    {"transport":"onboard","identity_stable":True,
+                    {"transport":"onboard","identity_stable":True,"iface":"wlan0",
                      "kernel_mode":"monitor","arphrd":1,"driver":"brcmfmac"},
-                    {"transport":"usb","identity_stable":True,
+                    {"transport":"usb","identity_stable":True,"iface":"wlan1",
                      "kernel_mode":"monitor","arphrd":803,"driver":"mt76x2u"},
                 ],
             }}
@@ -111,7 +111,7 @@ def test_radio_tft_shows_bettercap_onboard_and_usb_rows_separately(monkeypatch):
     frame = fbui.render(measured(), page="radios", now=1001)
     assert frame.size == (480, 320)
     assert "BETTERCAP / wlan0" in labels
-    assert "ONBOARD / OBSERVED / brcmfmac" in labels
+    assert "ONBOARD / wlan0 / OBSERVED / brcmfmac" in labels
     assert "MODE MONITOR / LINK 1 / RX UNVERIFIED" in labels
-    assert "USB / OBSERVED / mt76x2u" in labels
+    assert "USB / wlan1 / OBSERVED / mt76x2u" in labels
     assert "MODE MONITOR / LINK 803 / RX UNVERIFIED" in labels
