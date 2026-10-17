@@ -115,3 +115,33 @@ def test_full_fbui_loop_scrolls_doctor_not_radio(monkeypatch):
                    "--confirm-touch-calibration"])
     assert pages == [("doctor", 0), ("doctor", 3)]
     assert closed == [123]
+
+
+def test_preview_exports_scrolled_doctor_pixels_and_validates_cli(tmp_path, capsys):
+    import json
+    from redux.display import preview
+    r = report(now=1000, num=8)
+    first = preview.build(report=r, pages=("doctor",), doctor_offset=0)["doctor"]
+    second = preview.build(report=r, pages=("doctor",), doctor_offset=3)["doctor"]
+    # Both renders from a historical sample are safely marked stale relative
+    # to wall time, so inject actual current sample for visual pagination.
+    current = report(num=8)
+    a = preview.build(report=current, pages=("doctor",), doctor_offset=0)["doctor"]
+    b = preview.build(report=current, pages=("doctor",), doctor_offset=3)["doctor"]
+    assert a != b
+    assert first == second  # stale findings cannot be exposed by a scroll
+    for bad in (True, -1, 62, "4"):
+        with pytest.raises(ValueError):
+            preview.build(report=current, doctor_offset=bad)
+    out = tmp_path / "doctor"
+    out.mkdir()
+    source = tmp_path / "source.json"
+    source.write_text(json.dumps(current))
+    assert preview.main(["--output-dir", str(out), "--status-json", str(source),
+                         "--page", "doctor", "--doctor-offset", "3"]) == 0
+    assert (out / "redux-doctor.png").is_file()
+    assert json.loads(capsys.readouterr().out)["files"] == ["redux-doctor.png"]
+    with pytest.raises(SystemExit) as error:
+        preview.main(["--output-dir", str(tmp_path),
+                      "--doctor-offset", "3"])
+    assert error.value.code == 2
