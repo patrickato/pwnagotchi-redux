@@ -343,16 +343,18 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
                   " / RX UNVERIFIED", font=_font(10), fill=AMBER)
         draw.line((18, 210, 462, 210), fill=(36, 57, 69), width=1)
         onboard = radios["onboard"]
-        draw.text((20, 217), "ONBOARD / " + onboard["state"] + " / " + onboard["driver"],
-                  font=_font(11, bold=True),
+        draw.text((20, 217), "ONBOARD / " + onboard["iface"] + " / " +
+                  onboard["state"] + " / " + onboard["driver"],
+                  font=_font(10, bold=True),
                   fill=INK if onboard["state"] == "OBSERVED" else AMBER)
         draw.text((20, 236), "MODE " + onboard["mode"] + " / LINK " +
                   (str(onboard["link"]) if onboard["link"] is not None else "--") +
                   " / RX UNVERIFIED", font=_font(9), fill=AMBER)
         draw.line((18, 252, 462, 252), fill=(36, 57, 69), width=1)
         usb = radios["usb"]
-        draw.text((20, 258), "USB / " + usb["state"] + " / " + usb["driver"],
-                  font=_font(11, bold=True), fill=INK if usb["state"] == "OBSERVED" else AMBER)
+        draw.text((20, 258), "USB / " + usb["iface"] + " / " +
+                  usb["state"] + " / " + usb["driver"],
+                  font=_font(10, bold=True), fill=INK if usb["state"] == "OBSERVED" else AMBER)
         draw.text((20, 278), "MODE " + usb["mode"] + " / LINK " +
                   (str(usb["link"]) if usb["link"] is not None else "--") +
                   " / RX UNVERIFIED", font=_font(9), fill=AMBER)
