@@ -120,7 +120,7 @@ The tool's output always marks hardware acceptance as pending.
 
 ### Calibrated touchscreen tabs — source-only until a new image is qualified
 
-The native 480×320 dashboard now draws three footer tabs: **Overview**,
+The native 480×320 dashboard now draws four footer tabs: **Overview**,
 **Captures**, and **Doctor**. When a physical five-point calibration has been
 observed and explicitly confirmed, classic single-touch taps inside those
 footer regions select the visible page. Horizontal gestures still advance or
@@ -171,7 +171,7 @@ sudo redux-fbui --framebuffer /dev/fbN --run \
 
 If visible framebuffer pixels are deliberately rotated 180 degrees, also
 supply `--rotate 180`. The gesture decoder transforms physical coordinates
-back into logical UI coordinates for the three touch targets and swipe direction.
+back into logical UI coordinates for the four touch targets and swipe direction.
 Calibration confirmation is an **operator assertion**, not proof created by
 the software. Check all three tabs and both swipe directions in person. The
 feature does not change kernel calibration, create event devices, grab input,
@@ -202,6 +202,49 @@ at 16bpp (RGB565-compatible). It does not claim 320×480 rotation,
 automatic touch calibration, physically qualified swipe accuracy, frame timing,
 backlight control or cross-board graphics compatibility. Those are follow-on
 features, not green gates today.
+
+## Four-page native navigation and independent radio reporting
+
+Redux now supports four native pages — **Overview, Captures, Doctor and Radios** —
+with four 120-pixel footer tabs across the 480×320 display. A physically
+confirmed calibrated tap can select any page; horizontal swipes navigate and
+wrap in the same order. The uncalibrated swipe-only mode uses that order too.
+The offline PNG preview includes `redux-radios.png`.
+
+The Radios page distinguishes the **current selected capture interface**
+(observed through the existing, fresh `runtime` status data) from a separate
+optional independently sampled **radio inventory**. If no current radio
+inventory was supplied, the USB section explicitly reports NOT REPORTED,
+even when a USB adapter was previously seen by a separate hardware tool.
+
+The optional, source-only `radio_inventory` status extension is:
+```json
+{
+  "schema": 1,
+  "sampled_utc": 0,
+  "radios": [
+    {"transport": "onboard", "driver": "brcmfmac", "kernel_mode": "monitor",
+     "arphrd": 1, "identity_stable": true},
+    {"transport": "usb", "driver": "mt76x2u", "kernel_mode": "monitor",
+     "arphrd": 803, "identity_stable": true}
+  ]
+}
+```
+**The zero timestamp and these radio records are format examples, not a live
+reading or hardware attestation.** The current runtime does **not** produce
+this extension yet. A future independent source must supply bounded,
+same-boot evidence and actual timestamps before this field can be used
+operationally. Until then the UI shows the active capture's *real* link-type
+metadata from `runtime` and leaves the USB inventory unreported. There is
+no automatic sysfs/USB inspection, packet reader, mode change, or process
+attachment in the renderer.
+
+Even for a recent record, ARPHRD801/803 and monitor mode are only kernel
+metadata. The Radios page always labels decoded RF reception **UNVERIFIED**,
+and it never treats an identity-stable flag as verified exclusive ownership.
+A stale, duplicated, malformed, or partially changed inventory is discarded
+as a whole. This is visual diagnostics, **not an RF qualification or an
+authorization mechanism**.
 
 ## Measured capture processing on the native TFT
 
