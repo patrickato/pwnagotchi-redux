@@ -101,7 +101,7 @@ def consume(buffer: bytes, tracker: SwipeTracker):
 
 
 def navigate(page: str, step: int):
-    pages = ("overview", "captures", "doctor")
+    from .gesture_nav import PAGES as pages
     if page not in pages:
         raise ValueError("unknown page")
     return pages[(pages.index(page) + step) % len(pages)]
