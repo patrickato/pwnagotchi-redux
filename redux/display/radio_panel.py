@@ -53,8 +53,8 @@ def _historical(payload):
                 or not isinstance(driver, str) or not _DRIVER.fullmatch(driver)
                 or arphrd is None or mode not in ("MONITOR", "MANAGED", "UNKNOWN")):
             return None
-        selected[transport] = {"state": "SAVED", "driver": driver,
-                               "mode": mode, "link": arphrd,
+        selected[transport] = {"state": "SAVED", "iface": "UNKNOWN",
+                               "driver": driver, "mode": mode, "link": arphrd,
                                "reception": "UNVERIFIED"}
     return selected
 
@@ -93,9 +93,9 @@ def model(report, *, now=None):
             capture["framing"] = "OTHER LINK TYPE"
 
     inventory = root.get("radio_inventory")
-    usb = {"state": "NOT REPORTED", "driver": "UNKNOWN",
+    usb = {"state": "NOT REPORTED", "iface": "UNKNOWN", "driver": "UNKNOWN",
            "mode": "UNKNOWN", "link": None, "reception": "UNVERIFIED"}
-    onboard = {"state": "NOT REPORTED", "driver": "UNKNOWN",
+    onboard = {"state": "NOT REPORTED", "iface": "UNKNOWN", "driver": "UNKNOWN",
                "mode": "UNKNOWN", "link": None, "reception": "UNVERIFIED"}
     if not isinstance(inventory, dict) or inventory.get("schema") != 1:
         history = _historical(root.get("radio_acceptance_snapshot"))
@@ -126,14 +126,16 @@ def model(report, *, now=None):
         seen.add(transport)
         mode = entry.get("kernel_mode")
         driver = entry.get("driver")
+        iface = entry.get("iface", "UNKNOWN")
         arphrd = _link(entry.get("arphrd"))
         if (mode not in ("monitor", "managed", "unknown")
                 or not isinstance(driver, str) or not _DRIVER.fullmatch(driver)
+                or not isinstance(iface, str) or not _IFACE.fullmatch(iface)
                 or arphrd is None):
             return {"capture": capture, "onboard": onboard, "usb": usb,
                     "inventory": "INVALID"}
-        selected[transport] = {"state": "OBSERVED", "driver": driver,
-                               "mode": mode.upper(), "link": arphrd,
-                               "reception": "UNVERIFIED"}
+        selected[transport] = {"state": "OBSERVED", "iface": iface,
+                               "driver": driver, "mode": mode.upper(),
+                               "link": arphrd, "reception": "UNVERIFIED"}
     return {"capture": capture, "onboard": selected.get("onboard", onboard),
             "usb": selected.get("usb", usb), "inventory": "CURRENT"}
