@@ -48,19 +48,32 @@ def evaluate(points: list[TouchPoint], *, width: int = 480, height: int = 320,
     Requires four corners and a center. An ambiguous or inconsistent fit fails
     closed, and never implies that physical mapping has been accepted.
     """
-    if (width < 2 or height < 2 or len(points) < 5 or len(points) > 32
+    if (type(width) is not int or type(height) is not int
+            or width < 2 or height < 2 or len(points) < 5 or len(points) > 32
+            or type(tolerance_px) not in (int, float)
             or not isfinite(tolerance_px) or not 0 < tolerance_px <= 80):
         return None
     vals = [(p.raw_x, p.raw_y, p.pixel_x, p.pixel_y) for p in points]
-    if not all(all(isfinite(v) for v in row) for row in vals):
+    if not all(all(type(v) in (int, float) and isfinite(v) for v in row) for row in vals):
         return None
     if not all(0 <= p.pixel_x < width and 0 <= p.pixel_y < height for p in points):
         return None
     targets = [(0, 0), (width - 1, 0), (0, height - 1),
                (width - 1, height - 1), ((width - 1) / 2, (height - 1) / 2)]
-    if any(not any(abs(p.pixel_x - tx) <= width * .2 and
-                       abs(p.pixel_y - ty) <= height * .2 for p in points)
-           for tx, ty in targets):
+    # Distinct targets need distinct samples. Otherwise one center-ish sample
+    # could satisfy multiple targets on small panels or an uneven test set.
+    possible = [tuple(i for i, p in enumerate(points)
+                      if abs(p.pixel_x - tx) <= width * .2
+                      and abs(p.pixel_y - ty) <= height * .2)
+                for tx, ty in targets]
+    if any(not indices for indices in possible):
+        return None
+    def has_matching(target=0, used=frozenset()):
+        if target == len(possible):
+            return True
+        return any(i not in used and has_matching(target + 1, used | {i})
+                   for i in possible[target])
+    if not has_matching():
         return None
     fits = []
     for swap in (False, True):
