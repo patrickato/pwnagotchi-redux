@@ -122,6 +122,8 @@ def main(argv=None) -> int:
     parser.add_argument("--output-dir", required=True, help="existing absolute destination directory")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--status-json", help="absolute file containing measured Redux status JSON")
+    source.add_argument("--acceptance-json",
+                        help="sanitized read-only acceptance JSON; historical Radios page only")
     source.add_argument("--live", action="store_true", help="read current loopback Redux API only")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--page", choices=PAGES, help="one page; default: all available pages")
@@ -129,8 +131,14 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.port < 1 or args.port > 65535:
         parser.error("invalid port")
+    if args.acceptance_json and args.page not in (None, "radios"):
+        parser.error("historical acceptance can preview only the Radios page")
     try:
-        if args.status_json:
+        if args.acceptance_json:
+            from .acceptance_snapshot import load as read_acceptance
+            report = {"radio_acceptance_snapshot": read_acceptance(args.acceptance_json)}
+            source_name = "historical_readonly_acceptance"
+        elif args.status_json:
             report = _snapshot(args.status_json)
             source_name = "saved_status"
         elif args.live:
@@ -141,8 +149,10 @@ def main(argv=None) -> int:
         else:
             report = None
             source_name = "offline_unverified"
+        selected_pages = ((args.page,) if args.page else
+                          ("radios",) if args.acceptance_json else PAGES)
         names = publish(args.output_dir, build(report=report,
-                                              pages=(args.page,) if args.page else PAGES,
+                                              pages=selected_pages,
                                               rotate=args.rotate))
     except (OSError, ValueError, TypeError) as exc:
         parser.error(f"preview refused: {type(exc).__name__}")
