@@ -58,8 +58,8 @@ def test_left_and_right_swipes_switch_pages_only_when_complete():
     assert t.navigate("overview", moves[0]) == "captures"
     moves, rem = t.consume(swipe(900, 2900), tracker)
     assert moves == [-1]
-    assert t.navigate("overview", moves[0]) == "doctor"
-    assert t.navigate("doctor", 1) == "overview"
+    assert t.navigate("overview", moves[0]) == "radios"
+    assert t.navigate("doctor", 1) == "radios"
 
 
 def test_swipe_parser_keeps_partial_records_across_reads():
