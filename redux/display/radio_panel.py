@@ -62,9 +62,9 @@ def _historical(payload):
 def model(report, *, now=None):
     """Display only current measured metadata; leave reception unverified.
 
-    Optional radio_inventory is a future, separately provisioned, independently
-    sampled status field. It must have a fresh explicit sampling clock and
-    stable identities to be displayed. No caller-supplied flag can qualify RF.
+    Optional radio_inventory is supplied by the live runtime's bounded,
+    read-only display collector. It must have a fresh sample clock and stable
+    identities to be displayed. No inventory field or flag can qualify RF.
     """
     now = time.time() if now is None else now
     current = _clock(now)
