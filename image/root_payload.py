@@ -45,6 +45,8 @@ _MUST_EXIST = (
     "opt/redux/redux/display/capture_panel.py",
     "opt/redux/redux/display/radio_panel.py",
     "opt/redux/redux/display/acceptance_snapshot.py",
+    "opt/redux/redux/display/telemetry_history.py",
+    "opt/redux/redux/display/trend_chart.py",
     "etc/systemd/system/redux-fbui.service",
     "usr/share/redux/fbui.example.env",
     "usr/local/bin/redux-live-diag",
