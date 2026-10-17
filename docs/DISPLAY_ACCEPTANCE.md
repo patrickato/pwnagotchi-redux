@@ -235,6 +235,17 @@ The pending independent live-status supplier remains a separate hardware
 and runtime integration gate; this screenshot tool is not that supplier.
 Do not share captured identifiers or the unreviewed raw report publicly.
 
+## Radio page role separation
+
+The radio page renders three distinct observations: the live Bettercap
+capture interface and link framing, the independently sampled onboard radio,
+and the independently sampled USB radio. Driver, kernel mode, and link type
+remain observation-only. Every radio row continues to say RX UNVERIFIED;
+the USB driver's presence does not claim that AngryOxide owns or is currently
+using it, and the onboard monitor label does not establish packet reception.
+Missing or stale inventory displays NOT REPORTED or STALE rather than filling
+in a presumed adapter.
+
 ## Engine telemetry trends — real counters, no invented RF
 
 The native TFT now includes a fifth page, **Trends**, with five equal
