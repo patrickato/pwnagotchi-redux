@@ -352,3 +352,43 @@ def test_cli_once_writes_exact_frame_and_never_autoruns(monkeypatch):
     assert len(written) == 1
     assert written[0][0] == "/dev/fb1"
     assert len(written[0][1]) == 960 * 320
+
+
+def test_overview_runtime_diagnostics_are_current_bounded_and_visible(monkeypatch):
+    import PIL.ImageDraw as image_draw
+    report = valid_report(now=100)
+    report["runtime"].update(
+        retry_in_seconds=12.6, failure_streak=2, engine_attempts=9,
+        capture_mount=False)
+    view = fbui.status_view(report, now=101)
+    assert view["retry_seconds"] == 13
+    assert view["failure_streak"] == 2
+    assert view["engine_attempts"] == 9
+    assert view["capture_mount"] is False
+    stale = fbui.status_view(report, now=130)
+    assert stale["retry_seconds"] is None
+    assert stale["failure_streak"] is None
+    assert stale["engine_attempts"] is None
+    assert stale["capture_mount"] is None
+
+    labels = []
+    real_draw = image_draw.Draw
+    class Recorder:
+        def __init__(self, image):
+            self.inner = real_draw(image)
+        def text(self, xy, label, *args, **kwargs):
+            labels.append(label)
+            return self.inner.text(xy, label, *args, **kwargs)
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+    monkeypatch.setattr(image_draw, "Draw", Recorder)
+    image = fbui.render(report, now=101)
+    assert image.size == (480, 320)
+    assert "RETRY 13s / FAILURES 2 / STARTS 9 / REDUXCAP MISSING" in labels
+
+
+@pytest.mark.parametrize("bad", [True, -1, 1.5, float("nan"), 10**1000, "12", 86401])
+def test_overview_retry_duration_rejects_malformed_values(bad):
+    report = valid_report(now=100)
+    report["runtime"]["retry_in_seconds"] = bad
+    assert fbui.status_view(report, now=101)["retry_seconds"] is None
