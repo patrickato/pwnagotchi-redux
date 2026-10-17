@@ -115,3 +115,25 @@ def test_missing_report_and_malformed_report_render_without_exceptions():
                          {"runtime": {"updated_utc": 1000}, "capture_processing":
                           {"available": True, "by_status": []}}):
         assert fbui.render(report_value, page="captures", now=1001).size == (480, 320)
+
+
+def test_worker_low_storage_pause_is_visible_not_a_successful_scan():
+    r = report()
+    r["capture_processing"]["last_scan"] = {
+        "completed_utc": 999, "scanned": 0,
+        "outcomes": {"paused_low_storage": 1}}
+    panel = capture_panel.model(r, now=1001)
+    assert panel["ledger"] == "AVAILABLE"
+    assert panel["scan_state"] == "PAUSED STORAGE"
+    assert panel["scan_files"] is None
+    assert panel["last_ready"] is None
+
+
+def test_worker_outcome_count_must_match_nonpaused_batch():
+    r = report()
+    r["capture_processing"]["last_scan"]["outcomes"]["error"] = 9
+    assert capture_panel.model(r, now=1001)["scan_state"] == "INVALID"
+    r["capture_processing"]["last_scan"]["outcomes"] = {"paused_low_storage": 1,
+                                                              "ready": 1}
+    r["capture_processing"]["last_scan"]["scanned"] = 1
+    assert capture_panel.model(r, now=1001)["scan_state"] == "INVALID"
