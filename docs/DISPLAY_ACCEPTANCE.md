@@ -167,6 +167,44 @@ automatic touch calibration, physically qualified swipe accuracy, frame timing,
 backlight control or cross-board graphics compatibility. Those are follow-on
 features, not green gates today.
 
+## Hardware-free exact TFT screenshots (new source tool)
+
+The source tree now provides `python3 -m redux.display.preview` (or
+`redux-ui-preview` after installing the optional Python entry point).
+It renders the **same `fbui.render()` code** that drives the eventual
+480×320 native framebuffer, producing private RGB PNG files. It does not
+access /dev/fbN, /dev/input, radio hardware, or the physical Pi.
+
+From the trusted laptop's updated source checkout with Pillow installed:
+
+```sh
+cd ~/redux-workbench-src
+out="$HOME/redux-ui-preview-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$out"
+python3 -m redux.display.preview --output-dir "$out"
+```
+
+This produces `redux-overview.png`, `redux-captures.png`, and
+`redux-doctor.png` in that directory. **Without a measured status source,
+screens clearly show OFFLINE/UNKNOWN rather than fabricated telemetry.**
+
+An existing *local* JSON snapshot shaped like Redux's `/api/status` output
+can be displayed with `--status-json /absolute/path/to/status.json`.
+The snapshot is size-bounded and its age is checked by the ordinary display
+renderer; stale counters never become fresh. The alternative `--live`
+only queries the same **127.0.0.1** API endpoint already used by the actual
+TFT; if unavailable it fails rather than silently creating fake live frames.
+`--page doctor` limits output to one page; `--rotate 180` matches a
+physically rotated panel. The command creates 0600 files, refuses to
+overwrite existing files or follow an output directory symlink, and
+rolls back files created by a failed multi-page export.
+
+These are **real software renders, not verified hardware photographs**.
+They do not establish framebuffer enumeration, visible pixels, touch
+accuracy, frame timing, monitor reception, or image-boot compatibility.
+The preview is source-only until the next qualified image; no services are
+enabled or installed by running it in the development checkout.
+
 ## 1. Collect the real devices, without modifying them
 
 On a booted development board, run as the local user:
