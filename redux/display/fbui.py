@@ -226,9 +226,28 @@ def status_view(report, *, now=None):
         "detail": _safe_text(actionable.get("remediation"), 67) if actionable else
                   ("Live readings" if not stale else "Waiting for fresh live telemetry"),
         "doctor_rows": doctor_rows[:3],
+        "doctor_all": doctor_rows,
         "doctor_more": max(0, len(doctor_rows) - 3),
         "stale": stale,
     }
+
+
+def doctor_window(view, offset=0):
+    """Bound scrolling to current verified findings; no stale detail replay."""
+    if type(offset) is not int or offset < 0:
+        raise ValueError("doctor offset must be a nonnegative integer")
+    if not isinstance(view, dict):
+        raise TypeError("doctor view must be a mapping")
+    if view.get("stale") is not False:
+        return {"rows": [], "start": 0, "total": 0, "more": 0}
+    rows = view.get("doctor_all", [])
+    if not isinstance(rows, list):
+        return {"rows": [], "start": 0, "total": 0, "more": 0}
+    rows = rows[:64]
+    total = len(rows)
+    first = min(offset, max(0, total - 3))
+    return {"rows": rows[first:first + 3], "start": first, "total": total,
+            "more": max(0, total - first - 3)}
 
 
 def _font(size=13, *, bold=False):
@@ -241,10 +260,11 @@ def _font(size=13, *, bold=False):
         return ImageFont.load_default()
 
 
-def render(report, *, page="overview", now=None):
+def render(report, *, page="overview", now=None, doctor_offset=0):
     """Pillow RGB image, no placeholder activity, no radio-facing operations."""
     from PIL import Image, ImageDraw
     data = status_view(report, now=now)
+    doctor = doctor_window(data, doctor_offset) if page == "doctor" else None
     from .gesture_nav import PAGES
     if page not in PAGES:
         raise ValueError("unknown framebuffer page")
@@ -317,16 +337,19 @@ def render(report, *, page="overview", now=None):
         if data["stale"]:
             draw.text((20, 194), "REPORT STALE / NO VERIFIED FINDINGS",
                       font=_font(12), fill=AMBER)
-        elif data["doctor_rows"]:
-            for index, finding in enumerate(data["doctor_rows"]):
+        elif doctor["rows"]:
+            for index, finding in enumerate(doctor["rows"]):
                 y = 190 + index * 30
                 color = colors[finding["status"]]
                 draw.ellipse((20, y + 5, 28, y + 13), fill=color)
                 draw.text((35, y), finding["status"].upper() + " / " + finding["summary"],
                           font=_font(11), fill=INK)
-            if data["doctor_more"]:
-                draw.text((35, 278), f"+{data['doctor_more']} additional findings",
-                          font=_font(10), fill=SUBTLE)
+            if doctor["total"] > 3:
+                visible = doctor["start"] + len(doctor["rows"])
+                draw.text((35, 282),
+                          f"FINDINGS {doctor['start'] + 1}-{visible} / {doctor['total']}"
+                          "  SWIPE UP/DOWN",
+                          font=_font(9), fill=SUBTLE)
         else:
             message = ("No actionable findings" if data["health"] == "ok"
                        else "No verified findings")
@@ -468,6 +491,7 @@ def main(argv=None):
     tracker = None
     fragment = b""
     page = args.page
+    doctor_offset = 0
     if args.touch_device:
         from . import touch_nav
         if args.calibration_file:
@@ -499,7 +523,15 @@ def main(argv=None):
     try:
         while running:
             report = read_status(args.port)
-            image = render(report, page=page)
+            if page == "doctor":
+                current_doctor = status_view(report)
+                if current_doctor["stale"]:
+                    doctor_offset = 0
+                else:
+                    doctor_offset = doctor_window(current_doctor, doctor_offset)["start"]
+                image = render(report, page=page, doctor_offset=doctor_offset)
+            else:
+                image = render(report, page=page)
             if args.rotate == 180:
                 from PIL import Image
                 image = image.transpose(Image.Transpose.ROTATE_180)
@@ -530,8 +562,22 @@ def main(argv=None):
                     actions, fragment = consume_gestures(fragment, tracker)
                     if actions:
                         action, value = actions[-1]
-                        page = value if action == "page" else touch_nav.navigate(page, value)
-                        break  # redraw selected page immediately
+                        if action == "scroll":
+                            if page != "doctor":
+                                continue
+                            count = len(status_view(report)["doctor_all"])
+                            doctor_offset = min(max(0, count - 3),
+                                                max(0, doctor_offset + value * 3))
+                        elif action == "page":
+                            if value != page:
+                                doctor_offset = 0
+                            page = value
+                        elif action == "swipe":
+                            page = touch_nav.navigate(page, value)
+                            doctor_offset = 0
+                        else:
+                            continue
+                        break  # redraw selected page or Doctor scroll immediately
                 else:
                     directions, fragment = touch_nav.consume(fragment, tracker)
                     if directions:
