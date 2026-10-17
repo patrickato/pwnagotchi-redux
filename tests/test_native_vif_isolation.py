@@ -181,6 +181,83 @@ def test_manager_claiming_temporary_vif_aborts_before_activation():
     assert ['ip', 'link', 'set', 'dev', NAME, 'up'] not in ops.commands
 
 
+@pytest.mark.parametrize(('field', 'value', 'check'), [
+    ('temp_nm_managed', None, 'temporary_nm_unmanaged'),
+    ('temp_nm_managed', True, 'temporary_nm_unmanaged'),
+    ('temp_type', 1, 'native_80211_link_type'),
+    ('temp_monitor', False, 'temporary_mode_monitor'),
+    ('firmware', 2, 'firmware_mode_expected'),
+])
+def test_post_create_failure_reports_exact_bounded_gate_before_cleanup(field, value, check):
+    class ChangedVif(Fake):
+        def change(self, args):
+            super().change(args)
+            if args[:2] == ['iw', 'phy']:
+                self.s[field] = value
+    ops = ChangedVif()
+    result = trial.run_trial(ops, NAME, approved=True)
+    assert result['restored'] is True
+    assert 'temporary interface isolation not confirmed' in result['test']['stopped']
+    assert check in result['post_create']['failed_checks']
+    assert result['post_create']['stage'] == 'created'
+    assert result['post_create']['observed']['temp_type'] in (1, 803)
+    assert ['ip', 'link', 'set', 'dev', NAME, 'up'] not in ops.commands
+    assert result['after']['managed'] is True
+
+
+def test_post_activate_snapshot_retained_on_driver_mode_failure():
+    class BadActivation(Fake):
+        def change(self, args):
+            super().change(args)
+            if args == ['ip', 'link', 'set', 'dev', NAME, 'up']:
+                self.s['firmware'] = 0
+    ops = BadActivation()
+    result = trial.run_trial(ops, NAME, approved=True)
+    assert result['restored'] is True
+    assert 'native monitor activation did not pass' in result['test']['stopped']
+    assert result['post_create']['failed_checks'] == []
+    assert result['post_activate']['failed_checks'] == ['firmware_mode_expected']
+    assert result['post_activate']['observed']['firmware'] == 0
+
+
+def test_valid_vif_snapshots_only_allowlist_never_arbitrary_identifiers():
+    ops = Fake()
+    ops.s.update(ssid='PRIVATE NETWORK', connection='private-profile',
+                 mac_address='00:11:22:33:44:55')
+    result = trial.run_trial(ops, NAME, approved=True)
+    assert result['restored'] is True
+    for key in ('post_create', 'post_activate'):
+        snapshot = result[key]
+        assert snapshot['failed_checks'] == []
+        assert snapshot['observed']['temp_type'] == 803
+        assert snapshot['observed']['temp_index'] == 9
+        assert 'ssid' not in snapshot['observed']
+        assert 'connection' not in snapshot['observed']
+        assert 'mac_address' not in snapshot['observed']
+        assert 'PRIVATE NETWORK' not in repr(snapshot)
+        assert '00:11:22:33:44:55' not in repr(snapshot)
+
+
+def test_snapshot_separates_temporary_interface_identity_without_free_text():
+    state = Fake().s
+    state.update(interfaces=['wlan0', NAME], temp_index=9, temp_phy='phy0',
+                 temp_monitor=True, temp_nm_managed=False, temp_type=803,
+                 firmware=0, managed=False, nm_state=10, primary_mode='managed',
+                 primary_up=False, live='inactive', capture_process=False)
+    snapshot = trial.vif_gate_snapshot(state, NAME, 'phy0', stage='created')
+    assert snapshot['failed_checks'] == []
+    state['temp_phy'] = 'phy9'
+    mismatch = trial.vif_gate_snapshot(state, NAME, 'phy0', stage='created')
+    assert mismatch['failed_checks'] == ['temporary_phy_matches']
+    assert mismatch['observed']['temp_phy_matches'] is False
+    assert 'phy9' not in repr(mismatch)
+    state['temp_phy'] = 'phy0'
+    state['temp_index'] = 13
+    activated = trial.vif_gate_snapshot(state, NAME, 'phy0', stage='activated',
+                                        expected_index=9)
+    assert 'temporary_ifindex_unchanged' in activated['failed_checks']
+
+
 def test_replaced_temporary_interface_is_never_deleted():
     class Replaced(Fake):
         def begin_cleanup(self):
