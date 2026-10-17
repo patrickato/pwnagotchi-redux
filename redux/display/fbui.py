@@ -152,11 +152,33 @@ def status_view(report, *, now=None):
     elif link is None:
         rf_label = "RF UNVERIFIED"
     elif link in (801, 803):
-        rf_label = f"802.11 LINK {link}"
+        # A kernel header type can never prove actual received 802.11 frames.
+        rf_label = f"802.11 {link} / RX UNVERIFIED"
     elif link == 1:
         rf_label = "ETHERNET 1 / NO NATIVE RF"
     else:
         rf_label = f"UNQUALIFIED LINK {link}"
+
+    # Display health cannot be greener than fresh, directly measured runtime
+    # evidence. Doctor summaries normally agree; this also fails safely when
+    # they are delayed, inconsistent, or partially unavailable.
+    if not stale:
+        severity = {"ok": 0, "attention": 1, "degraded": 2, "action": 3}
+        measured = None
+        runtime_state = runtime.get("state")
+        if runtime_state == "storage_paused":
+            measured = "action"
+        elif runtime_state == "degraded" or (running and link == 1):
+            measured = "degraded"
+        elif runtime_state in ("starting", "starting_engine", "rotating", "stopped"):
+            measured = "attention"
+        # A fresh process can still report a current failure.
+        if runtime.get("last_error") or (
+                _bounded_count(runtime.get("failure_streak")) not in (None, 0)):
+            measured = max((measured, "degraded"), key=lambda v: severity.get(v, -1))
+        if measured is not None and severity.get(health, -1) < severity[measured]:
+            health = measured
+
     free = _bounded_count(runtime.get("free_bytes"))
     free_mb = round(free / 1048576) if free is not None else None
     results = pipeline.get("by_status", {}) if isinstance(pipeline.get("by_status"), dict) else {}
