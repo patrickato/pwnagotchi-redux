@@ -19,6 +19,19 @@ _TRANSPORTS = frozenset(("onboard", "usb"))
 _MODE_RANK = {"unknown": 0, "managed": 1, "monitor": 2}
 
 
+def _drivers(sys_root, identities):
+    result = {}
+    for iface in identities:
+        try:
+            driver = (Path(sys_root) / iface / "device" / "driver").resolve(strict=True).name
+        except OSError as exc:
+            raise Unavailable("radio_driver_unavailable") from exc
+        if not _DRIVER.fullmatch(driver):
+            raise Unavailable("radio_driver_invalid")
+        result[iface] = driver
+    return result
+
+
 def collect(*, sys_root=Path("/sys/class/net"), run=None,
             wall_clock=time.time, monotonic=time.monotonic):
     """Return one stable sanitized sample or raise Unavailable.
@@ -33,11 +46,15 @@ def collect(*, sys_root=Path("/sys/class/net"), run=None,
     before = inventory(sys_root)
     if not before:
         raise Unavailable("wireless_inventory_empty")
+    drivers_before = _drivers(sys_root, before)
     raw = runner(["iw", "dev"])
     interfaces = iw_interfaces(raw)
     after = inventory(sys_root)
+    drivers_after = _drivers(sys_root, after)
     if before != after or set(interfaces) != set(before):
         raise Unavailable("radio_identity_changed")
+    if drivers_before != drivers_after:
+        raise Unavailable("radio_driver_changed")
 
     groups = {}
     for iface, identity in sorted(before.items()):
@@ -53,12 +70,7 @@ def collect(*, sys_root=Path("/sys/class/net"), run=None,
                 or type(arphrd) is not int or not 0 <= arphrd <= 65535
                 or not re.fullmatch(r"phy[0-9]+", phy)):
             raise Unavailable("radio_kernel_identity_disagrees")
-        try:
-            driver = (Path(sys_root) / iface / "device" / "driver").resolve(strict=True).name
-        except OSError as exc:
-            raise Unavailable("radio_driver_unavailable") from exc
-        if not _DRIVER.fullmatch(driver):
-            raise Unavailable("radio_driver_invalid")
+        driver = drivers_after[iface]
         raw_mode = observed.get("type")
         mode = raw_mode if raw_mode in ("monitor", "managed") else "unknown"
         key = (transport, device_path, device_inode)
