@@ -112,6 +112,22 @@ def test_unknown_transport_duplicate_usb_and_missing_iw_identity_fail_closed(tmp
                    wall_clock=lambda: 1000.0)
 
 
+def test_driver_rebind_during_sample_is_rejected(tmp_path):
+    root = tmp_path / "sys" / "class" / "net"
+    root.mkdir(parents=True)
+    row = add_net(root, iface="wlan0", ifindex=4, phy="phy0",
+                  transport="sdio", driver="brcmfmac", arphrd=1)
+    driver_link = root / "wlan0" / "device" / "driver"
+    replacement = tmp_path / "drivers" / "replacement"
+    replacement.mkdir(parents=True)
+    def rebind(_args):
+        driver_link.unlink()
+        driver_link.symlink_to(replacement)
+        return iw_text(row)
+    with pytest.raises(Unavailable, match="radio_driver_changed"):
+        di.collect(sys_root=root, run=rebind, wall_clock=lambda: 1000.0)
+
+
 def test_sysfs_identity_change_during_sample_is_rejected(tmp_path, monkeypatch):
     root = tmp_path / "sys" / "class" / "net"
     root.mkdir(parents=True)
