@@ -16,7 +16,7 @@ import stat
 
 from . import fbui
 
-PAGES = ("overview", "captures", "doctor")
+from .gesture_nav import PAGES
 
 
 def _snapshot(path: str) -> dict:
@@ -124,7 +124,7 @@ def main(argv=None) -> int:
     source.add_argument("--status-json", help="absolute file containing measured Redux status JSON")
     source.add_argument("--live", action="store_true", help="read current loopback Redux API only")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--page", choices=PAGES, help="one page; default: all three")
+    parser.add_argument("--page", choices=PAGES, help="one page; default: all available pages")
     parser.add_argument("--rotate", type=int, choices=(0, 180), default=0)
     args = parser.parse_args(argv)
     if args.port < 1 or args.port > 65535:
