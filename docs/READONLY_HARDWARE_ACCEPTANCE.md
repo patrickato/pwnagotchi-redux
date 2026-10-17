@@ -180,10 +180,13 @@ retry, reload, globally restart managers, reboot or reflash. A second attempt or
 expanded recovery requires fresh approval. The existing native DOWN-only VIF
 procedure remains independent and is NOT part of USB reception approval.
 
-**Remaining source gate before executing A:** a bounded, identity-pinned decoded
-header measurement runner and adapter-specific reviewed isolation/rollback are
-not supplied by this read-only toolkit. Do not substitute tcpdump metadata or
-fabricated counts. No physical approval is requested for an unreviewed runner.
+**Source-only follow-up:** the bounded AWUS036ACM/mt76x2u runner is now
+implemented with synthetic tests; see [AWUS036ACM_PASSIVE_QUALIFICATION.md](AWUS036ACM_PASSIVE_QUALIFICATION.md)
+for its strict pre-isolated baseline, exact commands and separate NM companion
+procedure. It is not part of the read-only entry point and has NOT been executed.
+The loaded live runtime must already pin wlan0; unknown/auto-selection blocks
+execution. No hardware approval, fabricated counts or lease interlock bypass
+is supplied by source completion.
 
 ### B. USB live runtime, handoff and removal (separate later approval)
 

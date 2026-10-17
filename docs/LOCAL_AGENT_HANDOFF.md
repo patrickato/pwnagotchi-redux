@@ -354,3 +354,19 @@ space and active Redux services. One SDIO onboard brcmfmac netdev remained
 monitor-labeled but ARPHRD1, NM managed/state20; no USB Wi-Fi netdev enumerated.
 No decoded RF or PAN qualification, Pi mutation, installation, receipt write,
 physical trial or image build. Prior hardware approvals remain consumed.
+
+## Source-only AWUS036ACM passive qualification runner
+
+`redux.radio.awus036acm` now provides a default-read-only, explicitly gated
+single trial for a physically identified 0e8d:7612/mt76x2u adapter, with pure
+bounded radiotap/802.11 parsing and identity-pinned cleanup. It accepts only
+already-isolated NM no/state10, managed/DOWN/type1/no-frequency baseline. It
+requires Ethernet, unchanged onboard brcmfmac/Bettercap and an already-loaded
+explicit wlan0 preference, so observing today's wlan0 PID alone cannot authorize
+a USB trial. No NM/service/onboard setters, VIFs, receipt issuance or live lease
+rearm are included. The separate companion NM isolation/return procedure is for
+review, not implicit execution. See
+[AWUS036ACM_PASSIVE_QUALIFICATION.md](AWUS036ACM_PASSIVE_QUALIFICATION.md).
+No Pi connection, RF sampling, hardware mutation or image build occurred during
+this source-only milestone. Adapter availability/policy, loaded runtime pin,
+actual DOWN-channel behavior/reception and physical restoration remain gates.
