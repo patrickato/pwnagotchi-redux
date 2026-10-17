@@ -16,7 +16,9 @@ def add_net(root, *, iface, ifindex, phy, transport, driver, arphrd):
     device.mkdir(parents=True, exist_ok=True)
     subsys = root.parent / "subsystems" / transport
     subsys.mkdir(parents=True, exist_ok=True)
-    (device / "subsystem").symlink_to(subsys)
+    subsystem_link = device / "subsystem"
+    if not subsystem_link.exists() and not subsystem_link.is_symlink():
+        subsystem_link.symlink_to(subsys)
     drivers = root.parent / "drivers" / driver
     drivers.mkdir(parents=True, exist_ok=True)
     driver_link = device / "driver"
