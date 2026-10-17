@@ -93,8 +93,12 @@ def draw_trends(draw, view, *, font, ink, subtle, teal, amber, blue):
               font=font(10), fill=ink)
     draw.text((20, 265), "5m", font=font(9), fill=subtle)
     draw.text((433, 265), "NOW", font=font(9), fill=subtle)
-    legend = (("EVENTS", teal, 20), ("HS EVENTS", amber, 153),
-              ("HANDOFFS", blue, 329))
+    latest = records[-1][1]
+    # Keep the latest measured rates visible even when a user cannot
+    # distinguish individual points on the compact 480x320 chart.
+    legend = ((f"EVENTS {_compact(latest[0])}", teal, 20),
+              (f"HS EVENTS {_compact(latest[1])}", amber, 153),
+              (f"HANDOFFS {_compact(latest[2])}", blue, 329))
     for name, color, x in legend:
         draw.rectangle((x, 286, x + 7, 291), fill=color)
         draw.text((x + 12, 281), name, font=font(9), fill=subtle)
