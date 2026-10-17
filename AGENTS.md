@@ -38,6 +38,18 @@ one brief consolidated request **and keep working on independent safe tasks**
 instead of stopping all engineering work. Once authorized, stay strictly
 within the stated bounds and verify the result before reporting success.
 
+**Approval is scoped to an operation, not each command within it.** When the
+owner has explicitly approved one named, reviewed physical experiment, including
+its listed steps and bounded rollback, perform those already-authorized steps
+without requesting a redundant project-level "yes" before each step. Repeat
+read-only safety preflight at execution time; a failed gate stops the experiment
+and invokes only the specifically authorized cleanup. Do not treat a prior
+approval as permission for a second attempt, expanded recovery, different
+interface, driver reload, reboot, image build or other new Pi mutation.
+Codex's own sandbox/tool permission prompts are independent of this project
+rule and must be configured through Codex's official permission controls; a
+project instruction cannot bypass them.
+
 **Coordination and safeguards:**
 - Before GitHub writes, fetch the current branch HEAD; before local edits,
   `git pull --ff-only` after verifying a clean worktree. Do not force-push or
