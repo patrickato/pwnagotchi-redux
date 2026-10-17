@@ -235,6 +235,42 @@ The pending independent live-status supplier remains a separate hardware
 and runtime integration gate; this screenshot tool is not that supplier.
 Do not share captured identifiers or the unreviewed raw report publicly.
 
+## Scrollable Doctor findings on the 480×320 panel
+
+The native Doctor screen is no longer limited to its first three diagnostic
+findings. A physically confirmed classic single-touch vertical swipe inside
+the Doctor **content viewport** advances one group of three findings, and a
+reverse swipe moves back. Footer taps still select Overview, Captures, Doctor
+or Radios; horizontal swipes still change pages. The viewport requires an
+approximately 60-pixel, directionally dominant vertical gesture that begins
+and ends inside the content area. Diagonal touches and footer drags do not
+scroll. Display rotation 180° is mapped into logical screen coordinates.
+
+Finding navigation is entirely read-only. The model sorts up to 64 fresh
+actionable findings by severity and clamps every offset to the available
+entries. Stale or unavailable Doctor telemetry hides historical findings
+rather than replaying them as current. Switching pages resets Doctor to the
+first finding. After any kernel `SYN_DROPPED` event, the decoder now requires
+a new **BTN_TOUCH release after synchronization** before accepting gestures
+again; no stale finger coordinates can navigate a page.
+
+For hardware-free inspection of a real Doctor status JSON report, the
+preview CLI can render a specific visible window:
+
+```sh
+python3 -m redux.display.preview \
+  --status-json /absolute/path/to/status.json \
+  --output-dir /absolute/existing/private/directory \
+  --page doctor --doctor-offset 3
+```
+
+The `--doctor-offset` argument accepts 0–61, and the renderer clamps it to
+the actual fresh findings. A saved status report whose runtime timestamp is
+already stale will show no verified findings, regardless of offset; this
+is intentional. Source CI tests are **not** confirmation of the actual
+ILI9486 pixels, ADS7846 touch wiring, scrolling ergonomics or performance.
+Do not enable the touchscreen service before physical qualification.
+
 ## Four-page native navigation and independent radio reporting
 
 Redux now supports four native pages — **Overview, Captures, Doctor and Radios** —
