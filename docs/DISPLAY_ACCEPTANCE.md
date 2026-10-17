@@ -267,6 +267,17 @@ accessible loopback status source. The screenshot tool does not generate
 mock data to make a graph look populated. The still-unqualified 480×320
 TFT and touch hardware do not become validated by these tests.
 
+## Overview runtime diagnostics
+
+The Overview page also shows the live supervisor retry delay, consecutive
+failure streak, engine start attempts, and REDUXCAP mount state. Values are
+read from the existing runtime status response and are displayed only when
+that entire sample is fresh. Retry durations and counters are strictly
+bounded; malformed values become `--` or `UNKNOWN`, never zero. A missing
+mount field is not treated as mounted, and a reported unmounted capture
+volume highlights the diagnostic line. This is a read-only display; it does
+not restart the engine, remount storage, or modify any service.
+
 ## Scrollable Doctor findings on the 480×320 panel
 
 The native Doctor screen is no longer limited to its first three diagnostic
