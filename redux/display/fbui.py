@@ -260,7 +260,7 @@ def _font(size=13, *, bold=False):
         return ImageFont.load_default()
 
 
-def render(report, *, page="overview", now=None, doctor_offset=0):
+def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
     """Pillow RGB image, no placeholder activity, no radio-facing operations."""
     from PIL import Image, ImageDraw
     data = status_view(report, now=now)
@@ -307,6 +307,10 @@ def render(report, *, page="overview", now=None, doctor_offset=0):
         metric(20, "PREPARED", compact_count(capture["ready"]))
         metric(180, "FAILED", compact_count(capture["errors"]))
         metric(350, "HASH ROWS", compact_count(capture["hash_records"]))
+    elif page == "trends":
+        from .trend_chart import draw_trends
+        draw_trends(draw, trends, font=_font, ink=INK, subtle=SUBTLE,
+                    teal=TEAL, amber=AMBER, blue=BLUE)
     elif page == "radios":
         from .radio_panel import model as radio_model
         radios = radio_model(report, now=now)
@@ -379,8 +383,8 @@ def render(report, *, page="overview", now=None, doctor_offset=0):
         draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
         draw.text((20, 250), "DOCTOR / " + data["finding"], font=_font(12, bold=True), fill=accent)
         draw.text((20, 272), data["detail"], font=_font(10), fill=SUBTLE)
-    # The footer's three equal touch targets share exact coordinates with
-    # gesture_nav.TAB_TOP/TAB_WIDTH. Visual tabs do not activate touch.
+    # Footer tabs share geometry with gesture_nav.TAB_TOP/TAB_WIDTH.
+    # They are visual only until the physical touch path is opted in.
     from .gesture_nav import PAGES, TAB_TOP, TAB_WIDTH
     draw.rectangle((0, TAB_TOP, 479, 319), fill=(15, 24, 35))
     for index, tab in enumerate(PAGES):
@@ -492,6 +496,8 @@ def main(argv=None):
     fragment = b""
     page = args.page
     doctor_offset = 0
+    from .telemetry_history import TelemetryWindow
+    history = TelemetryWindow()
     if args.touch_device:
         from . import touch_nav
         if args.calibration_file:
@@ -523,15 +529,23 @@ def main(argv=None):
     try:
         while running:
             report = read_status(args.port)
+            sampled_at = time.time()
+            # Only genuine, independently updated live status counters advance
+            # the bounded in-memory chart; the UI never synthesizes activity.
+            history.ingest(report, now=sampled_at)
             if page == "doctor":
-                current_doctor = status_view(report)
+                current_doctor = status_view(report, now=sampled_at)
                 if current_doctor["stale"]:
                     doctor_offset = 0
                 else:
                     doctor_offset = doctor_window(current_doctor, doctor_offset)["start"]
-                image = render(report, page=page, doctor_offset=doctor_offset)
+                image = render(report, page=page, now=sampled_at,
+                               doctor_offset=doctor_offset)
+            elif page == "trends":
+                image = render(report, page=page, now=sampled_at,
+                               trends=history.snapshot(now=sampled_at))
             else:
-                image = render(report, page=page)
+                image = render(report, page=page, now=sampled_at)
             if args.rotate == 180:
                 from PIL import Image
                 image = image.transpose(Image.Transpose.ROTATE_180)
