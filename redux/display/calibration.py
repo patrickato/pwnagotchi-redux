@@ -49,12 +49,20 @@ def evaluate(points: list[TouchPoint], *, width: int = 480, height: int = 320,
     closed, and never implies that physical mapping has been accepted.
     """
     if (type(width) is not int or type(height) is not int
-            or width < 2 or height < 2 or len(points) < 5 or len(points) > 32
-            or type(tolerance_px) not in (int, float)
-            or not isfinite(tolerance_px) or not 0 < tolerance_px <= 80):
+            or not 2 <= width <= 4096 or not 2 <= height <= 4096
+            or len(points) < 5 or len(points) > 32
+            or type(tolerance_px) not in (int, float)):
         return None
-    vals = [(p.raw_x, p.raw_y, p.pixel_x, p.pixel_y) for p in points]
-    if not all(all(type(v) in (int, float) and isfinite(v) for v in row) for row in vals):
+    try:
+        if not isfinite(tolerance_px) or not 0 < tolerance_px <= 80:
+            return None
+        vals = [(p.raw_x, p.raw_y, p.pixel_x, p.pixel_y) for p in points]
+        if not all(all(type(v) in (int, float) and isfinite(v)
+                       for v in row) for row in vals):
+            return None
+    except (OverflowError, ValueError, TypeError):
+        # Python's isfinite converts arbitrary-size integers to float;
+        # a malformed JSON number must never abort touch setup.
         return None
     if not all(0 <= p.pixel_x < width and 0 <= p.pixel_y < height for p in points):
         return None
