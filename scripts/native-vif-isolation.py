@@ -87,6 +87,39 @@ def isolated_primary(s):
             and s['live'] == 'inactive' and s['capture_process'] is False)
 
 
+def vif_gate_snapshot(s, name, phy, *, stage, expected_index=None):
+    """Allowlisted read-only gate evidence captured BEFORE abort or cleanup.
+
+    Never output frames, addresses, connection profiles, raw subprocess text,
+    or unbounded external strings. The kernel/manager observations are already
+    collected by observe(); this function performs no extra hardware action.
+    """
+    index = s.get('temp_index')
+    observed = {key: s.get(key) for key in (
+        'safe', 'managed', 'nm_state', 'primary_mode', 'primary_up',
+        'primary_type', 'live', 'capture_process', 'firmware',
+        'temp_index', 'temp_type', 'temp_monitor', 'temp_nm_managed',
+    )}
+    # Never serialize arbitrary interface names/paths from the environment.
+    observed['temp_present'] = name in s.get('interfaces', ())
+    observed['temp_phy_matches'] = s.get('temp_phy') == phy
+    checks = {
+        'primary_isolated': isolated_primary(s),
+        'temporary_interface_present': observed['temp_present'],
+        'temporary_phy_matches': observed['temp_phy_matches'],
+        'temporary_mode_monitor': s.get('temp_monitor') is True,
+        'temporary_ifindex_measured': type(index) is int and index > 0,
+        'temporary_nm_unmanaged': s.get('temp_nm_managed') is False,
+        'native_80211_link_type': s.get('temp_type') in (801, 803),
+        'firmware_mode_expected': s.get('firmware') == (0 if stage == 'created' else 2),
+    }
+    if stage == 'activated':
+        checks['temporary_ifindex_unchanged'] = (
+            type(index) is int and index == expected_index)
+    return {'stage': stage, 'observed': observed,
+            'failed_checks': sorted(k for k, passed in checks.items() if not passed)}
+
+
 def baseline_ok(s):
     return (s['safe'] is True and s['interfaces'] == ['wlan0']
             and s['managed'] is True and s['nm_state'] == 20
@@ -128,18 +161,18 @@ def run_trial(ops, name, *, approved=False):
         created_attempt = True
         ops.change(['iw', 'phy', before['phy'], 'interface', 'add', name, 'type', 'monitor'])
         s = ops.observe(name)
+        log['post_create'] = vif_gate_snapshot(s, name, before['phy'], stage='created')
+        ops.event('post_create', gate=log['post_create'])
         owned_index = ops.temp_index(s, name, before['phy'])
-        if (owned_index is None or not isolated_primary(s)
-                or s['temp_nm_managed'] is not False
-                or s['temp_type'] not in (801, 803) or s['firmware'] != 0):
+        if log['post_create']['failed_checks']:
             raise Stop('temporary interface isolation not confirmed')
         ops.event('created', temporary_vif=name, ifindex=owned_index, phy=before['phy'])
         ops.change(['ip', 'link', 'set', 'dev', name, 'up'])
         s = ops.observe(name)
-        if (not isolated_primary(s)
-                or ops.temp_index(s, name, before['phy']) != owned_index
-                or s['temp_nm_managed'] is not False or s['temp_type'] not in (801, 803)
-                or s['firmware'] != 2):
+        log['post_activate'] = vif_gate_snapshot(
+            s, name, before['phy'], stage='activated', expected_index=owned_index)
+        ops.event('post_activate', gate=log['post_activate'])
+        if log['post_activate']['failed_checks']:
             raise Stop('native monitor activation did not pass')
         log['test'] = {'arphrd': s['temp_type'], 'firmware': s['firmware'],
                        'reception': ops.sample(name, s['temp_type'], seconds=60)}
