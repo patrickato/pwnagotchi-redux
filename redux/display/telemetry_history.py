@@ -12,7 +12,7 @@ import math
 import time
 
 _MAX_COUNT = (1 << 63) - 1
-_MAX_POINTS = 48
+_MAX_POINTS = 151
 _MAX_AGE_SECONDS = 300
 _MAX_INTERVAL_SECONDS = 45
 _MAX_RUNTIME_LAG = 20
