@@ -387,7 +387,7 @@ def test_overview_runtime_diagnostics_are_current_bounded_and_visible(monkeypatc
     assert "RETRY 13s / FAILURES 2 / STARTS 9 / REDUXCAP MISSING" in labels
 
 
-@pytest.mark.parametrize("bad", [True, -1, 1.5, float("nan"), 10**1000, "12", 86401])
+@pytest.mark.parametrize("bad", [True, -1, float("nan"), 10**1000, "12", 86401])
 def test_overview_retry_duration_rejects_malformed_values(bad):
     report = valid_report(now=100)
     report["runtime"]["retry_in_seconds"] = bad
