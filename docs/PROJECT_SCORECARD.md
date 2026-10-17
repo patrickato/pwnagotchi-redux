@@ -1,4 +1,4 @@
-# Redux completion scorecard — updated 2026-10-16
+# Redux completion scorecard — updated 2026-10-17
 
 > **Overall estimate: approximately 60–65% complete / 35–40% remaining**
 > for the ambitious **standalone Augur / Redux v1 product**, not just the
@@ -10,30 +10,41 @@
 ## Current physical evidence (supersedes older checkpoints in this file)
 
 The signed ARM64 `4f907ff` image was independently qualified and **booted on
-the owner's Pi 4**. The October 16 console-verified SSH and read-only field
-diagnostics confirmed signed image/kernel/driver provenance, US regulatory
-state, REDUXCAP ext4, live services, Bettercap REST auth and recurring empty
-worker scans. Over a measured 313 seconds encompassing a rotation interval,
-the capture pipeline remained empty: no closed PCAP, handoff or converted
-artifact. The selected `wlan0` still reported **ARPHRD 1** and firmware
-monitor **0**, despite `iw` showing monitor and a running supervisor.
-**Native RF reception is a hard FAIL/UNKNOWN gate, not 100% software readiness.**
-Only a 1920×1080 framebuffer was enumerated, not the 480×320 TFT.
-Pi 5 remains physically untested.
+the owner's Pi 4**. October 16–17 field checks confirmed signed image/kernel/
+driver provenance, Ethernet SSH, US regulatory state, REDUXCAP ext4, Redux
+services, Bettercap REST authentication and recurring empty worker scans.
+The selected primary `wlan0` remains **ARPHRD 1**, firmware monitor **0**,
+even while `iw` labels it monitor. No closed PCAP, valid handoff or prepared
+capture has been observed from this standalone image.
 
-See `docs/FIELD_DIAGNOSTICS_20261016.md` for exact evidence and the
-separately approved-operation proposal. The new source commits after the
-image freeze are **not** deployed merely by passing GitHub CI.
+**October 17 native-VIF milestone:** After a scoped runtime NM isolation
+and one interface-add operation, the disposable Pi created exactly one
+verified temporary native monitor VIF on phy0 with **ARPHRD 803 (radiotap)**,
+ifindex 5, and firmware monitor 0 *before activation*. NetworkManager had not
+enumerated the VIF, so affirmative unmanaged ownership was unavailable;
+the runner stopped without activating the VIF or receiving packets.
+The reviewed rollback fully restored the original primary mode/UP,
+NetworkManager state and running Redux. Thus **native interface creation
+is demonstrated, but native RF activation, decoded reception and capture
+processing remain unverified**. Do not mistake ARPHRD 803 on a transient,
+unactivated VIF for actual RF capture.
+
+See [NATIVE_VIF_TRIAL_02080F0_20261017.md](NATIVE_VIF_TRIAL_02080F0_20261017.md)
+for exact current physical evidence. The new source commits after the frozen
+Pi image are **not** deployed merely by passing GitHub CI. Only a
+1920×1080 framebuffer has been observed, not the 480×320 TFT; Pi 5 remains
+physically untested.
 
 ## Shortest safe critical path to a genuinely usable Pi 4
 
-1. **P0 RF:** The first approved native VIF test **stopped safely before
-   mutation**: NetworkManager still claimed `wlan0` (managed=yes, state20)
-   and supplicant ownership was not proven absent. Review
-   [NATIVE_VIF_OWNERSHIP_PLAN.md](NATIVE_VIF_OWNERSHIP_PLAN.md) and ask the
-   operator for a **separate approval** before the proposed runtime-only,
-   per-device NetworkManager isolation followed by one VIF test. No global
-   manager stop, driver reload, repeated test, RF injection or reboot.
+1. **P0 RF:** Native temporary VIF creation and radiotap link type **803**
+   now passed on the real Pi 4; runtime per-device NM isolation is reproducible
+   and original-state restoration has been verified. **The remaining immediate
+   blocker is positive ownership evidence** for a newly created monitor VIF
+   not yet enumerated by NetworkManager. Investigate source-only alternate
+   read-only verification, independently review it, then request a *new*
+   bounded hardware approval. Do not bypass the unknown-ownership stop or
+   attempt activation/receive without a reviewed ownership proof.
 2. **P0 capture:** If native 802.11/radiotap framing and *decoded packets*
    are measured, then validate closed PCAP rotation/handoff and honest
    ingest/conversion status using only the operator's test AP. Empty scans
@@ -70,7 +81,7 @@ No percentage is promoted solely by adding passing unit tests.
 
 - **Demonstrated in GitHub CI:** cross-module Python tests, shell/source/image staging, structural image verifier synthetic fixtures, real driver API URL construction, artificial failure/retry and pipeline end-to-end simulation.
 - **Recorded Pi 4 physical evidence:** the earlier 2026-10-08 passive test processed 703 real frames, observing two APs and three identities **outside** the final standalone image. On 2026-10-12 the owner built and qualified a separate ARM64 field image, flashed a disposable card, booted it on the Pi 4 and logged in. Two on-device reports observed Redux services active, a mounted REDUXCAP ext4 partition, US regulatory domain, monitor-labeled wlan0, an authenticated Bettercap loopback listener, and event counters increasing from 6 to 12. Those reports did **not** establish native frame reception, a closed nonempty PCAP, or valid handshake material.
-- **Current Pi 4 blocker (updated):** Earlier native-interface testing failed with `-16` busy. The **new signed image does contain the built patched Pi 4 module**, which was independently checked on the running Pi. Nevertheless `wlan0` still reports Ethernet ARPHRD 1 and firmware monitor 0, with no closed captures after a full rotation. A separate native monitor VIF is a **hypothesis requiring bounded physical testing**, not a software-verification pass. See `docs/FIELD_DIAGNOSTICS_20261016.md`.
+- **Current Pi 4 blocker (updated October 17):** Earlier native-interface testing failed with `-16` busy, and the loaded signed-image brcmfmac patch was independently verified. After scoped isolation, `iw phy ... interface add ... type monitor` **succeeded** on the Pi and the temporary interface was measured as **radiotap ARPHRD 803** on phy0. The strict post-create gate stopped because NM did not enumerate the VIF (`temp_nm_managed=null`), so ownership remained UNKNOWN; activation and decoded packets were **not tested**. The original `wlan0` remains Ethernet ARPHRD 1/firmware0 after fully verified rollback. No capture or handoff was proven. See `docs/NATIVE_VIF_TRIAL_02080F0_20261017.md`.
 - **Unverified hardware-dependent gates:** real 802.11/radiotap ingress in this Redux image, native driver interface lifecycle, supported kernel/Nexmon compatibility, capture-to-hcx conversion against an operator-owned AP, Pi 5 image build/boot, full TFT and touch, sustained faults/restarts, OTA/UPS, SDR/CSI and optional audit hardware.
 - **New software-only operational capability (2026-10-12):** `redux pipeline recover` now inspects previously failed conversions and missing prepared outputs without mutation, and `--apply` performs bounded, lock-coordinated retries without deleting capture evidence. Doctor links measured conversion errors to this operator workflow. Python/CLI integration is CI-tested; real ARM64 converter and power-loss behavior still require field qualification.
 - **New native screen build milestone (2026-10-13):** the ARM64 image now packages a lightweight browser-free RGB565 dashboard with actual runtime/Doctor/capture telemetry, plus optional manually selected ADS7846/XPT2046 swipe paging. A disabled systemd service, persistent operator-config template and rootfs export checks ensure no accidental TFT startup before hardware qualification. Source/rendering/synthetic touch/image-stage/root payload checks pass CI; no LCD pixels or tap calibration have been verified on a real Pi yet.
