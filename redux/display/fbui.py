@@ -205,6 +205,12 @@ def status_view(report, *, now=None):
             doctor_rows.append({"status": severity, "summary": summary})
         order = {"action": 0, "degraded": 1, "attention": 2}
         doctor_rows.sort(key=lambda item: order[item["status"]])
+        if doctor_rows:
+            # The summary cannot override a verified worse individual finding.
+            rank = {"ok": 0, "attention": 1, "degraded": 2, "action": 3}
+            most_severe = doctor_rows[0]["status"]
+            if rank.get(health, -1) < rank[most_severe]:
+                health = most_severe
     return {
         "health": health, "state": state, "engine": engine,
         "iface": _safe_text(runtime.get("iface") or "UNKNOWN", 18),
