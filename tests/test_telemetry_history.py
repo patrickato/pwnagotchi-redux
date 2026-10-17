@@ -193,3 +193,28 @@ def test_native_refresh_loop_accumulates_real_status_samples(monkeypatch):
     assert shown[1]["state"] == "TRACKING"
     assert shown[1]["last"]["events_per_min"] == 120
     assert len(writes) == 2
+
+
+def test_trend_legend_shows_latest_observed_rates():
+    class DrawRecorder:
+        def __init__(self):
+            self.labels = []
+        def text(self, xy, label, **kwargs):
+            self.labels.append(label)
+        def line(self, *args, **kwargs):
+            pass
+        def ellipse(self, *args, **kwargs):
+            pass
+        def rectangle(self, *args, **kwargs):
+            pass
+    h = history.TelemetryWindow()
+    h.ingest(report(1000, events=5), now=1000)
+    h.ingest(report(1002, events=10), now=1002)
+    h.ingest(report(1004, events=20), now=1004)
+    draw = DrawRecorder()
+    trend_chart.draw_trends(
+        draw, h.snapshot(now=1004), font=lambda *_a, **_k: None,
+        ink=None, subtle=None, teal=None, amber=None, blue=None)
+    assert "EVENTS 300" in draw.labels
+    assert "HS EVENTS 0.0" in draw.labels
+    assert "HANDOFFS 0.0" in draw.labels
