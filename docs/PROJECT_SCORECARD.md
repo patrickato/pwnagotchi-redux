@@ -20,11 +20,16 @@ unexpected gaps and malformed measurements; it **never** labels these counts
 verified 802.11 reception or valid handshake captures. Overview now shows
 fresh retry/failure/start and REDUXCAP mount diagnostics. The Radios page
 visually separates Bettercap's capture interface from onboard and USB adapter
-observations, while explicitly leaving reception and USB process ownership
-unverified. That page can only show live adapter rows when a separately
-measured `radio_inventory` is supplied; this UI change does not fabricate or
-automatically collect one. Touchscreen navigation, previews, and regression
-coverage were extended without enabling the real TFT or changing the Pi.
+observations, including the measured netdev name when available, while
+explicitly leaving reception and USB process ownership unverified. The
+installed service now samples `radio_inventory` through a bounded read-only
+worker: sysfs identity is checked before and after one `iw dev` query, virtual
+interfaces are grouped by physical device, and unknown transports or duplicate
+physical radios on one transport fail closed. Samples are attempted every
+10 seconds and expire in the UI after 20 seconds. This reports metadata only;
+it does not change radios or establish packet reception. Touchscreen
+navigation, previews, runtime diagnostics, and regression coverage were
+extended without enabling the real TFT or changing the Pi.
 
 The combined GitHub CI run `39064412864` passed **2,365 software tests and
 648 image-contract checks**. This is source-level verification only.
