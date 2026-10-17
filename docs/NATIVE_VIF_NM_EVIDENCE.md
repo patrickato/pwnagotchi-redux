@@ -32,12 +32,15 @@ assuming device-list absence. Enumerating only `nmcli device status`
 does not rule out a not-yet-realized D-Bus entry. In particular,
 `GetDeviceByIpIface` may not be useful for a non-IP monitor device.
 
-NetworkManager's documented udev policy is another independent source:
+Newer NetworkManager versions document an additional udev policy; **this
+is not implemented in upstream 1.42.4** (see pinned-source review below):
 `ID_NET_MANAGED_BY` **when explicitly set to a value different from
 `org.freedesktop.NetworkManager`** requests that NM leave that device
 unmanaged. `NM_UNMANAGED=true` separately requests unmanaged but can
-be overridden by runtime configuration; if `NM_UNMANAGED` is set,
-NetworkManager ignores `ID_NET_MANAGED_BY`. A missing property is not
+be overridden by runtime configuration; if `NM_UNMANAGED` is set (including
+false), NetworkManager ignores `ID_NET_MANAGED_BY`. The classification helper
+now requires independently verified implementation support before interpreting
+`ID_NET_MANAGED_BY` as an ownership policy. A missing property is not
 an affirmative policy. Never fabricate or inject this property as
 a workaround without its own reviewed physical-change approval.
 
@@ -98,3 +101,102 @@ to `eth0` or the permanent system, and account for unsuccessful cleanup.
 
 Activation/firmware2 and decoded receive counts are still **unknown**.
 No image rebuild is justified by the current evidence.
+
+
+## Completed read-only/source investigation — 2026-10-17
+
+**Decision: no affirmative live ownership evidence for the deleted monitor
+VIF is available from the current baseline. Activation stays blocked.**
+No VIF was created and no NM/udev/service/radio state was changed in this
+investigation. The existing runner is unchanged. All classifier outcomes
+continue to set `permits_activation=False`.
+
+### Pinned implementation, not current-manual assumptions
+
+Reviewed upstream tag **1.42.4**, using these exact source paths:
+
+- [Wi-Fi factory](https://github.com/NetworkManager/NetworkManager/blob/1.42.4/src/core/devices/wifi/nm-wifi-factory.c#L104):
+  `create_device` accepts infrastructure, ad-hoc, AP and mesh modes; for
+  monitor/other unsupported modes it sets the ignore result and returns no
+  NMDevice. The manager returns on this factory result; it does not fall
+  back to a generic device for a deliberately ignored link.
+- [nl80211 mode mapping](https://github.com/NetworkManager/NetworkManager/blob/1.42.4/src/libnm-platform/wifi/nm-wifi-utils-nl80211.c#L170):
+  monitor is not mapped to one of those supported modes. An interface first
+  seen in monitor mode therefore fits the factory's ignore path. This is a
+  source-backed explanation of the prior snapshot, **not a measured live
+  ownership exclusion**. It does not contradict the already-created wlan0
+  NM object remaining visible after a later primary-mode change.
+- [Manager enumeration](https://github.com/NetworkManager/NetworkManager/blob/1.42.4/src/core/nm-manager.c#L4246):
+  GetDevices and GetAllDevices iterate existing NM device objects; the
+  difference is filtering unrealized objects. GetAllDevices does not query
+  every kernel netdev or synthesize an object for a factory-ignored VIF.
+  Thus switching from nmcli to GetAllDevices alone is unlikely to recover
+  a Managed property for this monitor VIF. This remains a hypothesis until
+  an approved VIF exists for the simultaneous measurement.
+- [Udev policy implementation](https://github.com/NetworkManager/NetworkManager/blob/1.42.4/src/libnm-platform/nm-platform.c#L1618):
+  `nm_platform_link_get_unmanaged` checks **NM_UNMANAGED only**, not
+  ID_NET_MANAGED_BY. The pinned [manual](https://github.com/NetworkManager/NetworkManager/blob/1.42.4/man/NetworkManager.xml#L193)
+  likewise documents NM_UNMANAGED's runtime-overridable behavior.
+  A newer manual cannot establish this older daemon's feature support.
+- [Default udev rules](https://github.com/NetworkManager/NetworkManager/blob/1.42.4/data/85-nm-unmanaged.rules):
+  the rules cover several virtualization/gadget devices, not native monitor
+  interfaces. Do not infer an applicable monitor exclusion from their presence.
+
+### Actual Pi observations, all read-only
+
+- Installed package: **1.42.4-1+rpt1+deb12u1**; nmcli reports 1.42.4.
+  The installed daemon contains NM_UNMANAGED's key string but not
+  ID_NET_MANAGED_BY's. This corroborates the upstream version distinction;
+  string inspection alone is not execution-path or ownership proof.
+- Both D-Bus methods succeeded and each returned three device objects.
+  Among the target names, both exposed only original wlan0, Managed=true,
+  State20. There is currently no temporary VIF; no ownership assertion about
+  a nonexistent VIF follows from these inventories.
+- Original wlan0's existing udev database has neither ownership property.
+  No local/runtime ownership-rule entry was found in the inspected rules
+  directories. The packaged rule has five active NM_UNMANAGED assignments,
+  none monitor/trial-specific, and SHA256
+  `afce2a870bf2cefb2b52214ed959d0e0025ed2efef5c05871895f6edbedec24a`,
+  exactly matching pinned upstream 85-nm-unmanaged.rules.
+- Filtered effective configuration showed no monitor/trial-specific matcher
+  or unmanaged-devices exclusion. Other sections exist; unrelated selectors
+  and all connection profiles were withheld. This is not proof about every
+  possible policy source or a future VIF's computed udev properties.
+- The full existing safety observation passed: strict Ethernet route and
+  identity, signed image/kernel/module, US, storage, unbound supplicant and
+  original wlan0 monitor/UP/type1/firmware0. Redux stayed active and fresh;
+  Doctor remains degraded for native RF. No captures or packets were read.
+
+### Source corrections and remaining boundary
+
+The pure classifier now treats ID_NET_MANAGED_BY as unsupported or unverified
+unless the caller separately verifies implementation support. Explicit
+NM_UNMANAGED=false suppresses fallback to that property. Invalid numeric
+state and contradictory managed=yes/D-Bus-absent evidence cannot be reported
+as valid live evidence. Invalid caller strings are never echoed into the
+allowlisted result. Tests cover these cases. This helper remains diagnostic,
+not authorization and not a replacement for the execution gate.
+
+**Safest next experiment, if desired: ownership-only, DOWN-only observation.**
+Prepare/review a separate one-attempt procedure that retains the original
+preflight, redux-live stop, primary runtime isolation and verified cleanup,
+creates only rxv5e16a901 **without bringing it UP**, and observes its stable
+ifindex/PHY/monitor/ARPHRD plus GetDevices/GetAllDevices and filtered udev
+properties for a bounded discovery window (e.g. ten seconds). No activation,
+firmware setter or packet socket. Preserve UNKNOWN when no affirmative NM
+exclusion appears, then remove only the identified VIF and restore the
+original primary/NM/live baseline through the existing gates. Such a test
+would measure the source hypothesis and actual per-VIF udev properties; it
+would not itself prove capture readiness. Do not repeat the activation trial
+unchanged: the current source predicts the same missing-object gate.
+
+This is a **new physical-change boundary**. No further experiment is
+approved. If that observation also finds no affirmative exclusion, a
+version-supported, exact-interface, reversible policy would need its own
+source review, rollback qualification and explicit authorization. Do not
+install an ID_NET_MANAGED_BY rule as a workaround on this 1.42.4 daemon,
+change permanent policy, or bypass the gate based on source exclusion alone.
+
+Offline qualification: **1,730 tests passed, 2 skipped**, including the
+classifier and unchanged native-VIF runner regressions. No hardware-change
+authorization or physical capture success follows from these tests.

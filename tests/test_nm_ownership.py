@@ -17,11 +17,11 @@ from redux.radio.nm_ownership import assess_ownership, udev_ownership_policy
     ("ID_NET_MANAGED_BY=foreign\nID_NET_MANAGED_BY=other\n", "unknown"),
     ("NM_UNMANAGED=true\nNM_UNMANAGED=false\n", "unknown"),
     ("ID_NET_MANAGED_BY=io.systemd.Network\nNM_UNMANAGED=0\n",
-     "names_other_manager"),
+     "udev_requests_managed"),
     ("SSID=my private network\nBSSID=00:11:22:33:44:55\n", "not_declared"),
 ])
 def test_only_allowlisted_udev_fields_affect_policy(properties, expected):
-    assert udev_ownership_policy(properties) == expected
+    assert udev_ownership_policy(properties, supports_id_net_managed_by=True) == expected
 
 
 def evaluate(**change):
@@ -31,6 +31,7 @@ def evaluate(**change):
         dbus_enumerated=False,
         udev_properties=None,
         kernel_interface_present=True,
+        supports_id_net_managed_by=True,
     )
     data.update(change)
     return assess_ownership(**data)
@@ -98,3 +99,45 @@ def test_udev_property_output_never_exposes_identifiers():
     assert evidence.status == "not_enumerated_unknown"
     for sensitive in ("private", "customer", "001122334455"):
         assert sensitive not in repr(evidence)
+
+
+@pytest.mark.parametrize(('support', 'policy'), [
+    (False, 'managed_by_unsupported'), (None, 'managed_by_support_unverified'),
+])
+def test_managed_by_cannot_exclude_nm_without_verified_version_support(support, policy):
+    properties = 'ID_NET_MANAGED_BY=other\n'
+    assert udev_ownership_policy(properties, supports_id_net_managed_by=support) == policy
+    evidence = evaluate(udev_properties=properties, supports_id_net_managed_by=support)
+    assert evidence.udev_policy == policy
+    assert evidence.status == 'not_enumerated_unknown'
+    assert evidence.permits_activation is False
+
+
+def test_managed_by_default_is_unverified_not_exclusion():
+    assert udev_ownership_policy('ID_NET_MANAGED_BY=other\n') == 'managed_by_support_unverified'
+
+
+@pytest.mark.parametrize('value', ['0', 'false', ''])
+def test_explicit_false_unmanaged_suppresses_managed_by(value):
+    evidence = evaluate(udev_properties=f'NM_UNMANAGED={value}\nID_NET_MANAGED_BY=other\n')
+    assert evidence.udev_policy == 'udev_requests_managed'
+    assert evidence.status == 'not_enumerated_unknown'
+    assert evidence.permits_activation is False
+
+
+@pytest.mark.parametrize('state', [10.0, '10', True, -1])
+def test_invalid_state_cannot_be_explicit_unmanaged(state):
+    evidence = evaluate(nm_managed=False, nm_state=state, dbus_enumerated=True)
+    assert evidence.status == 'unknown'
+    assert evidence.permits_activation is False
+
+
+def test_managed_yes_conflicts_with_negative_dbus_enumeration():
+    assert evaluate(nm_managed=True, nm_state=20, dbus_enumerated=False).status == 'inconsistent'
+
+
+def test_invalid_evidence_does_not_echo_private_input():
+    evidence = evaluate(nm_managed='private-profile', dbus_enumerated='private-path')
+    assert evidence.status == 'unknown'
+    assert evidence.nm_enumerated is None and evidence.dbus_enumerated is None
+    assert 'private' not in repr(evidence)

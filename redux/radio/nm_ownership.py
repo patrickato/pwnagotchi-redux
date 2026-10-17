@@ -26,11 +26,14 @@ class OwnershipEvidence:
     permits_activation: bool = False
 
 
-def udev_ownership_policy(properties: str | None) -> str:
+def udev_ownership_policy(properties: str | None, *,
+                          supports_id_net_managed_by: bool | None = None) -> str:
     """Parse only two documented udev fields; reject ambiguity and duplicates.
 
     A udev policy is not proof that a running NetworkManager instance has
     applied it, so callers must still independently inspect NM's live state.
+    ID_NET_MANAGED_BY requires separately verified implementation support;
+    NetworkManager 1.42.4 does not implement it. Unknown support fails closed.
     """
     if properties is None or not isinstance(properties, str) or len(properties) > 32768:
         return "unknown"
@@ -47,34 +50,47 @@ def udev_ownership_policy(properties: str | None) -> str:
     if unmanaged is not None:
         if unmanaged.lower() in ("1", "true"):
             return "udev_requests_unmanaged_overridable"
-        if unmanaged.lower() not in ("0", "false", ""):
-            return "unknown"
+        if unmanaged.lower() in ("0", "false", ""):
+            # Presence takes precedence even when false; never fall through
+            # to ID_NET_MANAGED_BY after an explicit NM_UNMANAGED value.
+            return "udev_requests_managed"
+        return "unknown"
     controller = values.get("ID_NET_MANAGED_BY")
     if not controller:
         return "not_declared"
+    if supports_id_net_managed_by is not True:
+        return ("managed_by_unsupported" if supports_id_net_managed_by is False
+                else "managed_by_support_unverified")
     if controller == "org.freedesktop.NetworkManager":
         return "names_networkmanager"
     # A different manager label explicitly rules out NM under the documented
-    # udev behavior (when NM_UNMANAGED is not asserted).
+    # udev behavior (when NM_UNMANAGED is absent and support is verified).
     return "names_other_manager"
 
 
 def assess_ownership(*, nm_managed: bool | None, nm_state: int | None,
                      dbus_enumerated: bool | None, udev_properties: str | None,
-                     kernel_interface_present: bool) -> OwnershipEvidence:
+                     kernel_interface_present: bool,
+                     supports_id_net_managed_by: bool | None = None) -> OwnershipEvidence:
     """Classify one read-only observation without inferring negative ownership.
 
     D-Bus enumeration alone means NM knows a device; it is *not* its Managed
     property. Missing both nmcli and D-Bus never proves unmanaged.
     """
-    policy = udev_ownership_policy(udev_properties)
-    nmlist = nm_managed is not None
+    policy = udev_ownership_policy(
+        udev_properties, supports_id_net_managed_by=supports_id_net_managed_by)
+    nmlist = nm_managed is not None if type(nm_managed) in (bool, type(None)) else None
+    dbus_observed = dbus_enumerated if type(dbus_enumerated) in (bool, type(None)) else None
     def outcome(status: str, reason: str) -> OwnershipEvidence:
-        return OwnershipEvidence(status, nmlist, dbus_enumerated, policy, reason)
+        return OwnershipEvidence(status, nmlist, dbus_observed, policy, reason)
     if kernel_interface_present is not True:
         return outcome("no_kernel_interface", "No observed netdevice to classify.")
     if type(nm_managed) not in (bool, type(None)) or type(dbus_enumerated) not in (bool, type(None)):
         return outcome("unknown", "Invalid NM evidence.")
+    if nm_state is not None and (type(nm_state) is not int or nm_state < 0):
+        return outcome("unknown", "Invalid NM state evidence.")
+    if nm_managed is True and dbus_enumerated is False:
+        return outcome("inconsistent", "NM managed=yes conflicts with D-Bus enumeration.")
     if nm_managed is True:
         return outcome("nm_managed", "NetworkManager explicitly reports managed=yes.")
     if nm_managed is False:
