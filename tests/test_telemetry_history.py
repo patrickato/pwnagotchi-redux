@@ -160,3 +160,33 @@ def test_five_page_swipe_wraps_correctly():
     assert touch_nav.navigate("radios", 1) == "trends"
     assert touch_nav.navigate("trends", 1) == "overview"
     assert touch_nav.navigate("overview", -1) == "trends"
+
+
+def test_native_refresh_loop_accumulates_real_status_samples(monkeypatch):
+    responses = [report(1000, events=2), report(1002, events=6)]
+    shown = []
+    monkeypatch.setattr(fbui, "framebuffer_info",
+                        lambda *_a: {"ok": True, "stride": 960})
+    monkeypatch.setattr(fbui, "read_status", lambda *_a: responses.pop(0))
+    monkeypatch.setattr(fbui.time, "time", iter((1000, 1002)).__next__)
+    monkeypatch.setattr(fbui.time, "monotonic", iter((0, 3)).__next__)
+    renderer = fbui.render
+    def draw(record, *, page, **kw):
+        assert page == "trends"
+        shown.append(kw.get("trends"))
+        return renderer(record, page=page, **kw)
+    monkeypatch.setattr(fbui, "render", draw)
+    monkeypatch.setattr(fbui, "rgb565_bytes", lambda *_a, **_k: b"frame")
+    writes = []
+    def writer(*_a):
+        writes.append(1)
+        if len(writes) == 2:
+            raise RuntimeError("finished synthetic loop")
+    monkeypatch.setattr(fbui, "write_frame", writer)
+    with pytest.raises(RuntimeError, match="finished synthetic loop"):
+        fbui.main(["--framebuffer", "/dev/fb1", "--run", "--page", "trends"])
+    assert shown[0]["points"] == []
+    assert shown[0]["state"] == "ONE SAMPLE"
+    assert shown[1]["state"] == "TRACKING"
+    assert shown[1]["last"]["events_per_min"] == 120
+    assert len(writes) == 2
