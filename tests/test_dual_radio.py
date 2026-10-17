@@ -120,3 +120,45 @@ def test_split_data_is_pure_and_does_not_touch_input_state():
     assert plan(radios=radios, evidence=evidence).state == "receive_verified"
     assert radios == [ONBOARD, ALFA]
     assert evidence == {"wlan0": MGMT, "wlan1": RX}
+
+
+def test_verified_ethernet_uplink_allows_separate_usb_capture_without_wifi_uplink():
+    field_primary = RadioEvidence("phy0", mode="monitor", arphrd=1,
+                                  decoded_frames=None, owner_verified=True,
+                                  management_connected=False)
+    observations = {"wlan0": field_primary, "wlan1": RX}
+    result = plan_dual_radio((ONBOARD, ALFA), observations,
+                             ethernet_management_verified=True)
+    assert result.state == "receive_verified"
+    assert result.management_path == "verified_ethernet"
+    assert result.capture_iface == "wlan1"
+    assert result.management_iface == "wlan0"  # onboard still reserved
+    assert result.activation_authorized is False
+
+
+def test_unproven_ethernet_route_never_unlocks_capture_candidate():
+    field_primary = RadioEvidence("phy0", mode="monitor", owner_verified=True)
+    observations = {"wlan0": field_primary, "wlan1": RX}
+    for proof in (False, None, "true", 1):
+        result = plan_dual_radio((ONBOARD, ALFA), observations,
+                                 ethernet_management_verified=proof)
+        assert result.state == "blocked"
+        assert result.capture_iface is None
+
+
+def test_ethernet_management_still_requires_distinct_external_phy():
+    onboard = RadioEvidence("phy0", mode="monitor", owner_verified=True)
+    same_phy_usb = Radio("wlan1", phy="phy0", monitor=True, usb_gen=3)
+    result = plan_dual_radio(
+        (ONBOARD, same_phy_usb),
+        {"wlan0": onboard, "wlan1": RX},
+        ethernet_management_verified=True)
+    assert result.state == "blocked"
+    assert result.activation_authorized is False
+
+
+def test_verified_onboard_uplink_preferred_if_both_routes_exist():
+    result = plan_dual_radio((ONBOARD, ALFA),
+                             {"wlan0": MGMT, "wlan1": RX},
+                             ethernet_management_verified=True)
+    assert result.management_path == "onboard_wifi"
