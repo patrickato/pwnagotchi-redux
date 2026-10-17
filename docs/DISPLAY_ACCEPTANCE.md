@@ -203,6 +203,31 @@ automatic touch calibration, physically qualified swipe accuracy, frame timing,
 backlight control or cross-board graphics compatibility. Those are follow-on
 features, not green gates today.
 
+## Measured capture processing on the native TFT
+
+The Captures page now uses the existing `capture_processing` object from the
+local Redux status API, which is derived from the **SQLite worker ledger**.
+Its three numeric counters are *PREPARED* (cumulative ledger rows with status
+`ready`), *FAILED* (cumulative rows with status `error`) and *HASH ROWS*
+(the ledger's count of structurally accepted format-22000 records). None of
+these counts means a password has been recovered. They are historical ledger
+totals, not per-second radio activity.
+
+The lower panel distinguishes ledger availability from the age of the last
+worker scan. A fresh runtime reading older than 20 seconds is STALE, and its
+ledger counters are suppressed. Even if the runtime is fresh, a worker scan
+older than five minutes is independently STALE; old per-pass results are
+suppressed. A recent scan shows files examined plus per-pass ready, failed and
+deferred outcomes where measured. Unknown counters are shown as `--`, never
+fabricated zeros. A successfully opened ledger without any recorded scan
+reports NO COMPLETED SCAN.
+
+This is a read-only UI. The numbers originate in the same live-status payload
+already used by Redux. The screen never opens captures, the SQLite database,
+or the radio. It does not qualify actual native 802.11 reception or the
+correctness of captured handshakes. The changes remain **source-only** until a
+subsequent signed image is built, flashed and physically accepted.
+
 ## Hardware-free exact TFT screenshots (new source tool)
 
 The source tree now provides `python3 -m redux.display.preview` (or
