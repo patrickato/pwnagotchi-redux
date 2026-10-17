@@ -245,7 +245,8 @@ def render(report, *, page="overview", now=None):
     """Pillow RGB image, no placeholder activity, no radio-facing operations."""
     from PIL import Image, ImageDraw
     data = status_view(report, now=now)
-    if page not in ("overview", "captures", "doctor"):
+    from .gesture_nav import PAGES
+    if page not in PAGES:
         raise ValueError("unknown framebuffer page")
     img = Image.new("RGB", RESOLUTION, BACKGROUND)
     px = img.load()
@@ -286,6 +287,24 @@ def render(report, *, page="overview", now=None):
         metric(20, "PREPARED", compact_count(capture["ready"]))
         metric(180, "FAILED", compact_count(capture["errors"]))
         metric(350, "HASH ROWS", compact_count(capture["hash_records"]))
+    elif page == "radios":
+        from .radio_panel import model as radio_model
+        radios = radio_model(report, now=now)
+        radio_capture = radios["capture"]
+        draw.text((20, 160), "CURRENT CAPTURE / " + radio_capture["iface"],
+                  font=_font(13, bold=True), fill=INK)
+        draw.text((20, 183), radio_capture["state"] + " / " + radio_capture["framing"],
+                  font=_font(11), fill=SUBTLE)
+        draw.text((20, 204), "KERNEL TYPE " +
+                  (str(radio_capture["link"]) if radio_capture["link"] is not None else "--") +
+                  " / RX UNVERIFIED", font=_font(11), fill=AMBER)
+        draw.line((18, 229, 462, 229), fill=(36, 57, 69), width=1)
+        usb = radios["usb"]
+        draw.text((20, 241), "USB / " + usb["state"] + "  " + usb["driver"],
+                  font=_font(12, bold=True), fill=INK if usb["state"] == "OBSERVED" else AMBER)
+        draw.text((20, 267), "MODE " + usb["mode"] + " / LINK " +
+                  (str(usb["link"]) if usb["link"] is not None else "--") +
+                  " / RX UNVERIFIED", font=_font(10), fill=SUBTLE)
     else:
         draw.text((20, 160), "DOCTOR / ACTIONABLE FINDINGS",
                   font=_font(12, bold=True), fill=SUBTLE)
@@ -395,7 +414,8 @@ def main(argv=None):
     parser.add_argument("--framebuffer", required=True,
                         help="actual verified /dev/fbN from redux-display-diag")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--page", choices=("overview", "captures", "doctor"),
+    from .gesture_nav import PAGES
+    parser.add_argument("--page", choices=PAGES,
                         default="overview")
     parser.add_argument("--order", choices=("rgb565", "bgr565"), default="rgb565",
                         help="manually validated panel pixel order")
