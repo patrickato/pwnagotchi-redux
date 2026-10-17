@@ -92,3 +92,20 @@ def model(report, *, now=None):
                 last_deferred=(sum(outcomes.get(k, 0) for k in
                                    ("deferred", "deferred_low_storage"))))
     return base
+
+
+def compact_count(value):
+    """Bound TFT numeric width; UNKNOWN is never rendered as zero."""
+    value = _count(value)
+    if value is None:
+        return "--"
+    if value < 10_000:
+        return str(value)
+    for scale, suffix in ((10**12, "T"), (10**9, "B"),
+                          (10**6, "M"), (10**3, "K")):
+        if value >= scale:
+            display = value / scale
+            if display >= 999.5:
+                return "999+T" if suffix == "T" else f"999+{suffix}"
+            return f"{display:.1f}{suffix}" if display < 10 else f"{display:.0f}{suffix}"
+    return str(value)
