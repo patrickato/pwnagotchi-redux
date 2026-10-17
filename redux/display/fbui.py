@@ -281,9 +281,11 @@ def render(report, *, page="overview", now=None):
         metric(180, "FILE HANDOFFS", value(data["handoffs"]))
         metric(352, "FREE MB", value(data["storage_mb"]))
     elif page == "captures":
-        metric(20, "PREPARED", value(data["processed"]))
-        metric(180, "FAILED", value(data["errors"]))
-        metric(352, "HANDOFFS", value(data["handoffs"]))
+        from .capture_panel import model as capture_model, compact_count
+        capture = capture_model(report, now=now)
+        metric(20, "PREPARED", compact_count(capture["ready"]))
+        metric(180, "FAILED", compact_count(capture["errors"]))
+        metric(350, "HASH ROWS", compact_count(capture["hash_records"]))
     else:
         draw.text((20, 160), "DOCTOR / ACTIONABLE FINDINGS",
                   font=_font(12, bold=True), fill=SUBTLE)
@@ -305,7 +307,25 @@ def render(report, *, page="overview", now=None):
                        else "No verified findings")
             draw.text((20, 194), message, font=_font(12), fill=SUBTLE)
 
-    if page != "doctor":
+    if page == "captures":
+        draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
+        status = capture["ledger"]
+        scan = capture["scan_state"]
+        indicator = RED if status != "AVAILABLE" else SUBTLE
+        draw.text((20, 247), "LEDGER / " + status,
+                  font=_font(11, bold=True), fill=indicator)
+        scan_label = "WORKER / " + scan
+        if scan == "RECENT":
+            scan_label += f" / {capture['scan_age_seconds']}s ago"
+        draw.text((20, 266), scan_label, font=_font(11), fill=SUBTLE)
+        if scan == "RECENT":
+            draw.text((20, 282),
+                      "PASS " + compact_count(capture["scan_files"]) +
+                      " FILES   READY " + compact_count(capture["last_ready"]) +
+                      "   ERROR " + compact_count(capture["last_errors"]) +
+                      "   DEFER " + compact_count(capture["last_deferred"]),
+                      font=_font(9), fill=SUBTLE)
+    elif page == "overview":
         draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
         draw.text((20, 250), "DOCTOR / " + data["finding"], font=_font(12, bold=True), fill=accent)
         draw.text((20, 272), data["detail"], font=_font(10), fill=SUBTLE)
