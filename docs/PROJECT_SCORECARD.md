@@ -11,7 +11,7 @@
 
 The native 480×320 renderer now has **five** pages: Overview, Captures,
 Doctor, Radios and **Trends**. The Trends page uses the *existing* Augur
-runtime counters to build a private, bounded 48-sample, five-minute history
+runtime counters to build a private, bounded 151-sample, five-minute history
 of actual status events, handshake-event notifications and completed file
 handoffs. It discards stale/duplicate data, counter rollback, engine changes,
 unexpected gaps and malformed measurements; it **never** labels these counts
