@@ -33,6 +33,32 @@ def _safe_label(value, pattern):
     return value if isinstance(value, str) and pattern.fullmatch(value) else "UNKNOWN"
 
 
+def _historical(payload):
+    """Render offline evidence as SAVED, never as CURRENT or receive-qualified."""
+    if (not isinstance(payload, dict) or payload.get("schema") != 1
+            or payload.get("source") != "historical_readonly_acceptance"):
+        return None
+    rows = payload.get("radios")
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 4:
+        return None
+    selected = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        transport = row.get("transport")
+        driver = row.get("driver")
+        arphrd = _link(row.get("arphrd"))
+        mode = row.get("mode")
+        if (transport not in ("onboard", "usb") or transport in selected
+                or not isinstance(driver, str) or not _DRIVER.fullmatch(driver)
+                or arphrd is None or mode not in ("MONITOR", "MANAGED", "UNKNOWN")):
+            return None
+        selected[transport] = {"state": "SAVED", "driver": driver,
+                               "mode": mode, "link": arphrd,
+                               "reception": "UNVERIFIED"}
+    return selected
+
+
 def model(report, *, now=None):
     """Display only current measured metadata; leave reception unverified.
 
@@ -72,6 +98,10 @@ def model(report, *, now=None):
     onboard = {"state": "NOT REPORTED", "driver": "UNKNOWN",
                "mode": "UNKNOWN", "link": None, "reception": "UNVERIFIED"}
     if not isinstance(inventory, dict) or inventory.get("schema") != 1:
+        history = _historical(root.get("radio_acceptance_snapshot"))
+        if history is not None:
+            return {"capture": capture, "onboard": history.get("onboard", onboard),
+                    "usb": history.get("usb", usb), "inventory": "SAVED SNAPSHOT"}
         return {"capture": capture, "onboard": onboard, "usb": usb,
                 "inventory": "NOT REPORTED"}
     sampled = _clock(inventory.get("sampled_utc"))
