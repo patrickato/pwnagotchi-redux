@@ -82,6 +82,42 @@ qualified. This first native implementation provides swipe navigation
 only; its systemd service intentionally leaves touch **off** until the
 operator separately validates input and decides to enable it.
 
+### Offline five-tap calibration preparation
+
+There is now a small companion command,
+`python3 -m redux.display.calibration_wizard`
+(`redux-touch-calibrate` when installed as a Python entry point).
+It can convert a **measured**, existing `redux-display-diag` report into a
+candidate `touch-calibration.json` without hand-entering raw coordinates.
+
+Use `redux-display-diag --touch-device /dev/input/eventN --seconds 15`
+on the Pi **only after the selected event node and physical panel have
+been independently verified and the touch observation is approved**.
+During its sampling window, touch and release precisely **five times in
+this order: top-left, top-right, bottom-left, bottom-right, center**.
+Copy the produced JSON report to the trusted laptop through an approved
+read-only workflow. Do not publish it, or the touch coordinates, in the
+public repository.
+
+From the source checkout on the laptop, with that JSON already available:
+
+```sh
+out="$HOME/redux-touch-candidate-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$out"
+python3 -m redux.display.calibration_wizard \
+  --report /absolute/path/to/display-report.json \
+  --output-dir "$out" --confirm-order
+```
+
+Only use `--confirm-order` when the five physical taps were actually
+performed in the documented order. The tool requires exactly five complete
+raw samples, independently measured axis bounds, no SYN_DROPPED events,
+and a consistent 480×320 geometric mapping. It refuses to overwrite
+an existing file, uses mode 0600, and **never** automatically enables touch.
+The resulting file is compatible with `--calibration-file` described below,
+but requires a separately approved deployment and direct physical validation.
+The tool's output always marks hardware acceptance as pending.
+
 ### Calibrated touchscreen tabs — source-only until a new image is qualified
 
 The native 480×320 dashboard now draws three footer tabs: **Overview**,
