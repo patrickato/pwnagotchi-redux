@@ -85,6 +85,15 @@ def model(report, *, now=None):
                                   _count(v) is None for k, v in outcomes.items()):
         base["scan_state"] = "INVALID"
         return base
+    if outcomes.get("paused_low_storage") is not None:
+        if outcomes != {"paused_low_storage": 1} or scanned != 0:
+            base["scan_state"] = "INVALID"
+            return base
+        base.update(scan_state="PAUSED STORAGE", scan_age_seconds=round(max(0, age)))
+        return base
+    if sum(outcomes.values()) != scanned:
+        base["scan_state"] = "INVALID"
+        return base
     base.update(scan_state="RECENT", scan_files=scanned,
                 scan_age_seconds=round(max(0, age)),
                 last_ready=_count(outcomes.get("ready")),
