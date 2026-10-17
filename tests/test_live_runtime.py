@@ -596,6 +596,8 @@ def test_readonly_radio_inventory_provider_is_cached_and_attached(tmp_path, monk
         clock=lambda: clock[0], radio_inventory_provider=provider)
     try:
         runtime._checkpoint()
+        runtime._radio_inventory_thread.join(timeout=2)
+        assert not runtime._radio_inventory_thread.is_alive()
         assert calls == [100.0]
         assert runtime._snapshot["radio_inventory"]["radios"][0]["iface"] == "wlan0"
         clock[0] = 105.0
@@ -603,6 +605,8 @@ def test_readonly_radio_inventory_provider_is_cached_and_attached(tmp_path, monk
         assert calls == [100.0]
         clock[0] = 110.0
         runtime._checkpoint()
+        runtime._radio_inventory_thread.join(timeout=2)
+        assert not runtime._radio_inventory_thread.is_alive()
         assert calls == [100.0, 110.0]
         assert runtime._snapshot["radio_inventory"]["sampled_utc"] == 1010.0
     finally:
@@ -624,9 +628,13 @@ def test_failed_radio_inventory_refresh_keeps_timestamped_sample_not_freshening_
         clock=lambda: clock[0], radio_inventory_provider=provider)
     try:
         runtime._checkpoint()
+        runtime._radio_inventory_thread.join(timeout=2)
+        assert not runtime._radio_inventory_thread.is_alive()
         first = runtime._snapshot["radio_inventory"]
         clock[0] = 110.0
         runtime._checkpoint()
+        runtime._radio_inventory_thread.join(timeout=2)
+        assert not runtime._radio_inventory_thread.is_alive()
         assert calls == [100.0, 110.0]
         assert runtime._snapshot["radio_inventory"] is first
         assert runtime._snapshot["radio_inventory"]["sampled_utc"] == 1000.0
