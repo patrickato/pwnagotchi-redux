@@ -93,3 +93,25 @@ def test_swipe_navigation_includes_fourth_page_and_wraps():
     assert touch_nav.navigate("doctor", 1) == "radios"
     assert touch_nav.navigate("radios", 1) == "trends"
     assert touch_nav.navigate("overview", -1) == "trends"
+
+
+def test_radio_tft_shows_bettercap_onboard_and_usb_rows_separately(monkeypatch):
+    import PIL.ImageDraw as image_draw
+    labels = []
+    real_draw = image_draw.Draw
+    class Recorder:
+        def __init__(self, image):
+            self.inner = real_draw(image)
+        def text(self, xy, label, *args, **kwargs):
+            labels.append(label)
+            return self.inner.text(xy, label, *args, **kwargs)
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+    monkeypatch.setattr(image_draw, "Draw", Recorder)
+    frame = fbui.render(measured(), page="radios", now=1001)
+    assert frame.size == (480, 320)
+    assert "BETTERCAP / wlan0" in labels
+    assert "ONBOARD / OBSERVED / brcmfmac" in labels
+    assert "MODE MONITOR / LINK 1 / RX UNVERIFIED" in labels
+    assert "USB / OBSERVED / mt76x2u" in labels
+    assert "MODE MONITOR / LINK 803 / RX UNVERIFIED" in labels
