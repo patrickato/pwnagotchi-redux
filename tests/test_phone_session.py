@@ -131,11 +131,23 @@ def test_disabling_connected_phone_disconnects_before_poweroff():
         PhoneIntent.DISCONNECT, PhoneIntent.DISABLE_ADAPTER)
 
 
-@pytest.mark.parametrize("now", [-1, True, None, "12", math.inf, math.nan, -math.inf])
+@pytest.mark.parametrize("now", [
+    -1, True, None, "12", math.inf, math.nan, -math.inf,
+    1e308, 10 ** 2000, 1_000_000_000_001,
+])
 def test_invalid_clocks_fail_closed(now):
     p = PhoneSession()
     with pytest.raises(ValueError):
         p.enable(now=now)
+
+
+def test_extreme_clocks_cannot_extend_discoverability_forever():
+    p = PhoneSession()
+    p.enable(now=1)
+    with pytest.raises(ValueError):
+        p.open_pairing(owner_authorized=True, now=1e308)
+    assert p.phase is PhonePhase.IDLE
+    assert p.status(now=2)["discoverable"] is False
 
 
 def test_monotonic_clock_rollbacks_are_not_accepted():
