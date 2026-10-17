@@ -64,14 +64,22 @@ def plan_transition(old_roles: dict, new_roles: dict, gone=None) -> list:
 
 
 def _iw_apply(action: Action) -> None:
-    """Live applier (hardware). No-op where iw/ip are absent."""
+    """Apply a requested mode only if every bounded OS command succeeds.
+
+    Never claim success when iw/ip are absent, time out, or reject a mode.
+    The caller marks a partially applied transition out of sync, so later
+    commands cannot silently compound the error without re-probing.
+    """
     import subprocess
 
     def run(*args):
         try:
-            subprocess.run(list(args), check=False, capture_output=True)
-        except FileNotFoundError:
-            pass
+            completed = subprocess.run(
+                list(args), check=False, capture_output=True, timeout=8)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("radio interface operation unavailable or timed out") from exc
+        if completed.returncode != 0:
+            raise RuntimeError("radio interface operation rejected by kernel/driver")
 
     if action.mode is Mode.MONITOR:
         run("ip", "link", "set", action.iface, "down")
@@ -97,6 +105,7 @@ class RadioManager:
         self._intent = Intent(intent)
         self._applier = applier or _iw_apply
         self._assignment = decide(self._radios.values(), self._intent)
+        self._out_of_sync = False
 
     @property
     def assignment(self):
@@ -106,31 +115,51 @@ class RadioManager:
     def intent(self):
         return self._intent
 
-    def _recompute(self, gone=None) -> list:
-        old = dict(self._assignment.roles)
-        self._assignment = decide(list(self._radios.values()), self._intent)
-        actions = plan_transition(old, self._assignment.roles, gone=gone)
-        for a in actions:
-            self._applier(a)
+    @property
+    def out_of_sync(self) -> bool:
+        """A previous mode command failed; re-probe hardware before reuse."""
+        return self._out_of_sync
+
+    def _apply_actions(self, actions: list) -> None:
+        if self._out_of_sync:
+            raise RuntimeError("radio state unverified after failed transition; re-probe required")
+        try:
+            for action in actions:
+                self._applier(action)
+        except Exception as exc:
+            self._out_of_sync = True
+            raise RuntimeError("radio transition incomplete; re-probe required") from exc
+
+    def _recompute(self, gone=None, *, radios=None, intent=None) -> list:
+        if self._out_of_sync:
+            raise RuntimeError("radio state unverified after failed transition; re-probe required")
+        proposed_radios = dict(self._radios) if radios is None else dict(radios)
+        proposed_intent = self._intent if intent is None else Intent(intent)
+        new_assignment = decide(list(proposed_radios.values()), proposed_intent)
+        actions = plan_transition(self._assignment.roles, new_assignment.roles, gone=gone)
+        self._apply_actions(actions)
+        # Commit the in-memory plan *only after* all applier calls succeeded.
+        self._radios = proposed_radios
+        self._intent = proposed_intent
+        self._assignment = new_assignment
         return actions
 
     def realize(self) -> list:
-        """Apply the current assignment from a clean slate (e.g. at boot)."""
+        """Apply current plan from a clean slate; stop on incomplete execution."""
         actions = plan_transition({}, self._assignment.roles)
-        for a in actions:
-            self._applier(a)
+        self._apply_actions(actions)
         return actions
 
     def set_intent(self, intent) -> list:
-        self._intent = Intent(intent)
-        return self._recompute()
+        return self._recompute(intent=Intent(intent))
 
     def add_radio(self, radio) -> list:
-        """Hotplug: a radio appeared. Promotion falls out of `decide`."""
-        self._radios[radio.iface] = radio
-        return self._recompute()
+        """Hotplug: do not publish a new assignment before hardware succeeds."""
+        radios = dict(self._radios)
+        radios[radio.iface] = radio
+        return self._recompute(radios=radios)
 
     def remove_radio(self, iface) -> list:
-        """Hotplug: a radio was removed. Graceful fallback falls out of `decide`."""
-        self._radios.pop(iface, None)
-        return self._recompute(gone={iface})
+        radios = dict(self._radios)
+        radios.pop(iface, None)
+        return self._recompute(radios=radios, gone={iface})
