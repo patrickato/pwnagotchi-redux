@@ -235,6 +235,38 @@ The pending independent live-status supplier remains a separate hardware
 and runtime integration gate; this screenshot tool is not that supplier.
 Do not share captured identifiers or the unreviewed raw report publicly.
 
+## Engine telemetry trends — real counters, no invented RF
+
+The native TFT now includes a fifth page, **Trends**, with five equal
+96-pixel footer tabs (Overview / Captures / Doctor / Radios / Trends).
+Calibrated taps and horizontal swipes share the same page order.
+
+Trends reads the ordinary existing Redux status API's `runtime` fields:
+`updated_utc`, `events_seen`, `handshake_events`, `handed_off`,
+`state`, `iface`, and optionally `pid`. This is **live engine
+counter telemetry**, not a monitor-mode packet decoder, crack success
+indicator, or evidence that Bettercap received valid 802.11 frames.
+
+A source-only 48-sample volatile ring computes **observed counter differences
+divided by actual sample time** and displays event, handshake-event and
+handoff rates per minute in a fixed five-minute graph. There are no seeded
+points, artificial wiggles, or archived files. Counters must be valid
+nonnegative integers and the snapshot must be fresh. Duplicate timestamps
+never create a second interval. When engine identity changes, counters
+decrease, runtime exits running, samples become stale, or gaps exceed
+45 seconds, the trend restarts instead of connecting unrelated periods.
+There is no persistence or continuous sensor processing between UI polls.
+The graph is empty until **two distinct qualifying samples** arrive, and
+clears after an unacceptable reading.
+
+The `python3 -m redux.display.preview --page trends ...` path uses the
+identical renderer and honestly says NO VERIFIED RATE HISTORY because a
+single saved status record cannot establish a real rate. Live progression
+requires the intentionally enabled framebuffer `--run` loop and a real
+accessible loopback status source. The screenshot tool does not generate
+mock data to make a graph look populated. The still-unqualified 480×320
+TFT and touch hardware do not become validated by these tests.
+
 ## Scrollable Doctor findings on the 480×320 panel
 
 The native Doctor screen is no longer limited to its first three diagnostic
