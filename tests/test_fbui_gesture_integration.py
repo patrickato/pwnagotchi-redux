@@ -42,7 +42,7 @@ def test_calibrated_tap_redraws_selected_page_without_opening_radio(tmp_path, mo
                         lambda *_a: {"ok": True, "stride": 960})
     monkeypatch.setattr(fbui, "read_status", lambda *_a: None)
     pages = []
-    monkeypatch.setattr(fbui, "render", lambda *_a, page: pages.append(page) or object())
+    monkeypatch.setattr(fbui, "render", lambda *_a, page, **_kw: pages.append(page) or object())
     monkeypatch.setattr(fbui, "rgb565_bytes", lambda *_a, **_k: b"frame")
     writes = []
     def writer(_device, _frame):
