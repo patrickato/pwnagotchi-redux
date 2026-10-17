@@ -23,7 +23,7 @@ def contact(start, end=None, *, prepress=False):
     return begin + ev(EV_SYN, 0, 0) + pos(end) + ev(EV_KEY, BTN_TOUCH, 0)
 
 
-@pytest.mark.parametrize("x,page", [(35, "overview"), (175, "captures"), (295, "doctor"), (423, "radios")])
+@pytest.mark.parametrize("x,page", [(35, "overview"), (175, "captures"), (245, "doctor"), (335, "radios"), (423, "trends")])
 def test_footer_taps_select_exact_pages(x, page):
     tracker = NavigationGestures(calibration(), physically_verified=True)
     actions, tail = consume_gestures(contact((x, 308)), tracker)
@@ -49,7 +49,7 @@ def test_swipes_have_screen_relative_direction(dx, step):
 def test_rotation_180_maps_visible_footer_and_swipes():
     tracker = NavigationGestures(calibration(), physically_verified=True, rotation=180)
     # Physical top-left is displayed logical bottom-right after screen rotation.
-    assert consume_gestures(contact((55, 11)), tracker)[0] == [("page", "radios")]
+    assert consume_gestures(contact((55, 11)), tracker)[0] == [("page", "trends")]
     assert consume_gestures(contact((320, 170), (120, 170)), tracker)[0] == [
         ("swipe", -1)]
 
@@ -91,7 +91,7 @@ def test_fragmented_read_and_duplicate_release():
     actions, fragment = consume_gestures(data[:13], tracker)
     assert actions == []
     actions, fragment = consume_gestures(fragment + data[13:], tracker)
-    assert actions == [("page", "radios")] and fragment == b""
+    assert actions == [("page", "trends")] and fragment == b""
     assert consume_gestures(ev(EV_KEY, BTN_TOUCH, 0), tracker)[0] == []
 
 
