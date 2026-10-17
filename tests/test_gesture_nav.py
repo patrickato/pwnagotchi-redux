@@ -65,9 +65,11 @@ def test_syn_dropped_aborts_contact_and_does_not_reuse_coordinates():
     tracker = NavigationGestures(calibration(), physically_verified=True)
     data = (ev(EV_KEY, BTN_TOUCH, 1) + ev(EV_ABS, ABS_X, 30) +
             ev(EV_ABS, ABS_Y, 309) + ev(EV_SYN, 3, 0) +
-            contact((240, 309)))
+            ev(EV_KEY, BTN_TOUCH, 1) + ev(EV_ABS, ABS_X, 240) +
+            ev(EV_ABS, ABS_Y, 309) + ev(EV_KEY, BTN_TOUCH, 0))
     assert consume_gestures(data, tracker)[0] == []
     assert tracker.desynced
+    # SYN_REPORT resynchronizes, and only a fresh contact then qualifies.
     assert consume_gestures(ev(EV_SYN, 0, 0) +
                             contact((240, 309)), tracker)[0] == [
         ("page", "captures")]
