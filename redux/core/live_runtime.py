@@ -306,6 +306,9 @@ class LiveRuntime:
         self.radio_inventory_provider = radio_inventory_provider
         self._radio_inventory = None
         self._radio_inventory_sampled_at = float("-inf")
+        self._radio_inventory_lock = threading.Lock()
+        self._radio_inventory_inflight = False
+        self._radio_inventory_thread = None
         self.executor = executor
         self.spawn = spawn
         self.clock = clock
@@ -454,22 +457,40 @@ class LiveRuntime:
                     and capture_mount_snapshot() == self.capture_mount_identity))
 
     def _refresh_radio_inventory(self, now):
-        """Sample optional read-only radio metadata no more often than every 10s."""
+        """Schedule bounded read-only radio sampling off the capture supervisor loop."""
         provider = self.radio_inventory_provider
         if provider is None:
             return
-        if now >= self._radio_inventory_sampled_at and now - self._radio_inventory_sampled_at < 10:
-            return
-        self._radio_inventory_sampled_at = now
-        try:
-            sample = provider()
-            if not isinstance(sample, dict) or sample.get("schema") != 1:
-                raise ValueError("invalid radio inventory sample")
-            self._radio_inventory = sample
-        except Exception as error:
-            # Keep the last timestamped sample. The UI itself expires it after
-            # 20 seconds, so a failed refresh cannot make old hardware look live.
-            _LOG.debug("read-only radio inventory unavailable: %s", type(error).__name__)
+        with self._radio_inventory_lock:
+            if self._radio_inventory_inflight:
+                return
+            if (now >= self._radio_inventory_sampled_at
+                    and now - self._radio_inventory_sampled_at < 10):
+                return
+            self._radio_inventory_sampled_at = now
+            self._radio_inventory_inflight = True
+
+        def sample_once():
+            try:
+                sample = provider()
+                if not isinstance(sample, dict) or sample.get("schema") != 1:
+                    raise ValueError("invalid radio inventory sample")
+                with self._radio_inventory_lock:
+                    self._radio_inventory = sample
+            except Exception as error:
+                # Keep the last timestamped sample. The UI expires it after
+                # 20s; a failed refresh cannot make old hardware look live.
+                _LOG.debug("read-only radio inventory unavailable: %s",
+                           type(error).__name__)
+            finally:
+                with self._radio_inventory_lock:
+                    self._radio_inventory_inflight = False
+
+        worker = threading.Thread(target=sample_once, daemon=True,
+                                  name="redux-radio-inventory")
+        with self._radio_inventory_lock:
+            self._radio_inventory_thread = worker
+        worker.start()
 
     def _observe(self, emission):
         event = emission.payload.get("event")
@@ -597,8 +618,10 @@ class LiveRuntime:
         metadata["health"] = health["overall"]
         metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])
         snapshot["doctor"] = health
-        if self._radio_inventory is not None:
-            snapshot["radio_inventory"] = self._radio_inventory
+        with self._radio_inventory_lock:
+            radio_inventory = self._radio_inventory
+        if radio_inventory is not None:
+            snapshot["radio_inventory"] = radio_inventory
         self._snapshot = snapshot
         if mount_ok and (self.state != self.saved_state or self.clock() - self.last_saved >= 5):
             try:
