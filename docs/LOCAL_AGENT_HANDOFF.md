@@ -293,3 +293,16 @@ would expose a host with LAN access and SSH credentials to untrusted
 workflow code. If a future automated chat-to-LAN job queue is needed,
 design it in a separate private, narrowly scoped control plane with
 independent security review rather than exposing a general shell.
+
+## Latest supervised f4f83c0 attempt — 2026-10-17
+
+A new explicitly approved single attempt passed fresh preflight and the
+measured NM managed/DOWN isolation. It stopped at the post-create temporary
+interface gate **before activation or reception sampling**. Planned cleanup
+fully verified restoration: original wlan0 monitor/UP/type1/firmware0,
+NM yes/state20, fresh active Redux, strict Ethernet/US/storage preserved.
+Independent summary at 2026-10-17T13:03:35Z passed service/transport baseline;
+native reception remains unproven. The combined temporary gate did not log
+its individual measurements, so its precise failed predicate is UNKNOWN.
+No retries or extra recovery. This approval is consumed; see
+[NATIVE_VIF_TRIAL_20261017.md](NATIVE_VIF_TRIAL_20261017.md).
