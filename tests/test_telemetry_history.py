@@ -94,17 +94,17 @@ def test_broken_sample_clocks_fail_closed(time_value):
 
 def test_bounded_memory_and_five_minute_immutable_rate_history():
     h = history.TelemetryWindow()
-    for i in range(100):
+    for i in range(200):
         at = 1000 + 2 * i
         assert h.ingest(report(at, events=i * 2), now=at)
-    assert len(h.samples) == 48
-    assert len(h.rates) == 47
+    assert len(h.samples) == 151
+    assert len(h.rates) == 150
     snapshot = h.snapshot(now=1198)
-    assert len(snapshot["points"]) == 47
+    assert len(snapshot["points"]) == 150
     assert all(0 <= row["age_seconds"] <= 300 for row in snapshot["points"])
     assert snapshot["last"]["events_per_min"] == 60
     snapshot["points"].clear()
-    assert len(h.rates) == 47
+    assert len(h.rates) == 150
 
 
 def test_discontinuous_time_or_broken_engine_never_carries_old_rates():
