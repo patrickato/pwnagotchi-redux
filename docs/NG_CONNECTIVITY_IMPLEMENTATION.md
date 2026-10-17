@@ -144,3 +144,105 @@ Both of the newly committed Redux modules above were written for
 Redux rather than copying third-party implementation. If specific
 GPL-licensed upstream code is later copied, retain notices and
 attribution and review dependency licenses.
+
+## Independent integration stage — 2026-10-17
+
+Implemented source-only, with synthetic tests in
+`tests/test_connectivity_integration.py`:
+
+- `redux/radio/split_integration.py` binds read-only iw capability output,
+  *per-interface* measured bus metadata and independent RadioEvidence to the
+  split planner. `bind_probe_observations` preserves extra VIFs instead of
+  collapsing them behind the legacy preferred monitor name. All interfaces
+  must have fresh, matching PHY/mode and positive ifindex; unknown transport,
+  duplicate PHY/index, missing management or stale evidence blocks the plan.
+  Explicit owner roles distinguish NM management from exclusive capture;
+  a generic owner_verified flag cannot qualify an NM-owned USB adapter.
+  Injection guesses are discarded. The caller must independently measure
+  bus attachment and bound snapshot age; no periodic live collector is installed.
+- Capture leases pin iface/PHY/ifindex and exclusive measured ownership;
+  `lease_present` rejects removal, name reuse, shared capture PHY, ownership
+  loss, non-native framing or lost management verification. It never chooses
+  a fallback. Rebuilding a lease requires requalification, including fresh
+  Ethernet proof rather than trusting a previous SplitPlan label.
+- Capability probe now resolves the sysfs device symlink before walking USB
+  parents. Nonfinite, negative and pre-USB2 speeds no longer claim USB2/3.
+  Driver-name inference of onboard status in the older probe is still a
+  heuristic; the measured bridge uses explicit transport evidence instead.
+- Split inventory validation rejects truthy string monitor/onboard claims
+  and malformed interface/PHY identities. RadioManager marks interrupted
+  transitions out of sync even for a session signal/KeyboardInterrupt.
+  Return-code success still needs independent measured mode/ownership
+  readback before a future live split executor may claim applied roles.
+- PhoneSession now bounds a trusted reconnect attempt (default 30 seconds),
+  rejects a late success and yields disconnect before backoff on timeout.
+  Disabling during CONNECTING explicitly cancels it. Pairing never opens
+  as a reconnect fallback. The eventual backend must poll tick and verify
+  stop intents; pure policy state is not observed controller state.
+- `redux/connectivity/bluez_pan.py` prepares declarative Network1.Connect
+  requests only for an explicitly enabled, due reconnect with paired,
+  trusted, separately authenticated bond and advertised NAP evidence.
+  Network1 Connected/Interface/UUID must match the returned bnep netdev and
+  the management IP route must be independently verified. Pairing property
+  plans set finite PairableTimeout/DiscoverableTimeout before opening both
+  flags and close both flags on window exit. No bus executor, pairing agent,
+  trust setter, DHCP/NM/firewall or Bluetooth service is installed or started.
+
+BlueZ [Network1](https://bluez.readthedocs.io/en/latest/network-api/) provides
+PAN profile connectivity, not an authenticated Redux management session.
+Keep a long-lived bus owner: its disappearance releases the client network;
+call Disconnect on attempt timeout. A future adapter must pin private peer
+identity and D-Bus service owner/generation, reject stale replies, re-read
+trust/security before each reconnect, and verify encryption/application
+credentials separately. Device1 Trusted alone is not pairing authentication.
+The [Adapter1 API](https://bluez.readthedocs.io/en/latest/adapter-api/) exposes
+Pairable separately from Discoverable, so stopping discoverability alone
+would not close incoming pairing. Requests/peer paths are private and must
+never be serialized into Doctor/public reports.
+
+### Bettercap review and integration boundary
+
+Existing LiveRuntime stops/reaps its writer before queuing a nonempty closed
+PCAP; termination_pending prevents another engine or handoff while the old
+child survives. Existing tests cover terminate/kill/wait failures and durable
+handoff. Its generic choose_safe_radio retry path can select another eligible
+radio, including disconnected onboard Wi-Fi, and tracks interface name rather
+than a split lease. **The new lease planner is not yet wired into this live
+path.** Use no auto-deployment or claim that generic runtime currently enforces
+split reservations. A future opt-in executor must reserve onboard Wi-Fi,
+verified Ethernet and any PAN management netdev, pin a qualified USB lease,
+stop/reap/close/handoff before reacquiring, and block on USB removal until
+fresh identity/ownership/management measurements qualify a new lease.
+A preferred interface limits name fallback but does not solve ifindex reuse.
+
+### Actual read-only Pi inventory
+
+Strict verified ED25519 SSH, no mutations: only wlan0/phy0/ifindex3,
+brcmfmac, SDIO/platform attachment, advertised monitor and 2.4/5 GHz,
+no measured USB generation. No external Wi-Fi radio was enumerated.
+This inventory does not measure reception, injection, split ownership,
+Bluetooth pairing/PAN, or capture handoff. No radio was created or retuned.
+
+### Remaining acceptance and preserved native-VIF work
+
+USB bus/power/kernel health, actual monitor ownership/link type/decoded RF,
+management continuity, hot-unplug/replug/ifindex reuse, closed-file handoff
+and conversion need their own explicitly approved external-radio field run.
+Bluetooth needs a reviewed bus executor/agent, outcome/timeouts/identity
+handling, PAN IP/application authentication and a separate approved field
+procedure before any boot service. Source and synthetic tests do not pass
+these hardware gates.
+
+NM 1.42.4's deliberate monitor-device exclusion and unsupported
+ID_NET_MANAGED_BY finding remain separate and unchanged. The prepared,
+unexecuted [DOWN-only ownership observation](DOWN_ONLY_VIF_OBSERVATION.md)
+now lists exact commands, bounded measurements and gated rollback. It still
+requires a dedicated reviewed offline-tested execution mode before any new
+hardware approval request. No existing VIF authorization remains active.
+
+Offline qualification for this stage: **1,827 passed, 2 skipped** in the
+full suite, plus **517 image-contract tests passed**. Included existing
+split/Ethernet/phone/manager/Bettercap lifecycle regressions and new measured
+bridge, lease reuse/removal, explicit owner roles, PAN outcome/privacy,
+finite pairing properties, timeout/cancel and USB sysfs tests. No source
+change in this stage was installed on the Pi.

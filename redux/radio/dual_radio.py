@@ -7,6 +7,7 @@ activation, changes a device or overrides NetworkManager safety gates.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
@@ -35,9 +36,12 @@ class SplitPlan:
 
 
 def _valid(radio: Radio) -> bool:
-    return (isinstance(radio, Radio) and bool(radio.iface)
-            and bool(radio.phy) and radio.phy.startswith("phy")
-            and radio.phy[3:].isdigit())
+    return (isinstance(radio, Radio) and isinstance(radio.iface, str)
+            and re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", radio.iface) is not None
+            and radio.iface not in (".", "..")
+            and isinstance(radio.phy, str)
+            and re.fullmatch(r"phy[0-9]+", radio.phy) is not None
+            and type(radio.monitor) is bool and type(radio.onboard) is bool)
 
 
 def plan_dual_radio(radios: Sequence[Radio],

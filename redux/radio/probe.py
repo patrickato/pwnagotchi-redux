@@ -11,6 +11,7 @@ injection self-test is a separate task (see TASKS.md) and should override this.
 from __future__ import annotations
 
 import os
+import math
 import re
 import subprocess
 from typing import Optional
@@ -130,12 +131,14 @@ def _driver_of(iface: str) -> str:
 
 def _usb_gen_of(iface: str) -> Optional[int]:
     # Walk up the device chain looking for a USB 'speed' (Mbps): 480=USB2, 5000+=USB3.
-    base = f"/sys/class/net/{iface}/device"
+    base = os.path.realpath(f"/sys/class/net/{iface}/device")
     for _ in range(6):
         speed_path = os.path.join(base, "speed")
         try:
             with open(speed_path) as f:
                 mbps = float(f.read().strip())
+                if not math.isfinite(mbps) or mbps < 480:
+                    return None
                 return 3 if mbps >= 5000 else 2
         except (OSError, ValueError):
             pass

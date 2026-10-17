@@ -126,8 +126,10 @@ class RadioManager:
         try:
             for action in actions:
                 self._applier(action)
-        except Exception as exc:
+        except BaseException as exc:
             self._out_of_sync = True
+            if not isinstance(exc, Exception):
+                raise
             raise RuntimeError("radio transition incomplete; re-probe required") from exc
 
     def _recompute(self, gone=None, *, radios=None, intent=None) -> list:

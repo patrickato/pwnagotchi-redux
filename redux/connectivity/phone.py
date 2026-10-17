@@ -37,8 +37,11 @@ class PhonePolicy:
     pairing_window_s: int = 90
     initial_backoff_s: int = 5
     maximum_backoff_s: int = 300
+    connect_timeout_s: int = 30
 
     def __post_init__(self):
+        if type(self.connect_timeout_s) is not int or not 1 <= self.connect_timeout_s <= 120:
+            raise ValueError("invalid connection timeout")
         if (type(self.pairing_window_s) is not int
                 or not 15 <= self.pairing_window_s <= 300):
             raise ValueError("pairing window must be 15-300 seconds")
@@ -61,6 +64,7 @@ class PhoneSession:
         self._retry_at = 0.0
         self._failures = 0
         self._trusted = False
+        self._connect_until = 0.0
 
     def _clock(self, now: float) -> float:
         # Reject oversized clocks *before* converting to float: integer
@@ -87,13 +91,13 @@ class PhoneSession:
         actions = []
         if self.phase is PhonePhase.PAIRING:
             actions.append(PhoneIntent.STOP_DISCOVERABLE)
-        if self.phase is PhonePhase.CONNECTED:
+        if self.phase in (PhonePhase.CONNECTED, PhonePhase.CONNECTING):
             actions.append(PhoneIntent.DISCONNECT)
         actions.append(PhoneIntent.DISABLE_ADAPTER)
         self.phase = PhonePhase.DISABLED
         self._trusted = False
         self._failures = 0
-        self._retry_at = self._pairing_until = 0.0
+        self._retry_at = self._pairing_until = self._connect_until = 0.0
         return tuple(actions)
 
     def open_pairing(self, *, owner_authorized: bool, now: float) -> tuple[PhoneIntent, ...]:
@@ -123,6 +127,7 @@ class PhoneSession:
                        now: float) -> tuple[PhoneIntent, ...]:
         self._clock(now)
         if (self.phase not in (PhonePhase.IDLE, PhonePhase.CONNECTING)
+                or (self.phase is PhonePhase.CONNECTING and self._last_now >= self._connect_until)
                 or not self._trusted or authenticated is not True
                 or trusted is not True):
             raise PermissionError("only an authenticated, bonded phone may connect")
@@ -162,8 +167,12 @@ class PhoneSession:
             self.phase = PhonePhase.IDLE
             self._trusted = False
             return (PhoneIntent.STOP_DISCOVERABLE,)
+        if self.phase is PhonePhase.CONNECTING and self._last_now >= self._connect_until:
+            self._schedule_retry()
+            return (PhoneIntent.DISCONNECT,)
         if self.phase is PhonePhase.BACKOFF and self._last_now >= self._retry_at:
             self.phase = PhonePhase.CONNECTING
+            self._connect_until = self._last_now + self.policy.connect_timeout_s
             return (PhoneIntent.CONNECT_TRUSTED,)
         return ()
 
