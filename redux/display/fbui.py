@@ -191,6 +191,20 @@ def status_view(report, *, now=None):
          and f.get("status") in ("action", "degraded", "attention")),
         None,
     )
+    # Doctor's detailed page only promotes *fresh*, bounded, actionable
+    # findings. Metadata-only or stale reports never make claims of health.
+    doctor_rows = []
+    if not stale:
+        for finding in findings[:64]:
+            if not isinstance(finding, dict):
+                continue
+            severity = finding.get("status")
+            if severity not in ("action", "degraded", "attention"):
+                continue
+            summary = _safe_text(finding.get("summary"), 47).strip() or "UNKNOWN"
+            doctor_rows.append({"status": severity, "summary": summary})
+        order = {"action": 0, "degraded": 1, "attention": 2}
+        doctor_rows.sort(key=lambda item: order[item["status"]])
     return {
         "health": health, "state": state, "engine": engine,
         "iface": _safe_text(runtime.get("iface") or "UNKNOWN", 18),
@@ -205,6 +219,8 @@ def status_view(report, *, now=None):
                    ("No actionable findings" if health == "ok" else "No verified health detail"),
         "detail": _safe_text(actionable.get("remediation"), 67) if actionable else
                   ("Live readings" if not stale else "Waiting for fresh live telemetry"),
+        "doctor_rows": doctor_rows[:3],
+        "doctor_more": max(0, len(doctor_rows) - 3),
         "stale": stale,
     }
 
@@ -263,12 +279,30 @@ def render(report, *, page="overview", now=None):
         metric(180, "FAILED", value(data["errors"]))
         metric(352, "HANDOFFS", value(data["handoffs"]))
     else:
-        metric(20, "STATUS", data["health"].upper())
-        metric(242, "ENGINE", data["engine"])
+        draw.text((20, 160), "DOCTOR / ACTIONABLE FINDINGS",
+                  font=_font(12, bold=True), fill=SUBTLE)
+        if data["stale"]:
+            draw.text((20, 194), "REPORT STALE / NO VERIFIED FINDINGS",
+                      font=_font(12), fill=AMBER)
+        elif data["doctor_rows"]:
+            for index, finding in enumerate(data["doctor_rows"]):
+                y = 190 + index * 30
+                color = colors[finding["status"]]
+                draw.ellipse((20, y + 5, 28, y + 13), fill=color)
+                draw.text((35, y), finding["status"].upper() + " / " + finding["summary"],
+                          font=_font(11), fill=INK)
+            if data["doctor_more"]:
+                draw.text((35, 278), f"+{data['doctor_more']} additional findings",
+                          font=_font(10), fill=SUBTLE)
+        else:
+            message = ("No actionable findings" if data["health"] == "ok"
+                       else "No verified findings")
+            draw.text((20, 194), message, font=_font(12), fill=SUBTLE)
 
-    draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
-    draw.text((20, 250), "DOCTOR / " + data["finding"], font=_font(12, bold=True), fill=accent)
-    draw.text((20, 272), data["detail"], font=_font(10), fill=SUBTLE)
+    if page != "doctor":
+        draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
+        draw.text((20, 250), "DOCTOR / " + data["finding"], font=_font(12, bold=True), fill=accent)
+        draw.text((20, 272), data["detail"], font=_font(10), fill=SUBTLE)
     # The footer's three equal touch targets share exact coordinates with
     # gesture_nav.TAB_TOP/TAB_WIDTH. Visual tabs do not activate touch.
     from .gesture_nav import PAGES, TAB_TOP, TAB_WIDTH
