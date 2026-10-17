@@ -254,7 +254,7 @@ Calibrated taps and horizontal swipes share the same page order.
 
 Trends reads the ordinary existing Redux status API's `runtime` fields:
 `updated_utc`, `events_seen`, `handshake_events`, `handed_off`,
-`state`, `iface`, and optionally `pid`. This is **live engine
+`state`, `iface`, and a positive measured engine `pid`. This is **live engine
 counter telemetry**, not a monitor-mode packet decoder, crack success
 indicator, or evidence that Bettercap received valid 802.11 frames.
 
