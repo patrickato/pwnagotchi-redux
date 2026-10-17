@@ -203,6 +203,38 @@ automatic touch calibration, physically qualified swipe accuracy, frame timing,
 backlight control or cross-board graphics compatibility. Those are follow-on
 features, not green gates today.
 
+## Offline view of a saved read-only hardware acceptance report
+
+The `redux-ui-preview` source tool can now render the existing sanitized
+`redux-readonly-acceptance-v1` report into the **actual Radios-page pixels**.
+For example, from a trusted laptop checkout with Pillow installed, after
+capturing an acceptance report locally:
+
+```sh
+cd ~/redux-workbench-src
+out="$HOME/redux-radio-review-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$out"
+python3 -m redux.display.preview \
+  --acceptance-json /absolute/path/to/saved-readonly-acceptance.json \
+  --output-dir "$out"
+```
+
+This produces exactly one private file, `redux-radios.png`. It displays
+the previously observed sanitized onboard/USB drivers, modes and kernel
+link types. It requires a fresh *at-collection* inventory report with
+stable identities and an Ethernet management PASS, and refuses private
+unexpected fields, incompatible report schemas and claims of authenticated
+ownership or decoded reception in the v1 format.
+
+**This report lacks an authenticated collection timestamp** and is therefore
+always rendered as **SAVED INVENTORY / HISTORICAL - NOT LIVE**, even if
+the file was generated seconds earlier. No file modification time or
+laptop clock is substituted for an authenticated observation timestamp.
+It does not connect to the Pi, monitor live state, or change any radio.
+The pending independent live-status supplier remains a separate hardware
+and runtime integration gate; this screenshot tool is not that supplier.
+Do not share captured identifiers or the unreviewed raw report publicly.
+
 ## Four-page native navigation and independent radio reporting
 
 Redux now supports four native pages — **Overview, Captures, Doctor and Radios** —
