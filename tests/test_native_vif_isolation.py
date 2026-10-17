@@ -181,14 +181,15 @@ def test_manager_claiming_temporary_vif_aborts_before_activation():
     assert ['ip', 'link', 'set', 'dev', NAME, 'up'] not in ops.commands
 
 
-@pytest.mark.parametrize(('field', 'value', 'check'), [
-    ('temp_nm_managed', None, 'temporary_nm_unmanaged'),
-    ('temp_nm_managed', True, 'temporary_nm_unmanaged'),
-    ('temp_type', 1, 'native_80211_link_type'),
-    ('temp_monitor', False, 'temporary_mode_monitor'),
-    ('firmware', 2, 'firmware_mode_expected'),
+@pytest.mark.parametrize(('field', 'value', 'check', 'restored'), [
+    ('temp_nm_managed', None, 'temporary_nm_unmanaged', True),
+    ('temp_nm_managed', True, 'temporary_nm_unmanaged', True),
+    ('temp_type', 1, 'native_80211_link_type', True),
+    ('temp_monitor', False, 'temporary_mode_monitor', False),
+    ('temp_phy', 'phy9', 'temporary_phy_matches', False),
+    ('firmware', 2, 'firmware_mode_expected', True),
 ])
-def test_post_create_failure_reports_exact_bounded_gate_before_cleanup(field, value, check):
+def test_post_create_failure_reports_exact_bounded_gate_before_cleanup(field, value, check, restored):
     class ChangedVif(Fake):
         def change(self, args):
             super().change(args)
@@ -196,13 +197,26 @@ def test_post_create_failure_reports_exact_bounded_gate_before_cleanup(field, va
                 self.s[field] = value
     ops = ChangedVif()
     result = trial.run_trial(ops, NAME, approved=True)
-    assert result['restored'] is True
+    assert result['restored'] is restored
     assert 'temporary interface isolation not confirmed' in result['test']['stopped']
     assert check in result['post_create']['failed_checks']
     assert result['post_create']['stage'] == 'created'
     assert result['post_create']['observed']['temp_type'] in (1, 803)
     assert ['ip', 'link', 'set', 'dev', NAME, 'up'] not in ops.commands
-    assert result['after']['managed'] is True
+    if restored:
+        assert result['after']['managed'] is True
+        assert ['iw', 'dev', NAME, 'del'] in ops.commands
+    else:
+        # Unproven monitor/PHY identity must never authorize deletion or
+        # subsequent primary/NM/service recovery, even under our test name.
+        assert result['cleanup'] == ['temporary interface identity changed; refuse deletion']
+        assert 'after' not in result
+        assert ['ip', 'link', 'set', 'dev', NAME, 'down'] not in ops.commands
+        assert ['iw', 'dev', NAME, 'del'] not in ops.commands
+        assert ['iw', 'dev', 'wlan0', 'set', 'type', 'monitor'] not in ops.commands
+        assert not any(cmd[0] == 'nmcli' and cmd[-1] == 'yes' for cmd in ops.commands)
+        assert ['systemctl', 'start', 'redux-live.service'] not in ops.commands
+        assert trial.trial_exit_code(result, execution=True) == 3
 
 
 def test_post_activate_snapshot_retained_on_driver_mode_failure():
@@ -229,6 +243,12 @@ def test_valid_vif_snapshots_only_allowlist_never_arbitrary_identifiers():
     for key in ('post_create', 'post_activate'):
         snapshot = result[key]
         assert snapshot['failed_checks'] == []
+        assert set(snapshot['observed']) == {
+            'safe', 'managed', 'nm_state', 'primary_mode', 'primary_up',
+            'primary_type', 'live', 'capture_process', 'firmware',
+            'temp_index', 'temp_type', 'temp_monitor', 'temp_nm_managed',
+            'temp_present', 'temp_phy_matches',
+        }
         assert snapshot['observed']['temp_type'] == 803
         assert snapshot['observed']['temp_index'] == 9
         assert 'ssid' not in snapshot['observed']
