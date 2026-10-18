@@ -128,6 +128,28 @@ def test_driver_rebind_during_sample_is_rejected(tmp_path):
         di.collect(sys_root=root, run=rebind, wall_clock=lambda: 1000.0)
 
 
+def test_physical_adapter_replacement_during_sample_is_rejected(tmp_path):
+    root = tmp_path / "sys" / "class" / "net"
+    root.mkdir(parents=True)
+    row = add_net(root, iface="wlan1", ifindex=7, phy="phy1",
+                  transport="usb", driver="mt76x2u", arphrd=803)
+    device_link = root / "wlan1" / "device"
+    replacement = tmp_path / "sys" / "class" / "devices" / "usb-replacement"
+    replacement.mkdir(parents=True)
+    subsystem = tmp_path / "sys" / "class" / "subsystems" / "usb"
+    driver = tmp_path / "sys" / "class" / "drivers" / "mt76x2u"
+    (replacement / "subsystem").symlink_to(subsystem)
+    (replacement / "driver").symlink_to(driver)
+
+    def swap(_args):
+        device_link.unlink()
+        device_link.symlink_to(replacement)
+        return iw_text(row)
+
+    with pytest.raises(Unavailable, match="radio_identity_changed"):
+        di.collect(sys_root=root, run=swap, wall_clock=lambda: 1000.0)
+
+
 def test_sysfs_identity_change_during_sample_is_rejected(tmp_path, monkeypatch):
     root = tmp_path / "sys" / "class" / "net"
     root.mkdir(parents=True)

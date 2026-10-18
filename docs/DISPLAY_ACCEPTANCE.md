@@ -326,10 +326,10 @@ is intentional. Source CI tests are **not** confirmation of the actual
 ILI9486 pixels, ADS7846 touch wiring, scrolling ergonomics or performance.
 Do not enable the touchscreen service before physical qualification.
 
-## Four-page native navigation and independent radio reporting
+## Five-page native navigation and reconciled radio reporting
 
-Redux now supports four native pages — **Overview, Captures, Doctor and Radios** —
-with four 120-pixel footer tabs across the 480×320 display. A physically
+Redux now supports five native pages — **Overview, Captures, Doctor, Radios
+and Trends** — with five 96-pixel footer tabs across the 480×320 display. A physically
 confirmed calibrated tap can select any page; horizontal swipes navigate and
 wrap in the same order. The uncalibrated swipe-only mode uses that order too.
 The offline PNG preview includes `redux-radios.png`.
@@ -371,6 +371,18 @@ and it never treats an identity-stable flag as verified exclusive ownership.
 A stale, duplicated, malformed, or partially changed inventory is discarded
 as a whole. This is visual diagnostics, **not an RF qualification or an
 authorization mechanism**.
+
+The page reconciles the runtime and inventory clocks rather than merely
+drawing both records. It shows bounded runtime/inventory ages, rejects records
+more than 15 seconds apart as conflicting generations, rejects duplicate
+netdev labels across physical rows, and checks that a fresh Bettercap iface
+matches exactly one inventory row. The readiness line remains `BLOCKED` for
+missing/stale/conflicting sources, non-native capture framing, or a missing
+onboard/USB role. Compatible metadata can improve that line only to
+`UNVERIFIED`: NetworkManager policy, exclusive ownership, decoded reception
+and physical qualification remain explicit blockers because this status API
+does not measure them. Adapter replacement during collection is detected by
+the physical sysfs identity comparison and discards the sample.
 
 ## Measured capture processing on the native TFT
 

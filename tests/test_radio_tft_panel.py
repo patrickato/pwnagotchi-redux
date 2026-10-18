@@ -29,6 +29,12 @@ def test_current_two_radios_do_not_fabricate_reception_or_ownership():
     assert r["usb"]["reception"] == "UNVERIFIED"
     assert r["capture"]["reception"] == "UNVERIFIED"
     assert r["usb"]["state"] == "OBSERVED"
+    assert r["readiness"]["state"] == "BLOCKED"
+    assert r["readiness"]["runtime_age_seconds"] == 1.0
+    assert r["readiness"]["inventory_age_seconds"] == 1.0
+    assert "CAPTURE FRAMING" in r["readiness"]["blockers"]
+    assert "RX UNVERIFIED" in r["readiness"]["blockers"]
+    assert "POLICY UNMEASURED" in r["readiness"]["blockers"]
     assert fbui.render(measured(), page="radios", now=1001).size == (480, 320)
 
 
@@ -48,6 +54,7 @@ def test_no_inventory_does_not_infer_usb_from_other_fields():
     assert result["inventory"] == "NOT REPORTED"
     assert result["usb"]["state"] == "NOT REPORTED"
     assert result["capture"]["iface"] == "wlan0"
+    assert result["readiness"]["blockers"] == ["INVENTORY MISSING"]
 
 
 @pytest.mark.parametrize("change", [
@@ -70,6 +77,7 @@ def test_invalid_or_stale_radio_inventory_rejected_atomically(change):
     assert result["inventory"] in ("INVALID", "STALE", "NOT REPORTED")
     assert result["usb"]["state"] == "NOT REPORTED"
     assert result["onboard"]["state"] == "NOT REPORTED"
+    assert result["readiness"]["state"] == "BLOCKED"
 
 
 def test_stale_runtime_cannot_claim_current_capture_radio():
@@ -79,6 +87,40 @@ def test_stale_runtime_cannot_claim_current_capture_radio():
     assert result["capture"]["state"] == "NOT CURRENT"
     assert result["capture"]["link"] is None
     assert result["usb"]["state"] == "NOT REPORTED"
+
+
+def test_individually_fresh_but_generation_skewed_sources_conflict():
+    r = measured(now=1000)
+    r["runtime"]["updated_utc"] = 970
+    result = radio_panel.model(r, now=1000)
+    assert result["inventory"] == "CONFLICT"
+    assert result["onboard"]["state"] == "NOT REPORTED"
+    assert result["readiness"]["blockers"] == ["SOURCE CLOCK SKEW"]
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda report: report["runtime"].update(iface="wlan9", capture_link_type=803),
+    lambda report: report["radio_inventory"]["radios"][1].update(iface="wlan0"),
+])
+def test_conflicting_capture_or_duplicate_interface_never_qualifies(mutate):
+    r = measured()
+    mutate(r)
+    result = radio_panel.model(r, now=1001)
+    assert result["readiness"]["state"] == "BLOCKED"
+    assert result["inventory"] in ("CURRENT", "INVALID")
+    if result["inventory"] == "CURRENT":
+        assert "CAPTURE IDENTITY MISMATCH" in result["readiness"]["blockers"]
+    else:
+        assert result["onboard"]["state"] == "NOT REPORTED"
+
+
+def test_compatible_metadata_remains_unverified_not_qualified():
+    r = measured()
+    r["runtime"].update(iface="wlan1", capture_link_type=803)
+    result = radio_panel.model(r, now=1001)
+    assert result["readiness"]["state"] == "UNVERIFIED"
+    assert result["readiness"]["blockers"] == [
+        "POLICY UNMEASURED", "RX UNVERIFIED", "PHYSICAL UNVERIFIED"]
 
 
 def test_oversized_numeric_inputs_fail_closed():
@@ -112,6 +154,8 @@ def test_radio_tft_shows_bettercap_onboard_and_usb_rows_separately(monkeypatch):
     frame = fbui.render(measured(), page="radios", now=1001)
     assert frame.size == (480, 320)
     assert "BETTERCAP / wlan0" in labels
+    assert "DUAL / BLOCKED / RT 1s / INV 1s" in labels
+    assert "BLOCK / CAPTURE FRAMING + POLICY UNMEASURED" in labels
     assert "ONBOARD / wlan0 / OBSERVED / brcmfmac" in labels
     assert "MODE MONITOR / LINK 1 / RX UNVERIFIED" in labels
     assert "USB / wlan1 / OBSERVED / mt76x2u" in labels

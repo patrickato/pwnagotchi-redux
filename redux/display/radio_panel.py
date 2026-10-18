@@ -59,6 +59,13 @@ def _historical(payload):
     return selected
 
 
+def _base_readiness(state="UNVERIFIED", *blockers, runtime_age=None,
+                    inventory_age=None):
+    return {"state": state, "blockers": list(blockers),
+            "runtime_age_seconds": runtime_age,
+            "inventory_age_seconds": inventory_age}
+
+
 def model(report, *, now=None):
     """Display only current measured metadata; leave reception unverified.
 
@@ -74,6 +81,7 @@ def model(report, *, now=None):
     at = _clock(runtime.get("updated_utc"))
     fresh = (current is not None and at is not None and
              -30 <= current - at <= 20)
+    runtime_age = round(max(0.0, current - at), 1) if fresh else None
 
     capture = {"iface": "UNKNOWN", "state": "NOT CURRENT",
                "link": None, "framing": "UNVERIFIED",
@@ -101,28 +109,53 @@ def model(report, *, now=None):
         history = _historical(root.get("radio_acceptance_snapshot"))
         if history is not None:
             return {"capture": capture, "onboard": history.get("onboard", onboard),
-                    "usb": history.get("usb", usb), "inventory": "SAVED SNAPSHOT"}
+                    "usb": history.get("usb", usb), "inventory": "SAVED SNAPSHOT",
+                    "readiness": _base_readiness("HISTORICAL", "NOT LIVE")}
         return {"capture": capture, "onboard": onboard, "usb": usb,
-                "inventory": "NOT REPORTED"}
+                "inventory": "NOT REPORTED",
+                "readiness": _base_readiness("BLOCKED", "INVENTORY MISSING",
+                                              runtime_age=runtime_age)}
     sampled = _clock(inventory.get("sampled_utc"))
     if current is None or sampled is None or not -30 <= current - sampled <= 20:
         return {"capture": capture, "onboard": onboard, "usb": usb,
-                "inventory": "STALE"}
+                "inventory": "STALE",
+                "readiness": _base_readiness("BLOCKED", "INVENTORY STALE",
+                                              runtime_age=runtime_age)}
+    inventory_age = round(max(0.0, current - sampled), 1)
+    # Both clocks can be individually fresh yet describe different hardware
+    # generations. The collector normally runs every ten seconds, so a larger
+    # separation is conflicting evidence rather than one coherent view.
+    if at is None or abs(at - sampled) > 15:
+        return {"capture": capture, "onboard": onboard, "usb": usb,
+                "inventory": "CONFLICT",
+                "readiness": _base_readiness("BLOCKED", "SOURCE CLOCK SKEW",
+                                              runtime_age=runtime_age,
+                                              inventory_age=inventory_age)}
     radios = inventory.get("radios")
     if not isinstance(radios, list) or not 1 <= len(radios) <= 4:
         return {"capture": capture, "onboard": onboard, "usb": usb,
-                "inventory": "INVALID"}
+                "inventory": "INVALID",
+                "readiness": _base_readiness("BLOCKED", "INVENTORY INVALID",
+                                              runtime_age=runtime_age,
+                                              inventory_age=inventory_age)}
     seen = set()
+    seen_ifaces = set()
     selected = {}
     for entry in radios:
         if not isinstance(entry, dict):
             return {"capture": capture, "onboard": onboard, "usb": usb,
-                    "inventory": "INVALID"}
+                    "inventory": "INVALID",
+                    "readiness": _base_readiness("BLOCKED", "INVENTORY INVALID",
+                                                  runtime_age=runtime_age,
+                                                  inventory_age=inventory_age)}
         transport = entry.get("transport")
         if (transport not in ("onboard", "usb") or transport in seen
                 or entry.get("identity_stable") is not True):
             return {"capture": capture, "onboard": onboard, "usb": usb,
-                    "inventory": "INVALID"}
+                    "inventory": "INVALID",
+                    "readiness": _base_readiness("BLOCKED", "IDENTITY UNSTABLE",
+                                                  runtime_age=runtime_age,
+                                                  inventory_age=inventory_age)}
         seen.add(transport)
         mode = entry.get("kernel_mode")
         driver = entry.get("driver")
@@ -131,11 +164,38 @@ def model(report, *, now=None):
         if (mode not in ("monitor", "managed", "unknown")
                 or not isinstance(driver, str) or not _DRIVER.fullmatch(driver)
                 or not isinstance(iface, str) or not _IFACE.fullmatch(iface)
-                or arphrd is None):
+                or iface in seen_ifaces or arphrd is None):
             return {"capture": capture, "onboard": onboard, "usb": usb,
-                    "inventory": "INVALID"}
+                    "inventory": "INVALID",
+                    "readiness": _base_readiness("BLOCKED", "INVENTORY INVALID",
+                                                  runtime_age=runtime_age,
+                                                  inventory_age=inventory_age)}
+        seen_ifaces.add(iface)
         selected[transport] = {"state": "OBSERVED", "iface": iface,
                                "driver": driver, "mode": mode.upper(),
                                "link": arphrd, "reception": "UNVERIFIED"}
+    blockers = []
+    if not fresh:
+        blockers.append("RUNTIME STALE")
+    matching = [transport for transport, row in selected.items()
+                if row["iface"] == capture["iface"]]
+    if fresh and len(matching) != 1:
+        blockers.append("CAPTURE IDENTITY MISMATCH")
+    if capture["link"] not in (801, 803):
+        blockers.append("CAPTURE FRAMING")
+    if "onboard" not in selected:
+        blockers.append("ONBOARD MISSING")
+    if "usb" not in selected:
+        blockers.append("USB MISSING")
+    # Display inventory has no NM policy, socket exclusivity, decoded-frame,
+    # or physical qualification proof. Keep these explicit even if framing is
+    # compatible and the runtime-selected interface matches one inventory row.
+    blockers.extend(("POLICY UNMEASURED", "RX UNVERIFIED", "PHYSICAL UNVERIFIED"))
+    state = "BLOCKED" if any(item in blockers for item in (
+        "RUNTIME STALE", "CAPTURE IDENTITY MISMATCH", "CAPTURE FRAMING",
+        "ONBOARD MISSING", "USB MISSING")) else "UNVERIFIED"
     return {"capture": capture, "onboard": selected.get("onboard", onboard),
-            "usb": selected.get("usb", usb), "inventory": "CURRENT"}
+            "usb": selected.get("usb", usb), "inventory": "CURRENT",
+            "readiness": _base_readiness(state, *blockers,
+                                          runtime_age=runtime_age,
+                                          inventory_age=inventory_age)}

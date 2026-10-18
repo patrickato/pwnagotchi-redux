@@ -31,6 +31,14 @@ it does not change radios or establish packet reception. Touchscreen
 navigation, previews, runtime diagnostics, and regression coverage were
 extended without enabling the real TFT or changing the Pi.
 
+The Radios page now reconciles the two source clocks and reports their ages
+plus fail-closed readiness blockers. Cross-generation timestamp skew,
+duplicate interface identities, runtime/inventory iface disagreement and
+physical adapter replacement are rejected. Even fully compatible kernel
+metadata remains `UNVERIFIED` while policy, exclusive ownership, decoded
+reception and physical qualification are unmeasured. This is source-only UX
+hardening and does not increase the completion percentage.
+
 The combined GitHub CI run `39065298631` passed **2,378 software tests and
 651 image-contract checks**. This is source-level verification only.
 

@@ -22,6 +22,7 @@ import urllib.error
 import urllib.request
 
 from .local_http import open_status
+from . import calibration_file
 
 FB_PATTERN = re.compile(r"/dev/fb[0-9]{1,2}\Z")
 RESOLUTION = (480, 320)
@@ -328,29 +329,37 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
         from .radio_panel import model as radio_model
         radios = radio_model(report, now=now)
         snapshot_only = radios["inventory"] == "SAVED SNAPSHOT"
+        readiness = radios["readiness"]
+        rt_age = readiness["runtime_age_seconds"]
+        inv_age = readiness["inventory_age_seconds"]
+        age_label = ("RT -- / INV --" if rt_age is None or inv_age is None else
+                     f"RT {rt_age:g}s / INV {inv_age:g}s")
         draw.text((20, 132),
                   "SAVED INVENTORY / HISTORICAL - NOT LIVE" if snapshot_only
-                  else "INVENTORY / " + radios["inventory"],
+                  else "DUAL / " + readiness["state"] + " / " + age_label,
                   font=_font(10, bold=True),
-                  fill=AMBER if snapshot_only else SUBTLE)
+                  fill=AMBER if snapshot_only or readiness["state"] != "UNVERIFIED" else SUBTLE)
+        blockers = readiness["blockers"]
+        draw.text((20, 147), "BLOCK / " + (" + ".join(blockers[:2]) if blockers else "NONE"),
+                  font=_font(8), fill=AMBER)
         radio_capture = radios["capture"]
-        draw.text((20, 153), "BETTERCAP / " + radio_capture["iface"],
+        draw.text((20, 162), "BETTERCAP / " + radio_capture["iface"],
                   font=_font(12, bold=True), fill=INK)
-        draw.text((20, 173), radio_capture["state"] + " / " + radio_capture["framing"],
+        draw.text((20, 181), radio_capture["state"] + " / " + radio_capture["framing"],
                   font=_font(10), fill=SUBTLE)
-        draw.text((20, 191), "KERNEL TYPE " +
+        draw.text((20, 197), "KERNEL TYPE " +
                   (str(radio_capture["link"]) if radio_capture["link"] is not None else "--") +
                   " / RX UNVERIFIED", font=_font(10), fill=AMBER)
-        draw.line((18, 210, 462, 210), fill=(36, 57, 69), width=1)
+        draw.line((18, 214, 462, 214), fill=(36, 57, 69), width=1)
         onboard = radios["onboard"]
-        draw.text((20, 217), "ONBOARD / " + onboard["iface"] + " / " +
+        draw.text((20, 219), "ONBOARD / " + onboard["iface"] + " / " +
                   onboard["state"] + " / " + onboard["driver"],
                   font=_font(10, bold=True),
                   fill=INK if onboard["state"] == "OBSERVED" else AMBER)
-        draw.text((20, 236), "MODE " + onboard["mode"] + " / LINK " +
+        draw.text((20, 237), "MODE " + onboard["mode"] + " / LINK " +
                   (str(onboard["link"]) if onboard["link"] is not None else "--") +
                   " / RX UNVERIFIED", font=_font(9), fill=AMBER)
-        draw.line((18, 252, 462, 252), fill=(36, 57, 69), width=1)
+        draw.line((18, 253, 462, 253), fill=(36, 57, 69), width=1)
         usb = radios["usb"]
         draw.text((20, 258), "USB / " + usb["iface"] + " / " +
                   usb["state"] + " / " + usb["driver"],
@@ -535,10 +544,9 @@ def main(argv=None):
     if args.touch_device:
         from . import touch_nav
         if args.calibration_file:
-            from .calibration_file import load_calibration
             from .gesture_nav import NavigationGestures
             try:
-                calibration = load_calibration(args.calibration_file)
+                calibration = calibration_file.load_calibration(args.calibration_file)
                 tracker = NavigationGestures(
                     calibration, physically_verified=True, rotation=args.rotate)
             except (OSError, ValueError, TypeError) as exc:
