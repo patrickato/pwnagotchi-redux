@@ -901,3 +901,65 @@ def test_prepared_identity_with_bad_digest_shape_refused(tmp_path):
         assert worker.ingest_file(source) == "error"
         assert "identity" in worker.rows()[0]["reason"]
     assert source.is_file()
+
+
+
+@pytest.mark.parametrize("first_outcome", ["ready", "invalid"])
+def test_duplicate_fast_path_refuses_replaced_source_even_with_same_bytes(
+        tmp_path, monkeypatch, first_outcome):
+    from redux.crack import ingest
+    cfg = settings(tmp_path)
+    content = ((REC + "\n").encode() if first_outcome == "ready"
+               else b"not a structurally valid capture\n")
+    source = write_file(cfg.inputs[0] / "replace.hc22000", content)
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == first_outcome
+        prior = worker.rows()
+        first_stat = source.stat()
+        hash_source = ingest._digest_file
+        shifted = [False]
+
+        def replace_after_read(path, **kwargs):
+            sha = hash_source(path, **kwargs)
+            if Path(path) == source and not shifted[0]:
+                shifted[0] = True
+                source.rename(tmp_path / "old-source-preserved")
+                source.write_bytes(content)
+                os.utime(source, ns=(first_stat.st_atime_ns, first_stat.st_mtime_ns))
+            return sha
+
+        monkeypatch.setattr(ingest, "_digest_file", replace_after_read)
+        assert worker.ingest_file(source) == "deferred"
+        assert worker.rows() == prior
+        assert shifted[0]
+    assert source.read_bytes() == content
+
+
+def test_digest_rejects_in_place_file_change_during_hash(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    import types
+    source = tmp_path / "changing.pcap"
+    source.write_bytes(b"synthetic raw capture" * 64)
+    inode = source.stat().st_ino
+    real_fstat = ingest.os.fstat
+    checked = [0]
+
+    def changed_fstat(fd):
+        status = real_fstat(fd)
+        if status.st_ino == inode:
+            checked[0] += 1
+            if checked[0] == 2:
+                return types.SimpleNamespace(
+                    st_mode=status.st_mode,
+                    st_size=status.st_size,
+                    st_dev=status.st_dev,
+                    st_ino=status.st_ino,
+                    st_mtime_ns=status.st_mtime_ns + 1,
+                )
+        return status
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(ingest.os, "fstat", changed_fstat)
+        with pytest.raises(OSError, match="changed while hashing"):
+            ingest._digest_file(source, max_bytes=4096)
+    assert checked[0] == 2
