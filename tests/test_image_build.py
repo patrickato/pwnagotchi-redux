@@ -235,7 +235,7 @@ def test_ota_health_checkpoint_belongs_to_current_boot_and_process(tmp_path):
     boot_id = tmp_path / "boot-id"
     boot_id.write_text("00000000-0000-0000-0000-000000000001\n")
     good = {"schema": 1, "clean_shutdown": False, "pid": 321,
-            "boot_id": boot_id.read_text().strip(), "started_utc": "fixture"}
+            "boot_id": boot_id.read_text().strip(), "started_utc": "2026-10-17T20:00:00+00:00"}
     checkpoint.write_text(__import__("json").dumps(good))
     assert ota.validate_boot_checkpoint(321, checkpoint=checkpoint,
                                         boot_id=boot_id)["pid"] == 321
