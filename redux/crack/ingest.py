@@ -58,8 +58,10 @@ def _verified_scan_heartbeat(value):
     stamp = value.get("completed_utc")
     scanned = value.get("scanned")
     outcomes = value.get("outcomes")
-    if (type(stamp) not in (int, float) or not math.isfinite(stamp)
-            or not 0 <= stamp <= 1e12
+    # Check the numeric range before converting to float: a forged huge
+    # Python integer must not raise OverflowError in a read-only API.
+    if (type(stamp) not in (int, float) or not 0 <= stamp <= 1e12
+            or not math.isfinite(stamp)
             or type(scanned) is not int or not 0 <= scanned <= _MAX_SCAN_COUNTER
             or not isinstance(outcomes, dict) or len(outcomes) > len(_SCAN_OUTCOMES) + 1):
         raise ValueError("invalid scan fields")
