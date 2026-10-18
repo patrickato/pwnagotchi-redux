@@ -59,3 +59,14 @@ def test_reescalation_resets_cooldown():
     d = g.evaluate(Reading(cpu_temp_c=85.0), now=10.0)
     assert d.mode is Mode.SURVIVAL and d.holding is False
     assert g._cooldown_since is None
+
+
+def test_observed_governor_axes_are_independent_of_mode_and_ignore_battery_on_mains():
+    d = Governor().evaluate(Reading(), now=0)
+    assert d.mode is Mode.FULL and d.observed_axes == ()
+    d = Governor().evaluate(Reading(cpu_temp_c=39, ram_pct=20,
+                                    battery_pct=7, on_battery=False), now=1)
+    assert d.observed_axes == ("cpu_temp", "ram")
+    d = Governor().evaluate(Reading(cpu_temp_c=39, battery_pct=11,
+                                    on_battery=True), now=1)
+    assert d.observed_axes == ("cpu_temp", "battery")
