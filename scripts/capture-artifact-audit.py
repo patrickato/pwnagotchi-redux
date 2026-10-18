@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import sqlite3
 import stat
+from urllib.parse import quote
 
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 MAX_ARTIFACT = 32 * 1024 * 1024
@@ -37,7 +38,7 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
             return result
         # Immutable SQLite snapshot: mode=ro prevents the audit itself from
         # creating a ledger. No journaling changes or writer-side migrations.
-        uri = "file:" + __import__("urllib.parse", fromlist=["quote"]).quote(str(db.absolute()), safe="/") + "?mode=ro"
+        uri = "file:" + quote(str(db.absolute()), safe="/") + "?mode=ro"
         conn = sqlite3.connect(uri, uri=True, timeout=1.0)
         try:
             found = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifacts'").fetchone()
@@ -100,7 +101,7 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--db", type=Path, default=Path("/captures/jobs.db"))
-    p.add_argument("--output", type=Path, default=Path("/captures/prepared"))
+    p.add_argument("--output", type=Path, default=Path("/captures/ready"))
     args = p.parse_args(argv)
     report = audit(args.db, args.output)
     print(json.dumps(report, sort_keys=True))
