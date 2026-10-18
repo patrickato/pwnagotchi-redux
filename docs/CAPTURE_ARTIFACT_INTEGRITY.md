@@ -19,9 +19,10 @@ ready-row bound per invocation. Its JSON output contains only aggregate
 counts and predefined error codes; no file paths, SSIDs, MACs, handshake
 records, credentials or captured packet bytes appear.
 
-Exit 0 means that recorded ready artifacts were structurally intact at
-the time of the read. Exit 1 means unavailable or failed evidence. An empty
-ledger produces zero checked, **not** evidence of actual packet capture.
+Exit 0 means that at least one recorded ready artifact was structurally intact at
+the time of the read and no failures were found. Exit 1 means unavailable
+or failed evidence. Exit 3 and result UNKNOWN mean an empty ledger: no
+prepared artifacts have yet been verified.
 
 Run the offline tests:
 
