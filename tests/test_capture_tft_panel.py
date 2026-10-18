@@ -137,3 +137,28 @@ def test_worker_outcome_count_must_match_nonpaused_batch():
                                                               "ready": 1}
     r["capture_processing"]["last_scan"]["scanned"] = 1
     assert capture_panel.model(r, now=1001)["scan_state"] == "INVALID"
+
+
+@pytest.mark.parametrize("bad,scan_error", [
+    (None, "invalid stored scan record"),
+    ("unparsed heartbeat", ""),
+    ([], ""),
+    (False, ""),
+])
+def test_corrupted_persisted_heartbeat_is_invalid_not_never_scanned(bad, scan_error):
+    r = report()
+    r["capture_processing"]["last_scan"] = bad
+    r["capture_processing"]["scan_error"] = scan_error
+    panel = capture_panel.model(r, now=1001)
+    assert panel["ledger"] == "AVAILABLE"
+    assert panel["scan_state"] == "INVALID"
+    assert panel["scan_files"] is None
+    assert panel["last_ready"] is None
+    assert panel["last_errors"] is None
+
+
+def test_no_completed_worker_scan_is_not_reported_as_corruption():
+    r = report()
+    r["capture_processing"]["last_scan"] = None
+    r["capture_processing"]["scan_error"] = ""
+    assert capture_panel.model(r, now=1001)["scan_state"] == "NO COMPLETED SCAN"
