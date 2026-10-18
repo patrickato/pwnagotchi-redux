@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -105,7 +106,7 @@ def assess(value):
 def fetch(ip, key, *, runner=subprocess.run):
     argv = ["ssh", "-i", str(key), "-o", "BatchMode=yes", "-o",
             "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=8",
-            f"pi@{ip}", "python3", "-c", REMOTE]
+            f"pi@{ip}", "python3 -c " + shlex.quote(REMOTE)]
     try:
         result = runner(argv, capture_output=True, text=True, timeout=20, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
