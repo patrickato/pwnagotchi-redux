@@ -190,6 +190,45 @@ def load_state(path, stable):
     return data
 
 
+_PARTUUID_PATH = re.compile(
+    r"/dev/disk/by-partuuid/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\Z"
+)
+
+
+def validate_runtime_context(record, cmdline):
+    """Fail closed on stale or substituted A/B partition identities.
+
+    Generator context is saved in /run, but OTA health and installer must not
+    trust arbitrary contents, a prior boot's slot, or an unexpected root disk.
+    """
+    if (type(record) is not dict or set(record) != {"current", "devices"}
+            or type(record["current"]) is not str
+            or record["current"] not in SLOTS
+            or type(record["devices"]) is not dict
+            or set(record["devices"]) != {str(n) for n in range(1, 7)}
+            or type(cmdline) is not str):
+        raise ValueError("invalid OTA runtime context")
+    devices = record["devices"]
+    if any(type(path) is not str or _PARTUUID_PATH.fullmatch(path) is None
+           for path in devices.values()):
+        raise ValueError("OTA runtime partition path is not canonical")
+    if len(set(devices.values())) != 6:
+        raise ValueError("OTA runtime partition identities are not unique")
+    current = record["current"]
+    roots = [token[5:] for token in cmdline.split() if token.startswith("root=")]
+    expected_root = "PARTUUID=" + devices[str(SLOTS[current]["root"])].rsplit("/", 1)[-1]
+    if (slot_from_cmdline(cmdline) != current or len(roots) != 1
+            or roots[0].lower() != expected_root.lower()):
+        raise ValueError("OTA runtime context does not match the running boot")
+    return record
+
+
+def load_runtime_context(*, runtime=None, cmdline_path=Path("/proc/cmdline")):
+    runtime = RUNTIME if runtime is None else Path(runtime)
+    record = _read_bounded_state_json(runtime / "context.json", limit=8192)
+    return validate_runtime_context(record, Path(cmdline_path).read_text())
+
+
 def transition(state, stable, current, action, slot=None, value=None, trial=False):
     state = json.loads(json.dumps(state))
     if action in {"set-primary", "set-state"} and slot not in SLOTS:
@@ -402,7 +441,7 @@ def check_health(context, expected_pid=None):
 
 
 def health():
-    context = json.loads((RUNTIME / "context.json").read_text())
+    context = load_runtime_context()
     current = context["current"]
     try:
         # Sixty real seconds of stable service PID, not a simulated success timer.
@@ -427,7 +466,7 @@ def install(bundle):
     if "://" in bundle and not bundle.startswith("https://"):
         raise ValueError("remote updates require HTTPS and RAUC signature verification")
     preflight()
-    context = json.loads((RUNTIME / "context.json").read_text())
+    context = load_runtime_context()
     subprocess.run(["rauc", "install", bundle], check=True)
     state = load_state(STATE, stable_from_autoboot(CONTROL.read_text()))
     if state["pending"] is None or state["pending"] == context["current"]:
@@ -441,7 +480,7 @@ def preflight():
     timeout = re.search(r"^BOOT_WATCHDOG_TIMEOUT=(\d+)$", firmware, re.M)
     if not timeout or not 15 <= int(timeout[1]) <= 300:
         raise ValueError("provision/test BOOT_WATCHDOG_TIMEOUT=15..300 before unattended OTA")
-    context = json.loads((RUNTIME / "context.json").read_text())
+    context = load_runtime_context()
     check_health(context)
     stable = stable_from_autoboot(CONTROL.read_text())
     if context["current"] != stable or load_state(STATE, stable)["pending"] is not None:
@@ -486,7 +525,7 @@ def hook():
     if os.environ.get("RAUC_SLOT_CLASS") != "boot":
         raise ValueError("hook must apply to a boot slot")
     slot = os.environ["RAUC_SLOT_BOOTNAME"]
-    context = json.loads((RUNTIME / "context.json").read_text())
+    context = load_runtime_context()
     if slot not in SLOTS or slot == context["current"]:
         raise ValueError("refusing to patch the running slot")
     root_uuid = Path(context["devices"][str(SLOTS[slot]["root"])]).name
