@@ -12,6 +12,7 @@ import fcntl
 import hashlib
 import heapq
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -37,6 +38,41 @@ def requires_capture_mount(settings):
 SUFFIXES = frozenset({".pcap", ".pcapng", ".cap", ".hc22000"})
 _HEX = re.compile(r"^[0-9a-fA-F]*$")
 _MAC = re.compile(r"^[0-9a-fA-F]{12}$")
+_SCAN_OUTCOMES = frozenset({
+    "ready", "error", "invalid", "duplicate", "skipped", "deferred",
+    "deferred_low_storage",
+})
+_MAX_SCAN_COUNTER = (1 << 63) - 1
+
+
+def _verified_scan_heartbeat(value):
+    """Validate one untrusted persisted worker receipt; never infer success.
+
+    Worker passes must account for every candidate. The exceptional
+    low-storage pause scans zero files and records exactly one pause marker.
+    Anything contradictory is unknown rather than a healthy empty scan.
+    """
+    if (not isinstance(value, dict) or type(value.get("schema")) is not int
+            or value["schema"] != 1):
+        raise ValueError("invalid scan schema")
+    stamp = value.get("completed_utc")
+    scanned = value.get("scanned")
+    outcomes = value.get("outcomes")
+    if (type(stamp) not in (int, float) or not math.isfinite(stamp)
+            or not 0 <= stamp <= 1e12
+            or type(scanned) is not int or not 0 <= scanned <= _MAX_SCAN_COUNTER
+            or not isinstance(outcomes, dict) or len(outcomes) > len(_SCAN_OUTCOMES) + 1):
+        raise ValueError("invalid scan fields")
+    if (any(type(name) is not str or name not in _SCAN_OUTCOMES | {"paused_low_storage"}
+            or type(count) is not int or not 0 <= count <= _MAX_SCAN_COUNTER
+            for name, count in outcomes.items())):
+        raise ValueError("invalid scan outcome")
+    paused = "paused_low_storage" in outcomes
+    if (paused and (scanned != 0 or outcomes != {"paused_low_storage": 1})
+            or not paused and sum(outcomes.values()) != scanned):
+        raise ValueError("contradictory scan outcomes")
+    return {"completed_utc": stamp, "scanned": scanned, "outcomes": outcomes}
+
 
 
 @dataclass(frozen=True)
@@ -522,23 +558,7 @@ def read_summary(database=None):
                     raw = row[0]
                     if not isinstance(raw, str) or len(raw) > 4096:
                         raise ValueError("heartbeat exceeds permitted length")
-                    scan = json.loads(raw)
-                    if (not isinstance(scan, dict)
-                            or type(scan.get("schema")) is not int
-                            or scan["schema"] != 1
-                            or type(scan.get("completed_utc")) not in (int, float)
-                            or type(scan.get("scanned")) is not int
-                            or scan["scanned"] < 0
-                            or not isinstance(scan.get("outcomes"), dict)
-                            or any(not isinstance(k, str) or len(k) > 80
-                                   or type(v) is not int or v < 0
-                                   for k, v in scan["outcomes"].items())):
-                        raise ValueError("invalid scan record")
-                    scan = {
-                        "completed_utc": scan["completed_utc"],
-                        "scanned": scan["scanned"],
-                        "outcomes": scan["outcomes"],
-                    }
+                    scan = _verified_scan_heartbeat(json.loads(raw))
                 except (TypeError, ValueError, json.JSONDecodeError):
                     scan = None
                     scan_error = "invalid stored scan record"
