@@ -332,6 +332,24 @@ def validate_boot_checkpoint(expected_pid, *, checkpoint=BOOT_CHECKPOINT, boot_i
     return record
 
 
+def _require_partition_mount(context, point, partition, filesystem, mode):
+    """Require a mounted slot to be the intended filesystem and block device.
+
+    An unrelated read-only FAT partition or a writable ext4 substitute is not
+    evidence that the candidate has booted with its expected A/B volumes.
+    """
+    kind = command(["findmnt", "-n", "-o", "FSTYPE", point])
+    if kind != filesystem:
+        raise ValueError(f"{point} has an unexpected filesystem")
+    options = command(["findmnt", "-n", "-o", "OPTIONS", point]).split(",")
+    if mode not in options:
+        raise ValueError(f"{point} is not mounted {mode}")
+    actual = command(["findmnt", "-n", "-o", "SOURCE", point])
+    expected = context["devices"][str(partition)]
+    if Path(actual).resolve(strict=True) != Path(expected).resolve(strict=True):
+        raise ValueError(f"{point} is mounted from an unexpected partition")
+
+
 def check_health(context, expected_pid=None):
     current = context["current"]
     if dt_integer("partition") != SLOTS[current]["boot"]:
@@ -346,20 +364,18 @@ def check_health(context, expected_pid=None):
     validate_boot_checkpoint(int(pid))
     if command(["findmnt", "-n", "-o", "FSTYPE", "/"]) != "overlay":
         raise ValueError("root is not protected by overlay")
-    if "ro" not in command(["findmnt", "-n", "-o", "OPTIONS", "/media/root-ro"]).split(","):
-        raise ValueError("lower root is writable")
-    for point in ("/boot/firmware", "/boot/redux-control"):
-        if "ro" not in command(["findmnt", "-n", "-o", "OPTIONS", point]).split(","):
-            raise ValueError(f"{point} is writable")
-    if "rw" not in command(["findmnt", "-n", "-o", "OPTIONS", "/captures"]).split(","):
-        raise ValueError("captures is not writable")
+    _require_partition_mount(context, "/media/root-ro",
+                             SLOTS[current]["root"], "ext4", "ro")
+    _require_partition_mount(context, "/boot/firmware",
+                             SLOTS[current]["boot"], "vfat", "ro")
+    _require_partition_mount(context, "/boot/redux-control",
+                             1, "vfat", "ro")
+    _require_partition_mount(context, "/captures",
+                             6, "ext4", "rw")
     if command(["systemctl", "show", "-p", "RuntimeWatchdogUSec", "--value"]) in {"0", "0s", "infinity", ""}:
         raise ValueError("PID 1 hardware watchdog is disabled")
     if Path("/sys/class/watchdog/watchdog0/state").read_text().strip() != "active":
         raise ValueError("hardware watchdog is not active")
-    capture = command(["findmnt", "-n", "-o", "SOURCE", "/captures"])
-    if Path(capture).resolve() != Path(context["devices"]["6"]).resolve():
-        raise ValueError("captures mount belongs to another disk")
 
 
 def health():
