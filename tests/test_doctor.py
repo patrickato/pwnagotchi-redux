@@ -75,3 +75,46 @@ def test_augur_doctor_report_from_live_state():
     assert areas["capture radio"] == "ok"       # the Alfa supports monitor
     assert areas["detectors"] == "ok"           # 13 detectors wired
     assert areas["scope"] == "attention"        # empty scope by default
+
+
+def test_governor_without_sensor_evidence_never_makes_thermal_green():
+    from types import SimpleNamespace
+    from redux.core.governor import Mode, GovDecision
+    examples = (
+        object(),
+        SimpleNamespace(mode=Mode.FULL, reason="looks fine"),
+        GovDecision(mode=Mode.FULL, interval_scale=1.0,
+                    reason="FULL — no readings available"),
+        Governor().evaluate(Reading(), now=0),
+        Governor().evaluate(Reading(battery_pct=10, on_battery=False), now=0),
+        SimpleNamespace(mode=Mode.FULL, observed_axes=("made_up",), reason="ok"),
+        SimpleNamespace(mode=Mode.FULL, observed_axes=("cpu_temp", "cpu_temp"), reason="ok"),
+    )
+    for governor in examples:
+        report = Doctor().report(DoctorInputs(governor=governor))
+        thermal = next(f for f in report["findings"] if f["area"] == "thermal/power")
+        assert thermal["status"] == "unknown"
+        assert "thermal/power" in report["coverage"]["not_assessed"]
+
+
+def test_real_thermal_measurement_still_reports_expected_governor_mode():
+    full = Governor().evaluate(Reading(cpu_temp_c=42), now=0)
+    assert full.observed_axes == ("cpu_temp",)
+    report = Doctor().report(DoctorInputs(governor=full))
+    thermal = next(f for f in report["findings"] if f["area"] == "thermal/power")
+    assert thermal["status"] == "ok"
+    assert "thermal/power" in report["coverage"]["assessed"]
+    critical = Governor().evaluate(Reading(cpu_temp_c=83), now=0)
+    assert critical.observed_axes == ("cpu_temp",)
+    assert next(f for f in Doctor().report(DoctorInputs(governor=critical))["findings"]
+                if f["area"] == "thermal/power")["status"] == "action"
+
+
+def test_unknown_detector_counts_remain_coverage_gaps():
+    for number in (True, False, -1, 2.5, "13", float("nan"), None):
+        report = Doctor().report(DoctorInputs(detector_count=number))
+        finding = next(f for f in report["findings"] if f["area"] == "detectors")
+        assert finding["status"] == "unknown"
+        assert "detectors" in report["coverage"]["not_assessed"]
+    report = Doctor().report(DoctorInputs(detector_count=0))
+    assert next(f for f in report["findings"] if f["area"] == "detectors")["status"] == "degraded"
