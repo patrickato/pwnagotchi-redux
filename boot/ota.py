@@ -12,6 +12,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -246,22 +247,36 @@ def dt_integer(name):
 
 
 def commit_selector(slot):
+    payload = autoboot(slot)
+    if CONTROL.is_symlink() or CONTROL.parent.is_symlink():
+        raise ValueError("OTA firmware selector path must not be a symlink")
+    # Never reuse a fixed '.new' file left by an interrupted commit. The
+    # exclusive same-directory staging file is fsynced before publication.
+    staged = None
     command(["mount", "-o", "remount,rw", "/boot/redux-control"])
     try:
-        # The selector is authoritative; record commit only after file+directory sync.
-        temporary = CONTROL.with_suffix(".new")
-        with temporary.open("w") as stream:
-            stream.write(autoboot(slot))
+        if CONTROL.is_symlink() or CONTROL.parent.is_symlink():
+            raise ValueError("OTA firmware selector path changed during remount")
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="ascii", dir=CONTROL.parent,
+                prefix=".redux-autoboot-", delete=False) as stream:
+            staged = Path(stream.name)
+            stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, CONTROL)
+        os.replace(staged, CONTROL)
+        staged = None
         descriptor = os.open(CONTROL.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
     finally:
-        command(["mount", "-o", "remount,ro", "/boot/redux-control"])
+        try:
+            if staged is not None:
+                staged.unlink(missing_ok=True)
+        finally:
+            command(["mount", "-o", "remount,ro", "/boot/redux-control"])
 
 
 def backend(arguments):
