@@ -291,8 +291,12 @@ def validate_boot_checkpoint(expected_pid, *, checkpoint=BOOT_CHECKPOINT, boot_i
     """Authenticate bootstrap initialization to this process and kernel boot."""
     try:
         record = _read_bounded_state_json(checkpoint, limit=65536)
-    except FileNotFoundError as error:
+    except OSError as error:
         raise ValueError("bootstrap initialization checkpoint is unavailable") from error
+    except ValueError as error:
+        if "permitted length" in str(error):
+            raise ValueError("bootstrap initialization checkpoint is oversized") from error
+        raise
     current_boot = Path(boot_id).read_text(encoding="ascii").strip()
     if (not isinstance(record, dict) or type(record.get("schema")) is not int
             or record["schema"] != 1 or record.get("clean_shutdown") is not False
