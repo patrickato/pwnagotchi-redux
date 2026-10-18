@@ -266,3 +266,75 @@ def test_ota_ledger_refuses_unknown_stable_slot(tmp_path):
     ledger = tmp_path / "state.json"
     with pytest.raises(ValueError, match="unknown stable"):
         ota.load_state(ledger, "C")
+
+
+
+def _selector_fixture(tmp_path, monkeypatch):
+    selector = tmp_path / "autoboot.txt"
+    selector.write_text(ota.autoboot("A"))
+    commands = []
+    monkeypatch.setattr(ota, "CONTROL", selector)
+    monkeypatch.setattr(ota, "command", lambda args: commands.append(args) or "")
+    return selector, commands
+
+
+def test_ota_selector_commit_does_not_reuse_or_follow_fixed_staging_name(
+        tmp_path, monkeypatch):
+    selector, commands = _selector_fixture(tmp_path, monkeypatch)
+    outside = tmp_path / "private"
+    outside.write_text("leave this alone")
+    abandoned = selector.with_suffix(".new")
+    abandoned.symlink_to(outside)
+    ota.commit_selector("B")
+    assert selector.read_text() == ota.autoboot("B")
+    assert outside.read_text() == "leave this alone"
+    assert abandoned.is_symlink()
+    assert not list(tmp_path.glob(".redux-autoboot-*"))
+    assert commands == [
+        ["mount", "-o", "remount,rw", "/boot/redux-control"],
+        ["mount", "-o", "remount,ro", "/boot/redux-control"],
+    ]
+
+
+@pytest.mark.parametrize("stage", ["replace", "sync"])
+def test_ota_selector_commit_failure_preserves_old_selector_and_cleans_stage(
+        tmp_path, monkeypatch, stage):
+    selector, commands = _selector_fixture(tmp_path, monkeypatch)
+    with monkeypatch.context() as patcher:
+        if stage == "replace":
+            def fail_replace(source, target):
+                assert Path(source).name.startswith(".redux-autoboot-")
+                assert Path(target) == selector
+                raise OSError("simulated selector rename interruption")
+            patcher.setattr(ota.os, "replace", fail_replace)
+        else:
+            def fail_sync(_descriptor):
+                raise OSError("simulated selector file sync interruption")
+            patcher.setattr(ota.os, "fsync", fail_sync)
+        with pytest.raises(OSError, match="simulated selector"):
+            ota.commit_selector("B")
+    assert selector.read_text() == ota.autoboot("A")
+    assert not list(tmp_path.glob(".redux-autoboot-*"))
+    assert commands[-1] == ["mount", "-o", "remount,ro", "/boot/redux-control"]
+
+
+def test_ota_selector_commit_refuses_symlinked_selector_before_remount(
+        tmp_path, monkeypatch):
+    selector, commands = _selector_fixture(tmp_path, monkeypatch)
+    outside = tmp_path / "outside"
+    outside.write_text("protected")
+    selector.unlink()
+    selector.symlink_to(outside)
+    with pytest.raises(ValueError, match="symlink"):
+        ota.commit_selector("B")
+    assert outside.read_text() == "protected"
+    assert commands == []
+
+
+def test_ota_selector_rejects_invalid_slot_without_remount(
+        tmp_path, monkeypatch):
+    selector, commands = _selector_fixture(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="invalid stable slot"):
+        ota.commit_selector("C")
+    assert selector.read_text() == ota.autoboot("A")
+    assert commands == []
