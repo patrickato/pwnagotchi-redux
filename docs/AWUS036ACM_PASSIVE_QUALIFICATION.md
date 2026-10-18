@@ -237,3 +237,7 @@ and Device.Autoconnect are both true. The onboard assignment and isolated USB
 preconditions fail. See [DUAL_RADIO_READINESS_20261017.md](DUAL_RADIO_READINESS_20261017.md)
 for measured facts and the separate configuration-handoff/policy boundaries.
 The original runner gates remain unchanged; do not run it in the current state.
+The read-only `--dual-radio` acceptance exit status now also fails when these
+preconditions are blocked. A future pass authorizes no operation by itself: it
+means only that a separately approved qualification could be considered, with
+decoded reception and physical qualification still unknown.

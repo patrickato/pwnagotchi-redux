@@ -113,6 +113,9 @@ def report(peer, *, run=None, collector=collect, pan=None, dual_radio=False):
             pass
     if dual_radio:
         result['dual_radio_readiness']=collect_readiness(peer,run=run)
+        result['gates']['dual_radio_readiness'] = (
+            'PASS' if result['dual_radio_readiness'].get('readiness',{}).get('state')
+            == 'READY_FOR_SEPARATE_QUALIFICATION' else 'FAIL')
     return result
 
 

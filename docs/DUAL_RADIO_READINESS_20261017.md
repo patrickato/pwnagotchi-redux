@@ -80,6 +80,16 @@ unmanaged. It uses the actual NM1.42 Device.Autoconnect property, documented
 [here](https://networkmanager.dev/docs/api/1.42.4/gdbus-org.freedesktop.NetworkManager.Device.html).
 It does not assume GENERAL.AUTOCONNECT exists in nmcli device-show output.
 
+The provider now emits a glass-box `readiness` assessment and the consolidated
+acceptance command includes `dual_radio_readiness` in its normal gates/exit
+status. A blocked configuration can no longer print detailed failures while
+the CLI exits successfully because unrelated base gates passed. The assessment
+requires coherent onboard capture assignment/binding, native onboard framing,
+one isolated Alfa identity and affirmative unmanaged/autoconnect-disabled USB
+policy. Passing means only `READY_FOR_SEPARATE_QUALIFICATION`; decoded reception
+and physical qualification remain `UNKNOWN` and require their own approved
+hardware gate.
+
 No setters, packet sockets, discovery scan, capture bytes, credentials or API
 body are read. The only firmware command is absolute-path
 `/usr/local/bin/nexutil -I wlan0 -m` (getter). PATH deliberately excludes

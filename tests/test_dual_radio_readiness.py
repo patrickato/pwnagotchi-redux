@@ -188,6 +188,8 @@ def test_integrated_collector_is_stable_sanitized_and_never_qualifies_reception(
     assert result['onboard']['decoded_reception']=='UNKNOWN'
     assert '192.0.2'not in json.dumps(result) and 'usbrx'not in json.dumps(result)
     assert 'synthetic-boot'not in json.dumps(result)
+    assert result['readiness']['state']=='BLOCKED'
+    assert result['readiness']['decoded_reception']=='UNKNOWN'
 
 
 @pytest.mark.parametrize('fault',['usb_gone','identity','pid','config','nm_owner','permission'])
@@ -226,6 +228,36 @@ def test_root_receipt_missing_and_invalid_inputs_never_crash_checkpoint_helper(t
     cfg=SimpleNamespace(preferred_iface='wlan0',require_usb_lease=False,allow_connected_capture=False)
     assert configuration_checkpoint(cfg,pid=10,proc_root=tmp_path)is None
     assert r.loaded_policy(None,(20,20,0,0),'boot')is None
+
+
+def test_glass_box_readiness_can_only_authorize_a_later_qualification():
+    value=dict(observation='stable',ethernet_verified=True,
+        runtime=dict(loaded_wlan0_pin='PASS',effective_onboard_assignment='PASS',
+                     bettercap_argument_onboard=True,onboard_bound=1,usb_bound=0,
+                     wildcard_bound=0),
+        onboard=dict(transport_onboard=True,native_framing=True,
+                     decoded_reception='UNKNOWN'),
+        alfa=dict(usb_candidates=1,netdev_count=1,devices=[dict(
+            mode='monitor',arphrd=803,ip_addresses=0,owner_stable=True,
+            managed=False,autoconnect=False)]))
+    assessment=r.assess_readiness(value)
+    assert assessment==dict(state='READY_FOR_SEPARATE_QUALIFICATION',blockers=[],
+                            decoded_reception='UNKNOWN',physical_qualification='UNKNOWN')
+    value['alfa']['devices'][0]['managed']=True
+    blocked=r.assess_readiness(value)
+    assert blocked['state']=='BLOCKED'
+    assert blocked['blockers']==['alfa_exclusive_policy_unverified']
+
+
+def test_dual_radio_acceptance_gate_affects_exit_contract(monkeypatch):
+    from redux import acceptance
+    from redux.radio import readiness
+    def blocked(*_args,**_kwargs):
+        return {'readiness':{'state':'BLOCKED','blockers':['capture_not_onboard']}}
+    monkeypatch.setattr(readiness,'collect_readiness',blocked)
+    result=acceptance.report('192.0.2.1',run=lambda _args:'',collector=lambda *_a,**_k:{},
+                             dual_radio=True)
+    assert result['gates']['dual_radio_readiness']=='FAIL'
 
 
 def test_core_checkpoint_contains_loaded_fields_without_changing_selection(tmp_path):

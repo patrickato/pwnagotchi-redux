@@ -212,6 +212,44 @@ def api_status():
     except (OSError,urllib.error.URLError):return None
 
 
+def assess_readiness(result):
+    """Glass-box preflight only; never claims decoded or physical success."""
+    if not isinstance(result,dict):
+        return {'state':'BLOCKED','blockers':['observation_unverified'],
+                'decoded_reception':'UNKNOWN','physical_qualification':'UNKNOWN'}
+    blockers=[]
+    runtime=result.get('runtime',{})
+    onboard=result.get('onboard',{})
+    alfa=result.get('alfa',{})
+    runtime=runtime if isinstance(runtime,dict)else{}
+    onboard=onboard if isinstance(onboard,dict)else{}
+    alfa=alfa if isinstance(alfa,dict)else{}
+    if result.get('observation')!='stable':blockers.append('observation_unverified')
+    if result.get('ethernet_verified')is not True:blockers.append('ethernet_unverified')
+    if runtime.get('loaded_wlan0_pin')!='PASS':blockers.append('loaded_onboard_policy_unverified')
+    if runtime.get('effective_onboard_assignment')!='PASS':blockers.append('capture_not_onboard')
+    if (runtime.get('bettercap_argument_onboard')is not True
+            or type(runtime.get('onboard_bound'))is not int or runtime.get('onboard_bound')<1
+            or runtime.get('usb_bound')!=0 or runtime.get('wildcard_bound')!=0):
+        blockers.append('capture_binding_unverified')
+    if onboard.get('transport_onboard')is not True:blockers.append('onboard_identity_unverified')
+    if onboard.get('native_framing')is not True:blockers.append('onboard_native_framing_unverified')
+    devices=alfa.get('devices')
+    if alfa.get('usb_candidates')!=1 or alfa.get('netdev_count')!=1 or not isinstance(devices,list)or len(devices)!=1:
+        blockers.append('alfa_identity_unverified')
+    else:
+        device=devices[0]
+        if (device.get('mode')!='monitor' or device.get('arphrd')not in (801,803)
+                or device.get('ip_addresses')!=0):
+            blockers.append('alfa_capture_shape_unverified')
+        if (device.get('owner_stable')is not True or device.get('managed')is not False
+                or device.get('autoconnect')is not False):
+            blockers.append('alfa_exclusive_policy_unverified')
+    return {'state':'READY_FOR_SEPARATE_QUALIFICATION'if not blockers else'BLOCKED',
+            'blockers':blockers,'decoded_reception':'UNKNOWN',
+            'physical_qualification':'UNKNOWN'}
+
+
 def collect_readiness(peer, *, run=None, sys=Path('/sys/class/net'), proc=Path('/proc'),
                       usb=Path('/sys/bus/usb/devices'), live=Path('/captures/live/live.json'),
                       config=Path('/etc/redux/live.toml'), api=api_status):
@@ -298,7 +336,10 @@ def collect_readiness(peer, *, run=None, sys=Path('/sys/class/net'), proc=Path('
                'file_overflow','command_denied','command_timeout','command_failed','deadline'}
         reason=str(error)if isinstance(error,Unavailable)and str(error)in known else 'measurement_unavailable'
         # Discard partial affirmations on any generation, permission or input fault.
-        return dict(format=result['format'],hardware_changes=False,observation='unverified',
+        failed=dict(format=result['format'],hardware_changes=False,observation='unverified',
             runtime={'loaded_wlan0_pin':'UNKNOWN'},onboard={'decoded_reception':'UNKNOWN'},reason=reason,
             alfa=dict(usb_candidates=None,netdev_count=None,devices=[]))
+        failed['readiness']=assess_readiness(failed)
+        return failed
+    result['readiness']=assess_readiness(result)
     return result
