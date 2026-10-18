@@ -191,7 +191,7 @@ def load_state(path, stable):
 
 
 _PARTUUID_PATH = re.compile(
-    r"/dev/disk/by-partuuid/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\Z"
+    r"/dev/disk/by-partuuid/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 )
 
 
