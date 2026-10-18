@@ -226,3 +226,53 @@ def test_trend_requires_positive_measured_engine_pid(pid):
     assert not h.ingest(report(1000, events=1, pid=pid), now=1000)
     assert h.state == "UNQUALIFIED"
     assert not h.samples and not h.rates
+
+
+def test_snapshot_retains_specific_rejection_after_clear():
+    reasons = (
+        (None, "UNAVAILABLE"),
+        ({"runtime": {"updated_utc": 1002, "state": "degraded"}}, "NOT CURRENT"),
+        (report(1002, 12, pid=0), "UNQUALIFIED"),
+        (report(1002, events="bad"), "COUNTERS UNKNOWN"),
+    )
+    for malformed, reason in reasons:
+        h = history.TelemetryWindow()
+        assert h.ingest(report(1000, events=10), now=1000)
+        assert h.ingest(report(1001, events=11), now=1001)
+        assert not h.ingest(malformed, now=1002)
+        snap = h.snapshot(now=1002)
+        assert snap == {"state": reason, "points": [], "last": None, "seconds": None}
+        assert trend_chart.points(snap) == []
+        assert not h.samples and not h.rates
+
+
+def test_chart_diagnostic_keeps_clock_conflict_instead_of_no_samples():
+    h = history.TelemetryWindow()
+    h.ingest(report(1000, events=1), now=1000)
+    h.ingest(report(1002, events=3), now=1002)
+    assert not h.ingest(report(1002, events=99), now=1002)
+    snap = h.snapshot(now=1002)
+    assert snap["state"] == "CLOCK CONFLICT"
+    class Draw:
+        def __init__(self): self.labels = []
+        def text(self, _xy, text, **_kw): self.labels.append(text)
+        def line(self, *_args, **_kwargs): pass
+        def rectangle(self, *_args, **_kwargs): pass
+        def ellipse(self, *_args, **_kwargs): pass
+    draw = Draw()
+    assert trend_chart.draw_trends(draw, snap, font=lambda *_a, **_k: None,
+                                   ink=None, subtle=None, teal=None, amber=None,
+                                   blue=None) == 0
+    assert "CLOCK CONFLICT" in draw.labels
+    assert "NO SAMPLES" not in draw.labels
+
+
+@pytest.mark.parametrize("invalid", [True, float("nan"), float("inf"), -1, "bad"])
+def test_snapshot_invalid_caller_clock_does_not_render_tracking(invalid):
+    h = history.TelemetryWindow()
+    h.ingest(report(1000, events=1), now=1000)
+    h.ingest(report(1002, events=3), now=1002)
+    state = h.snapshot(now=invalid)
+    assert state == {"state": "UNAVAILABLE", "points": [], "last": None, "seconds": None}
+    assert trend_chart.points(state) == []
+    assert h.snapshot(now=1002)["state"] == "TRACKING"
