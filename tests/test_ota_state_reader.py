@@ -227,3 +227,42 @@ def test_ota_health_refuses_substitute_storage(
     measured[point][key] = spoof
     with pytest.raises((OSError, ValueError)):
         ota.check_health(context, expected_pid=321)
+
+
+
+@pytest.mark.parametrize("bad", [
+    {"pending": None, "states": {"A": "bad", "B": "good"}},
+    {"pending": "B", "states": {"A": "good", "B": "bad"}},
+    {"pending": "A", "states": {"A": "bad", "B": "good"}},
+])
+def test_ota_ledger_rejects_bad_committed_fallback_or_pending_candidate(tmp_path, bad):
+    ledger = tmp_path / "state.json"
+    record = ota.initial_state("A")
+    record.update(bad)
+    ledger.write_text(json.dumps(record))
+    with pytest.raises(ValueError, match="invalid OTA state"):
+        ota.load_state(ledger, "A")
+    # A contradictory record cannot be silently repaired by a health check.
+    assert json.loads(ledger.read_text()) == record
+
+
+def test_ota_ledger_retains_interrupted_selector_commit_recovery(tmp_path):
+    ledger = tmp_path / "state.json"
+    staged, _ = ota.transition(ota.initial_state("A"), "A", "A",
+                               "set-primary", "B")
+    ledger.write_text(json.dumps(staged))
+    # The selector may already be B while the state write was interrupted:
+    # pending==stable is deliberately valid for the recovery branch.
+    loaded = ota.load_state(ledger, "B")
+    assert loaded["pending"] == "B" and loaded["states"]["B"] == "good"
+    recovered, committed = ota.transition(loaded, "B", "B",
+                                           "set-state", "B", "good")
+    assert committed is None
+    assert recovered["pending"] is None
+    assert "interrupted" in recovered["reason"]
+
+
+def test_ota_ledger_refuses_unknown_stable_slot(tmp_path):
+    ledger = tmp_path / "state.json"
+    with pytest.raises(ValueError, match="unknown stable"):
+        ota.load_state(ledger, "C")
