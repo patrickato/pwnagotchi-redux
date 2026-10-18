@@ -66,10 +66,21 @@ def probe_thermal_power(inp: DoctorInputs) -> Finding:
         return Finding("thermal/power", Status.UNKNOWN,
                        "No thermal/power readings yet.",
                        "needs a hardware collector feeding the Governor")
-    mode = getattr(getattr(g, "mode", None), "value", "full")
+    mode = getattr(getattr(g, "mode", None), "value", None)
+    observed = getattr(g, "observed_axes", ())
+    valid_axes = {"cpu_temp", "cpu_load", "ram", "battery"}
+    # A Governor decision with no measured sensor axes is a scheduling
+    # decision, NOT evidence that temperatures, memory or power are healthy.
+    if (mode not in ("full", "guarded", "reduced", "survival")
+            or not isinstance(observed, tuple) or not observed
+            or any(type(name) is not str or name not in valid_axes for name in observed)
+            or len(set(observed)) != len(observed)):
+        return Finding("thermal/power", Status.UNKNOWN,
+                       "Thermal/power readings not verified.",
+                       "no valid independently supplied sensor coverage")
     reason = getattr(g, "reason", "")
     st = {"full": Status.OK, "guarded": Status.ATTENTION,
-          "reduced": Status.DEGRADED, "survival": Status.ACTION_REQUIRED}.get(mode, Status.UNKNOWN)
+          "reduced": Status.DEGRADED, "survival": Status.ACTION_REQUIRED}[mode]
     summ = {"full": "Running at full performance.",
             "guarded": "Easing off slightly under load.",
             "reduced": "Throttled to manage heat/power.",
@@ -103,8 +114,9 @@ def probe_location(inp: DoctorInputs) -> Finding:
 
 
 def probe_detectors(inp: DoctorInputs) -> Finding:
-    if inp.detector_count is None:
-        return Finding("detectors", Status.UNKNOWN, "Can't assess detectors.", "no detector count provided")
+    if type(inp.detector_count) is not int or inp.detector_count < 0:
+        return Finding("detectors", Status.UNKNOWN, "Can't assess detectors.",
+                       "a verified nonnegative detector count was not provided")
     if inp.detector_count > 0:
         return Finding("detectors", Status.OK, f"{inp.detector_count} detectors armed and watching.",
                        "the detect engine is populated")
