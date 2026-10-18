@@ -53,6 +53,10 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
             rows = conn.execute("SELECT output_sha,output_path FROM artifacts WHERE status='ready'").fetchall()
         finally:
             conn.close()
+        if count == 0:
+            # Integrity cannot be established when no artifacts were prepared.
+            result["result"] = "unknown"
+            return result
         for digest, pathname in rows:
             result["checked"] += 1
             if not isinstance(digest, str) or not SHA.fullmatch(digest):
@@ -105,7 +109,7 @@ def main(argv=None):
     args = p.parse_args(argv)
     report = audit(args.db, args.output)
     print(json.dumps(report, sort_keys=True))
-    return 0 if report["result"] == "pass" else 1
+    return 0 if report["result"] == "pass" else 3 if report["result"] == "unknown" else 1
 
 
 if __name__ == "__main__":
