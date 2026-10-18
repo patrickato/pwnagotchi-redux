@@ -829,3 +829,75 @@ def test_worker_heartbeat_accepts_exact_empty_and_low_storage_pause(tmp_path):
     status = read_summary(cfg.database)
     assert status["scan_error"] == ""
     assert status["last_scan"]["outcomes"] == {"paused_low_storage": 1}
+
+
+def test_corrupted_ledger_prepared_path_cannot_read_arbitrary_files(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "prepared.hc22000", (REC + "\n").encode())
+    outside = tmp_path / "private-do-not-read"
+    outside.write_bytes(b"outside private material")
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        worker.db.execute("UPDATE artifacts SET output_path=?", (str(outside),))
+        worker.db.commit()
+        original_digest = ingest._digest_file
+
+        def no_outside_digest(path, **kwargs):
+            assert Path(path) != outside, "worker tried to read untrusted ledger path"
+            return original_digest(path, **kwargs)
+
+        monkeypatch.setattr(ingest, "_digest_file", no_outside_digest)
+        assert worker.ingest_file(source) == "error"
+        assert "identity" in worker.rows()[0]["reason"]
+    assert outside.read_bytes() == b"outside private material"
+    assert source.is_file()
+
+
+def test_prepared_artifact_exceeding_limit_never_enters_unbounded_digest(tmp_path):
+    from redux.crack import ingest
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "previous.hc22000", (REC + "\n").encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        prepared = Path(worker.rows()[0]["output_path"])
+        with prepared.open("r+b") as stream:
+            stream.truncate(ingest._MAX_PREPARED_BYTES + 1)
+        assert worker.ingest_file(source) == "error"
+        assert "size limit" in worker.rows()[0]["reason"]
+        assert prepared.stat().st_size == ingest._MAX_PREPARED_BYTES + 1
+    assert source.is_file()
+
+
+def test_source_growth_before_hash_is_deferred_without_ledger_write(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    cfg = settings(tmp_path, max_capture_bytes=1024)
+    source = write_file(cfg.inputs[0] / "growing.hc22000", (REC + "\n").encode())
+    original_digest = ingest._digest_file
+    grown = [False]
+
+    def grow_then_hash(path, **kwargs):
+        if Path(path) == source and not grown[0]:
+            grown[0] = True
+            with source.open("ab") as stream:
+                stream.write(b"new bytes" * 1024)
+        return original_digest(path, **kwargs)
+
+    monkeypatch.setattr(ingest, "_digest_file", grow_then_hash)
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "deferred"
+        assert worker.rows() == []
+    assert grown[0]
+    assert source.stat().st_size > cfg.max_capture_bytes
+
+
+def test_prepared_identity_with_bad_digest_shape_refused(tmp_path):
+    cfg = settings(tmp_path)
+    source = write_file(cfg.inputs[0] / "shape.hc22000", (REC + "\n").encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        worker.db.execute("UPDATE artifacts SET output_sha=?", ("not-a-sha",))
+        worker.db.commit()
+        assert worker.ingest_file(source) == "error"
+        assert "identity" in worker.rows()[0]["reason"]
+    assert source.is_file()
