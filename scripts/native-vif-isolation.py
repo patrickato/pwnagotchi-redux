@@ -561,6 +561,8 @@ class DownOnlyPiOps(PiOps):
         for method in ('GetDevices', 'GetAllDevices'):
             fixed.append(bus + ['call', 'org.freedesktop.NetworkManager',
                 '/org/freedesktop/NetworkManager', 'org.freedesktop.NetworkManager', method])
+        fixed.append(bus + ['call', 'org.freedesktop.DBus', '/org/freedesktop/DBus',
+            'org.freedesktop.DBus', 'GetNameOwner', 's', 'org.freedesktop.NetworkManager'])
         device_property = (len(args) == 8 and args[:5] == bus + ['get-property', 'org.freedesktop.NetworkManager']
             and re.fullmatch(r'/org/freedesktop/NetworkManager/Devices/[0-9]+', args[5])
             and args[6] == 'org.freedesktop.NetworkManager.Device' and args[7] in ('Interface','Managed','State'))
@@ -586,6 +588,13 @@ class DownOnlyPiOps(PiOps):
                         or state['temp_type'] not in (801, 803)
                         or state['temp_nm_managed'] is True):
                     raise Stop('DOWN-only identity or safety changed')
+                owner_cmd=['busctl','--system','--auto-start=no','call',
+                    'org.freedesktop.DBus','/org/freedesktop/DBus',
+                    'org.freedesktop.DBus','GetNameOwner','s','org.freedesktop.NetworkManager']
+                _,owner_before=self.command(owner_cmd)
+                owner_match=re.fullmatch(r's "(:[0-9]+\.[0-9]+)"\s*',owner_before)
+                if not owner_match:
+                    raise Stop('invalid NetworkManager D-Bus owner')
                 inventories = {}
                 for method in ('GetDevices', 'GetAllDevices'):
                     _, raw = self.command(['busctl', '--system', '--auto-start=no', 'call',
@@ -613,6 +622,9 @@ class DownOnlyPiOps(PiOps):
                             raise Stop('invalid D-Bus ownership measurement')
                         found.append({'managed': managed.strip() == 'b true', 'state': int(nm_state[2:])})
                     inventories[method] = {'device_count': len(paths), 'matches': found}
+                _,owner_after=self.command(owner_cmd)
+                if owner_after!=owner_before:
+                    raise Stop('NetworkManager D-Bus owner changed')
                 _, properties = self.command(['udevadm', 'info', '--query=property',
                                                 '--path=/sys/class/net/' + name])
                 # Expose only fixed classifications, never arbitrary udev values.
@@ -624,7 +636,8 @@ class DownOnlyPiOps(PiOps):
                                  else 'false' if key == 'NM_UNMANAGED' and value in ('0','false')
                                  else 'present_uninterpreted')
                 item = {'inventories': inventories, 'udev': vals, 'ifindex': index,
-                        'arphrd': state['temp_type'], 'firmware': 0, 'up': False}
+                        'arphrd': state['temp_type'], 'firmware': 0, 'up': False,
+                        'nm_owner_stable': True}
                 snapshots.append(item)
                 self.event('down_only_evidence', evidence=item)
                 # Any positive manager claim stops observation, never activates.

@@ -1,5 +1,10 @@
 # Raspberry Pi 4 native-monitor ownership isolation — approval request
 
+> This file retains the full historical design/recovery record. The only
+> current consolidated candidate is the non-authorized DOWN-only procedure in
+> [NATIVE_VIF_FUTURE_EXPERIMENT.md](NATIVE_VIF_FUTURE_EXPERIMENT.md). Do not
+> execute older activation command tables from this document.
+
 **CURRENT STATUS: the separately approved 2b540ad attempt stopped before VIF
 creation. Baseline was restored under subsequent separate approval. Do not
 repeat the trial. See [NATIVE_VIF_TRIAL_20261016.md](NATIVE_VIF_TRIAL_20261016.md).**

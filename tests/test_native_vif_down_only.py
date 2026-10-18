@@ -125,6 +125,7 @@ def test_real_down_observer_filters_udev_and_dbus_identifiers(monkeypatch):
     ops.observe=fake.observe
     events=[];ops.event=lambda phase,**data:events.append(data)
     def command(args,**kw):
+        if 'GetNameOwner' in args:return 0,'s ":1.20"\n'
         if 'GetDevices' in args or 'GetAllDevices' in args:return 0,'ao 0\n'
         if args[0]=='udevadm':return 0,'NM_UNMANAGED=1\nID_NET_MANAGED_BY=PRIVATE-OWNER\nSSID=PRIVATE-NETWORK\n'
         pytest.fail('unexpected command')
@@ -134,6 +135,7 @@ def test_real_down_observer_filters_udev_and_dbus_identifiers(monkeypatch):
     assert len(result)==2 and 'PRIVATE' not in repr(result)
     assert result[0]['udev']['NM_UNMANAGED']=='true'
     assert result[0]['inventories']['GetAllDevices']['matches']==[]
+    assert result[0]['nm_owner_stable'] is True
     assert ops.command_limit==6
 
 

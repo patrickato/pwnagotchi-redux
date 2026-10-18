@@ -62,6 +62,16 @@ It must not be called as a substitute for the runner's existing safety
 gates. An independent review and a new scoped hardware approval are
 required before any changed execution sequence can be used.
 
+The shared classifier now also consumes the existing DOWN-only runner's two
+sanitized snapshots. It requires stable ifindex/ARPHRD/DOWN/firmware identity,
+a stable NetworkManager unique D-Bus owner, agreement between `GetDevices`
+and `GetAllDevices`, and stable filtered udev classifications. Only one
+matching NM object reporting Managed=false/State10 is positive ownership
+evidence; two stable empty inventories still produce
+`not_enumerated_unknown`. See
+[NATIVE_VIF_FUTURE_EXPERIMENT.md](NATIVE_VIF_FUTURE_EXPERIMENT.md) for the
+single consolidated future procedure. It is not authorization.
+
 ## Codex's next work: read-only investigation, no new VIF
 
 Using the existing verified strict Ethernet SSH and previously inspected

@@ -114,3 +114,68 @@ def assess_ownership(*, nm_managed: bool | None, nm_state: int | None,
                        "Udev requests unmanaged, but NM can override it at runtime.")
     return outcome("not_enumerated_unknown",
                    "NM device not enumerated; no affirmative exclusion or unmanaged state.")
+
+
+def assess_down_only_samples(samples) -> OwnershipEvidence:
+    """Classify the runner's two sanitized snapshots, never raw identifiers.
+
+    A positive result requires both NM inventory APIs to expose exactly one
+    matching object with the same explicit Managed=false/State=10 values in
+    both observations. Absence remains unknown because NM 1.42.4 can ignore a
+    monitor-mode link at its Wi-Fi factory without creating an NMDevice.
+    """
+    def result(status, policy="unknown", reason="Invalid or changing DOWN-only evidence."):
+        return OwnershipEvidence(status, None, None, policy, reason)
+    if not isinstance(samples, list) or len(samples) != 2:
+        return result("unknown")
+    normalized=[]
+    for item in samples:
+        if (not isinstance(item, dict) or item.get("up") is not False
+                or item.get("firmware") != 0 or item.get("nm_owner_stable") is not True):
+            return result("unknown")
+        ifindex=item.get("ifindex")
+        arphrd=item.get("arphrd")
+        if type(ifindex)is not int or ifindex<=0 or type(arphrd)is not int or arphrd not in (801,803):
+            return result("unknown")
+        inventories=item.get("inventories")
+        udev=item.get("udev")
+        if not isinstance(inventories,dict)or set(inventories)!={"GetDevices","GetAllDevices"}or not isinstance(udev,dict):
+            return result("unknown")
+        observations=[]
+        for method in ("GetDevices","GetAllDevices"):
+            inventory=inventories[method]
+            if not isinstance(inventory,dict)or set(inventory)!={"device_count","matches"}:
+                return result("unknown")
+            count=inventory["device_count"];matches=inventory["matches"]
+            if type(count)is not int or not 0<=count<=64 or not isinstance(matches,list)or len(matches)>1:
+                return result("inconsistent")
+            if not matches:
+                observations.append(None);continue
+            match=matches[0]
+            if (not isinstance(match,dict)or set(match)!={"managed","state"}
+                    or type(match.get("managed"))is not bool
+                    or type(match.get("state"))is not int or not 0<=match["state"]<=120):
+                return result("unknown")
+            observations.append((match["managed"],match["state"]))
+        if observations[0]!=observations[1]:
+            return result("inconsistent")
+        unmanaged=udev.get("NM_UNMANAGED")
+        controller=udev.get("ID_NET_MANAGED_BY")
+        allowed={"absent","true","false","present_uninterpreted"}
+        if unmanaged not in allowed or controller not in allowed:
+            return result("unknown")
+        normalized.append((ifindex,arphrd,observations[0],unmanaged,controller))
+    if normalized[0]!=normalized[1]:
+        return result("inconsistent")
+    _,_,observation,unmanaged,controller=normalized[0]
+    properties=("NM_UNMANAGED="+("true"if unmanaged=="true"else"false")+"\n"
+                if unmanaged in ("true","false")else"")
+    # ID_NET_MANAGED_BY is intentionally uninterpreted on NM 1.42.4.
+    if observation is None:
+        return assess_ownership(nm_managed=None,nm_state=None,dbus_enumerated=False,
+            udev_properties=properties,kernel_interface_present=True,
+            supports_id_net_managed_by=False)
+    managed,state=observation
+    return assess_ownership(nm_managed=managed,nm_state=state,dbus_enumerated=True,
+        udev_properties=properties,kernel_interface_present=True,
+        supports_id_net_managed_by=False)

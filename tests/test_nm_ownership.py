@@ -1,7 +1,8 @@
 """Offline ownership evidence: missing NM discovery never means unmanaged."""
 import pytest
 
-from redux.radio.nm_ownership import assess_ownership, udev_ownership_policy
+from redux.radio.nm_ownership import (assess_down_only_samples,
+                                      assess_ownership, udev_ownership_policy)
 
 
 @pytest.mark.parametrize(("properties", "expected"), [
@@ -141,3 +142,46 @@ def test_invalid_evidence_does_not_echo_private_input():
     assert evidence.status == 'unknown'
     assert evidence.nm_enumerated is None and evidence.dbus_enumerated is None
     assert 'private' not in repr(evidence)
+
+
+def down_sample(matches=None, **change):
+    matches=[] if matches is None else matches
+    value={"inventories":{
+        "GetDevices":{"device_count":3,"matches":[dict(row) for row in matches]},
+        "GetAllDevices":{"device_count":3,"matches":[dict(row) for row in matches]},
+    },"udev":{"NM_UNMANAGED":"absent","ID_NET_MANAGED_BY":"absent"},
+        "ifindex":5,"arphrd":803,"firmware":0,"up":False,"nm_owner_stable":True}
+    value.update(change)
+    return value
+
+
+def test_stable_explicit_unmanaged_down_only_observation_is_positive_evidence():
+    samples=[down_sample([{"managed":False,"state":10}]) for _ in range(2)]
+    result=assess_down_only_samples(samples)
+    assert result.status=="nm_explicitly_unmanaged"
+    assert result.permits_activation is False
+
+
+def test_stable_absence_remains_unknown_for_factory_ignored_monitor_vif():
+    result=assess_down_only_samples([down_sample(),down_sample()])
+    assert result.status=="not_enumerated_unknown"
+    assert result.nm_enumerated is False and result.permits_activation is False
+
+
+@pytest.mark.parametrize("mutate",[
+    lambda samples:samples.pop(),
+    lambda samples:samples[1].update(ifindex=6),
+    lambda samples:samples[1].update(arphrd=801),
+    lambda samples:samples[1]["inventories"]["GetDevices"].update(matches=[]),
+    lambda samples:samples[0]["inventories"]["GetDevices"].update(matches=[
+        {"managed":False,"state":10},{"managed":False,"state":10}]),
+    lambda samples:samples[0]["udev"].update(NM_UNMANAGED="private"),
+    lambda samples:samples[0].update(up=True),
+    lambda samples:samples[0].update(nm_owner_stable=False),
+])
+def test_down_only_changing_ambiguous_or_malformed_evidence_never_qualifies(mutate):
+    samples=[down_sample([{"managed":False,"state":10}]) for _ in range(2)]
+    mutate(samples)
+    result=assess_down_only_samples(samples)
+    assert result.status in ("unknown","inconsistent")
+    assert result.permits_activation is False

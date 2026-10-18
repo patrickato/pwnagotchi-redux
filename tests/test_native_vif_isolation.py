@@ -155,6 +155,45 @@ def test_networkmanager_absent_temp_device_is_unknown_not_unmanaged():
         ops.nm(NAME)
 
 
+def _down_observer(monkeypatch, owners):
+    monkeypatch.setattr(trial.time, 'sleep', lambda _seconds: None)
+    ops=object.__new__(trial.DownOnlyPiOps)
+    ops.deadline=trial.time.monotonic()+30
+    ops.command_limit=6
+    state=dict(safe=True,managed=False,nm_state=10,supplicant=[],
+        primary_mode='managed',primary_up=False,primary_type=1,live='inactive',
+        capture_process=False,temp_index=5,temp_phy='phy0',temp_monitor=True,
+        temp_up=False,temp_nm_managed=None,firmware=0,temp_type=803,
+        interfaces=['wlan0',NAME])
+    ops.observe=lambda _name:dict(state)
+    ops.event=lambda *_args,**_kwargs:None
+    owner_values=iter(owners)
+    def command(args,required=True):
+        if 'GetNameOwner'in args:return 0,'s "'+next(owner_values)+'"\n'
+        if args[-1]in ('GetDevices','GetAllDevices'):return 0,'ao 0\n'
+        if args[0]=='udevadm':return 0,'DEVPATH=/private/not-published\n'
+        raise AssertionError(args)
+    ops.command=command
+    return ops
+
+
+def test_down_only_observation_pins_nm_owner_and_preserves_absence_unknown(monkeypatch):
+    from redux.radio.nm_ownership import assess_down_only_samples
+    ops=_down_observer(monkeypatch,[':1.20']*4)
+    samples=ops.observe_down(NAME,5,'phy0')
+    assert len(samples)==2 and all(row['nm_owner_stable']for row in samples)
+    evidence=assess_down_only_samples(samples)
+    assert evidence.status=='not_enumerated_unknown'
+    assert evidence.permits_activation is False
+    assert 'private'not in repr(samples)
+
+
+def test_down_only_observation_rejects_nm_restart_during_snapshot(monkeypatch):
+    ops=_down_observer(monkeypatch,[':1.20',':1.21'])
+    with pytest.raises(trial.Stop,match='D-Bus owner changed'):
+        ops.observe_down(NAME,5,'phy0')
+
+
 def test_unobserved_temp_networkmanager_ownership_blocks_activation():
     class NotEnumerated(Fake):
         def change(self, args):
