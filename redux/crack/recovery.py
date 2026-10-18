@@ -19,8 +19,12 @@ _OUTPUT_SHA = re.compile(r"^[0-9a-f]{64}$")
 
 from .ingest import (
     CaptureIngestor, CaptureMountLost, Settings, SUFFIXES,
-    capture_scan_lock, requires_capture_mount,
+    _digest_file, capture_scan_lock, requires_capture_mount,
 )
+
+# Ingestion accepts at most 32 MiB of converter material. A small margin
+# permits normalized line endings without allowing unbounded recovery reads.
+_MAX_PREPARED_BYTES = 33 * 1024 * 1024
 
 
 def _snapshot_checked(settings):
@@ -50,7 +54,8 @@ def _candidates(conn, settings, *, max_files, now):
     ).fetchall()
     result = {
         "records_checked": 0, "retryable": 0, "recorded_errors": 0,
-        "missing_outputs": 0, "blocked": 0, "deferred": 0,
+        "missing_outputs": 0, "altered_outputs": 0,
+        "blocked": 0, "deferred": 0,
         "truncated": len(rows) > inspected_limit,
     }
     retry = []
@@ -104,8 +109,25 @@ def _candidates(conn, settings, *, max_files, now):
             if output.exists():
                 if not output.is_file():
                     result["blocked"] += 1
-                # A file with incorrect contents will be identified by
-                # ordinary ingestion; recovery does not erase it.
+                    continue
+                # Report mismatched prepared bytes now, without opening the
+                # source capture or overwriting an existing result. Ingestion
+                # already refuses collisions; operator recovery must too.
+                try:
+                    verified_sha = _digest_file(
+                        output, max_bytes=_MAX_PREPARED_BYTES)
+                except ValueError:
+                    # An oversized prepared output cannot be an authentic
+                    # product of our bounded conversion process.
+                    result["altered_outputs"] += 1
+                    result["blocked"] += 1
+                    continue
+                except OSError:
+                    result["blocked"] += 1
+                    continue
+                if verified_sha != output_sha:
+                    result["altered_outputs"] += 1
+                    result["blocked"] += 1
                 continue
             result["missing_outputs"] += 1
         else:
@@ -129,7 +151,8 @@ def recovery_report(settings: Settings, *, apply=False, max_files=100,
     report = {
         "mode": "apply" if apply else "dry_run", "ledger_available": False,
         "records_checked": 0, "retryable": 0, "recorded_errors": 0,
-        "missing_outputs": 0, "blocked": 0, "deferred": 0,
+        "missing_outputs": 0, "altered_outputs": 0,
+        "blocked": 0, "deferred": 0,
         "truncated": False, "attempted": 0, "outcomes": {},
         "note": "Source captures and prepared artifacts are never deleted.",
     }

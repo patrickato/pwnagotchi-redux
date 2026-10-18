@@ -777,6 +777,7 @@ def test_ledger_record_and_scan_heartbeat_refuse_mount_change(tmp_path, monkeypa
     lambda x: x.update(completed_utc=True),
     lambda x: x.update(completed_utc=-1),
     lambda x: x.update(completed_utc=10**20),
+    lambda x: x.update(completed_utc=10**1000),
     lambda x: x.update(scanned=True),
     lambda x: x.update(scanned=-1),
     lambda x: x.update(scanned=2**70),

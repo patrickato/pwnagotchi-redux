@@ -116,9 +116,12 @@ redux pipeline --config /etc/redux/pipeline.toml recover --max-files 50 --apply
 The default invocation is genuinely **read-only**: it opens the existing
 SQLite ledger in read-only mode, creates no database/lock/outputs, and returns
 bounded counts **without printing filenames, hashes or MAC addresses**.
-It distinguishes records with prior errors from successfully recorded
-artifacts whose converted output has disappeared. Missing source inputs,
-symlinks, unsettled captures and suspicious paths are not retried.
+It distinguishes prior conversion errors, missing prepared artifacts,
+and altered prepared bytes (`altered_outputs`). Existing prepared results
+are checked against their recorded SHA-256 with bounded reads. A mismatched
+or oversized result is reported as blocked and is never overwritten or
+silently repaired. Missing source inputs, symlinks, unsettled captures and
+suspicious paths are not retried.
 
 `--apply` retries a bounded set of eligible sources using the very same
 `CaptureIngestor`, protected by its exclusive `jobs.lock` and REDUXCAP
