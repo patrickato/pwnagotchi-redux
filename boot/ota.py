@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -133,10 +134,42 @@ def initial_state(stable):
             "reason": "factory boot: stable selector is authoritative"}
 
 
+def _read_bounded_state_json(path, *, limit):
+    """Read one stable, singly-linked regular file, not a writable path target.
+
+    Both the OTA ledger and bootstrap checkpoint live on REDUXCAP. Neither
+    may redirect the verifier outside that volume or grow during parsing.
+    """
+    path = Path(path)
+    if path.parent.is_symlink():
+        raise ValueError("OTA state directory must not be a symlink")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+    with os.fdopen(os.open(path, flags), "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ValueError("OTA state must be a private regular file")
+        if before.st_size > limit:
+            raise ValueError("OTA state exceeds permitted length")
+        raw = stream.read(limit + 1)
+        if len(raw) > limit:
+            raise ValueError("OTA state grew beyond permitted length")
+        after = os.fstat(stream.fileno())
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise ValueError("OTA state changed during inspection")
+    return json.loads(raw)
+
+
 def load_state(path, stable):
-    if not path.exists():
+    path = Path(path)
+    try:
+        data = _read_bounded_state_json(path, limit=16384)
+    except FileNotFoundError:
+        # An actually missing factory ledger is initialized from the firmware
+        # selector. An existing/dangling symlink must never look like "missing".
+        if path.is_symlink() or path.parent.is_symlink():
+            raise ValueError("OTA state symlink is forbidden")
         return initial_state(stable)
-    data = json.loads(path.read_text())
     if (not isinstance(data, dict) or type(data.get("schema")) is not int or data["schema"] != 1
             or type(data.get("pending")) not in {str, type(None)} or not isinstance(data.get("states"), dict)
             or data.get("pending") not in {None, "A", "B"}
@@ -256,12 +289,10 @@ def backend(arguments):
 
 def validate_boot_checkpoint(expected_pid, *, checkpoint=BOOT_CHECKPOINT, boot_id=BOOT_ID):
     """Authenticate bootstrap initialization to this process and kernel boot."""
-    checkpoint = Path(checkpoint)
-    if checkpoint.is_symlink() or not checkpoint.is_file():
-        raise ValueError("bootstrap initialization checkpoint is unavailable")
-    if checkpoint.stat().st_size > 65536:
-        raise ValueError("bootstrap initialization checkpoint is oversized")
-    record = json.loads(checkpoint.read_text())
+    try:
+        record = _read_bounded_state_json(checkpoint, limit=65536)
+    except FileNotFoundError as error:
+        raise ValueError("bootstrap initialization checkpoint is unavailable") from error
     current_boot = Path(boot_id).read_text(encoding="ascii").strip()
     if (not isinstance(record, dict) or type(record.get("schema")) is not int
             or record["schema"] != 1 or record.get("clean_shutdown") is not False
