@@ -161,14 +161,26 @@ def free_bytes(path):
     return stats.f_bavail * stats.f_frsize
 
 
-def _digest_file(path):
-    """Hash regular file bytes without following a swapped-in symlink/FIFO."""
+def _digest_file(path, *, max_bytes=None):
+    """Hash regular bytes without following symlinks; optionally bound reads.
+
+    The limit also applies to a file that grows after fstat, so a hostile
+    or concurrently written prepared artifact cannot trigger unbounded disk
+    reads during read-only recovery inspection.
+    """
     digest = hashlib.sha256()
     flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
     with os.fdopen(os.open(path, flags), "rb") as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
             raise OSError("capture digest source is not a regular file")
+        if max_bytes is not None and info.st_size > max_bytes:
+            raise ValueError("capture digest source exceeds read limit")
+        scanned = 0
         for block in iter(lambda: stream.read(1024 * 1024), b""):
+            scanned += len(block)
+            if max_bytes is not None and scanned > max_bytes:
+                raise ValueError("capture digest source grew beyond read limit")
             digest.update(block)
     return digest.hexdigest()
 
