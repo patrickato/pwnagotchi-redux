@@ -176,6 +176,7 @@ def _ota_mount_health_fixture(tmp_path, monkeypatch):
         point: {"FSTYPE": kind, "OPTIONS": options, "SOURCE": devices[part]}
         for point, (kind, options, part) in points.items()
     }
+    measured["/"] = {"FSTYPE": "overlay"}
 
     def command(arguments):
         if arguments == ["systemctl", "is-active", "redux.service"]:
