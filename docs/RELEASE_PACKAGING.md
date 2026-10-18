@@ -12,7 +12,7 @@ A Debian/Ubuntu Linux host must support privileged loop devices, partition
 tools, `arch-test arm64`, `qemu-aarch64` binfmt, and sufficient free disk
 space. This cannot be performed by hardware-free CI.
 
-From a clean checkout of `human/redux-capture-pipeline-integration`:
+From a clean checkout of `human/redux-workbench`:
 
 ```bash
 git status --short
@@ -76,3 +76,20 @@ low-voltage conditions separately. No fake 22000 fixture can replace this.
 The built-in TFT/touch acceptance and Pi-local Hashcat backend capability
 are separate release gates. Only after **both** image boot and pipeline
 functionality are proven should a hardware-tested release be labeled as such.
+
+## A/B update and rollback evidence
+
+The optional A/B OTA profile is not qualified by this packaging procedure.
+The backend validates its runtime partition map against the running slot and
+root PARTUUID before trusting it. Candidate health additionally requires
+the expected ext4 root/capture mounts, vfat boot/control mounts, correct
+partition identities and mount modes, a current process-bound bootstrap
+checkpoint, and stable service/watchdog observations. Contradictory OTA ledger
+states and unsafe selector staging are rejected rather than repaired silently.
+
+These safeguards have **hardware-free CI evidence only**. A release still
+requires a separate, operator-observed trial on a disposable Pi development
+card: cold boot, stable fallback, successful candidate health commit, failed
+candidate rollback, storage interruption and repeated restart. The active
+Jayofelony card must not be touched. No synthetic test establishes actual
+Raspberry Pi EEPROM tryboot or power-loss behavior.
