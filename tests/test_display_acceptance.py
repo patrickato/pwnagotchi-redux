@@ -40,6 +40,7 @@ def test_inventory_keeps_framebuffer_and_event_identity_explicit(tmp_path):
     assert listing["input_devices"] == [{
         "device": "/dev/input/event4", "name": "ADS7846 Touchscreen",
         "abs_bits": "3", "key_bits": None, "properties": None,
+        "modalias": None, "compatible": None, "driver": None,
     }]
 
 
@@ -64,6 +65,7 @@ def test_spi_inventory_exposes_controller_evidence_without_claiming_pixels(tmp_p
     assert item["spi_devices"] == [{
         "sysfs_device": "spi0.0", "modalias": "spi:ili9486",
         "compatible": "ilitek,ili9486", "driver": "fb_ili9486",
+        "device_tree_status": None,
     }]
     state = acceptance.report(graphics=graphics, inputs=inputs, spi=spi,
                               environ={}, uid=1000)
@@ -71,6 +73,53 @@ def test_spi_inventory_exposes_controller_evidence_without_claiming_pixels(tmp_p
     assert state["framebuffer_candidates"][0]["virtual_size"] == "1920,1080"
     assert state["physical_display_verified"] is False
     assert state["touch_verified"] is False
+    assert state["panel_readiness"]["state"] == "BLOCKED"
+
+
+def test_panel_readiness_requires_one_complete_selection_without_claiming_hardware(tmp_path):
+    graphics=tmp_path/"graphics";inputs=tmp_path/"input";spi=tmp_path/"spi"
+    fb=graphics/"fb1";fb.mkdir(parents=True)
+    for name,value in (("name","fb_ili9486"),("virtual_size","480,320"),
+                       ("bits_per_pixel","16"),("stride","960")):
+        (fb/name).write_text(value)
+    event=inputs/"event4/device";event.mkdir(parents=True)
+    (event/"capabilities").mkdir()
+    (event/"name").write_text("ADS7846 Touchscreen")
+    (event/"capabilities/abs").write_text("3")
+    (event/"capabilities/key").write_text("400 0")
+    controller=spi/"spi0.0";controller.mkdir(parents=True)
+    (controller/"modalias").write_text("spi:ili9486")
+    driver=tmp_path/"drivers/fb_ili9486";driver.mkdir(parents=True)
+    (controller/"driver").symlink_to(driver)
+    overview=acceptance.inventory(graphics=graphics,inputs=inputs,spi=spi)
+    readiness=acceptance.panel_readiness(overview)
+    assert readiness["state"]=="READY_FOR_OPERATOR_SELECTION"
+    assert readiness["blockers"]==[]
+    assert readiness["physical_display_verified"] is False
+    assert readiness["touch_verified"] is False
+
+
+def test_panel_readiness_rejects_ambiguous_and_incomplete_metadata():
+    fb={"virtual_size":"480,320","bits_per_pixel":"16","stride":"960"}
+    touch={"name":"XPT2046 Touchscreen","abs_bits":"3","key_bits":"400"}
+    controller={"modalias":"spi:ili9486","compatible":None,"driver":None}
+    result=acceptance.panel_readiness({"framebuffers":[fb,dict(fb)],
+        "input_devices":[touch,dict(touch)],"spi_devices":[controller]})
+    assert result["state"]=="BLOCKED"
+    assert result["blockers"]==["FRAMEBUFFER AMBIGUOUS","ILI9486 DRIVER UNBOUND",
+                                "TOUCH DEVICE AMBIGUOUS"]
+    invalid=acceptance.panel_readiness({"framebuffers":None})
+    assert invalid["state"]=="INVALID"
+
+
+def test_display_inventory_is_bounded_and_truncation_blocks_selection(tmp_path):
+    graphics=tmp_path/"graphics";inputs=tmp_path/"input";spi=tmp_path/"spi"
+    graphics.mkdir();inputs.mkdir();spi.mkdir()
+    for number in range(65):(graphics/f"fb{number}").mkdir()
+    overview=acceptance.inventory(graphics=graphics,inputs=inputs,spi=spi)
+    assert len(overview["framebuffers"])==64
+    assert overview["inventory_truncated"] is True
+    assert acceptance.panel_readiness(overview)["blockers"][0]=="INVENTORY TRUNCATED"
 
 
 def test_display_sysfs_reader_is_bounded_before_decode(tmp_path):

@@ -500,6 +500,15 @@ image, inspect the same kernel information with read-only sysfs tools rather
 than enabling or guessing a TFT overlay. Only an operator-approved panel
 configuration change may create a new framebuffer.
 
+The read-only report now includes `panel_readiness`, a source-selection gate
+for the future physical test. It requires exactly one measured 480×320,
+16-bit, stride-960 framebuffer candidate, exactly one ILI9486-compatible SPI
+candidate with a bound driver, and exactly one ADS7846/XPT2046 input candidate
+with advertised ABS/key capability metadata. Missing, unbound or ambiguous
+records produce explicit blockers. `READY_FOR_OPERATOR_SELECTION` still sets
+both `physical_display_verified` and `touch_verified` false: sysfs metadata
+cannot establish visible pixels, backlight, coordinate mapping or touch.
+
 ## 2. Sample raw touch presses (explicit opt-in)
 
 After visually identifying the touchscreen's \`/dev/input/eventN\` in the

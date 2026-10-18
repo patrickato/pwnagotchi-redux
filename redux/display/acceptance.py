@@ -39,19 +39,33 @@ def _read(path: Path, limit=256) -> str | None:
         return None
 
 
+def _driver_name(path: Path) -> str | None:
+    try:
+        return path.resolve(strict=True).name if path.is_symlink() else None
+    except OSError:
+        return None
+
+
 def inventory(*, graphics=Path("/sys/class/graphics"),
               inputs=Path("/sys/class/input"),
               spi=Path("/sys/bus/spi/devices")) -> dict:
     """Report kernel-exposed framebuffers and input devices, never guess fbN."""
     screens = []
-    for fb in sorted(graphics.glob("fb[0-9]*"), key=lambda p: p.name):
+    graphics_nodes=sorted(graphics.glob("fb[0-9]*"), key=lambda p: p.name)
+    input_nodes=sorted(inputs.glob("event[0-9]*"), key=lambda p: p.name)
+    spi_nodes=sorted(spi.glob("spi*"), key=lambda p: p.name)
+    truncated=len(graphics_nodes)>64 or len(input_nodes)>64 or len(spi_nodes)>32
+    for fb in graphics_nodes[:64]:
         if not re.fullmatch(r"fb[0-9]+", fb.name):
             continue
         screens.append({"device": f"/dev/{fb.name}",
                         "name": _read(fb / "name"),
-                        "virtual_size": _read(fb / "virtual_size")})
+                        "virtual_size": _read(fb / "virtual_size"),
+                        "bits_per_pixel": _read(fb / "bits_per_pixel"),
+                        "stride": _read(fb / "stride"),
+                        "driver": _driver_name(fb / "device" / "driver")})
     devices = []
-    for event in sorted(inputs.glob("event[0-9]*"), key=lambda p: p.name):
+    for event in input_nodes[:64]:
         if not re.fullmatch(r"event[0-9]+", event.name):
             continue
         node = event / "device"
@@ -59,12 +73,16 @@ def inventory(*, graphics=Path("/sys/class/graphics"),
                         "name": _read(node / "name"),
                         "abs_bits": _read(node / "capabilities/abs"),
                         "key_bits": _read(node / "capabilities/key"),
-                        "properties": _read(node / "properties")})
+                        "properties": _read(node / "properties"),
+                        "modalias": _read(node / "modalias", 128),
+                        "compatible": (_read(node / "of_node" / "compatible", 128)
+                                       or "").replace("\x00", " ").strip() or None,
+                        "driver": _driver_name(node / "driver")})
     # SPI evidence is independent of the framebuffer. A bound ILI9486
     # controller can exist without a usable fbN and vice versa; never infer
     # physically visible pixels from a device-tree compatible string.
     spi_devices = []
-    for node in sorted(spi.glob("spi*"), key=lambda p: p.name)[:32]:
+    for node in spi_nodes[:32]:
         if not re.fullmatch(r"spi[0-9]{1,3}\.[0-9]{1,3}", node.name):
             continue
         driver = node / "driver"
@@ -72,10 +90,54 @@ def inventory(*, graphics=Path("/sys/class/graphics"),
             "sysfs_device": node.name,
             "modalias": _read(node / "modalias", 128),
             "compatible": (_read(node / "of_node" / "compatible", 128) or "").replace("\x00", " ").strip() or None,
-            "driver": driver.resolve().name if driver.is_symlink() else None,
+            "driver": _driver_name(driver),
+            "device_tree_status": _read(node / "of_node" / "status", 64),
         })
     return {"framebuffers": screens, "input_devices": devices,
-            "spi_devices": spi_devices}
+            "spi_devices": spi_devices, "inventory_truncated": truncated}
+
+
+def panel_readiness(overview: dict) -> dict:
+    """Classify metadata needed to select a future physical 480x320 test.
+
+    This never promotes sysfs names to visible-pixel or working-touch proof.
+    Multiple plausible devices are ambiguous and require operator selection.
+    """
+    if not isinstance(overview, dict):
+        return {"state": "INVALID", "blockers": ["INVENTORY INVALID"],
+                "physical_display_verified": False, "touch_verified": False}
+    framebuffers = overview.get("framebuffers")
+    inputs = overview.get("input_devices")
+    spi = overview.get("spi_devices")
+    if not all(isinstance(value, list) for value in (framebuffers, inputs, spi)):
+        return {"state": "INVALID", "blockers": ["INVENTORY INVALID"],
+                "physical_display_verified": False, "touch_verified": False}
+    def label(row,key):
+        value=row.get(key)
+        return value.lower() if isinstance(value,str)and len(value)<=256 else""
+    fb = [row for row in framebuffers if isinstance(row, dict)
+          and row.get("virtual_size") == "480,320"
+          and row.get("bits_per_pixel") == "16" and row.get("stride") == "960"]
+    controllers = [row for row in spi if isinstance(row, dict)
+                   and "ili9486" in " ".join(label(row,key)
+                                                for key in ("modalias", "compatible"))]
+    touch = [row for row in inputs if isinstance(row, dict)
+             and any(kind in " ".join(label(row,key)
+                                      for key in ("name", "modalias", "compatible"))
+                     for kind in ("ads7846", "xpt2046"))]
+    blockers=[]
+    if overview.get("inventory_truncated") is True:blockers.append("INVENTORY TRUNCATED")
+    if len(fb)!=1:blockers.append("FRAMEBUFFER MISSING"if not fb else"FRAMEBUFFER AMBIGUOUS")
+    if len(controllers)!=1:blockers.append("ILI9486 MISSING"if not controllers else"ILI9486 AMBIGUOUS")
+    elif not controllers[0].get("driver"):blockers.append("ILI9486 DRIVER UNBOUND")
+    if len(touch)!=1:blockers.append("TOUCH DEVICE MISSING"if not touch else"TOUCH DEVICE AMBIGUOUS")
+    elif not touch[0].get("abs_bits")or not touch[0].get("key_bits"):
+        blockers.append("TOUCH CAPABILITIES MISSING")
+    state="READY_FOR_OPERATOR_SELECTION"if not blockers else"BLOCKED"
+    return {"state":state,"blockers":blockers,
+            "framebuffer_candidates":len(fb),"ili9486_candidates":len(controllers),
+            "touch_candidates":len(touch),"physical_display_verified":False,
+            "touch_verified":False}
 
 
 def xinput_probe(display: str, *, which=shutil.which,
@@ -235,6 +297,8 @@ def report(*, framebuffer=None, touch_device=None, seconds=12,
               "framebuffer_candidates": overview["framebuffers"],
               "input_candidates": overview["input_devices"],
               "spi_candidates": overview["spi_devices"],
+              "inventory_truncated": overview["inventory_truncated"],
+              "panel_readiness": panel_readiness(overview),
               "selected_framebuffer": None, "x11": None, "x11_geometry": None,
               "xinput": None, "touch_sample": None,
               "physical_display_verified": False, "touch_verified": False,

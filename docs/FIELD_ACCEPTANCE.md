@@ -138,6 +138,10 @@ to reattempt the same fault.
   overlay are explicitly configured for this Pi, not assumed from CI.
 - [ ] Confirm real framebuffer output, rotation, X/Y calibration,
   responsive touch/tap/swipe/scroll and readable Doctor + radio pages.
+- [ ] Run the read-only display inventory first. Its `panel_readiness` must
+  identify exactly one complete 480×320 RGB565 framebuffer, one bound ILI9486
+  SPI candidate and one ADS7846/XPT2046 input candidate before operator
+  selection. This metadata gate does not replace visible-pixel or touch tests.
 - [ ] Confirm no display rendering depends on synthetic telemetry or
   causes the live capture supervisor to lose control of the radio.
 - [ ] Only after these hardware checks consider enabling automatic kiosk

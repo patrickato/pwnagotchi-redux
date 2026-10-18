@@ -43,6 +43,16 @@ fields before publication, preserves the prior timestamp on malformed refresh,
 and discards late worker results during shutdown. These lifecycle safeguards
 prevent caller mutation or a closing service from freshening radio evidence.
 
+Native-VIF ownership analysis now has one shared classifier for the bounded
+DOWN-only evidence format. It requires two identity-stable snapshots, a stable
+NetworkManager unique D-Bus owner and agreement between both device inventory
+APIs; missing NM enumeration remains unknown. The prepared operator procedure
+is observation-only and not authorized. Display inventory now reports bounded,
+explicit framebuffer/ILI9486/touch selection blockers before any physical test,
+without promoting sysfs metadata to working pixels or touch. These close
+source-side diagnostic gaps but leave both hardware gates open, so the overall
+percentage remains unchanged.
+
 The combined GitHub CI run `39065298631` passed **2,378 software tests and
 651 image-contract checks**. This is source-level verification only.
 
