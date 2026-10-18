@@ -124,3 +124,35 @@ def test_ota_checkpoint_detects_in_place_change_during_inspection(tmp_path, monk
         with pytest.raises(ValueError, match="changed during inspection"):
             ota._read_bounded_state_json(path, limit=65536)
     assert hits[0] == 2
+
+
+
+@pytest.mark.parametrize("startup", [
+    "fixture",
+    "",
+    None,
+    True,
+    "2026-10-17T20:00:00",
+    "2999-01-01T00:00:00+00:00",
+    "2026-10-17T20:00:00+00:00" * 10,
+])
+def test_ota_health_requires_real_timezone_aware_nonfuture_start(tmp_path, startup):
+    boot_id = tmp_path / "boot-id"
+    boot_id.write_text(BOOT_ID)
+    health = tmp_path / "boot.json"
+    altered = checkpoint()
+    altered["started_utc"] = startup
+    health.write_text(json.dumps(altered))
+    with pytest.raises(ValueError, match="stale or incomplete"):
+        ota.validate_boot_checkpoint(147, checkpoint=health, boot_id=boot_id)
+
+
+def test_ota_health_does_not_accept_fake_kernel_boot_id(tmp_path):
+    boot_id = tmp_path / "boot-id"
+    boot_id.write_text("a-fake-boot-identity")
+    health = tmp_path / "boot.json"
+    altered = checkpoint()
+    altered["boot_id"] = "a-fake-boot-identity"
+    health.write_text(json.dumps(altered))
+    with pytest.raises(ValueError, match="stale or incomplete"):
+        ota.validate_boot_checkpoint(147, checkpoint=health, boot_id=boot_id)
