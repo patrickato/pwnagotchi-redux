@@ -1498,6 +1498,7 @@ def test_capture_mount_identity_comes_from_real_ext4_mount_record(tmp_path, monk
     "42 1 0:17 / {other} rw - ext4 /dev/disk rw\n",
     "malformed mountinfo line\n",
     "notanid 1 0:17 / {mount} rw - ext4 /dev/disk rw\n",
+    "42 1 0:17 / {mount} ro - ext4 /dev/disk ro\n",
 ])
 def test_capture_mount_refuses_wrong_filesystem_or_mountinfo(tmp_path, monkeypatch, record):
     mount = tmp_path / "captures"

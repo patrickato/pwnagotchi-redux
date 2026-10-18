@@ -666,12 +666,23 @@ A stalled loop therefore cannot keep itself alive through a separate timer threa
 This checks the bootstrap loop; it does not claim health coverage for RF workers
 that the lead has not connected to this entrypoint.
 
-`/captures/boot/boot.json` records real UTC startup/shutdown times and whether the
-previous shutdown was committed. Replacement syncs the temporary file and parent
-directory. Missing or corrupt records have explicit reasons; unclean restart
-resumes the passive bootstrap and never replays radio actions. Storage failure
-prevents readiness, allowing systemd to restart the process rather than report a
-healthy service with lost state.
+`/captures/boot/boot.json` records real UTC startup/shutdown times, the kernel boot
+ID, the supervised process ID, and whether the previous shutdown was committed.
+Replacement syncs the temporary file and parent directory. Missing or corrupt
+records have explicit reasons; unclean restart resumes the passive bootstrap and
+never replays radio actions. The image entrypoint also requires a writable ext4
+REDUXCAP mount identity before it can send `READY=1`. Storage failure prevents
+readiness, allowing systemd to restart the process rather than report a healthy
+service with lost state.
+
+An A/B candidate is not committed merely because `redux.service` is active. The
+OTA health gate authenticates that checkpoint against the current kernel boot ID
+and the exact stable service PID throughout its observation window. Missing,
+partial, stale, clean-shutdown, oversized, or symlinked checkpoint evidence fails
+closed. If an unhealthy tryboot candidate survives the rollback deadline, the
+deadline service requests a reboot and deliberately fails if the request does not
+complete within 15 seconds; systemd retries every 30 seconds without changing the
+committed firmware selector.
 
 **Hardware gates on Pi 4 and Pi 5:** record `cat /sys/class/watchdog/watchdog0/identity`,
 `systemctl show --property=RuntimeWatchdogUSec --property=RebootWatchdogUSec`,

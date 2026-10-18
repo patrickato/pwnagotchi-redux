@@ -73,6 +73,26 @@ _UNITS = {
     "redux-capture-ingest.timer": ("timers.target.wants", "Unit=redux-capture-ingest.service"),
 }
 
+_AB_UNITS = {
+    "redux-ota-health.service": (
+        "multi-user.target.wants", "After=redux.service", "Requires=redux.service",
+        "RequiresMountsFor=/captures /boot/firmware /boot/redux-control",
+        "ExecStart=/usr/local/libexec/redux-rauc-health",
+    ),
+    "redux-ota-deadline.timer": (
+        "timers.target.wants", "OnBootSec=120",
+        "Unit=redux-ota-deadline.service",
+    ),
+}
+
+_AB_REQUIRED_UNITS = {
+    "redux-ota-deadline.service": (
+        "Type=oneshot", "ExecStart=/usr/local/libexec/redux-rauc-deadline",
+        "Restart=on-failure", "RestartSec=30", "StartLimitIntervalSec=0",
+        "TimeoutStartSec=30",
+    ),
+}
+
 
 def regular(root, path):
     file = root / path
@@ -91,10 +111,10 @@ def text(root, path, limit=32768):
     return file.read_text(encoding="utf-8")
 
 
-def unit_contract(root):
+def _enabled_unit_contract(root, units):
     services = root / "etc/systemd/system"
     checked = []
-    for unit, (want, *required) in _UNITS.items():
+    for unit, (want, *required) in units.items():
         raw = text(root, "etc/systemd/system/" + unit)
         for directive in required:
             if directive not in raw.splitlines():
@@ -118,6 +138,12 @@ def unit_contract(root):
         if not correct:
             raise ValueError(f"image enable link points outside expected unit: {unit}")
         checked.append(unit)
+    return checked
+
+
+def unit_contract(root):
+    services = root / "etc/systemd/system"
+    checked = _enabled_unit_contract(root, _UNITS)
     # The native TFT runtime must be present but never selected or started
     # without a measured panel and persistent operator-supplied config.
     fbui = text(root, "etc/systemd/system/redux-fbui.service")
@@ -240,13 +266,19 @@ def verify(root, *, profile="lite", other_root=None, expected_country=None):
             regular(candidate, "etc/rauc/keyring.pem")
             if not (candidate / "etc/rauc/system.conf").is_symlink():
                 raise ValueError("A/B slot lacks generated RAUC config link")
+            _enabled_unit_contract(candidate, _AB_UNITS)
+            for unit, required in _AB_REQUIRED_UNITS.items():
+                raw = text(candidate, "etc/systemd/system/" + unit).splitlines()
+                for directive in required:
+                    if directive not in raw:
+                        raise ValueError(f"image unit {unit} missing {directive}")
         else:
             mask = candidate / "etc/systemd/system/rauc.service"
             if not mask.is_symlink() or mask.readlink() != Path("/dev/null"):
                 raise ValueError("Lite profile must mask unused RAUC unit")
     return {"schema": 1, "profile": profile, "slots_checked": len(roots),
             "runtime_files_checked": len(_MUST_EXIST) * len(roots),
-            "systemd_units": sorted(_UNITS),
+            "systemd_units": sorted(set(_UNITS) | (set(_AB_UNITS) if profile == "ab" else set())),
             "root_payload_verified": True,
             "regulatory_country_verified": expected_country is not None,
             "physical_boot_verified": False,

@@ -19,6 +19,8 @@ COMPATIBLE = "pwnagotchi-redux-pi4-pi5-arm64-ab-v1"
 RUNTIME = Path("/run/redux-ota")
 CONTROL = Path("/boot/redux-control/autoboot.txt")
 STATE = Path("/captures/rauc/boot-state.json")
+BOOT_CHECKPOINT = Path("/captures/boot/boot.json")
+BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
 
 
 def command(arguments):
@@ -252,12 +254,37 @@ def backend(arguments):
         logging.info(state["reason"])
 
 
-def check_health(context):
+def validate_boot_checkpoint(expected_pid, *, checkpoint=BOOT_CHECKPOINT, boot_id=BOOT_ID):
+    """Authenticate bootstrap initialization to this process and kernel boot."""
+    checkpoint = Path(checkpoint)
+    if checkpoint.is_symlink() or not checkpoint.is_file():
+        raise ValueError("bootstrap initialization checkpoint is unavailable")
+    if checkpoint.stat().st_size > 65536:
+        raise ValueError("bootstrap initialization checkpoint is oversized")
+    record = json.loads(checkpoint.read_text())
+    current_boot = Path(boot_id).read_text(encoding="ascii").strip()
+    if (not isinstance(record, dict) or type(record.get("schema")) is not int
+            or record["schema"] != 1 or record.get("clean_shutdown") is not False
+            or type(record.get("pid")) is not int or record["pid"] != int(expected_pid)
+            or not isinstance(record.get("started_utc"), str) or not record["started_utc"]
+            or not isinstance(record.get("boot_id"), str)
+            or record["boot_id"] != current_boot):
+        raise ValueError("bootstrap initialization checkpoint is stale or incomplete")
+    return record
+
+
+def check_health(context, expected_pid=None):
     current = context["current"]
     if dt_integer("partition") != SLOTS[current]["boot"]:
         raise ValueError("firmware boot partition disagrees with kernel slot")
     if command(["systemctl", "is-active", "redux.service"]) != "active":
         raise ValueError("redux is not active")
+    pid = expected_pid
+    if pid is None:
+        pid = command(["systemctl", "show", "-p", "MainPID", "--value", "redux.service"])
+    if not str(pid).isdigit() or int(pid) <= 0:
+        raise ValueError("redux has no running process")
+    validate_boot_checkpoint(int(pid))
     if command(["findmnt", "-n", "-o", "FSTYPE", "/"]) != "overlay":
         raise ValueError("root is not protected by overlay")
     if "ro" not in command(["findmnt", "-n", "-o", "OPTIONS", "/media/root-ro"]).split(","):
@@ -285,7 +312,7 @@ def health():
         if not pid.isdigit() or int(pid) <= 0:
             raise ValueError("redux has no running process")
         for _ in range(12):
-            check_health(context)
+            check_health(context, int(pid))
             if command(["systemctl", "show", "-p", "MainPID", "--value", "redux.service"]) != pid:
                 raise ValueError("redux restarted during candidate validation")
             time.sleep(5)
@@ -348,6 +375,11 @@ def deadline():
     if dt_integer("tryboot") == 1 and current != stable:
         logging.error("candidate missed 120-second health deadline; rebooting committed %s", stable)
         command(["systemctl", "reboot", "--no-block"])
+        # A successful systemctl request is not evidence that firmware handoff
+        # completed. Stay alive briefly; if this process survives, fail so the
+        # unit's bounded restart policy requests rollback again.
+        time.sleep(15)
+        raise ValueError("rollback reboot request did not complete")
 
 
 def hook():

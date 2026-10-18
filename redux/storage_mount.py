@@ -34,7 +34,8 @@ def capture_mount_snapshot(*, mountinfo=Path("/proc/self/mountinfo"),
                 continue
             # Linux reports kernel mount IDs for individual mount instances.
             # A new mount on the same disk still gets a new identity.
-            if not fields[0].isdigit() or fs[0] != "ext4":
+            if (not fields[0].isdigit() or fs[0] != "ext4"
+                    or "rw" not in fields[5].split(",")):
                 return None
             evidence = (int(fields[0]), fields[2], fs[0])
         if evidence is None:

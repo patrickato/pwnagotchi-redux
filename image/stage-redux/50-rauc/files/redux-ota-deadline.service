@@ -5,3 +5,7 @@ RequiresMountsFor=/boot/redux-control
 [Service]
 Type=oneshot
 ExecStart=/usr/local/libexec/redux-rauc-deadline
+Restart=on-failure
+RestartSec=30
+StartLimitIntervalSec=0
+TimeoutStartSec=30

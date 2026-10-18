@@ -8,8 +8,26 @@ from pathlib import Path
 import signal
 import socket
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from threading import Event
+
+from redux.storage_mount import capture_mount_snapshot
+
+
+BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
+
+
+def boot_identity(path: Path = BOOT_ID) -> str:
+    """Return the kernel boot identity, refusing absent or malformed evidence."""
+    value = path.read_text(encoding="ascii").strip()
+    try:
+        valid = str(uuid.UUID(value)) == value.lower()
+    except (ValueError, AttributeError):
+        valid = False
+    if not valid:
+        raise ValueError("kernel boot identity is malformed")
+    return value.lower()
 
 
 def atomic_checkpoint(path: Path, record: dict) -> None:
@@ -81,7 +99,17 @@ def watchdog_interval(environment, pid):
     return min(1.0, microseconds / 3_000_000)
 
 
-def run(stop: Event, logger: logging.Logger, checkpoint=None, notifier=None, interval=1.0) -> None:
+def validate_state_mount(state: Path, probe=capture_mount_snapshot) -> None:
+    """Require persistent bootstrap state to reside on verified REDUXCAP."""
+    state = Path(state)
+    if state != Path("/captures") and Path("/captures") not in state.parents:
+        raise ValueError("bootstrap state must be stored under /captures")
+    if probe() is None:
+        raise ValueError("writable REDUXCAP mount identity is unavailable")
+
+
+def run(stop: Event, logger: logging.Logger, checkpoint=None, notifier=None, interval=1.0,
+        *, pid=None, boot_id=None) -> None:
     """Stay alive until shutdown without inventing radio or capture state."""
     logger.info(
         "redux image bootstrap active; this entrypoint does not start live integration; "
@@ -94,8 +122,18 @@ def run(stop: Event, logger: logging.Logger, checkpoint=None, notifier=None, int
         checkpoint = Path(checkpoint)
         previous, reason = previous_checkpoint(checkpoint)
         logger.info("resume: %s", reason)
+        process_id = os.getpid() if pid is None else pid
+        current_boot = boot_identity() if boot_id is None else boot_id
+        try:
+            valid_boot = (isinstance(current_boot, str)
+                          and str(uuid.UUID(current_boot)) == current_boot.lower())
+        except (ValueError, AttributeError):
+            valid_boot = False
+        if type(process_id) is not int or process_id <= 0 or not valid_boot:
+            raise ValueError("invalid bootstrap process identity")
         record = {"schema": 1, "previous": previous, "reason": reason,
-                  "clean_shutdown": False, "started_utc": datetime.now(timezone.utc).isoformat()}
+                  "clean_shutdown": False, "pid": process_id, "boot_id": current_boot,
+                  "started_utc": datetime.now(timezone.utc).isoformat()}
         atomic_checkpoint(checkpoint, record)
     send = notifier or (lambda message: None)
     send("READY=1\nSTATUS=Passive bootstrap ready; no engine or radio operations")
@@ -119,6 +157,8 @@ def main() -> None:
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
     state = os.environ.get("REDUX_STATE_DIR")
+    if state:
+        validate_state_mount(Path(state))
     checkpoint = Path(state) / "boot.json" if state else None
     run(stop, logging.getLogger("redux.boot"), checkpoint, notify,
         watchdog_interval(os.environ, os.getpid()))

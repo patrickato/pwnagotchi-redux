@@ -229,6 +229,62 @@ def test_ota_corrupt_checkpoint_cannot_change_selector(tmp_path):
         ota.load_state(path,"A")
 
 
+def test_ota_health_checkpoint_belongs_to_current_boot_and_process(tmp_path):
+    ota = boot_module("ota")
+    checkpoint = tmp_path / "boot.json"
+    boot_id = tmp_path / "boot-id"
+    boot_id.write_text("00000000-0000-0000-0000-000000000001\n")
+    good = {"schema": 1, "clean_shutdown": False, "pid": 321,
+            "boot_id": boot_id.read_text().strip(), "started_utc": "fixture"}
+    checkpoint.write_text(__import__("json").dumps(good))
+    assert ota.validate_boot_checkpoint(321, checkpoint=checkpoint,
+                                        boot_id=boot_id)["pid"] == 321
+    for changed in (
+            {**good, "pid": 322},
+            {**good, "boot_id": "00000000-0000-0000-0000-000000000002"},
+            {**good, "clean_shutdown": True},
+            {k: v for k, v in good.items() if k != "started_utc"}):
+        checkpoint.write_text(__import__("json").dumps(changed))
+        with pytest.raises(ValueError, match="stale or incomplete"):
+            ota.validate_boot_checkpoint(321, checkpoint=checkpoint, boot_id=boot_id)
+
+
+def test_ota_health_checkpoint_refuses_missing_link_and_oversize(tmp_path):
+    ota = boot_module("ota")
+    boot_id = tmp_path / "boot-id"
+    boot_id.write_text("00000000-0000-0000-0000-000000000001\n")
+    checkpoint = tmp_path / "boot.json"
+    with pytest.raises(ValueError, match="unavailable"):
+        ota.validate_boot_checkpoint(1, checkpoint=checkpoint, boot_id=boot_id)
+    target = tmp_path / "target"
+    target.write_text("{}")
+    checkpoint.symlink_to(target)
+    with pytest.raises(ValueError, match="unavailable"):
+        ota.validate_boot_checkpoint(1, checkpoint=checkpoint, boot_id=boot_id)
+    checkpoint.unlink()
+    checkpoint.write_bytes(b"x" * 65537)
+    with pytest.raises(ValueError, match="oversized"):
+        ota.validate_boot_checkpoint(1, checkpoint=checkpoint, boot_id=boot_id)
+
+
+def test_ota_deadline_retries_when_accepted_reboot_does_not_complete(monkeypatch):
+    ota = boot_module("ota")
+    original = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda p, *a, **k:
+                        "rauc.slot=B" if str(p) == "/proc/cmdline" else
+                        ota.autoboot("A") if str(p) == "/fixture/control" else
+                        original(p, *a, **k))
+    monkeypatch.setattr(ota, "CONTROL", Path("/fixture/control"))
+    monkeypatch.setattr(ota, "stable_from_autoboot", lambda _text: "A")
+    monkeypatch.setattr(ota, "dt_integer", lambda name: 1 if name == "tryboot" else 3)
+    calls = []
+    monkeypatch.setattr(ota, "command", lambda argv: calls.append(argv) or "")
+    monkeypatch.setattr(ota.time, "sleep", lambda seconds: None)
+    with pytest.raises(ValueError, match="did not complete"):
+        ota.deadline()
+    assert calls == [["systemctl", "reboot", "--no-block"]]
+
+
 def test_ota_interrupted_health_commit_keeps_old_checkpoint(monkeypatch,tmp_path):
     ota = boot_module("ota")
     state, _ = ota.transition(ota.initial_state("A"),"A","A","set-primary","B")

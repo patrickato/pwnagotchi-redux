@@ -67,6 +67,16 @@ def slot(tmp_path, name="lite", profile="lite"):
     if profile == "lite":
         (systemd / "rauc.service").symlink_to("/dev/null")
     else:
+        for unit, (group, *directives) in gate._AB_UNITS.items():
+            target = systemd / unit
+            target.write_text("[Unit]\n[Timer]\n[Service]\n" +
+                              "\n".join(directives) + "\n")
+            enabled = systemd / group / unit
+            enabled.parent.mkdir(parents=True, exist_ok=True)
+            enabled.symlink_to("../" + unit)
+        for unit, directives in gate._AB_REQUIRED_UNITS.items():
+            target = systemd / unit
+            target.write_text("[Unit]\n[Service]\n" + "\n".join(directives) + "\n")
         rauc = root / "etc/rauc"
         rauc.mkdir()
         (rauc / "keyring.pem").write_text("fixture public certificate")
@@ -108,6 +118,19 @@ def test_ab_checks_both_slots_individually(tmp_path):
     assert report["runtime_files_checked"] == 2 * len(gate._MUST_EXIST)
     (b / "opt/redux/redux/crack/ingest.py").unlink()
     with pytest.raises(ValueError, match="missing"):
+        gate.verify(a, profile="ab", other_root=b)
+
+
+@pytest.mark.parametrize("unit,directive", [
+    ("redux-ota-health.service", "Requires=redux.service"),
+    ("redux-ota-deadline.service", "Restart=on-failure"),
+])
+def test_ab_requires_health_and_repeating_rollback_contract(tmp_path, unit, directive):
+    a = slot(tmp_path, "A", "ab")
+    b = slot(tmp_path, "B", "ab")
+    target = b / "etc/systemd/system" / unit
+    target.write_text(target.read_text().replace(directive + "\n", ""))
+    with pytest.raises(ValueError, match=directive):
         gate.verify(a, profile="ab", other_root=b)
 
 
