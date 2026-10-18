@@ -127,8 +127,8 @@ def test_converter_never_follows_post_digest_symlink(tmp_path, monkeypatch):
     original = module._digest_file
     called = []
 
-    def swap_after_digest(path):
-        digest = original(path)
+    def swap_after_digest(path, **kwargs):
+        digest = original(path, **kwargs)
         if Path(path) == source:
             source.unlink()
             source.symlink_to(outside)
@@ -200,8 +200,8 @@ def test_direct_22000_read_refuses_swapped_symlink(tmp_path, monkeypatch):
     outside.write_bytes(b"do not read or alter this file")
     digest_original = module._digest_file
 
-    def substitute_after_digest(path):
-        sha = digest_original(path)
+    def substitute_after_digest(path, **kwargs):
+        sha = digest_original(path, **kwargs)
         if Path(path) == source:
             source.unlink()
             source.symlink_to(outside)
@@ -331,7 +331,7 @@ def test_input_disappears_during_digest_is_deferred(tmp_path, monkeypatch):
     from redux.crack import ingest as module
     cfg = settings(tmp_path)
     source = write_file(cfg.inputs[0] / "race.hc22000", (REC + "\n").encode())
-    def disappearing(path):
+    def disappearing(path, **kwargs):
         raise FileNotFoundError("file moved by writer")
     monkeypatch.setattr(module, "_digest_file", disappearing)
     with CaptureIngestor(cfg) as ing:
@@ -356,14 +356,14 @@ def test_capture_replaced_before_first_digest_is_deferred(tmp_path, monkeypatch)
     initial = source.stat()
     old_digest = module._digest_file
 
-    def swap_before_digest(path):
+    def swap_before_digest(path, **kwargs):
         if Path(path) == source:
             # Retain the old inode so the filesystem cannot immediately
             # recycle its number for the replacement.
             source.rename(tmp_path / "original-preserved.hc22000")
             source.write_bytes((REC + "\n").encode())
             os.utime(source, ns=(initial.st_atime_ns, initial.st_mtime_ns))
-        return old_digest(path)
+        return old_digest(path, **kwargs)
 
     with CaptureIngestor(cfg) as worker:
         monkeypatch.setattr(module, "_digest_file", swap_before_digest)
