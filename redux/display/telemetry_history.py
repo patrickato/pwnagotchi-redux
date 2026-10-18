@@ -115,9 +115,16 @@ class TelemetryWindow:
     def snapshot(self, *, now=None):
         now = time.time() if now is None else now
         moment = _clock(now)
-        if moment is None or not self.samples:
-            return {"state": self.state if self.samples else "NO SAMPLES",
-                    "points": [], "last": None, "seconds": None}
+        if moment is None:
+            # Never render an otherwise tracking history as current when the
+            # caller's observation clock is malformed or unavailable.
+            return {"state": "UNAVAILABLE", "points": [], "last": None,
+                    "seconds": None}
+        if not self.samples:
+            # Keep the specific rejection cause after a cleared series.
+            # "NO SAMPLES" must not conceal a clock conflict or bad source.
+            return {"state": self.state, "points": [], "last": None,
+                    "seconds": None}
         last_at = self.samples[-1][0]
         if not -30 <= moment - last_at <= _MAX_RUNTIME_LAG:
             return {"state": "STALE", "points": [], "last": None, "seconds": None}
