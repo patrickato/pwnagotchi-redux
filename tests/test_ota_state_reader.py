@@ -338,3 +338,83 @@ def test_ota_selector_rejects_invalid_slot_without_remount(
         ota.commit_selector("C")
     assert selector.read_text() == ota.autoboot("A")
     assert commands == []
+
+
+def _valid_runtime_partition_context():
+    devices = {
+        str(number): ("/dev/disk/by-partuuid/"
+                      f"00000000-0000-0000-0000-{number:012d}")
+        for number in range(1, 7)
+    }
+    record = {"current": "A", "devices": devices}
+    return record, f"console=tty1 root=PARTUUID={devices['4'].rsplit('/', 1)[-1]} rauc.slot=A panic=10"
+
+
+def test_ota_runtime_context_requires_exact_disk_identity_and_running_slot(tmp_path):
+    record, cmdline = _valid_runtime_partition_context()
+    assert ota.validate_runtime_context(record, cmdline) == record
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    (runtime / "context.json").write_text(json.dumps(record))
+    boot = tmp_path / "cmdline"
+    boot.write_text(cmdline)
+    assert ota.load_runtime_context(runtime=runtime, cmdline_path=boot) == record
+
+
+@pytest.mark.parametrize("kind", [
+    "missing_partition", "extra_partition", "duplicate_partition",
+    "noncanonical_path", "numeric_device", "invalid_slot", "wrong_current",
+    "extra_root", "root_other_disk", "wrong_slot", "extra_context_key",
+    "bool_current", "list_devices",
+])
+def test_ota_runtime_context_rejects_substitutions(kind):
+    import copy
+    record, cmdline = _valid_runtime_partition_context()
+    record = copy.deepcopy(record)
+    if kind == "missing_partition":
+        del record["devices"]["6"]
+    elif kind == "extra_partition":
+        record["devices"]["7"] = record["devices"]["6"]
+    elif kind == "duplicate_partition":
+        record["devices"]["6"] = record["devices"]["5"]
+    elif kind == "noncanonical_path":
+        record["devices"]["6"] = "/tmp/untrusted-REDUXCAP"
+    elif kind == "numeric_device":
+        record["devices"]["6"] = 0
+    elif kind == "invalid_slot":
+        record["current"] = "C"
+    elif kind == "wrong_current":
+        record["current"] = "B"
+    elif kind == "extra_root":
+        cmdline += " root=/dev/mmcblk0p4"
+    elif kind == "root_other_disk":
+        cmdline = cmdline.replace("00000000-0000-0000-0000-000000000004",
+                                  "00000000-0000-0000-0000-000000000099")
+    elif kind == "wrong_slot":
+        cmdline = cmdline.replace("rauc.slot=A", "rauc.slot=B")
+    elif kind == "extra_context_key":
+        record["allow_unverified"] = True
+    elif kind == "bool_current":
+        record["current"] = True
+    elif kind == "list_devices":
+        record["devices"] = []
+    with pytest.raises((ValueError, TypeError)):
+        ota.validate_runtime_context(record, cmdline)
+
+
+def test_ota_runtime_context_refuses_bogus_or_redirected_records(tmp_path):
+    record, cmdline = _valid_runtime_partition_context()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    boot = tmp_path / "cmdline"
+    boot.write_text(cmdline)
+    target = tmp_path / "private"
+    target.write_text(json.dumps(record))
+    (runtime / "context.json").symlink_to(target)
+    with pytest.raises((OSError, ValueError)):
+        ota.load_runtime_context(runtime=runtime, cmdline_path=boot)
+    (runtime / "context.json").unlink()
+    (runtime / "context.json").write_bytes(b" " * 8193)
+    with pytest.raises((OSError, ValueError)):
+        ota.load_runtime_context(runtime=runtime, cmdline_path=boot)
+    assert json.loads(target.read_text()) == record
