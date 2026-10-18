@@ -184,6 +184,10 @@ def _digest_file(path, *, max_bytes=None):
             if max_bytes is not None and scanned > max_bytes:
                 raise ValueError("capture digest source grew beyond read limit")
             digest.update(block)
+        after = os.fstat(stream.fileno())
+        if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise OSError("capture source changed while hashing")
     return digest.hexdigest()
 
 
@@ -378,8 +382,19 @@ class CaptureIngestor:
             "SELECT status, output_sha, output_path FROM artifacts WHERE source_sha=?",
             (sha,),
         ).fetchone()
+
+        def original_inode_unchanged():
+            # Content-addressed fast paths otherwise skip the later converter
+            # pin/revalidation and could accept a replaced source as a duplicate.
+            try:
+                check = source.lstat()
+            except OSError:
+                return False
+            return stat.S_ISREG(check.st_mode) and (
+                check.st_dev, check.st_ino, check.st_size, check.st_mtime_ns
+            ) == (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
         if existing and existing[0] == "invalid":
-            return "duplicate"
+            return "duplicate" if original_inode_unchanged() else "deferred"
         if existing and existing[0] in {"ready", "duplicate"}:
             prior_sha, prior_path = existing[1], existing[2]
             if prior_sha or prior_path:
@@ -401,7 +416,7 @@ class CaptureIngestor:
                 if previous.is_file():
                     try:
                         if _digest_file(previous, max_bytes=_MAX_PREPARED_BYTES) == prior_sha:
-                            return "duplicate"
+                            return "duplicate" if original_inode_unchanged() else "deferred"
                     except ValueError:
                         self._record(sha, source, "error",
                                      reason="previous prepared artifact exceeds size limit")
