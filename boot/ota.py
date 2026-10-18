@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 import fcntl
 import json
 import logging
@@ -12,6 +13,7 @@ import stat
 import subprocess
 import sys
 import time
+import uuid
 
 from redux.core.boot import atomic_checkpoint
 
@@ -287,6 +289,28 @@ def backend(arguments):
         logging.info(state["reason"])
 
 
+def _valid_checkpoint_started(value, *, now=None):
+    if type(value) is not str or not 1 <= len(value) <= 64:
+        return False
+    try:
+        observed = datetime.fromisoformat(value)
+        if observed.tzinfo is None or observed.utcoffset() is None:
+            return False
+        current = datetime.now(timezone.utc) if now is None else now
+        return observed <= current + timedelta(seconds=60)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _valid_kernel_boot_id(value):
+    if type(value) is not str:
+        return False
+    try:
+        return str(uuid.UUID(value)) == value.lower()
+    except (ValueError, AttributeError):
+        return False
+
+
 def validate_boot_checkpoint(expected_pid, *, checkpoint=BOOT_CHECKPOINT, boot_id=BOOT_ID):
     """Authenticate bootstrap initialization to this process and kernel boot."""
     try:
@@ -301,9 +325,9 @@ def validate_boot_checkpoint(expected_pid, *, checkpoint=BOOT_CHECKPOINT, boot_i
     if (not isinstance(record, dict) or type(record.get("schema")) is not int
             or record["schema"] != 1 or record.get("clean_shutdown") is not False
             or type(record.get("pid")) is not int or record["pid"] != int(expected_pid)
-            or not isinstance(record.get("started_utc"), str) or not record["started_utc"]
-            or not isinstance(record.get("boot_id"), str)
-            or record["boot_id"] != current_boot):
+            or not _valid_checkpoint_started(record.get("started_utc"))
+            or not _valid_kernel_boot_id(current_boot)
+            or record.get("boot_id") != current_boot):
         raise ValueError("bootstrap initialization checkpoint is stale or incomplete")
     return record
 
