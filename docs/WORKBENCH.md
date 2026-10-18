@@ -49,3 +49,10 @@ freshness/provenance to Doctor and the live dashboard. Missing/stale sensors
 remain unknown; battery/power-source measurements are unavailable. See
 [HARDWARE_TELEMETRY.md](HARDWARE_TELEMETRY.md) for sources, status fields and
 hardware qualification limits. No Pi deployment or RF qualification is implied.
+
+## Unified qualification
+
+`python3 scripts/redux-qualify.py` runs local development preflight and the
+existing regression/image contracts with isolated Python caches. `--field`
+adds only an unprivileged, sanitized, read-only status probe; unavailable
+physical facts remain UNKNOWN. See [REDUX_QUALIFICATION.md](REDUX_QUALIFICATION.md).

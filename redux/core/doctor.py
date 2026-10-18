@@ -71,17 +71,36 @@ def probe_thermal_power(inp: DoctorInputs) -> Finding:
     observed = getattr(g, "observed_axes", ())
     telemetry = inp.telemetry
     if telemetry is not None:
-        if telemetry.get("fresh") is not True:
+        from .governor import finite_number
+        from .telemetry import FLAGS, MAX_AGE_SECONDS
+        if (not isinstance(telemetry, dict)
+                or not isinstance(telemetry.get("values"), dict)
+                or telemetry.get("flags") is not None and not isinstance(telemetry.get("flags"), dict)):
+            return Finding("thermal/power", Status.UNKNOWN,
+                           "Resource telemetry has an invalid schema.")
+        if (telemetry.get("fresh") is not True
+                or not finite_number(telemetry.get("measured_at"))
+                or not finite_number(telemetry.get("age_seconds"))
+                or not 0 <= telemetry["age_seconds"] <= MAX_AGE_SECONDS):
             return Finding("thermal/power", Status.UNKNOWN,
                            "Resource telemetry is stale or invalid.", detail=telemetry)
         flags = telemetry.get("flags") or {}
+        mask = telemetry["values"].get("throttled_mask")
+        firmware_valid = (type(mask) is int and 0 <= mask <= 0xffffffff
+                          and all(type(flags.get(name)) is bool
+                                  and flags[name] == bool(mask & (1 << bit))
+                                  for bit, name in FLAGS.items()))
+        if flags and not firmware_valid:
+            return Finding("thermal/power", Status.UNKNOWN,
+                           "Firmware telemetry is malformed or inconsistent.")
         if mode != "survival" and any(flags.get(name) is True for name in
                ("undervoltage", "frequency_capped", "throttled", "soft_temperature_limit")):
             return Finding("thermal/power", Status.DEGRADED,
                            "Firmware reports active power/thermal limits.", detail=telemetry)
         values = telemetry.get("values") or {}
-        if mode == "full" and (values.get("cpu_temp_c") is None
-                               or telemetry.get("flags") is None):
+        if mode == "full" and (not finite_number(values.get("cpu_temp_c"))
+                               or not -20 <= values["cpu_temp_c"] <= 150
+                               or not firmware_valid):
             return Finding("thermal/power", Status.UNKNOWN,
                            "Thermal/power sensor coverage is incomplete.", detail=telemetry)
     valid_axes = {"cpu_temp", "cpu_load", "ram", "battery"}

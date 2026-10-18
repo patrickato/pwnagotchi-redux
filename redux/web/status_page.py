@@ -183,6 +183,7 @@ body{background:radial-gradient(ellipse at 15% 0%,var(--halo) 0%,var(--bg) 53%);
 .overview-metrics .row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
 .overview-metrics .kv{min-width:0;overflow-wrap:anywhere}
 .overview-metrics .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.resource-provenance{overflow-wrap:anywhere}
 .overview-advice{border-left:3px solid var(--acc)}
 .theme-selector{display:flex;align-items:center;justify-content:space-between;
  gap:9px;margin-top:8px;padding-top:7px;border-top:1px solid var(--line)}
@@ -290,7 +291,7 @@ body[data-skin="plain"] .hero::before{display:none}
    <div class="kv"><div class="k">Handed off</div><div class="v" id="capturehanded">—</div></div>
    <div class="kv"><div class="k">Pending sightings</div><div class="v" id="capturepending">—</div></div>
   </div>
-  <div id="capturefile" class="reason">No active capture verified</div>
+  <div id="capturefile" class="reason">No configured capture path</div>
   <div id="capturewarning" class="reason">Waiting for a live supervisor</div>
  </section>
  <section class="card" data-page="doctor" hidden aria-label="Runtime diagnostics">
@@ -310,10 +311,12 @@ body[data-skin="plain"] .hero::before{display:none}
    <div class="kv"><div class="k">sightings</div><div class="v" id="sight">—</div></div>
    <div class="kv"><div class="k">alerts</div><div class="v" id="alerts">—</div></div>
  </div>
- <svg id="spark" class="rich" viewBox="0 0 400 40" preserveAspectRatio="none"></svg></div>
+ <svg id="spark" class="rich" viewBox="0 0 400 40" preserveAspectRatio="none"></svg>
+ <div class="reason" id="visualfreshness">Visual observations unavailable</div></div>
  <section class="card" data-page="overview" aria-label="Hardware telemetry">
   <div class="k">Hardware telemetry</div><div id="resourcevalues">No measurements yet</div>
   <div class="reason" id="resourcesource"></div>
+  <details><summary>Measurement sources</summary><div class="reason resource-provenance" id="resourceprovenance"></div></details>
  </section>
  <div class="card overview-advice" data-page="overview"><div class="k">brain recommends</div>
    <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div>
@@ -393,6 +396,8 @@ viewRoot.onpointercancel=function(){swipeStart=null};
 setView(location.hash.slice(1),false);
 var fetchPending=false,lastRuntimeVersion=null,lastVersionChanged=0;
 function markStale(why){
+ document.getElementById('resourcesource').textContent='STALE / invalid · last received measurements unverified';
+ document.getElementById('visualfreshness').textContent='STALE visual observations · '+why;
  document.getElementById('sub').textContent='STALE · '+why;
  document.getElementById('doctorheart').className='doctor-heart unknown';
  document.getElementById('doctorheart').textContent='♡';
@@ -483,8 +488,9 @@ applyTheme(savedTheme);
 function setb(id,txt,cls){var e=document.getElementById(id);e.textContent=txt;e.className='badge'+(cls?' '+cls:'')}
 var lastDoctorFindings=null;
 function renderDoctor(report){
- const d=report&&Array.isArray(report.findings)?report:null;
  const modes=['ok','attention','degraded','action','unknown'];
+ const d=report&&Array.isArray(report.findings)&&report.findings.every(f=>
+  f&&typeof f==='object'&&!Array.isArray(f)&&modes.includes(f.status))?report:null;
  const mode=d&&modes.includes(d.overall)?d.overall:'unknown';
  const labels={ok:'OK',attention:'ATTENTION',degraded:'DEGRADED',
   action:'ACTION REQUIRED',unknown:'UNKNOWN'};
@@ -496,7 +502,7 @@ function renderDoctor(report){
  shortcut.setAttribute('aria-label','Open Doctor: '+labels[mode]);
  document.getElementById('healthglyph').textContent=mode==='unknown'?'♡':'♥';
  document.querySelector('.doctor-primary').className='card doctor-primary '+mode;
- const gaps=d&&d.coverage&&Array.isArray(d.coverage.not_assessed)
+ const gaps=d&&d.coverage&&Array.isArray(d.coverage.not_assessed)&&d.coverage.not_assessed.every(g=>typeof g==='string')
   ?d.coverage.not_assessed:null;
  document.getElementById('doctorcoverage').textContent=
   !d?'Doctor snapshot unavailable — health has not been assessed.'
@@ -550,20 +556,65 @@ function renderPipeline(d){
  document.getElementById('pipelinereason').textContent=
   finding?(finding.reason||''):(p.reason||'No verified worker status');
 }
-function renderRuntimePanels(d){
- const t=d.telemetry,v=t&&t.values||{};
- const number=(key,unit)=>typeof v[key]==='number'&&Number.isFinite(v[key])?v[key].toFixed(1)+unit:'unavailable';
+var lastResourceStamp=null,resourceChangedAt=0;
+function resourceView(t,runtime){
+ const obj=t&&typeof t==='object'&&!Array.isArray(t)?t:{};
+ const values=obj.values&&typeof obj.values==='object'&&!Array.isArray(obj.values)?obj.values:{};
+ const bounds={cpu_temp_c:[-20,150],cpu_load_pct:[0,100],ram_pct:[0,100],
+  cpu_frequency_mhz:[1,10000],battery_pct:[0,100]};
+ const clean={};
+ Object.keys(bounds).forEach(key=>{
+  const v=values[key],b=bounds[key];
+  clean[key]=Number.isFinite(v)&&v>=b[0]&&v<=b[1]?v:null;
+ });
+ clean.on_battery=typeof values.on_battery==='boolean'?values.on_battery:null;
+ const mask=values.throttled_mask;
+ clean.throttled_mask=Number.isInteger(mask)&&mask>=0&&mask<=0xffffffff?mask:null;
+ const stamp=obj.measured_at,now=performance.now();
+ if(stamp!==lastResourceStamp){lastResourceStamp=stamp;resourceChangedAt=now}
+ const reference=runtime&&Number.isFinite(runtime.updated_utc)?runtime.updated_utc:Date.now()/1000;
+ const age=Number.isFinite(stamp)?reference-stamp:null;
+ const fresh=obj.fresh===true&&Number.isFinite(stamp)&&stamp>=0&&
+  Number.isFinite(obj.age_seconds)&&obj.age_seconds>=0&&obj.age_seconds<=10&&
+  Number.isFinite(age)&&age>=0&&age<=10&&now-resourceChangedAt>=0&&now-resourceChangedAt<=10000;
+ return {values:clean,fresh,measured_at:Number.isFinite(stamp)?stamp:null,
+  age_seconds:Number.isFinite(age)?Math.max(age,obj.age_seconds||0):null,
+  provenance:obj.provenance&&typeof obj.provenance==='object'&&!Array.isArray(obj.provenance)?obj.provenance:{}};
+}
+function renderResources(d){
+ const t=resourceView(d.telemetry,d.runtime),v=t.values;
+ const number=(key,unit)=>v[key]===null?'unavailable':v[key].toFixed(1)+unit;
  document.getElementById('resourcevalues').textContent=
   'CPU '+number('cpu_temp_c','°C')+' · CPU use '+number('cpu_load_pct','%')+
   ' · RAM '+number('ram_pct','%')+' · Clock '+number('cpu_frequency_mhz',' MHz')+
   ' · Battery '+number('battery_pct','%')+
-  ' · Firmware '+(v.throttled_mask==null?'unavailable':'0x'+v.throttled_mask.toString(16));
- document.getElementById('resourcesource').textContent=t?
-  (t.fresh?'Fresh':'STALE / invalid')+' · measured '+t.measured_at+
-  ' · age '+t.age_seconds+'s · '+JSON.stringify(t.provenance||{})+
-  ' · Power source unavailable':'No measurements yet';
+  ' · Firmware '+(v.throttled_mask===null?'unavailable':'0x'+v.throttled_mask.toString(16));
+ const power=v.on_battery===null?'Power source unavailable':v.on_battery?'On battery':'External power reported';
+ document.getElementById('resourcesource').textContent=d.telemetry?
+  (t.fresh?'Fresh':'STALE / invalid')+' · measured '+(t.measured_at??'unavailable')+
+  ' · age '+(t.age_seconds??'unavailable')+'s · '+power:'No measurements yet';
+ document.getElementById('resourceprovenance').textContent=Object.keys(v)
+  .filter(key=>v[key]!==null&&typeof t.provenance[key]==='string')
+  .map(key=>key+': '+t.provenance[key].slice(0,160)).join(' · ')||
+  (typeof t.provenance.reading==='string'?t.provenance.reading.slice(0,160):'No measured source attribution');
+}
+var visualStamp=null,visualChangedAt=0;
+function visualFreshness(d){
+ const r=d.runtime||{},stamp=r.visual_sampled_utc;
+ const version=Number.isInteger(r.visual_revision)&&r.visual_revision>=0?r.visual_revision:stamp;
+ const now=performance.now();
+ if(version!==visualStamp){visualStamp=version;visualChangedAt=now}
+ const maximum=Number.isFinite(r.visual_max_age_seconds)&&r.visual_max_age_seconds>=1&&r.visual_max_age_seconds<=300?r.visual_max_age_seconds:12;
+ const age=Number.isFinite(stamp)&&Number.isFinite(r.updated_utc)?r.updated_utc-stamp:null;
+ const fresh=Number.isFinite(age)&&age>=0&&age<=maximum&&now-visualChangedAt>=0&&now-visualChangedAt<=maximum*1000;
+ document.getElementById('visualfreshness').textContent=fresh?
+  'Visual observations fresh · sampled '+stamp:'STALE / unavailable visual observations · runtime heartbeat is separate';
+ return fresh;
+}
+function renderRuntimePanels(d){
+ renderResources(d);
  const runtime=d.runtime||{};
- const connected=typeof runtime.updated_utc==='number';
+ const connected=Number.isFinite(runtime.updated_utc);
  const state=connected&&typeof runtime.state==='string'?runtime.state:'';
  const statuses={running:'ok',starting:'attention',
   starting_engine:'attention',rotating:'attention',
@@ -587,7 +638,7 @@ function renderRuntimePanels(d){
   Number.isInteger(runtime.sightings_pending)?String(runtime.sightings_pending):'—';
  const path=typeof runtime.capture_file==='string'?runtime.capture_file:'';
  document.getElementById('capturefile').textContent=
-  path?'Active file: '+path.split('/').pop():'No active capture verified';
+  path?'Configured capture path: '+path.split('/').pop()+' (existence unverified)':'No configured capture path';
  document.getElementById('capturewarning').textContent=
   runtime.handoff_error||runtime.sightings_write_error||
   (connected?'No current capture handoff error reported':'Waiting for a live supervisor');
@@ -664,8 +715,9 @@ function paint(d){
  if(typeof d.sightings==='number'){if(lastSight!==null)SPARK.push(Math.max(0,d.sightings-lastSight));lastSight=d.sightings;if(SPARK.length>120)SPARK.shift()}
  const sample=d.runtime&&(typeof d.runtime.visual_revision==='number'
   ?d.runtime.visual_revision:d.runtime.visual_sampled_utc);
+ const visualFresh=visualFreshness(d);
  const changed=typeof sample!=='number'||sample!==lastVisualSample;
- if(changed){
+ if(changed&&visualFresh){
   lastVisualSample=typeof sample==='number'?sample:null;
   renderMap(d.located||[],d.position||null);
   renderSpark();renderAirspace(d.airspace||{});renderAPs(d.access_points||[]);

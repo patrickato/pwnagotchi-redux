@@ -290,3 +290,147 @@ def test_manual_battery_observation_is_preserved(rig):
     f = probe_thermal_power(augur._doctor_inputs())
     assert f.status is Status.DEGRADED
     assert 'unmeasured' not in f.reason
+
+
+@pytest.mark.parametrize('bad', [[], 'bad', {'fresh':True,'values':[]},
+    {'fresh':True,'values':{},'flags':'bad'}, {'fresh':True,'values':{},'age_seconds':'bad'}])
+def test_doctor_malformed_telemetry_is_unknown(bad):
+    g = Governor().evaluate(Reading(cpu_temp_c=40),100)
+    assert probe_thermal_power(DoctorInputs(governor=g,telemetry=bad)).status is Status.UNKNOWN
+
+
+def test_optional_snapshot_fields_and_overflow_cannot_break_json():
+    for frequency, mask in [(float('nan'),'bad'), (True, -1), ('bad',float('inf'))]:
+        s = Snapshot(-1e308, 1e308, Reading(), frequency, mask, None)
+        result = s.status(1e308, -1e308)
+        assert result['fresh'] is False
+        assert result['age_seconds'] is None
+        assert result['values']['cpu_frequency_mhz'] is None
+        assert result['values']['throttled_mask'] is None
+        json.dumps(result, allow_nan=False)
+
+
+def test_resource_state_survives_new_augur_and_uses_monotonic_recovery(rig):
+    from redux.core.telemetry import ResourceMonitor
+    root, clock, c = rig
+    monitor = ResourceMonitor(c)
+    put(root, 'sys/class/thermal/thermal_zone0/temp','82000')
+    a = Augur(radios=[], resource_monitor=monitor)
+    a.pump()
+    assert a._gov.mode is Mode.SURVIVAL
+    c.clock = lambda: 1000000  # wall-clock step cannot end a recovery hold
+    clock.now += 2
+    put(root, 'sys/class/thermal/thermal_zone0/temp','45000')
+    b = Augur(radios=[], resource_monitor=monitor)
+    b.pump()
+    assert b._gov.mode is Mode.SURVIVAL and b._gov.holding
+    assert a._gov is b._gov
+    clock.now += 21
+    b.pump()
+    assert b._gov.mode is Mode.FULL
+    assert b.telemetry_status()['values']['cpu_load_pct'] is None  # stalled ticks
+
+
+def test_no_radio_runtime_still_samples_without_engine_or_radio_actions(rig, tmp_path, monkeypatch):
+    from redux.core import live_runtime as live
+    from redux.core.telemetry import ResourceMonitor
+    _, clock, c = rig
+    runtime = live.LiveRuntime(live.LiveConfig(state_dir=tmp_path/'state',
+        capture_dir=tmp_path/'captures',active_dir=tmp_path/'active',enable_web=False),
+        clock=clock, resource_monitor=ResourceMonitor(c), radio_probe=lambda: [])
+    runtime.next_try = 1e10  # retry gate closed: no probe/launch action
+    def forbidden(*args,**kwargs):
+        raise AssertionError('hardware action attempted')
+    runtime.executor = forbidden
+    runtime.spawn = forbidden
+    try:
+        runtime.tick()
+        snapshot = runtime._snapshot
+        assert snapshot['telemetry']['values']['cpu_temp_c'] == 45
+        thermal = next(f for f in snapshot['doctor']['findings'] if f['area'] == 'thermal/power')
+        assert thermal['status'] == 'ok'
+        assert runtime.augur is None and runtime.process is None
+        json.dumps(snapshot, allow_nan=False)
+    finally:
+        runtime.close()
+
+
+def test_governor_does_not_treat_truthy_power_source_as_battery():
+    d = Governor().evaluate(Reading(on_battery='unknown',battery_pct=1),100)
+    assert d.mode is Mode.FULL and 'battery' not in d.observed_axes
+
+
+def test_complete_status_to_field_health_flow(rig):
+    import importlib.util
+    from pathlib import Path
+    from redux.web import status_payload
+    spec = importlib.util.spec_from_file_location('flow_field_status',
+        Path(__file__).resolve().parents[1] / 'scripts/field-status.py')
+    field = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(field)
+    root, clock, c = rig
+    augur = Augur(radios=[], resource_collector=c)
+    def response():
+        result = status_payload(augur, processing_report={})
+        result['doctor'] = augur.doctor_report()
+        result['runtime'] = {'updated_utc':clock.now,'state':'running'}
+        return json.loads(json.dumps(result,allow_nan=False))
+    assert field.sanitize(response(),clock.now)['telemetry'] is None
+    augur.pump()
+    clean = field.sanitize(response(),clock.now)
+    assert clean['telemetry']['fresh']
+    assert clean['telemetry']['values']['cpu_temp_c'] == 45
+    put(root,'sys/class/thermal/thermal_zone0/temp','82000')
+    clock.now += 2
+    augur.pump()
+    clean = field.sanitize(response(),clock.now)
+    verdicts = {name:state for name,state,_ in field.assess(clean)}
+    assert clean['areas']['thermal/power'] == 'action'
+    assert verdicts['Doctor thermal assessment'] == 'FAIL'
+    clock.now += 11
+    clean = field.sanitize(response(),clock.now)
+    assert clean['areas']['thermal/power'] == 'unknown'
+    assert not clean['telemetry']['fresh']
+    put(root,'sys/class/thermal/thermal_zone0/temp','malformed')
+    augur.pump()
+    clean = field.sanitize(response(),clock.now)
+    assert clean['telemetry']['values']['cpu_temp_c'] is None
+    assert clean['telemetry']['values']['battery_pct'] is None
+    assert clean['telemetry']['values']['on_battery'] is None
+
+
+def test_governor_checkpoint_does_not_lag_telemetry_in_visual_cache(rig, tmp_path):
+    from redux.core import live_runtime as live
+    from redux.core.telemetry import ResourceMonitor
+    root, clock, c = rig
+    monitor = ResourceMonitor(c)
+    augur = Augur(radios=[], resource_monitor=monitor)
+    runtime = live.LiveRuntime(live.LiveConfig(state_dir=tmp_path/'state',
+        capture_dir=tmp_path/'captures',active_dir=tmp_path/'active',
+        status_sample_seconds=30,enable_web=False),clock=clock,resource_monitor=monitor,
+        radio_probe=lambda: [])
+    runtime.augur = augur
+    try:
+        augur.pump()
+        runtime._checkpoint()
+        revision = runtime._snapshot['runtime']['visual_revision']
+        assert runtime._snapshot['governor']['mode'] == 'full'
+        clock.now += 2
+        put(root,'sys/class/thermal/thermal_zone0/temp','82000')
+        augur.pump()
+        runtime._checkpoint()
+        result = runtime._snapshot
+        assert result['runtime']['visual_revision'] == revision
+        assert result['governor']['mode'] == 'survival'
+        assert result['governor']['measurement_fresh'] is True
+        assert 'cpu_temp' in result['governor']['observed_axes']
+        assert result['telemetry']['values']['cpu_temp_c'] == 82
+        thermal = next(f for f in result['doctor']['findings'] if f['area']=='thermal/power')
+        assert thermal['status'] == 'action'
+    finally:
+        runtime.close()
+
+
+def test_malformed_power_source_never_reports_mains():
+    result = Snapshot(100,100,Reading(on_battery='unknown',battery_pct=10),None,None,{}).status(100,100)
+    assert result['values']['on_battery'] is None

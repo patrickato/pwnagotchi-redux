@@ -247,6 +247,59 @@ async function deliver(request,data){
  assert.equal(elem('engineindicator').className,'runtime-pill action');
  assert.equal(elem('healthjump').className,'health-shortcut degraded');
  assert.equal(elem('doctor-primary').className,'card doctor-primary degraded');
+
+ // Exercise actual resource rendering, not just source-string presence.
+ const readings={fresh:true,measured_at:100,age_seconds:0,
+  values:{cpu_temp_c:45,cpu_load_pct:0,ram_pct:25,cpu_frequency_mhz:1500,
+   throttled_mask:0,battery_pct:null,on_battery:null},
+  provenance:{cpu_temp_c:'sysfs:cpu-thermal'}};
+ context.renderResources({telemetry:readings,runtime:{updated_utc:100}});
+ assert.match(elem('resourcesource').textContent,/Fresh/);
+ assert.match(elem('resourcesource').textContent,/Power source unavailable/);
+ assert.match(elem('resourcevalues').textContent,/CPU use 0.0%/);
+ assert.match(elem('resourcevalues').textContent,/Battery unavailable/);
+ assert.match(elem('resourceprovenance').textContent,/sysfs:cpu-thermal/);
+ context.renderResources({telemetry:readings,runtime:{updated_utc:111}});
+ assert.match(elem('resourcesource').textContent,/STALE/,
+  'cached fresh bit must not override timestamp age');
+ context.renderResources({telemetry:{fresh:'false',measured_at:112,age_seconds:0,
+  values:{cpu_temp_c:'45',throttled_mask:'malformed',on_battery:'false'}},
+  runtime:{updated_utc:112}});
+ assert.match(elem('resourcevalues').textContent,/CPU unavailable/);
+ assert.match(elem('resourcevalues').textContent,/Firmware unavailable/);
+ assert.match(elem('resourcesource').textContent,/STALE/);
+ for(const bad of [null,[],false,'bad',{values:[]},{values:null}]){
+  context.renderResources({telemetry:bad}); // no unhandled UI exception
+ }
+ const visual=report(120,120);
+ visual.runtime.state='running';
+ context.paint(visual);
+ assert.match(elem('visualfreshness').textContent,/fresh/);
+ const lastMap=elem('map').firstChild;
+ now+=13000;
+ visual.runtime.updated_utc=121; // heartbeat advances, visual revision stalls
+ context.paint(visual);
+ assert.match(elem('visualfreshness').textContent,/STALE/);
+ assert.equal(elem('engineindicator').textContent,'RUNNING');
+ assert.strictEqual(elem('map').firstChild,lastMap,'stale visual data must not redraw');
+ const future=report(121,122);
+ context.paint(future);
+ assert.match(elem('visualfreshness').textContent,/STALE/,'future visual sample invalid');
+ const planned=report(122,122);
+ planned.runtime.state='running';
+ planned.runtime.capture_file='/captures/active/planned.pcap';
+ context.paint(planned);
+ assert.equal(elem('capturefile').textContent,
+  'Configured capture path: planned.pcap (existence unverified)');
+ context.renderDoctor({overall:'unknown',findings:[],
+  coverage:{assessed:[],not_assessed:['thermal/power']}});
+ assert.equal(elem('doctorlabel').textContent,'UNKNOWN');
+ assert.match(elem('doctorcoverage').textContent,/thermal\/power/);
+ context.renderDoctor({overall:'ok',findings:[null,'invalid'],coverage:{not_assessed:[]}});
+ assert.equal(elem('doctorlabel').textContent,'UNKNOWN','malformed findings cannot be green or throw');
+ context.markStale('frozen');
+ assert.match(elem('resourcesource').textContent,/STALE/);
+ assert.match(elem('visualfreshness').textContent,/STALE/);
  console.log('browser polling contract passed');
 })().catch(error=>{console.error(error);process.exitCode=1});
 """

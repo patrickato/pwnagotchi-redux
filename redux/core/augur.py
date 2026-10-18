@@ -29,7 +29,7 @@ from .supervisor import Supervisor
 from .narrator import Narrator
 from .brain import Brain
 from .governor import Governor, Reading, GovDecision
-from .telemetry import ResourceCollector, Snapshot
+from .telemetry import ResourceMonitor
 from .capabilities import Cap, Provider, CapabilityGraph
 from .scope import Scope
 from .doctor import Doctor, DoctorInputs
@@ -58,6 +58,7 @@ class Augur:
         governor: Optional[Governor] = None,
         scope: Optional[Scope] = None,
         resource_collector=None,
+        resource_monitor=None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
@@ -65,10 +66,10 @@ class Augur:
         self.engine = detect_engine or DetectEngine()
         self.store = store if store is not None else SightingStore()
         self._position = position_provider
-        self.governor = governor or Governor()
-        self._gov: Optional[GovDecision] = None
-        self.resource_collector = resource_collector if resource_collector is not None else ResourceCollector()
-        self._telemetry = None
+        self.resources = resource_monitor if resource_monitor is not None else ResourceMonitor(
+            resource_collector, governor)
+        self.governor = self.resources.governor
+        self.resource_collector = self.resources.collector
         self.scope = scope if scope is not None else Scope()
         # SD-wear: buffer geo-tags and flush once per pump cycle (one batched
         # commit) instead of an fsync per RF event. _flush_cap bounds memory if a
@@ -153,10 +154,7 @@ class Augur:
     def pump(self) -> list:
         """One cycle: drain driver events → detect + geo-tag + narrate + advise,
         then flush the cycle's sightings to the store in one batched write."""
-        snapshot = self.resource_collector.sample()
-        if snapshot is not None:
-            self.observe_resources(snapshot.reading, now=snapshot.measured_at)
-            self._telemetry = snapshot
+        self.resources.sample()
         alerts = self.supervisor.pump()
         self.flush_sightings()
         sentinel = getattr(self, "_sentinel", None)
@@ -172,18 +170,22 @@ class Augur:
     def observe_resources(self, reading: Reading, now: Optional[float] = None) -> GovDecision:
         """Feed real thermal/power/load readings to the Governor; returns its
         glass-box decision. Sampling itself never changes capture scheduling."""
-        measured_at = now if now is not None else self.resource_collector.clock()
-        self._telemetry = Snapshot(measured_at, self.resource_collector.monotonic(),
-                                   reading, None, None, {"reading": "observe_resources caller"})
-        self._gov = self.governor.evaluate(reading, measured_at)
-        return self._gov
+        return self.resources.observe(reading, now)
+
+    @property
+    def _gov(self):
+        return self.resources.decision
+
+    @_gov.setter
+    def _gov(self, value):
+        self.resources.decision = value
 
     def telemetry_status(self):
         """Inspect the latest observation without sampling or writing."""
-        if self._telemetry is None:
-            return None
-        return self._telemetry.status(self.resource_collector.clock(),
-                                      self.resource_collector.monotonic())
+        return self.resources.status()
+
+    def governor_status(self):
+        return self.resources.governor_status()
 
     def govern_scale(self) -> float:
         """Current cadence multiplier (1.0 until real readings say to shed)."""
@@ -548,11 +550,7 @@ class Augur:
             },
             "recent_alerts": len(self.bus.history(Signal.ALERT)),
             "telemetry": self.telemetry_status(),
-            "governor": {
-                "mode": self._gov.mode.value if self._gov else "full",
-                "interval_scale": self.govern_scale(),
-                "reason": self._gov.reason if self._gov else "FULL — no readings yet",
-            },
+            "governor": self.governor_status(),
         }
         if self.sense() is not None:
             status["sense"] = self.sense_status()

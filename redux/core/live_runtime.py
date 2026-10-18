@@ -36,6 +36,8 @@ from ..radio.split_integration import CaptureLease
 from ..radio.link_type import read_link_type, link_assessment
 from ..web.status_page import make_handler, status_payload
 from .augur import Augur
+from .telemetry import ResourceMonitor
+from .doctor import Doctor, DoctorInputs
 from .boot import atomic_checkpoint
 from .live_health import describe_live_health
 from .runtime_identity import configuration_checkpoint
@@ -286,7 +288,7 @@ class LiveRuntime:
 
     def __init__(self, config: LiveConfig, *, radio_probe=probe, executor=subprocess.run,
                  spawn=subprocess.Popen, clock=time.monotonic, lease_guard=None,
-                 radio_inventory_provider=None):
+                 radio_inventory_provider=None, resource_monitor=None):
         config.validate()
         self.config = config
         self.capture_mount_required = any(
@@ -314,6 +316,7 @@ class LiveRuntime:
         self.executor = executor
         self.spawn = spawn
         self.clock = clock
+        self.resources = resource_monitor if resource_monitor is not None else ResourceMonitor()
         self.lease_guard = None
         if config.require_usb_lease:
             self.lease_guard = lease_guard or UsbLeaseGuard(
@@ -570,8 +573,11 @@ class LiveRuntime:
             processing = self._cached_processing
         # Assemble a complete local copy, then publish it in one assignment.
         # The read-only HTTP thread must never see a partially written report.
-        snapshot = {"runtime": metadata, "capture_processing": processing}
-        report = None
+        snapshot = {"runtime": metadata, "capture_processing": processing,
+                    "telemetry": self.resources.status(),
+                    "governor": self.resources.governor_status()}
+        report = Doctor().report(DoctorInputs(governor=self.resources.decision,
+                                              telemetry=self.resources.status()))
         if self.augur is not None:
             elapsed = now - self._visual_sampled_at
             event_min = min(2, self.config.status_sample_seconds)
@@ -593,6 +599,9 @@ class LiveRuntime:
                 snapshot = dict(self._cached_visual)
                 snapshot["runtime"] = metadata
                 snapshot["capture_processing"] = processing
+            governor_status = getattr(self.augur, "governor_status", None)
+            if callable(governor_status):
+                snapshot["governor"] = governor_status()
             telemetry_status = getattr(self.augur, "telemetry_status", None)
             if callable(telemetry_status):
                 # Freshness belongs to each checkpoint, not the slower visual cache.
@@ -602,6 +611,7 @@ class LiveRuntime:
             except Exception as error:
                 _LOG.warning("Doctor snapshot unavailable: %s", type(error).__name__)
         metadata["visual_sampled_utc"] = self._visual_sampled_utc if self.augur else None
+        metadata["visual_max_age_seconds"] = max(12, 2 * self.config.status_sample_seconds)
         metadata["visual_revision"] = self._visual_revision if self.augur else None
         health = describe_live_health(
             self.state, iface=self.iface or "",
@@ -816,7 +826,8 @@ class LiveRuntime:
         # Supervisor -> BettercapDriver is the exclusive active radio owner.
         store = SightingStore(self.config.state_dir / "sightings.db")
         try:
-            agent = Augur(radios=radios, intent=Intent.RECON, driver=driver, store=store)
+            agent = Augur(radios=radios, intent=Intent.RECON, driver=driver, store=store,
+                          resource_monitor=self.resources)
         except Exception:
             store.close()
             raise
@@ -1011,6 +1022,7 @@ class LiveRuntime:
             _LOG.warning("%s", self.last_handoff_error)
 
     def tick(self):
+        self.resources.sample()
         now = self.clock()
         # A forced/lazy unmount invalidates the original flock/partition
         # identity. Never resume on a newly mounted filesystem under a stale

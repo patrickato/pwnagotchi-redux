@@ -65,3 +65,10 @@ all 734 `image/ci.sh` image-contract cases passed; Python compile, tracked shell
 syntax and `git diff --check` passed. The host used its existing temporary TCC
 and shellcheck toolchain, with local test socket permission and an external
 pycache directory. These are hardware-free checks, not Pi measurements.
+
+The unified qualification integration now keeps the collector and Governor in a
+single `ResourceMonitor` shared across runtime/Augur connections. Sampling also
+runs with no capture engine, and monotonic time protects production cooldowns
+from wall-clock steps. Snapshot optional fields and Doctor containers are
+validated before use. Browser resource and visual freshness are independently
+checked; see [REDUX_QUALIFICATION.md](REDUX_QUALIFICATION.md).

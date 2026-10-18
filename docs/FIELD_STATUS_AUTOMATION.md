@@ -37,3 +37,11 @@ Existing complementary commands:
 These commands reduce **routine read-only evidence gathering** to a small
 number of executions; changes that control hardware still require explicit
 operator approval.
+
+The supported integrated workflow is now `python3 scripts/redux-qualify.py`
+(offline by default), with `--field --host ... --key ...` for the bounded
+unprivileged status path. See [REDUX_QUALIFICATION.md](REDUX_QUALIFICATION.md)
+for bootstrap, gate ordering, exit codes and explicit UNKNOWN hardware coverage.
+Timestamp validation now overrides a cached freshness bit, and degraded/action
+Doctor health is FAIL rather than merely a successfully received assessment.
+The qualifier never calls the legacy sudo/full-report transport.

@@ -2,6 +2,11 @@
 # Hardware-free image checks; never fetch sources, mount disks, or build an image.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+if [[ -z "${PYTHONPYCACHEPREFIX:-}" ]]; then
+    redux_ci_cache="$(mktemp -d "${TMPDIR:-/tmp}/redux-image-pycache.XXXXXX")"
+    trap 'rm -rf -- "$redux_ci_cache"' EXIT
+    export PYTHONPYCACHEPREFIX="$redux_ci_cache"
+fi
 for tool in bash python3 shellcheck ld; do
     command -v "$tool" >/dev/null || { echo "Image CI needs $tool; see docs/IMAGE_BUILD.md." >&2; exit 1; }
 done

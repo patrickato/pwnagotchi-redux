@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 
-from .governor import Reading, valid_reading, finite_number
+from .governor import Reading, Governor, valid_reading, finite_number
 
 SAMPLE_SECONDS = 2.0
 MAX_AGE_SECONDS = 10.0
@@ -59,19 +59,26 @@ class Snapshot:
                           (now, self.measured_at, monotonic_now, self.monotonic_at))
         age = now - self.measured_at if valid_times else None
         elapsed = monotonic_now - self.monotonic_at if valid_times else None
+        valid_times = valid_times and finite_number(age) and finite_number(elapsed)
         fresh = (valid_times and 0 <= age <= MAX_AGE_SECONDS
                  and 0 <= elapsed <= MAX_AGE_SECONDS)
         values = asdict(valid_reading(self.reading))
         # There is no battery/power-source sensor in this collector.
-        if values['battery_pct'] is None and self.reading.on_battery is not True:
+        if (type(self.reading.on_battery) is not bool
+                or values['battery_pct'] is None and self.reading.on_battery is not True):
             values['on_battery'] = None
-        values['cpu_frequency_mhz'] = self.cpu_frequency_mhz
-        values['throttled_mask'] = self.throttled_mask
-        return {'measured_at': self.measured_at if finite_number(self.measured_at) else None, 'age_seconds': max(age, elapsed) if valid_times else None,
+        values['cpu_frequency_mhz'] = (self.cpu_frequency_mhz
+            if finite_number(self.cpu_frequency_mhz) and 1 <= self.cpu_frequency_mhz <= 10000 else None)
+        mask = self.throttled_mask
+        if type(mask) is not int or not 0 <= mask <= 0xffffffff:
+            mask = None
+        values['throttled_mask'] = mask
+        return {'measured_at': self.measured_at if finite_number(self.measured_at) else None,
+                'age_seconds': max(age, elapsed) if valid_times else None,
                 'fresh': fresh, 'max_age_seconds': MAX_AGE_SECONDS,
-                'values': values, 'provenance': dict(self.provenance),
-                'flags': {name: bool(self.throttled_mask & (1 << bit))
-                          for bit, name in FLAGS.items()} if self.throttled_mask is not None else None}
+                'values': values, 'provenance': dict(self.provenance) if isinstance(self.provenance, dict) else {},
+                'flags': {name: bool(mask & (1 << bit))
+                          for bit, name in FLAGS.items()} if mask is not None else None}
 
 
 class ResourceCollector:
@@ -149,3 +156,47 @@ class ResourceCollector:
 
     def status(self):
         return self.snapshot.status(self.clock(), self.monotonic()) if self.snapshot else None
+
+
+class ResourceMonitor:
+    """Lifetime of sensor/Governor state, independent of an engine connection.
+
+    One owner calls sample; status never samples. Shared by the live runtime
+    and its current Augur so rotation cannot reset cooldown or CPU baselines.
+    """
+    def __init__(self, collector=None, governor=None):
+        self.collector = collector if collector is not None else ResourceCollector()
+        self.governor = governor if governor is not None else Governor()
+        self.snapshot = None
+        self.decision = None
+
+    def observe(self, reading, now=None, *, snapshot=None):
+        measured = self.collector.clock() if now is None else now
+        mono = self.collector.monotonic()
+        self.snapshot = snapshot if snapshot is not None else Snapshot(
+            measured, mono, reading, None, None, {"reading": "observe_resources caller"})
+        # Keep the legacy explicit-now evaluation contract for direct callers;
+        # production sampling uses monotonic time for recovery holds.
+        evaluation_time = mono if snapshot is not None or now is None else now
+        self.decision = self.governor.evaluate(reading, evaluation_time)
+        return self.decision
+
+    def sample(self):
+        snapshot = self.collector.sample()
+        if snapshot is not None:
+            self.observe(snapshot.reading, snapshot.measured_at, snapshot=snapshot)
+        return snapshot
+
+    def governor_status(self):
+        decision = self.decision
+        telemetry = self.status()
+        return {"mode": decision.mode.value if decision else "full",
+                "interval_scale": decision.interval_scale if decision else 1.0,
+                "reason": decision.reason if decision else "FULL — no readings yet",
+                "observed_axes": list(decision.observed_axes) if decision else [],
+                "holding": decision.holding if decision else False,
+                "measurement_fresh": telemetry["fresh"] if telemetry is not None else False}
+
+    def status(self):
+        return (self.snapshot.status(self.collector.clock(), self.collector.monotonic())
+                if self.snapshot is not None else None)

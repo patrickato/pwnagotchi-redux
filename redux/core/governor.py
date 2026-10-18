@@ -73,7 +73,7 @@ def valid_reading(reading: Reading) -> Reading:
     for name, (low, high) in bounds.items():
         value = getattr(reading, name)
         clean[name] = value if (finite_number(value) and low <= value <= high) else None
-    return replace(reading, **clean)
+    return replace(reading, **clean, on_battery=reading.on_battery is True)
 
 
 @dataclass(frozen=True)

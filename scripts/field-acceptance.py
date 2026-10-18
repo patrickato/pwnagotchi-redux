@@ -123,6 +123,47 @@ def verdicts(data, expected_country):
     return checks
 
 
+
+def status_verdicts(data, expected_country=None):
+    """Reuse acceptance policy for the sanitized, unprivileged status path.
+
+    Only fields measured by that endpoint are eligible for PASS/FAIL. Missing
+    storage/systemd/regulatory/ownership/RF observations remain UNKNOWN. No
+    full report, sudo command or radio query is requested by this adapter.
+    """
+    allowed = {"live_state": {"running", "starting", "starting_engine", "rotating",
+               "degraded", "telemetry_degraded", "storage_paused", "stopped", "lease_blocked", "termination_pending"},
+               "dashboard": {"True", "False"},
+               "checkpoint_freshness": {"fresh", "stale", "future", "invalid"}}
+    clean = {}
+    if isinstance(data, dict):
+        for key, states in allowed.items():
+            if isinstance(data.get(key), str) and data[key] in states:
+                clean[key] = data[key]
+        for key in ("events_seen", "handed_off", "capture_link_type"):
+            raw = data.get(key)
+            if isinstance(raw, str) and re.fullmatch(r"[0-9]{1,19}", raw):
+                clean[key] = raw
+    measured = {"Live capture supervisor": "live_state", "Doctor dashboard": "dashboard",
+                "Live checkpoint freshness": "checkpoint_freshness",
+                "Monitor packet link type": "capture_link_type",
+                "Observed runtime events": "events_seen", "Closed capture handoff": "handed_off"}
+    result = []
+    stale = clean.get("checkpoint_freshness") != "fresh"
+    for name, state, reason in verdicts(clean, expected_country or "unconfigured"):
+        key = measured.get(name)
+        if key is None or key not in clean:
+            state, reason = "UNKNOWN", "not measured by unprivileged status endpoint"
+        elif stale and name != "Live checkpoint freshness":
+            state, reason = "UNKNOWN", "runtime checkpoint stale or invalid"
+        if name == "Regulatory country" and isinstance(expected_country, str) and re.fullmatch(r"[A-Z]{2}", expected_country):
+            reason += "; operator expects " + expected_country
+        if name == "Observed runtime events" and state == "PASS":
+            reason += "; runtime events alone do not prove RF reception"
+        result.append((name, state, reason))
+    return result
+
+
 def fetch_report(ip, key, *, runner=subprocess.run):
     args = [
         "ssh", "-i", str(key), "-o", "BatchMode=yes",
