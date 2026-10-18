@@ -89,3 +89,14 @@ def test_missing_schema(tmp_path):
     db = tmp_path / "jobs.db"
     sqlite3.connect(db).close()
     assert mod.audit(db, output)["issues"] == {"schema_missing": 1}
+
+def test_empty_ledger_is_unknown_not_verified(tmp_path):
+    db, output = fixture(tmp_path)
+    report = mod.audit(db, output)
+    assert report == {"result": "unknown", "checked": 0, "ready_rows": 0, "issues": {}}
+
+
+def test_empty_ledger_cli_returns_unknown_exit_code(tmp_path, capsys):
+    db, output = fixture(tmp_path)
+    assert mod.main(["--db", str(db), "--output", str(output)]) == 3
+    assert '"result": "unknown"' in capsys.readouterr().out
