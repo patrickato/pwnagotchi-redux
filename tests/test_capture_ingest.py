@@ -769,3 +769,62 @@ def test_ledger_record_and_scan_heartbeat_refuse_mount_change(tmp_path, monkeypa
         assert worker.db.execute(
             "SELECT value FROM pipeline_meta WHERE key='last_scan'"
         ).fetchone() is None
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda x: x.update(completed_utc=float("nan")),
+    lambda x: x.update(completed_utc=float("inf")),
+    lambda x: x.update(completed_utc=True),
+    lambda x: x.update(completed_utc=-1),
+    lambda x: x.update(completed_utc=10**20),
+    lambda x: x.update(scanned=True),
+    lambda x: x.update(scanned=-1),
+    lambda x: x.update(scanned=2**70),
+    lambda x: x.update(scanned=1),
+    lambda x: x.update(outcomes={"ready": 1}),
+    lambda x: x.update(outcomes={"ready": True}),
+    lambda x: x.update(outcomes={"ready": -1}),
+    lambda x: x.update(outcomes={"ready": 2**70}),
+    lambda x: x.update(outcomes={"unverified_success": 1}),
+    lambda x: x.update(outcomes={"paused_low_storage": 0}),
+    lambda x: x.update(outcomes={"paused_low_storage": 1, "ready": 0}),
+    lambda x: x.update(outcomes={"ready": 0, "paused_low_storage": 1}),
+    lambda x: x.update(outcomes=[0, 0]),
+    lambda x: x.update(schema=True),
+    lambda x: x.update(schema=2),
+])
+def test_untrusted_scan_metadata_never_forges_a_healthy_empty_pass(tmp_path, mutation):
+    import json
+    from redux.display.capture_panel import model
+    cfg = settings(tmp_path)
+    with CaptureIngestor(cfg) as worker:
+        assert worker.scan()["scanned"] == 0
+        forged = {"schema": 1, "completed_utc": 1000.0, "scanned": 0, "outcomes": {}}
+        mutation(forged)
+        worker.db.execute(
+            "UPDATE pipeline_meta SET value=? WHERE key='last_scan'",
+            (json.dumps(forged),))
+        worker.db.commit()
+    status = read_summary(cfg.database)
+    assert status["available"] is True
+    assert status["last_scan"] is None
+    assert status["scan_error"] == "invalid stored scan record"
+    tft = model({"runtime": {"updated_utc": 1000},
+                 "capture_processing": status}, now=1000)
+    assert tft["scan_state"] == "INVALID"
+    assert tft["scan_files"] is None
+
+
+def test_worker_heartbeat_accepts_exact_empty_and_low_storage_pause(tmp_path):
+    cfg = settings(tmp_path)
+    with CaptureIngestor(cfg) as worker:
+        worker.scan()
+        assert read_summary(cfg.database)["last_scan"]["outcomes"] == {}
+        worker.db.execute(
+            "UPDATE pipeline_meta SET value=? WHERE key='last_scan'",
+            ('{"schema":1,"completed_utc":1000,"scanned":0,'
+             '"outcomes":{"paused_low_storage":1}}',))
+        worker.db.commit()
+    status = read_summary(cfg.database)
+    assert status["scan_error"] == ""
+    assert status["last_scan"]["outcomes"] == {"paused_low_storage": 1}
