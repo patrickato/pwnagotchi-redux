@@ -214,3 +214,72 @@ def test_mount_is_revalidated_before_recovery_apply(tmp_path, monkeypatch):
     monkeypatch.setattr(recovery, "capture_mount_snapshot", change_at_check)
     with pytest.raises(recovery.CaptureMountLost, match="changed"):
         recovery.recovery_report(cfg)
+
+
+def test_recovery_detects_altered_prepared_bytes_without_retry_or_overwrite(tmp_path):
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "changed-output.hc22000",
+                            REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        prepared = Path(worker.rows()[0]["output_path"])
+    corrupted = b"altered prepared output - must not overwrite"
+    prepared.write_bytes(corrupted)
+    before = cfg.database.stat().st_mtime_ns
+    dry = recovery_report(cfg)
+    assert dry["altered_outputs"] == 1
+    assert dry["missing_outputs"] == 0
+    assert dry["retryable"] == 0
+    assert dry["blocked"] == 1
+    assert dry["attempted"] == 0
+    assert cfg.database.stat().st_mtime_ns == before
+    applied = recovery_report(cfg, apply=True)
+    assert applied["altered_outputs"] == 1
+    assert applied["attempted"] == 0 and applied["outcomes"] == {}
+    assert prepared.read_bytes() == corrupted
+    assert source.read_bytes() == REC.encode()
+
+
+def test_recovery_blocks_oversized_prepared_artifact_without_digesting(tmp_path,
+                                                                      monkeypatch):
+    import redux.crack.recovery as recovery
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "oversize.hc22000",
+                            REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        prepared = Path(worker.rows()[0]["output_path"])
+    with prepared.open("r+b") as stream:
+        stream.truncate(recovery._MAX_PREPARED_BYTES + 1)
+    status = recovery_report(cfg, apply=True)
+    assert status["altered_outputs"] == status["blocked"] == 1
+    assert status["attempted"] == status["retryable"] == 0
+    assert prepared.stat().st_size == recovery._MAX_PREPARED_BYTES + 1
+    assert source.exists()
+
+
+def test_recovery_refuses_prepared_symlink_without_touching_target(tmp_path):
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "symlink.hc22000", REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        prepared = Path(worker.rows()[0]["output_path"])
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"do not alter")
+    prepared.unlink()
+    prepared.symlink_to(outside)
+    status = recovery_report(cfg, apply=True)
+    assert status["blocked"] == 1
+    assert status["retryable"] == status["attempted"] == 0
+    assert status["altered_outputs"] == 0
+    assert prepared.is_symlink() and outside.read_bytes() == b"do not alter"
+    assert source.exists()
+
+
+def test_bounded_digest_refuses_file_growth(tmp_path, monkeypatch):
+    from redux.crack.ingest import _digest_file
+    target = tmp_path / "bounded.bin"
+    target.write_bytes(b"data")
+    with pytest.raises(ValueError, match="exceeds read limit"):
+        _digest_file(target, max_bytes=3)
+    assert _digest_file(target, max_bytes=4)
