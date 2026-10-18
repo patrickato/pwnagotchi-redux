@@ -63,7 +63,12 @@ def model(report, *, now=None):
                 artifacts=_count(pipeline.get("artifacts")))
     last = pipeline.get("last_scan")
     if not isinstance(last, dict):
-        base["scan_state"] = "NO COMPLETED SCAN"
+        # The ingestion reader distinguishes an absent first heartbeat from
+        # corrupt persisted scan metadata through a fixed, sanitized error.
+        # Do not turn evidence corruption into an innocuous "never scanned".
+        malformed = (last is not None or
+                     pipeline.get("scan_error") == "invalid stored scan record")
+        base["scan_state"] = "INVALID" if malformed else "NO COMPLETED SCAN"
         return base
     scanned = _count(last.get("scanned"))
     at = _clock(last.get("completed_utc"))
