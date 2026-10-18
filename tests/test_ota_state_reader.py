@@ -2,15 +2,21 @@
 
 Host-only fixtures: no RAUC, firmware selector, Pi, service, or reboot access.
 """
+import importlib.util
 import json
 import os
 from pathlib import Path
 import stat
+import sys
 from types import SimpleNamespace
 
 import pytest
 
-from boot import ota
+REPO = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("redux_ota_test_module", REPO / "boot/ota.py")
+ota = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = ota
+spec.loader.exec_module(ota)
 
 BOOT_ID = "00000000-0000-0000-0000-000000000001"
 
