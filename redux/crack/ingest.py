@@ -38,6 +38,8 @@ def requires_capture_mount(settings):
 SUFFIXES = frozenset({".pcap", ".pcapng", ".cap", ".hc22000"})
 _HEX = re.compile(r"^[0-9a-fA-F]*$")
 _MAC = re.compile(r"^[0-9a-fA-F]{12}$")
+_OUTPUT_SHA = re.compile(r"^[0-9a-f]{64}$")
+_MAX_PREPARED_BYTES = 33 * 1024 * 1024
 _SCAN_OUTCOMES = frozenset({
     "ready", "error", "invalid", "duplicate", "skipped", "deferred",
     "deferred_low_storage",
@@ -367,9 +369,10 @@ class CaptureIngestor:
         if free_bytes(self.settings.output_dir) < self.settings.min_free_bytes:
             return "deferred_low_storage"
         try:
-            sha = _digest_file(source)
-        except OSError:
-            # The writer could have finalized/moved the file during this scan.
+            sha = _digest_file(source, max_bytes=self.settings.max_capture_bytes)
+        except (OSError, ValueError):
+            # The writer could have finalized, moved or grown the file
+            # between lstat and bounded hashing; retry only when settled.
             return "deferred"
         existing = self.db.execute(
             "SELECT status, output_sha, output_path FROM artifacts WHERE source_sha=?",
@@ -379,15 +382,30 @@ class CaptureIngestor:
             return "duplicate"
         if existing and existing[0] in {"ready", "duplicate"}:
             prior_sha, prior_path = existing[1], existing[2]
-            if prior_sha and prior_path:
+            if prior_sha or prior_path:
+                # The writable field ledger is not authority to read an
+                # arbitrary filesystem path. Prior results must point to our
+                # own content-addressed artifact under the configured root.
+                if (not isinstance(prior_sha, str)
+                        or not _OUTPUT_SHA.fullmatch(prior_sha)
+                        or not isinstance(prior_path, str)
+                        or Path(prior_path) != self.settings.output_dir / (prior_sha + ".hc22000")
+                        or self.settings.output_dir.is_symlink()):
+                    self._record(sha, source, "error",
+                                 reason="ledger prepared artifact identity is invalid")
+                    return "error"
                 previous = Path(prior_path)
                 if previous.is_symlink():
                     self._record(sha, source, "error", reason="prepared artifact became a symlink")
                     return "error"
                 if previous.is_file():
                     try:
-                        if _digest_file(previous) == prior_sha:
+                        if _digest_file(previous, max_bytes=_MAX_PREPARED_BYTES) == prior_sha:
                             return "duplicate"
+                    except ValueError:
+                        self._record(sha, source, "error",
+                                     reason="previous prepared artifact exceeds size limit")
+                        return "error"
                     except OSError:
                         return "deferred"
                     self._record(sha, source, "error",
@@ -426,7 +444,8 @@ class CaptureIngestor:
             after = source.lstat()
             if not stat.S_ISREG(after.st_mode) or (
                 after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
-            ) != (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns) or _digest_file(source) != sha:
+            ) != (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns) or _digest_file(
+                source, max_bytes=self.settings.max_capture_bytes) != sha:
                 return "deferred"
             records, bssids = normalize_22000(raw)
             if not records:
@@ -440,7 +459,7 @@ class CaptureIngestor:
             self._assert_mount()
             if output_path.exists():
                 if (output_path.is_symlink() or not output_path.is_file()
-                        or _digest_file(output_path) != output_sha):
+                        or _digest_file(output_path, max_bytes=_MAX_PREPARED_BYTES) != output_sha):
                     raise RuntimeError("output collision or altered artifact")
                 state = "duplicate"
             else:
