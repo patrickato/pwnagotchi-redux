@@ -19,7 +19,6 @@ fires; any deauth stays behind the driver's empty-by-default allowlist.
 """
 from __future__ import annotations
 
-import time
 from typing import Callable, List, Optional
 
 from ..radio import Intent
@@ -30,6 +29,7 @@ from .supervisor import Supervisor
 from .narrator import Narrator
 from .brain import Brain
 from .governor import Governor, Reading, GovDecision
+from .telemetry import ResourceCollector, Snapshot
 from .capabilities import Cap, Provider, CapabilityGraph
 from .scope import Scope
 from .doctor import Doctor, DoctorInputs
@@ -57,6 +57,7 @@ class Augur:
         position_provider: Optional[Callable[[], Optional[tuple]]] = None,
         governor: Optional[Governor] = None,
         scope: Optional[Scope] = None,
+        resource_collector=None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
@@ -66,6 +67,8 @@ class Augur:
         self._position = position_provider
         self.governor = governor or Governor()
         self._gov: Optional[GovDecision] = None
+        self.resource_collector = resource_collector if resource_collector is not None else ResourceCollector()
+        self._telemetry = None
         self.scope = scope if scope is not None else Scope()
         # SD-wear: buffer geo-tags and flush once per pump cycle (one batched
         # commit) instead of an fsync per RF event. _flush_cap bounds memory if a
@@ -150,6 +153,10 @@ class Augur:
     def pump(self) -> list:
         """One cycle: drain driver events → detect + geo-tag + narrate + advise,
         then flush the cycle's sightings to the store in one batched write."""
+        snapshot = self.resource_collector.sample()
+        if snapshot is not None:
+            self.observe_resources(snapshot.reading, now=snapshot.measured_at)
+            self._telemetry = snapshot
         alerts = self.supervisor.pump()
         self.flush_sightings()
         sentinel = getattr(self, "_sentinel", None)
@@ -164,10 +171,19 @@ class Augur:
 
     def observe_resources(self, reading: Reading, now: Optional[float] = None) -> GovDecision:
         """Feed real thermal/power/load readings to the Governor; returns its
-        glass-box decision. A hardware collector calls this; the interval_scale
-        it yields stretches periodic work (pump/sample/flush cadence) under load."""
-        self._gov = self.governor.evaluate(reading, now if now is not None else time.time())
+        glass-box decision. Sampling itself never changes capture scheduling."""
+        measured_at = now if now is not None else self.resource_collector.clock()
+        self._telemetry = Snapshot(measured_at, self.resource_collector.monotonic(),
+                                   reading, None, None, {"reading": "observe_resources caller"})
+        self._gov = self.governor.evaluate(reading, measured_at)
         return self._gov
+
+    def telemetry_status(self):
+        """Inspect the latest observation without sampling or writing."""
+        if self._telemetry is None:
+            return None
+        return self._telemetry.status(self.resource_collector.clock(),
+                                      self.resource_collector.monotonic())
 
     def govern_scale(self) -> float:
         """Current cadence multiplier (1.0 until real readings say to shed)."""
@@ -217,6 +233,7 @@ class Augur:
         return DoctorInputs(
             graph=self.capability_graph(),
             governor=self._gov,
+            telemetry=self.telemetry_status(),
             scope=self.scope,
             detector_count=getattr(self.engine, "detector_count", None),
             sightings=self.store.count() if hasattr(self.store, "count") else None,
@@ -530,6 +547,7 @@ class Augur:
                 "write_failures": self._sighting_flush_failures,
             },
             "recent_alerts": len(self.bus.history(Signal.ALERT)),
+            "telemetry": self.telemetry_status(),
             "governor": {
                 "mode": self._gov.mode.value if self._gov else "full",
                 "interval_scale": self.govern_scale(),

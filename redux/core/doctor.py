@@ -56,6 +56,7 @@ class DoctorInputs:
     scope: Optional[object] = None        # a Scope (summary())
     detector_count: Optional[int] = None
     sightings: Optional[int] = None
+    telemetry: Optional[dict] = None
 
 
 # --- built-in probes --------------------------------------------------------- #
@@ -68,6 +69,21 @@ def probe_thermal_power(inp: DoctorInputs) -> Finding:
                        "needs a hardware collector feeding the Governor")
     mode = getattr(getattr(g, "mode", None), "value", None)
     observed = getattr(g, "observed_axes", ())
+    telemetry = inp.telemetry
+    if telemetry is not None:
+        if telemetry.get("fresh") is not True:
+            return Finding("thermal/power", Status.UNKNOWN,
+                           "Resource telemetry is stale or invalid.", detail=telemetry)
+        flags = telemetry.get("flags") or {}
+        if mode != "survival" and any(flags.get(name) is True for name in
+               ("undervoltage", "frequency_capped", "throttled", "soft_temperature_limit")):
+            return Finding("thermal/power", Status.DEGRADED,
+                           "Firmware reports active power/thermal limits.", detail=telemetry)
+        values = telemetry.get("values") or {}
+        if mode == "full" and (values.get("cpu_temp_c") is None
+                               or telemetry.get("flags") is None):
+            return Finding("thermal/power", Status.UNKNOWN,
+                           "Thermal/power sensor coverage is incomplete.", detail=telemetry)
     valid_axes = {"cpu_temp", "cpu_load", "ram", "battery"}
     # A Governor decision with no measured sensor axes is a scheduling
     # decision, NOT evidence that temperatures, memory or power are healthy.
@@ -79,15 +95,23 @@ def probe_thermal_power(inp: DoctorInputs) -> Finding:
                        "Thermal/power readings not verified.",
                        "no valid independently supplied sensor coverage")
     reason = getattr(g, "reason", "")
+    if telemetry is not None:
+        missing = []
+        if values.get("battery_pct") is None:
+            missing.append("battery level")
+        if values.get("on_battery") is None:
+            missing.append("power source")
+        if missing:
+            reason += "; unmeasured: " + ", ".join(missing)
     st = {"full": Status.OK, "guarded": Status.ATTENTION,
           "reduced": Status.DEGRADED, "survival": Status.ACTION_REQUIRED}[mode]
-    summ = {"full": "Running at full performance.",
+    summ = {"full": "Measured resources are within limits.",
             "guarded": "Easing off slightly under load.",
             "reduced": "Throttled to manage heat/power.",
             "survival": "Shedding load hard — hot or low battery."}.get(mode, "Unknown resource state.")
     rem = "Improve airflow or move to power; the Governor recovers on its own once it cools/charges." \
         if st in (Status.DEGRADED, Status.ACTION_REQUIRED) else ""
-    return Finding("thermal/power", st, summ, reason, {"mode": mode}, rem)
+    return Finding("thermal/power", st, summ, reason, {"mode": mode, "telemetry": telemetry}, rem)
 
 
 def _cap_probe(inp: DoctorInputs, cap: Cap, area: str, *, needed: bool) -> Finding:

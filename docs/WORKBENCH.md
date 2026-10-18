@@ -41,3 +41,11 @@ of work as a single accumulating pull request against the original project.
 This workbench is an independent **branch**, not a new GitHub repository.
 If full repository separation is wanted later, move this branch into a
 new repository while keeping the original project unmodified.
+
+## Resource telemetry
+
+The source-only read-only collector now feeds Augur/Governor and exposes shared
+freshness/provenance to Doctor and the live dashboard. Missing/stale sensors
+remain unknown; battery/power-source measurements are unavailable. See
+[HARDWARE_TELEMETRY.md](HARDWARE_TELEMETRY.md) for sources, status fields and
+hardware qualification limits. No Pi deployment or RF qualification is implied.

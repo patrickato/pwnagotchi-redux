@@ -311,6 +311,10 @@ body[data-skin="plain"] .hero::before{display:none}
    <div class="kv"><div class="k">alerts</div><div class="v" id="alerts">—</div></div>
  </div>
  <svg id="spark" class="rich" viewBox="0 0 400 40" preserveAspectRatio="none"></svg></div>
+ <section class="card" data-page="overview" aria-label="Hardware telemetry">
+  <div class="k">Hardware telemetry</div><div id="resourcevalues">No measurements yet</div>
+  <div class="reason" id="resourcesource"></div>
+ </section>
  <div class="card overview-advice" data-page="overview"><div class="k">brain recommends</div>
    <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div>
    <div class="theme-selector"><span class="k">Theme</span>
@@ -547,6 +551,17 @@ function renderPipeline(d){
   finding?(finding.reason||''):(p.reason||'No verified worker status');
 }
 function renderRuntimePanels(d){
+ const t=d.telemetry,v=t&&t.values||{};
+ const number=(key,unit)=>typeof v[key]==='number'&&Number.isFinite(v[key])?v[key].toFixed(1)+unit:'unavailable';
+ document.getElementById('resourcevalues').textContent=
+  'CPU '+number('cpu_temp_c','°C')+' · CPU use '+number('cpu_load_pct','%')+
+  ' · RAM '+number('ram_pct','%')+' · Clock '+number('cpu_frequency_mhz',' MHz')+
+  ' · Battery '+number('battery_pct','%')+
+  ' · Firmware '+(v.throttled_mask==null?'unavailable':'0x'+v.throttled_mask.toString(16));
+ document.getElementById('resourcesource').textContent=t?
+  (t.fresh?'Fresh':'STALE / invalid')+' · measured '+t.measured_at+
+  ' · age '+t.age_seconds+'s · '+JSON.stringify(t.provenance||{})+
+  ' · Power source unavailable':'No measurements yet';
  const runtime=d.runtime||{};
  const connected=typeof runtime.updated_utc==='number';
  const state=connected&&typeof runtime.state==='string'?runtime.state:'';

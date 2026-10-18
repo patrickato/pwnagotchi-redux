@@ -593,6 +593,10 @@ class LiveRuntime:
                 snapshot = dict(self._cached_visual)
                 snapshot["runtime"] = metadata
                 snapshot["capture_processing"] = processing
+            telemetry_status = getattr(self.augur, "telemetry_status", None)
+            if callable(telemetry_status):
+                # Freshness belongs to each checkpoint, not the slower visual cache.
+                snapshot["telemetry"] = telemetry_status()
             try:
                 report = self.augur.doctor_report()
             except Exception as error:
