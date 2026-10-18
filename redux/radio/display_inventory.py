@@ -13,10 +13,58 @@ import time
 
 from .local_evidence import BoundedReader, Unavailable, inventory, iw_interfaces
 
-_IFACE = re.compile(r"[A-Za-z0-9_.-]{1,15}\Z")
+_IFACE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}\Z")
 _DRIVER = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 _TRANSPORTS = frozenset(("onboard", "usb"))
 _MODE_RANK = {"unknown": 0, "managed": 1, "monitor": 2}
+
+
+def normalize_sample(sample):
+    """Return an owned, bounded schema-1 copy or raise Unavailable.
+
+    LiveRuntime treats providers as an integration boundary. Copying only the
+    allowlisted scalar fields prevents later caller mutation, oversized extra
+    structures, or conflicting duplicate identities from changing a published
+    status snapshot.
+    """
+    if not isinstance(sample, dict) or sample.get("schema") != 1:
+        raise Unavailable("radio_sample_invalid")
+    sampled = sample.get("sampled_utc")
+    try:
+        clock_valid = (type(sampled) in (int, float) and math.isfinite(sampled)
+                       and 0 <= sampled <= 1e12)
+    except (OverflowError, TypeError, ValueError):
+        clock_valid = False
+    if not clock_valid:
+        raise Unavailable("radio_sample_clock_invalid")
+    rows = sample.get("radios")
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 2:
+        raise Unavailable("radio_sample_invalid")
+    transports = set()
+    ifaces = set()
+    clean = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise Unavailable("radio_sample_invalid")
+        transport = row.get("transport")
+        iface = row.get("iface")
+        driver = row.get("driver")
+        mode = row.get("kernel_mode")
+        arphrd = row.get("arphrd")
+        if (transport not in _TRANSPORTS or transport in transports
+                or not isinstance(iface, str) or not _IFACE.fullmatch(iface)
+                or iface in ifaces
+                or not isinstance(driver, str) or not _DRIVER.fullmatch(driver)
+                or mode not in _MODE_RANK or row.get("identity_stable") is not True
+                or type(arphrd) is not int or not 0 <= arphrd <= 65535):
+            raise Unavailable("radio_sample_invalid")
+        transports.add(transport)
+        ifaces.add(iface)
+        clean.append({"transport": transport, "identity_stable": True,
+                      "iface": iface, "driver": driver,
+                      "kernel_mode": mode, "arphrd": arphrd})
+    clean.sort(key=lambda row: (0 if row["transport"] == "onboard" else 1))
+    return {"schema": 1, "sampled_utc": float(sampled), "radios": clean}
 
 
 def _drivers(sys_root, identities):
@@ -103,5 +151,5 @@ def collect(*, sys_root=Path("/sys/class/net"), run=None,
         clock_valid = False
     if not clock_valid:
         raise Unavailable("radio_sample_clock_invalid")
-    return {"schema": 1, "sampled_utc": float(sampled),
-            "radios": [selected[key] for key in ("onboard", "usb") if key in selected]}
+    return normalize_sample({"schema": 1, "sampled_utc": float(sampled),
+            "radios": [selected[key] for key in ("onboard", "usb") if key in selected]})

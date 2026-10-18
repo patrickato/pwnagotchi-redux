@@ -310,6 +310,7 @@ class LiveRuntime:
         self._radio_inventory_lock = threading.Lock()
         self._radio_inventory_inflight = False
         self._radio_inventory_thread = None
+        self._closing = False
         self.executor = executor
         self.spawn = spawn
         self.clock = clock
@@ -460,7 +461,7 @@ class LiveRuntime:
     def _refresh_radio_inventory(self, now):
         """Schedule bounded read-only radio sampling off the capture supervisor loop."""
         provider = self.radio_inventory_provider
-        if provider is None:
+        if provider is None or self._closing:
             return
         with self._radio_inventory_lock:
             if self._radio_inventory_inflight:
@@ -473,11 +474,11 @@ class LiveRuntime:
 
         def sample_once():
             try:
-                sample = provider()
-                if not isinstance(sample, dict) or sample.get("schema") != 1:
-                    raise ValueError("invalid radio inventory sample")
+                from ..radio.display_inventory import normalize_sample
+                sample = normalize_sample(provider())
                 with self._radio_inventory_lock:
-                    self._radio_inventory = sample
+                    if not self._closing:
+                        self._radio_inventory = sample
             except Exception as error:
                 # Keep the last timestamped sample. The UI expires it after
                 # 20s; a failed refresh cannot make old hardware look live.
@@ -1174,6 +1175,7 @@ class LiveRuntime:
         # Even on stop failure, release the Python supervisor's resources and
         # exit non-zero. systemd's default KillMode=control-group then retains
         # responsibility for any surviving service child before a new start.
+        self._closing = True
         stopped = self._drop()
         try:
             if self.web is not None:

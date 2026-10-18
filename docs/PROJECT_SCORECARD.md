@@ -38,6 +38,10 @@ physical adapter replacement are rejected. Even fully compatible kernel
 metadata remains `UNVERIFIED` while policy, exclusive ownership, decoded
 reception and physical qualification are unmeasured. This is source-only UX
 hardening and does not increase the completion percentage.
+The async runtime boundary now normalizes and copies allowlisted inventory
+fields before publication, preserves the prior timestamp on malformed refresh,
+and discards late worker results during shutdown. These lifecycle safeguards
+prevent caller mutation or a closing service from freshening radio evidence.
 
 The combined GitHub CI run `39065298631` passed **2,378 software tests and
 651 image-contract checks**. This is source-level verification only.

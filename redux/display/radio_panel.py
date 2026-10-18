@@ -10,8 +10,8 @@ from math import isfinite
 import re
 import time
 
-_IFACE = re.compile(r"[A-Za-z0-9_.-]{1,15}\Z")
-_DRIVER = re.compile(r"[A-Za-z0-9_-]{1,24}\Z")
+_IFACE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}\Z")
+_DRIVER = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 
 
 def _clock(value):

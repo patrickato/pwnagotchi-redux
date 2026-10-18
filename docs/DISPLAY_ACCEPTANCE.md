@@ -383,6 +383,11 @@ onboard/USB role. Compatible metadata can improve that line only to
 and physical qualification remain explicit blockers because this status API
 does not measure them. Adapter replacement during collection is detected by
 the physical sysfs identity comparison and discards the sample.
+The runtime normalizes that provider result into an allowlisted owned copy
+before publication, so later provider mutation and extra nested data cannot
+rewrite a displayed observation. Malformed refreshes retain only the older
+timestamped sample, which naturally expires; shutdown prevents new sampling
+and discards any worker result that finishes after close begins.
 
 ## Measured capture processing on the native TFT
 

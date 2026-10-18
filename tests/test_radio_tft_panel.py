@@ -123,6 +123,13 @@ def test_compatible_metadata_remains_unverified_not_qualified():
         "POLICY UNMEASURED", "RX UNVERIFIED", "PHYSICAL UNVERIFIED"]
 
 
+def test_valid_long_kernel_driver_name_is_not_an_interface_failure():
+    r = measured()
+    r["radio_inventory"]["radios"][0]["driver"] = "a" * 48
+    result = radio_panel.model(r, now=1001)
+    assert result["inventory"] == "CURRENT"
+
+
 def test_oversized_numeric_inputs_fail_closed():
     r = measured()
     r["runtime"]["capture_link_type"] = 10**1000

@@ -29,10 +29,10 @@ class Reader(BoundedReader):
                  ('systemctl','show','--property=MainPID','--value','redux-live.service')}:
             return True
         if (len(a)==6 and a[:5]==('nmcli','-g','GENERAL.DBUS-PATH','device','show')
-                and re.fullmatch(r'[A-Za-z0-9_-]{1,15}',a[5])):
+                and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,14}',a[5])):
             return True
         if (len(a)==6 and a[:5]==('ip','-j','addr','show','dev')
-                and re.fullmatch(r'[A-Za-z0-9_-]{1,15}',a[5])):
+                and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,14}',a[5])):
             return True
         if a == ('busctl','--system','--auto-start=no','call','org.freedesktop.DBus',
                  '/org/freedesktop/DBus','org.freedesktop.DBus','GetNameOwner','s','org.freedesktop.NetworkManager'):
@@ -106,7 +106,7 @@ def runtime_facts(run, *, proc=Path('/proc'), live=Path('/captures/live/live.jso
         if binary!='bettercap' or argv.count('-iface')!=1:
             raise Unavailable('bettercap_arguments_unknown')
         child_iface=argv[argv.index('-iface')+1]
-        if not re.fullmatch(r'[A-Za-z0-9_-]{1,15}',child_iface):
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,14}',child_iface):
             raise Unavailable('bettercap_arguments_unknown')
     boot=read_small(proc/'sys/kernel/random/boot_id')
     attested=loaded_policy(data.get('configuration_identity'),sp,boot)

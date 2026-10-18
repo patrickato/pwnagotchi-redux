@@ -646,6 +646,61 @@ def test_failed_radio_inventory_refresh_keeps_timestamped_sample_not_freshening_
         runtime.close()
 
 
+def test_malformed_radio_inventory_refresh_keeps_last_sanitized_sample(tmp_path):
+    clock = [100.0]
+    sample = {"schema": 1, "sampled_utc": 1000.0, "radios": [{
+        "transport": "usb", "identity_stable": True, "iface": "wlan1",
+        "driver": "mt76x2u", "kernel_mode": "monitor", "arphrd": 803}]}
+    calls = []
+    def provider():
+        calls.append(1)
+        if len(calls) == 1:
+            return sample
+        return {"schema": 1, "sampled_utc": 1010.0,
+                "radios": [dict(sample["radios"][0], identity_stable=False)]}
+    runtime = live.LiveRuntime(
+        cfg(tmp_path), radio_probe=lambda: [], clock=lambda: clock[0],
+        radio_inventory_provider=provider)
+    try:
+        runtime._checkpoint()
+        runtime._radio_inventory_thread.join(timeout=2)
+        runtime._checkpoint()
+        first = runtime._snapshot["radio_inventory"]
+        # Mutating the provider-owned object cannot rewrite the published copy.
+        sample["radios"][0]["iface"] = "replacement"
+        assert first["radios"][0]["iface"] == "wlan1"
+        clock[0] = 110.0
+        runtime._checkpoint()
+        runtime._radio_inventory_thread.join(timeout=2)
+        runtime._checkpoint()
+        assert runtime._snapshot["radio_inventory"] is first
+    finally:
+        runtime.close()
+
+
+def test_radio_inventory_worker_result_is_discarded_after_close(tmp_path):
+    import threading
+    started = threading.Event()
+    release = threading.Event()
+    def provider():
+        started.set()
+        assert release.wait(timeout=2)
+        return {"schema": 1, "sampled_utc": 1000.0, "radios": [{
+            "transport": "onboard", "identity_stable": True,
+            "iface": "wlan0", "driver": "brcmfmac",
+            "kernel_mode": "managed", "arphrd": 1}]}
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: [],
+                               radio_inventory_provider=provider)
+    runtime._checkpoint()
+    assert started.wait(timeout=2)
+    runtime.close()
+    release.set()
+    runtime._radio_inventory_thread.join(timeout=2)
+    assert not runtime._radio_inventory_thread.is_alive()
+    assert runtime._radio_inventory is None
+    assert "radio_inventory" not in runtime._snapshot
+
+
 def test_live_status_reuses_one_processing_ledger_read(tmp_path, monkeypatch):
     from redux.crack import ingest
     def spawn(*args, **kwargs):

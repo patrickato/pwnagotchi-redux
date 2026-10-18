@@ -182,3 +182,34 @@ def test_invalid_inventory_timestamp_is_refused(tmp_path, bad_clock):
     with pytest.raises(Unavailable, match="sample_clock_invalid"):
         di.collect(sys_root=root, run=lambda args: iw_text(row),
                    wall_clock=lambda: bad_clock)
+
+
+@pytest.mark.parametrize("change", [
+    lambda value: value.update(schema=2),
+    lambda value: value.update(sampled_utc=float("nan")),
+    lambda value: value.update(sampled_utc=10**1000),
+    lambda value: value.update(radios=[]),
+    lambda value: value["radios"].append(dict(value["radios"][0], transport="usb")),
+    lambda value: value["radios"][0].update(identity_stable=False),
+    lambda value: value["radios"][0].update(arphrd=True),
+    lambda value: value["radios"][0].update(iface=".."),
+])
+def test_normalized_provider_sample_is_bounded_owned_and_fail_closed(change):
+    sample = {"schema": 1, "sampled_utc": 1000, "radios": [{
+        "transport": "onboard", "identity_stable": True, "iface": "wlan0",
+        "driver": "brcmfmac", "kernel_mode": "managed", "arphrd": 1}]}
+    change(sample)
+    with pytest.raises(Unavailable, match="radio_sample"):
+        di.normalize_sample(sample)
+
+
+def test_normalized_sample_cannot_be_changed_through_provider_alias():
+    row = {"transport": "usb", "identity_stable": True, "iface": "wlan1",
+           "driver": "mt76x2u", "kernel_mode": "monitor", "arphrd": 803}
+    row["extra"] = {"unbounded": [1] * 100}
+    sample = {"schema": 1, "sampled_utc": 1000, "radios": [row],
+              "provider_private": [1] * 100}
+    clean = di.normalize_sample(sample)
+    row["iface"] = "replacement"
+    assert clean["radios"][0]["iface"] == "wlan1"
+    assert "extra" not in clean["radios"][0] and "provider_private" not in clean
