@@ -156,3 +156,73 @@ def test_ota_health_does_not_accept_fake_kernel_boot_id(tmp_path):
     health.write_text(json.dumps(altered))
     with pytest.raises(ValueError, match="stale or incomplete"):
         ota.validate_boot_checkpoint(147, checkpoint=health, boot_id=boot_id)
+
+
+
+def _ota_mount_health_fixture(tmp_path, monkeypatch):
+    """Four independently identifiable mounted volumes on a synthetic disk."""
+    points = {
+        "/media/root-ro": ["ext4", "ro,nodev", "4"],
+        "/boot/firmware": ["vfat", "ro,nodev", "2"],
+        "/boot/redux-control": ["vfat", "ro,nodev", "1"],
+        "/captures": ["ext4", "rw,nodev", "6"],
+    }
+    devices = {}
+    for part in ("1", "2", "4", "6"):
+        device = tmp_path / ("partition" + part)
+        device.write_bytes(b"fixture")
+        devices[part] = str(device)
+    measured = {
+        point: {"FSTYPE": kind, "OPTIONS": options, "SOURCE": devices[part]}
+        for point, (kind, options, part) in points.items()
+    }
+
+    def command(arguments):
+        if arguments == ["systemctl", "is-active", "redux.service"]:
+            return "active"
+        if arguments == ["systemctl", "show", "-p", "RuntimeWatchdogUSec", "--value"]:
+            return "20000000"
+        if arguments[:3] == ["findmnt", "-n", "-o"] and len(arguments) == 5:
+            return measured[arguments[4]][arguments[3]]
+        raise AssertionError(f"unexpected OTA probe: {arguments!r}")
+
+    monkeypatch.setattr(ota, "command", command)
+    monkeypatch.setattr(ota, "dt_integer", lambda name: 2 if name == "partition"
+                        else pytest.fail(f"unexpected device-tree read {name}"))
+    monkeypatch.setattr(ota, "validate_boot_checkpoint", lambda pid: checkpoint(pid))
+    real_read_text = Path.read_text
+
+    def watchdog_read(self, *args, **kwargs):
+        if str(self) == "/sys/class/watchdog/watchdog0/state":
+            return "active\n"
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", watchdog_read)
+    return {"current": "A", "devices": devices}, measured
+
+
+def test_ota_health_accepts_exactly_matched_boot_storage(tmp_path, monkeypatch):
+    context, _ = _ota_mount_health_fixture(tmp_path, monkeypatch)
+    assert ota.check_health(context, expected_pid=321) is None
+
+
+@pytest.mark.parametrize("point,key,spoof", [
+    ("/captures", "FSTYPE", "tmpfs"),
+    ("/captures", "OPTIONS", "ro,nodev"),
+    ("/captures", "SOURCE", "/nonexistent/other-capture-partition"),
+    ("/media/root-ro", "FSTYPE", "vfat"),
+    ("/media/root-ro", "OPTIONS", "rw,nodev"),
+    ("/media/root-ro", "SOURCE", "/nonexistent/other-root-partition"),
+    ("/boot/firmware", "FSTYPE", "ext4"),
+    ("/boot/firmware", "OPTIONS", "rw,nodev"),
+    ("/boot/firmware", "SOURCE", "/nonexistent/wrong-boot-partition"),
+    ("/boot/redux-control", "FSTYPE", "ext4"),
+    ("/boot/redux-control", "OPTIONS", "rw,nodev"),
+    ("/boot/redux-control", "SOURCE", "/nonexistent/wrong-control-partition"),
+])
+def test_ota_health_refuses_substitute_storage(
+        tmp_path, monkeypatch, point, key, spoof):
+    context, measured = _ota_mount_health_fixture(tmp_path, monkeypatch)
+    measured[point][key] = spoof
+    with pytest.raises((OSError, ValueError)):
+        ota.check_health(context, expected_pid=321)
