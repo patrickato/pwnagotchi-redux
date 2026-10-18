@@ -34,8 +34,8 @@ def checkpoint(pid=147):
 def test_ota_factory_ledger_default_and_pinned_valid_records(tmp_path):
     ledger = tmp_path / "state.json"
     assert ota.load_state(ledger, "A") == ota.initial_state("A")
-    state = ota.initial_state("A")
-    state["pending"] = "B"
+    state, _ = ota.transition(ota.initial_state("A"), "A", "A",
+                              "set-primary", "B")
     ledger.write_text(json.dumps(state))
     assert ota.load_state(ledger, "A") == state
 
