@@ -163,6 +163,8 @@ def _read_bounded_state_json(path, *, limit):
 
 
 def load_state(path, stable):
+    if stable not in SLOTS:
+        raise ValueError("unknown stable OTA slot")
     path = Path(path)
     try:
         data = _read_bounded_state_json(path, limit=16384)
@@ -176,7 +178,13 @@ def load_state(path, stable):
             or type(data.get("pending")) not in {str, type(None)} or not isinstance(data.get("states"), dict)
             or data.get("pending") not in {None, "A", "B"}
             or set(data.get("states", {})) != set(SLOTS)
-            or any(v not in {"good", "bad"} for v in data["states"].values())):
+            or any(v not in {"good", "bad"} for v in data["states"].values())
+            # A committed firmware selector is the only fallback. A ledger
+            # that calls it bad must never be used to stage or commit another
+            # candidate. Pending candidates are marked good when staged.
+            or data["states"][stable] != "good"
+            or (data["pending"] is not None
+                and data["states"][data["pending"]] != "good")):
         raise ValueError("invalid OTA state; stable firmware selector remains unchanged")
     return data
 
