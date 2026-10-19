@@ -354,3 +354,16 @@ def test_impossible_global_and_row_counters_stay_unknown():
     ]
     for item in cases:
         assert module.classify_receipt(item, now=1001)['status'] == 'unknown'
+
+
+def test_ledger_replacement_receipt_is_actionable():
+    row = receipt(result='attention', checked=1, ready_rows=1,
+                  issues={'ledger_changed': 1})
+    assert module.classify_receipt(row, now=1001)['status'] == 'attention'
+    with tempfile.TemporaryDirectory() as tmp:
+        destination = Path(tmp) / "integrity.json"
+        module.publish_receipt(destination, {
+            "result": "attention", "checked": 1, "ready_rows": 1,
+            "issues": {"ledger_changed": 1},
+        }, completed_utc=1000)
+        assert module.read_cached_receipt(destination, now=1001)['status'] == 'attention'
