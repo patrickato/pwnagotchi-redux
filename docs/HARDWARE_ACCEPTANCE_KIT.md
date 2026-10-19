@@ -1,5 +1,10 @@
 # First-boot and hardware acceptance kit
 
+For a single bounded, separately authorized read-only SSH bring-up session, use
+the existing entrypoint's `session-plan`, `session-collect` and `session-inspect`
+commands described in [BRINGUP_SESSION.md](BRINGUP_SESSION.md). Ordinary offline
+acceptance modes never connect to a device.
+
 `python3 scripts/redux-acceptance.py` is the host entrypoint. Preflight,
 inspection, evaluation, comparison and replay work offline. They never SSH,
 discover devices, install packages, invoke sudo, flash media, change Wi-Fi,

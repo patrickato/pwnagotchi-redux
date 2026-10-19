@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Offline first-boot and hardware acceptance. Never SSH, sudo, RF or deploy."""
+"""Offline acceptance by default; explicit session-collect uses read-only SSH.
+
+Never sudo, RF operations, installation, service changes or deployment.
+"""
 from __future__ import annotations
 import sys
 sys.dont_write_bytecode = True
@@ -29,9 +32,9 @@ def save(path, value):
     """New, private local report only; never overwrite or follow directory links."""
     from update_safety import safe_path
     path = Path(path).absolute(); safe_path(path.parent, path.name)
-    with path.open('xb') as stream:
-        import os
-        os.chmod(path, 0o600)
+    import os
+    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+    with os.fdopen(fd,'wb') as stream:
         stream.write(canonical(value) + b'\n')
 
 
@@ -97,10 +100,150 @@ def emit(result, args):
             if name in result:
                 print(f"{result[name]['status']:15} {name}: {result[name]['reason']}")
                 if result[name].get('diagnostic_hint'):print('Action: '+result[name]['diagnostic_hint'])
+        if result.get('observations') is not None:
+            print('Saved observations (unsigned; not physical qualification):')
+            print(json.dumps(result['observations'],indent=2,sort_keys=True,allow_nan=False))
         if result.get('recovery_plan'):
             print('Recovery plan only: '+result['recovery_plan']['phase']+'; '+result['recovery_plan']['status'])
-        print('Result: '+result['result']+'. Offline only; no device or network actions performed.')
+        note=(' Read-only SSH session; no device configuration changes performed.' if result.get('network_actions_performed') is True else ' Offline only; no device or network actions performed.')
+        print('Result: '+result['result']+'.'+note)
     return 1 if result['result']=='FAIL' else 3 if result['result']=='UNKNOWN' else 0
+
+
+def session_support():
+    """Reuse the existing bounded SSH transport and memory source loader."""
+    import importlib.util
+    import inspect
+    def module(name):
+        spec=importlib.util.spec_from_file_location(name.replace('-','_'), ROOT/'scripts'/(name+'.py'))
+        value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value)
+        return value
+    pi=module('pi-acceptance');field=module('field-status')
+    from redux.acceptance_collect import cached_status
+    helper='import math, urllib.request\n'+inspect.getsource(field.sanitize)+'\n'+inspect.getsource(cached_status)
+    modules=tuple(dict.fromkeys(pi.MODULES+('redux.acceptance_session','redux.boot_readiness',
+        'redux.display.acceptance','redux.display.kiosk','redux.core.processing_evidence')))
+    entry='''import json, os, sys
+from redux.acceptance_session import remote_snapshot
+from redux.session_helpers import cached_status, sanitize
+connection=os.environ.get('SSH_CONNECTION','').split()
+if len(connection)!=4:raise SystemExit(2)
+import ipaddress
+peer=str(ipaddress.ip_address(connection[0]))
+result=remote_snapshot(peer,sys.argv[1],sys.argv[2],status_supplier=cached_status,sanitizer=sanitize)
+print(json.dumps(result,sort_keys=True,allow_nan=False))
+'''
+    source=pi.bundle(modules=modules,extra_sources={'redux.session_helpers':helper},entrypoint=entry)
+    return pi,field,source
+
+
+def session_plan(revision):
+    import hashlib
+    _,_,source=session_support()
+    return {'format':'redux-bringup-plan-v1','host_revision':revision,
+        'collector_sha256':hashlib.sha256(source.encode()).hexdigest(),
+        'ssh':{'user':'pi','public_key_only':True,'strict_host_key_checking':True,'sudo':False,'deadline_seconds':45},
+        'scope':['installed source, model, kernel and firmware version hashes',
+                 'existing radio/ownership/regulatory inventory and service states',
+                 'two passive sysfs RX/TX counter snapshots; no packet socket',
+                 'kernel mount identity checks and capacity',
+                 'one cached dashboard status: Doctor, telemetry, worker aggregates and plugin availability',
+                 'existing framebuffer/SPI/touch metadata inventory; no input events or pixels'],
+        'excluded':['capture contents, logs, credentials, SSIDs, MACs, serials',
+                    'sudo, installs, writes, restarts, reboots, scans, interface or RF changes'],
+        'physical_acceptance':'UNKNOWN','card_identity':'UNKNOWN','requires_operator_authorization':True}
+
+
+def session_collect(args):
+    import hashlib
+    import shlex
+    import uuid
+    from redux.acceptance_session import FORMAT
+    from update_safety import safe_path
+    output=args.output.absolute()
+    safe_path(output.parent,output.name)
+    if output.exists() or output.is_symlink():raise ValueError('use a new session output')
+    pi,field,source=session_support()
+    host,key=field.validate_target(args.host,args.key)
+    revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+    dirty=bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True))
+    session=uuid.uuid4().hex+uuid.uuid4().hex
+    argv=['ssh','-F','/dev/null','-T','-i',str(key)]
+    for option in ('BatchMode=yes','StrictHostKeyChecking=yes','ConnectTimeout=8','IdentitiesOnly=yes',
+        'PreferredAuthentications=publickey','PasswordAuthentication=no','KbdInteractiveAuthentication=no',
+        'ClearAllForwardings=yes','ForwardAgent=no','ForwardX11=no','PermitLocalCommand=no',
+        'ControlMaster=no','ControlPath=none','UpdateHostKeys=no','ProxyCommand=none','ProxyJump=none','ServerAliveInterval=5','ServerAliveCountMax=2'):
+        argv+=['-o',option]
+    argv += [f'pi@{host}','python3 -B - '+shlex.join([session,revision])]
+    from redux.radio.local_evidence import Unavailable
+    try:
+        report=pi.fetch(argv,source,format_name=FORMAT)
+    except Unavailable:
+        return {'schema':1,'result':'UNKNOWN','session_report_saved':False,'network_actions_performed':True,
+                'checks':[{'gate':'read_only_transport','status':'UNKNOWN',
+                           'reason':'ssh_unavailable_check_verified_ethernet_host_key_identity_no_retry'}]}
+    if report.get('session_id')!=session or report.get('host_revision')!=revision:
+        raise ValueError('session response identity mismatch')
+    if report.get('physical_acceptance')!='UNKNOWN' or report.get('unsigned') is not True:
+        raise ValueError('unqualified acceptance claim')
+    if subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()!=revision:
+        raise ValueError('host source changed during acquisition')
+    report['operator_card_role']=getattr(args,'card_role','unverified')
+    report['host_worktree_dirty']=dirty
+    report['collector_sha256']=hashlib.sha256(source.encode()).hexdigest()
+    save(args.output,report)
+    return {**session_inspect(report), 'session_report_saved':True,'network_actions_performed':True,
+            'evidence_origin':'strict_ssh_read_only_unsigned','identity_stable':report.get('identity_stable') is True}
+
+
+
+def session_inspect(record, now=None):
+    """Readable projection of a saved session, never attest imported assertions."""
+    from redux.acceptance_session import FORMAT, token
+    if (not isinstance(record,dict) or record.get('format')!=FORMAT
+            or record.get('hardware_changes') is not False or record.get('unsigned') is not True
+            or any(record.get(key)!='UNKNOWN' for key in ('physical_acceptance','release_identity','card_identity','update_rollback'))
+            or not token(record.get('host_revision'),r'[a-f0-9]{40}')
+            or not token(record.get('session_id'),r'[a-f0-9]{64}')
+            or (record.get('embedded_revision') is not None and not token(record['embedded_revision'],r'[a-f0-9]{40}'))):
+        raise ValueError('invalid or forged session')
+    stamp=record.get('completed_at')
+    from redux.hardware_acceptance import number
+    now=time.time() if now is None else now
+    fresh=number(stamp) and 0<=now-stamp<=120
+    checks=[{'gate':'saved_observation_freshness','status':'PASS' if fresh else 'UNKNOWN',
+             'reason':'timestamp_within_120_seconds' if fresh else 'historical_or_invalid_timestamp'},
+            {'gate':'session_identity_continuity','status':'PASS' if record.get('identity_stable') is True else 'UNKNOWN',
+             'reason':'saved_identity_observation_is_not_independent_attestation'}]
+    field=__import__('importlib.util',fromlist=['util'])
+    spec=field.spec_from_file_location('session_field_status',ROOT/'scripts/field-status.py')
+    module=field.module_from_spec(spec);spec.loader.exec_module(module)
+    status=record.get('status')
+    if isinstance(status,dict):
+        for name,state,detail in module.assess(status):
+            checks.append({'gate':name,'status':state if fresh and record.get('identity_stable') is True else 'UNKNOWN',
+                           'reason':'saved_read_only_observation_not_physical_qualification'})
+    checks.extend({'gate':gate,'status':'UNKNOWN','reason':'requires_separate_approved_physical_evidence'}
+                  for gate in ('decoded_reception','capture_conversion','physical_touch_display','reboot_preservation','update_rollback','disposable_card_identity'))
+    observations={'host_revision':record['host_revision'],'embedded_revision':record.get('embedded_revision'),
+        'model':record.get('model') if record.get('model') in ('pi4','pi5') else None,
+        'kernel':token(record.get('kernel')), 'architecture':token(record.get('architecture')),
+        'firmware':{},'radios':[], 'display_metadata_state':None}
+    firmware=record.get('firmware')
+    if isinstance(firmware,dict):
+        observations['firmware']={key:token(firmware.get(key),r'[a-f0-9]{64}') for key in ('firmware_version_sha256','eeprom_version_sha256')}
+    rows=record.get('rx_observations')
+    if isinstance(rows,list):
+        for row in rows[:8]:
+            if not isinstance(row,dict):continue
+            observations['radios'].append({key:row.get(key) if type(row.get(key)) is int and 0<=row[key]<=2**63-1 else None
+                                           for key in ('radio','arphrd','rx_delta','tx_delta')})
+    display=record.get('display')
+    if isinstance(display,dict) and display.get('state') in ('READY_FOR_OPERATOR_SELECTION','BLOCKED','UNAVAILABLE','INVALID'):
+        observations['display_metadata_state']=display['state']
+    return {'schema':1,'result':'UNKNOWN','host_revision':record['host_revision'], 'observations':observations,
+            'embedded_revision':record.get('embedded_revision'),'checks':checks,
+            'physical_acceptance':'UNKNOWN','evidence_origin':'saved_unsigned_session'}
 
 
 def main(argv=None):
@@ -108,6 +251,15 @@ def main(argv=None):
     parser.add_argument('--json', action='store_true')
     parser.add_argument('--report', type=Path, help='new private redacted report; no overwrite')
     sub=parser.add_subparsers(dest='mode', required=True)
+    plan=sub.add_parser('session-plan',help='offline exact read-only SSH scope and collector identity; no connection')
+    saved=sub.add_parser('session-inspect',help='inspect a saved bounded session; never promote hardware gates')
+    saved.add_argument('--session-file',type=Path,required=True)
+    session=sub.add_parser('session-collect',help='explicit separately authorized read-only SSH, no sudo or device writes')
+    session.add_argument('--host',required=True)
+    session.add_argument('--key',type=Path,default=Path.home()/'.ssh/redux_field_ed25519')
+    session.add_argument('--card-role',choices=('unverified','disposable-redux','jayofelony','other'),default='unverified',help='operator declaration only; never hardware identity or flash authorization')
+    session.add_argument('--output',type=Path,required=True,help='new private host-only report')
+    session.add_argument('--authorize-read-only',action='store_true',required=True,help='operator approved this exact read-only session')
     pre=sub.add_parser('preflight', help='existing assembled-root contract, no boot or mounts')
     pre.add_argument('--root', type=Path, required=True)
     pre.add_argument('--other-root', type=Path)
@@ -145,7 +297,17 @@ def main(argv=None):
     if args.mode=='collect-local' and args.report:
         parser.error('collect-local writes stdout only; save evidence on the operator host')
     try:
-        if args.mode=='preflight':
+        if args.mode=='session-plan':
+            revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+            result=session_plan(revision)
+            if args.report:save(args.report,result)
+            print(json.dumps(result,sort_keys=True,allow_nan=False) if args.json else json.dumps(result,indent=2))
+            return 3
+        elif args.mode=='session-inspect':
+            return emit(session_inspect(load(args.session_file)),args)
+        elif args.mode=='session-collect':
+            return emit(session_collect(args),args)
+        elif args.mode=='preflight':
             root_payload.verify(args.root,profile=args.profile,other_root=args.other_root,expected_country=args.country)
             result={'schema':1,'result':'UNKNOWN','checks':[{'gate':'assembled_root','status':'PASS','reason':'existing_runtime_and_first_boot_contract_passed'},
                 {'gate':'physical_boot','status':'UNKNOWN','reason':'offline_root_is_not_boot_evidence'}], 'physical_boot_verified':False}
