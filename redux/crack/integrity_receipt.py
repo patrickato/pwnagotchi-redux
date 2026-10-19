@@ -86,29 +86,41 @@ MAX_RECEIPT_BYTES = 8192
 
 
 def read_cached_receipt(path, *, now=None):
-    """Load a precomputed receipt using a bounded no-follow read.
+    """Load a private receipt from a pinned directory, without a scan.
 
-    This never hashes an artifact, opens the SQLite capture ledger, or
-    publishes a new receipt. Errors always become UNKNOWN.
+    Every unavailable, invalid, nonregular, in-place modified, or stale
+    receipt is classified as UNKNOWN; full JSON contents are never logged.
     """
     unknown = {'status': 'unknown', 'reason': 'receipt_unavailable',
                'checked': 0, 'ready_rows': 0, 'age_seconds': None}
+    directory_fd = None
     try:
         source = Path(path)
-        fd = os.open(source, os.O_RDONLY | os.O_NONBLOCK |
-                     getattr(os, 'O_NOFOLLOW', 0))
+        if not source.name:
+            return unknown
+        directory_fd = os.open(source.parent, os.O_RDONLY | os.O_DIRECTORY |
+                               os.O_NOFOLLOW | os.O_CLOEXEC)
+        directory = os.fstat(directory_fd)
+        if not stat.S_ISDIR(directory.st_mode) or directory.st_mode & 0o022:
+            return unknown
+        fd = os.open(source.name, os.O_RDONLY | os.O_NONBLOCK |
+                     os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
         try:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_RECEIPT_BYTES:
                 return unknown
-            payload = b''
+            payload = bytearray()
             while len(payload) <= MAX_RECEIPT_BYTES:
                 piece = os.read(fd, MAX_RECEIPT_BYTES + 1 - len(payload))
                 if not piece:
                     break
-                payload += piece
-            if len(payload) > MAX_RECEIPT_BYTES:
+                payload.extend(piece)
+            after = os.fstat(fd)
+            if (len(payload) > MAX_RECEIPT_BYTES or
+                    (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns) !=
+                    (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
                 return unknown
+
             def pairs(items):
                 d = {}
                 for key, value in items:
@@ -116,14 +128,18 @@ def read_cached_receipt(path, *, now=None):
                         raise ValueError('duplicate key')
                     d[key] = value
                 return d
+
             receipt = json.loads(payload.decode('utf-8'), object_pairs_hook=pairs,
-                                 parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite')))
+                                 parse_constant=lambda _: (_ for _ in ()).throw(
+                                     ValueError('nonfinite')))
         finally:
             os.close(fd)
     except (OSError, UnicodeError, ValueError, TypeError):
         return unknown
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
     return classify_receipt(receipt, now=now)
-
 
 def publish_receipt(path, report, *, completed_utc=None):
     """Write a private audit receipt atomically through a pinned directory.
