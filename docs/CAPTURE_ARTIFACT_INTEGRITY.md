@@ -236,3 +236,18 @@ their committed Git blobs into an isolated Linux test directory; the source
 blob hashes were checked against GitHub and 23 targeted tests passed.
 This validates the two audited modules, not the full Redux repository or
 its physically mounted REDUXCAP partition.
+
+## Ledger identity across concurrent processing
+
+The auditor now pins the original regular `jobs.db` inode while reading a
+transactional snapshot and hashing prepared artifacts. After the scan, it
+checks that the ledger's public path is still the same regular inode. If the
+ledger was removed, replaced or redirected by a symlink, the audit emits
+`ledger_changed` as ATTENTION. The saved receipt classifier recognizes this
+global issue. Normal writes to the same SQLite inode in WAL mode remain
+permitted: no ingestion worker is stopped and no new lock is taken.
+
+This is a consistency check of the public ledger path at the audit boundary,
+not an anti-tampering guarantee against privileged writers and not physical
+proof of the prepared files on a Pi. Tests cover a ledger-path replacement,
+WAL updates on a stable inode and actionable receipt classification.
