@@ -29,12 +29,23 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
         result["issues"][code] = result["issues"].get(code, 0) + 1
         result["result"] = "attention"
 
+    directory_fd = None
     # Refuse symlinks for both the SQLite ledger and its artifact directory.
     # The bound matches redux.crack.ingest._MAX_PREPARED_BYTES; older
     # 32 MiB limits would falsely mark valid ingestion output as corrupt.
     try:
         root = output_dir.resolve(strict=True)
         if output_dir.is_symlink() or not root.is_dir():
+            issue("output_directory_untrusted")
+            return result
+        # Pin the verified output directory inode. A pathname-only O_NOFOLLOW
+        # on the final artifact cannot protect against a parent directory
+        # being renamed and replaced with a symlink during the hash.
+        directory_fd = os.open(
+            output_dir,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
             issue("output_directory_untrusted")
             return result
         if db.is_symlink() or not db.is_file():
@@ -73,7 +84,9 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
                 continue
             try:
                 # O_NOFOLLOW and fstat pin the validated artifact inode.
-                fd = os.open(expected, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | os.O_NONBLOCK)
+                fd = os.open(expected.name,
+                             os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                             dir_fd=directory_fd)
                 try:
                     meta = os.fstat(fd)
                     if not stat.S_ISREG(meta.st_mode):
@@ -108,6 +121,9 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
                 issue("artifact_unreadable")
     except (OSError, sqlite3.Error, ValueError):
         issue("audit_unavailable")
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
     return result
 
 
