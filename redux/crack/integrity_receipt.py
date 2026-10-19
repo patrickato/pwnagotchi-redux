@@ -140,7 +140,7 @@ def read_cached_receipt(path, *, now=None):
                                      ValueError('nonfinite')))
         finally:
             os.close(fd)
-    except (OSError, UnicodeError, ValueError, TypeError):
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError):
         return unknown
     finally:
         if directory_fd is not None:
