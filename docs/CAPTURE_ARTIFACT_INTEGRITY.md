@@ -15,7 +15,9 @@ It checks each `ready` row against its canonical SHA-256-named prepared file,
 checks regular-file type and a 33 MiB ceiling (matching the ingest worker), pins files through
 `O_NOFOLLOW`, verifies digest against ledger, checks for concurrent changes,
 and refuses a symlinked ledger or output directory. It imposes a 10,000
-ready-row bound per invocation. Its JSON output contains only aggregate
+ready-row bound and 512 MiB total file-hashing budget per invocation. If the
+budget is exhausted, it returns attention with the explicit
+`audit_byte_budget_exceeded` finding; partial verification never passes. Its JSON output contains only aggregate
 counts and predefined error codes; no file paths, SSIDs, MACs, handshake
 records, credentials or captured packet bytes appear.
 
