@@ -105,3 +105,70 @@ def navigate(page: str, step: int):
     if page not in pages:
         raise ValueError("unknown page")
     return pages[(pages.index(page) + step) % len(pages)]
+
+
+def touch_identity(fd):
+    """Read-only kernel identity plus physical input path; no guessed nodes."""
+    import fcntl
+    identity = bytearray(8)
+    physical = bytearray(256)
+    fcntl.ioctl(fd, 0x80084502, identity, True)  # EVIOCGID
+    fcntl.ioctl(fd, 0x81004507, physical, True)  # EVIOCGPHYS(256)
+    path = bytes(physical).split(b'\0', 1)[0]
+    if not path or not any(identity):
+        raise OSError('input identity unavailable')
+    return bytes(identity), path
+
+
+class TouchReconnect:
+    """Bounded reopening of the operator-selected node with identity continuity.
+
+    Failed identity measurement disables automatic reopening. A different input
+    device never inherits the previous controller's calibration.
+    """
+    def __init__(self, device, fd, *, identity=touch_identity, opener=open_touch,
+                 closer=os.close, clock=None):
+        import time
+        self.device, self.fd = device, fd
+        self.identity, self.opener, self.closer = identity, opener, closer
+        self.clock = clock or time.monotonic
+        self.expected = None
+        self.next_try = float('-inf')
+        self.state = 'connected'
+        try:
+            self.expected = identity(fd)
+        except OSError:
+            self.state = 'connected / identity unverified'
+
+    def disconnect(self):
+        if self.fd is not None:
+            try:
+                self.closer(self.fd)
+            except OSError:
+                pass
+        self.fd = None
+        self.state = 'disconnected'
+        self.next_try = self.clock() + 5
+
+    def poll(self):
+        if self.fd is not None or self.expected is None or self.clock() < self.next_try:
+            return None
+        self.next_try = self.clock() + 5
+        candidate = None
+        try:
+            candidate = self.opener(self.device)
+            if self.identity(candidate) != self.expected:
+                self.state = 'identity mismatch / restart after verification'
+                return None
+            self.fd, candidate = candidate, None
+            self.state = 'connected'
+            return self.fd
+        except OSError:
+            self.state = 'disconnected'
+            return None
+        finally:
+            if candidate is not None:
+                self.closer(candidate)
+
+    def close(self):
+        self.disconnect()

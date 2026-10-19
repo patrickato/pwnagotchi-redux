@@ -245,7 +245,7 @@ def test_live_checkpoint_refreshes_freshness_without_visual_resample(rig, tmp_pa
     runtime = live.LiveRuntime(live.LiveConfig(
         state_dir=tmp_path / 'state', capture_dir=tmp_path / 'captures',
         active_dir=tmp_path / 'active', enable_web=False, status_sample_seconds=30),
-        radio_probe=lambda: [], clock=clock)
+        radio_probe=lambda: [], clock=clock, resource_monitor=augur.resources)
     runtime.augur = augur
     calls = []
     def visual(agent, **kwargs):

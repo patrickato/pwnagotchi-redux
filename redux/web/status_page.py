@@ -631,7 +631,7 @@ function renderRuntimePanels(d){
  const statuses={running:'ok',starting:'attention',
   starting_engine:'attention',rotating:'attention',
   telemetry_degraded:'degraded',degraded:'degraded',
-  storage_paused:'action',termination_pending:'action',stopped:'attention'};
+  storage_paused:'action',termination_pending:'action',lease_blocked:'action',stopped:'attention'};
  const condition=Object.prototype.hasOwnProperty.call(statuses,state)?
   statuses[state]:'unknown';
  const pill=document.getElementById('engineindicator');
@@ -913,9 +913,14 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
                     self._send(401, b'{"error":"unauthorized"}', "application/json")
                     return
                 from ..display.ui_state import model
-                payload = dict(status_provider())
-                payload["ui"] = model(payload)
-                self._send(200, json.dumps(payload).encode(), "application/json")
+                try:
+                    payload = dict(status_provider())
+                    payload["ui"] = model(payload)
+                    body = json.dumps(payload).encode()
+                except Exception:
+                    self._send(503, b'{"error":"status unavailable"}', "application/json")
+                    return
+                self._send(200, body, "application/json")
             elif self.path == "/" or self.path == "":
                 if not authed:
                     self._send(401, LOGIN_PAGE.encode(), "text/html; charset=utf-8")

@@ -725,6 +725,7 @@ def test_live_status_reuses_one_processing_ledger_read(tmp_path, monkeypatch):
         monkeypatch.setattr(ingest, "read_summary",
                             lambda *a, **k: (_ for _ in ()).throw(
                                 AssertionError("Augur duplicated the processing DB read")))
+        runtime._cached_processing = None  # explicit fixture invalidation, not hot-loop retries
         runtime._checkpoint()
         assert len(calls) == 1
         assert calls[0] == runtime.config.capture_dir.parent / "jobs.db"
@@ -1107,7 +1108,8 @@ def test_status_disk_write_error_does_not_kill_runtime(tmp_path, monkeypatch):
             raise OSError("synthetic read-only SD card")
         monkeypatch.setattr(live, "atomic_checkpoint", disk_failed)
         assert runtime.tick() == "degraded"
-        assert "persistence failed" in runtime.last_error
+        assert "persistence failed" in runtime.persistence_error
+        assert "no monitor-capable" in runtime.last_error
         assert runtime._snapshot["runtime"]["state"] == "degraded"
         assert runtime.tick() == "degraded"
     finally:

@@ -136,3 +136,13 @@ Sprint 02 adds the separate [offline release candidate, RAUC readiness and
 recovery gate](RELEASE_QUALIFICATION.md). The default preflight reports its host
 parser requirements, and image CI runs both policy and real-artifact tests.
 Release qualification does not imply Pi boot, installation or automatic rollback.
+
+## Integrated beta assessment
+
+`python3 scripts/redux-qualify.py --beta --beta-report /tmp/redux-beta-new.json`
+reuses this run's full-suite JUnit results to qualify named integration and UI
+contracts, alongside the existing image and static gates. Release-candidate,
+physical RF/display and actual update/rollback gates remain UNKNOWN, so an otherwise
+passing beta assessment exits 3. Default qualification retains its existing exit
+codes and execution boundaries. See [BETA_HANDOFF.md](BETA_HANDOFF.md) for the matrix,
+state contracts, recovery limitations and concrete continuation steps.

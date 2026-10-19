@@ -121,6 +121,7 @@ def test_processing_health_distinguishes_current_empty_work_from_bad_conversion(
                                    processing_now_utc=1040)
     assert finding(current, "capture processing")["status"] == "ok"
     assert "does not prove" in finding(current, "capture processing")["reason"]
+    report["last_scan"]["scanned"] = 2
     report["last_scan"]["outcomes"] = {"error": 2}
     failed = describe_live_health("running", iface="wlan1mon",
                                   processing_report=report,
@@ -137,7 +138,7 @@ def test_processing_health_distinguishes_current_empty_work_from_bad_conversion(
 
 def test_processing_health_flags_stale_storage_pause_and_corrupt_scan():
     base = {"available": True, "by_status": {}, "last_scan": {
-        "completed_utc": 1000, "scanned": 5, "outcomes": {"ready": 2},
+        "completed_utc": 1000, "scanned": 2, "outcomes": {"ready": 2},
     }}
     stale = describe_live_health("running", iface="wlan1mon",
                                  processing_report=base,
@@ -146,6 +147,7 @@ def test_processing_health_flags_stale_storage_pause_and_corrupt_scan():
     assert finding(stale, "capture processing")["status"] == "degraded"
     assert "overdue" in finding(stale, "capture processing")["summary"]
     base["last_scan"]["completed_utc"] = 1190
+    base["last_scan"]["scanned"] = 0
     base["last_scan"]["outcomes"] = {"paused_low_storage": 1}
     paused = describe_live_health("running", iface="wlan1mon",
                                   processing_report=base, processing_now_utc=1200)

@@ -72,3 +72,12 @@ HTTP and native framebuffer renderers. It exposes independent sensor, visual and
 heartbeat freshness, provenance and unknown coverage. Native navigation uses an
 extensible sliding footer with 44-pixel targets. See [UI_OBSERVABILITY.md](UI_OBSERVABILITY.md)
 for controls, software acceptance and remaining physical display/touch gates.
+
+## Integrated beta handoff
+
+Sprint 04 integrates bounded diagnostic failures/recovery, shared worker heartbeat
+validation, canonical checkpoint/UI state and qualified touch reconnection.
+`redux-qualify.py --beta` produces an executable acceptance matrix while keeping
+physical RF/display and actual update/rollback UNKNOWN. Read
+[BETA_HANDOFF.md](BETA_HANDOFF.md) before continuing development or proposing any
+physical acceptance work. Offline qualification does not establish production readiness.

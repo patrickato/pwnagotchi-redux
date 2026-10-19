@@ -169,23 +169,38 @@ class ResourceMonitor:
         self.governor = governor if governor is not None else Governor()
         self.snapshot = None
         self.decision = None
+        self.collection_error = ""
+        self._retry_at = float("-inf")
 
     def observe(self, reading, now=None, *, snapshot=None):
         measured = self.collector.clock() if now is None else now
         mono = self.collector.monotonic()
-        self.snapshot = snapshot if snapshot is not None else Snapshot(
+        candidate = snapshot if snapshot is not None else Snapshot(
             measured, mono, reading, None, None, {"reading": "observe_resources caller"})
         # Keep the legacy explicit-now evaluation contract for direct callers;
         # production sampling uses monotonic time for recovery holds.
         evaluation_time = mono if snapshot is not None or now is None else now
-        self.decision = self.governor.evaluate(reading, evaluation_time)
-        return self.decision
+        decision = self.governor.evaluate(reading, evaluation_time)
+        self.snapshot, self.decision = candidate, decision
+        return decision
 
     def sample(self):
-        snapshot = self.collector.sample()
-        if snapshot is not None:
-            self.observe(snapshot.reading, snapshot.measured_at, snapshot=snapshot)
-        return snapshot
+        # A failed read-only observer must not become an engine failure in
+        # Augur.pump(). Retain history for provenance, explicitly invalidated.
+        now = self.collector.monotonic()
+        if now < self._retry_at:
+            return None
+        try:
+            snapshot = self.collector.sample()
+            if snapshot is not None:
+                self.observe(snapshot.reading, snapshot.measured_at, snapshot=snapshot)
+                self.collection_error = ""
+            self._retry_at = float("-inf")
+            return snapshot
+        except Exception as error:
+            self.collection_error = type(error).__name__
+            self._retry_at = now + SAMPLE_SECONDS
+            return None
 
     def governor_status(self):
         decision = self.decision
@@ -198,5 +213,9 @@ class ResourceMonitor:
                 "measurement_fresh": telemetry["fresh"] if telemetry is not None else False}
 
     def status(self):
-        return (self.snapshot.status(self.collector.clock(), self.collector.monotonic())
-                if self.snapshot is not None else None)
+        status = (self.snapshot.status(self.collector.clock(), self.collector.monotonic())
+                  if self.snapshot is not None else None)
+        if self.collection_error:
+            status = dict(status or {})
+            status.update(fresh=False, collection_error=self.collection_error)
+        return status

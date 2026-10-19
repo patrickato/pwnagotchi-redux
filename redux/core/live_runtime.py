@@ -308,6 +308,7 @@ class LiveRuntime:
         self.radio_probe = radio_probe
         self.radio_inventory_provider = radio_inventory_provider
         self._radio_inventory = None
+        self._radio_inventory_error = ""
         self._radio_inventory_sampled_at = float("-inf")
         self._radio_inventory_lock = threading.Lock()
         self._radio_inventory_inflight = False
@@ -353,7 +354,13 @@ class LiveRuntime:
         self.telemetry_next_try = float("-inf")
         self.sighting_loss_events = 0
         self.last_sighting_loss_reason = ""
-        self._snapshot = {"runtime": {"state": "starting"}}
+        self.observer_errors = {}
+        self.persistence_error = ""
+        self._visual_next_try = float("-inf")
+        self._snapshot = {"runtime": {"state": "starting", "updated_utc": time.time()},
+                          "doctor": Doctor().report(DoctorInputs()),
+                          "telemetry": None, "governor": self.resources.governor_status(),
+                          "capture_processing": {"available": False, "reason": "processing not yet observed"}}
         self._cached_visual = None
         self._visual_dirty = True
         self._visual_sampled_at = float("-inf")
@@ -482,7 +489,11 @@ class LiveRuntime:
                 with self._radio_inventory_lock:
                     if not self._closing:
                         self._radio_inventory = sample
+                        self._radio_inventory_error = ""
             except Exception as error:
+                with self._radio_inventory_lock:
+                    if not self._closing:
+                        self._radio_inventory_error = type(error).__name__
                 # Keep the last timestamped sample. The UI expires it after
                 # 20s; a failed refresh cannot make old hardware look live.
                 _LOG.debug("read-only radio inventory unavailable: %s",
@@ -495,7 +506,13 @@ class LiveRuntime:
                                   name="redux-radio-inventory")
         with self._radio_inventory_lock:
             self._radio_inventory_thread = worker
-        worker.start()
+        try:
+            worker.start()
+        except RuntimeError as error:
+            with self._radio_inventory_lock:
+                self._radio_inventory_inflight = False
+                self._radio_inventory_thread = None
+                self._radio_inventory_error = type(error).__name__
 
     def _observe(self, emission):
         event = emission.payload.get("event")
@@ -507,7 +524,25 @@ class LiveRuntime:
         if getattr(event, "type", None) == "handshake":
             self.handshakes += 1
 
+    def _status_observation(self, name, callback, fallback):
+        """Isolate diagnostic producers; never execute capture control here."""
+        try:
+            value = callback()
+            if not isinstance(value, dict):
+                raise ValueError("invalid observer result")
+            if len(json.dumps(value, allow_nan=False)) > 65536:
+                raise ValueError("oversized observer result")
+            self.observer_errors.pop(name, None)
+            return value
+        except Exception as error:
+            self.observer_errors[name] = type(error).__name__
+            return fallback
+
     def _checkpoint(self):
+        if getattr(self.resources, "collection_error", ""):
+            self.observer_errors["resources"] = self.resources.collection_error
+        else:
+            self.observer_errors.pop("resources", None)
         mount_ok = self._capture_mount_ok() and not self.capture_mount_lost
         if mount_ok:
             try:
@@ -524,11 +559,19 @@ class LiveRuntime:
                     if self.augur is not None else 0)
         now = self.clock()
         self._refresh_radio_inventory(now)
+        with self._radio_inventory_lock:
+            inventory_error = self._radio_inventory_error
+        if inventory_error:
+            self.observer_errors["radio_inventory"] = inventory_error
+        else:
+            self.observer_errors.pop("radio_inventory", None)
         # Read only the active capture iface's kernel-reported ARPHRD.
         # A monitor-mode label does not imply native 802.11 framing.
         capture_link_type = read_link_type(self.iface)
         metadata = {
             "state": self.state, "iface": self.iface or "",
+            "observer_errors": dict(self.observer_errors),
+            "persistence_error": self.persistence_error,
             "capture_link_type": capture_link_type,
             "capture_link_assessment": link_assessment(capture_link_type),
             "events_seen": self.created, "handshake_events": self.handshakes,
@@ -563,10 +606,10 @@ class LiveRuntime:
             processing = {"available": False, "reason": "REDUXCAP mount unavailable"}
             self._cached_processing = None
         elif (self._cached_processing is None
-              or not self._cached_processing.get("available")
               or now < self._processing_sampled_at
               or now - self._processing_sampled_at >= self.config.status_sample_seconds):
-            processing = read_summary(pipeline_path)
+            processing = self._status_observation("processing", lambda: read_summary(pipeline_path),
+                {"available": False, "reason": "processing observer unavailable"})
             self._cached_processing = processing
             self._processing_sampled_at = now
         else:
@@ -581,7 +624,7 @@ class LiveRuntime:
         if self.augur is not None:
             elapsed = now - self._visual_sampled_at
             event_min = min(2, self.config.status_sample_seconds)
-            if (self._cached_visual is None or elapsed < 0
+            if now >= self._visual_next_try and (self._cached_visual is None or elapsed < 0
                     or elapsed >= self.config.status_sample_seconds
                     or (self._visual_dirty and elapsed >= event_min)):
                 try:
@@ -591,46 +634,56 @@ class LiveRuntime:
                     self._visual_sampled_utc = time.time()
                     self._visual_revision += 1
                     self._visual_dirty = False
+                    self._visual_next_try = float("-inf")
+                    self.observer_errors.pop("visual", None)
                 except Exception as error:
                     self._cached_visual = None
                     self._visual_sampled_utc = None
+                    self._visual_next_try = now + self.config.status_sample_seconds
+                    self.observer_errors["visual"] = type(error).__name__
                     _LOG.warning("status snapshot unavailable: %s", type(error).__name__)
             if self._cached_visual is not None:
                 snapshot = dict(self._cached_visual)
                 snapshot["runtime"] = metadata
                 snapshot["capture_processing"] = processing
-            governor_status = getattr(self.augur, "governor_status", None)
-            if callable(governor_status):
-                snapshot["governor"] = governor_status()
-            telemetry_status = getattr(self.augur, "telemetry_status", None)
-            if callable(telemetry_status):
-                # Freshness belongs to each checkpoint, not the slower visual cache.
-                snapshot["telemetry"] = telemetry_status()
+            # The runtime and Augur share one ResourceMonitor. Read it directly
+            # after the visual cache so stale/broken presentation adapters cannot
+            # overwrite current sensor/Governor evidence.
+            snapshot["governor"] = self.resources.governor_status()
+            snapshot["telemetry"] = self.resources.status()
             try:
-                report = self.augur.doctor_report()
+                report = self._status_observation("doctor", self.augur.doctor_report, report)
+                if not isinstance(report.get("findings"), list):
+                    raise ValueError("invalid Doctor findings")
             except Exception as error:
+                report = Doctor().report(DoctorInputs())
+                self.observer_errors["doctor"] = type(error).__name__
                 _LOG.warning("Doctor snapshot unavailable: %s", type(error).__name__)
         metadata["visual_sampled_utc"] = self._visual_sampled_utc if self.augur else None
         metadata["visual_max_age_seconds"] = max(12, 2 * self.config.status_sample_seconds)
         metadata["visual_revision"] = self._visual_revision if self.augur else None
-        health = describe_live_health(
-            self.state, iface=self.iface or "",
-            capture_link_type=capture_link_type, free_bytes=free,
-            reserve_bytes=self.config.min_free_bytes, handoffs=self.handoffs,
-            last_error=self.last_error, handoff_error=self.last_handoff_error,
-            doctor_report=report,
-            dashboard_enabled=self.config.enable_web,
-            dashboard_active=self.web is not None,
-            dashboard_error=self.web_error,
-            sighting_pending=pending, sighting_write_error=write_error,
-            sighting_lost=self.sighting_loss_events,
-            engine_log_error=self.log_error,
-            capture_mount_ok=(mount_ok if self.capture_mount_required else None),
-            processing_report=processing,
-            processing_stale_seconds=self.config.pipeline_stale_seconds,
-            failure_streak=self.failure_streak,
-            retry_in_seconds=metadata["retry_in_seconds"],
-        )
+        def health_view():
+            return describe_live_health(
+                self.state, iface=self.iface or "",
+                capture_link_type=capture_link_type, free_bytes=free,
+                reserve_bytes=self.config.min_free_bytes, handoffs=self.handoffs,
+                last_error=self.last_error, handoff_error=self.last_handoff_error,
+                doctor_report=report,
+                dashboard_enabled=self.config.enable_web,
+                dashboard_active=self.web is not None,
+                dashboard_error=self.web_error,
+                sighting_pending=pending, sighting_write_error=write_error,
+                sighting_lost=self.sighting_loss_events,
+                engine_log_error=self.log_error,
+                capture_mount_ok=(mount_ok if self.capture_mount_required else None),
+                processing_report=processing,
+                processing_stale_seconds=self.config.pipeline_stale_seconds,
+                observer_errors=dict(self.observer_errors),
+                persistence_error=self.persistence_error,
+                failure_streak=self.failure_streak,
+                retry_in_seconds=metadata["retry_in_seconds"],
+            )
+        health = health_view()
         metadata["health"] = health["overall"]
         metadata["health_unknown_areas"] = len(health["coverage"]["not_assessed"])
         snapshot["doctor"] = health
@@ -638,19 +691,37 @@ class LiveRuntime:
             radio_inventory = self._radio_inventory
         if radio_inventory is not None:
             snapshot["radio_inventory"] = radio_inventory
-        self._snapshot = snapshot
+        metadata["observer_errors"] = dict(self.observer_errors)
+        from ..display.ui_state import model as ui_model
+        snapshot["ui"] = ui_model(snapshot)
+        previous_persistence_error = self.persistence_error
         if mount_ok and (self.state != self.saved_state or self.clock() - self.last_saved >= 5):
             try:
                 private_metadata = dict(metadata)
+                private_metadata["persistence_error"] = ""
                 private_metadata["configuration_identity"] = configuration_checkpoint(self.config)
+                private_metadata["observability"] = {
+                    "schema": 1, "sensor_measured_at": snapshot.get("telemetry", {}).get("measured_at") if isinstance(snapshot.get("telemetry"), dict) else None,
+                    "sensor_freshness": snapshot["ui"]["sensors"]["state"],
+                    "visual_freshness": snapshot["ui"]["visual"]["state"],
+                    "processing_available": processing.get("available") is True,
+                }
                 atomic_checkpoint(self.config.state_dir / "live.json", private_metadata)
-            except OSError as error:
+                self.persistence_error = ""
+            except (OSError, ValueError) as error:
                 # Storage becoming read-only must not abandon a running child
                 # or spin systemd restart loops. Keep the live snapshot usable.
-                self.last_error = f"status persistence failed: {type(error).__name__}"
-                _LOG.error("%s", self.last_error)
+                self.persistence_error = f"status persistence failed: {type(error).__name__}"
+                _LOG.error("%s", self.persistence_error)
             self.last_saved = self.clock()
             self.saved_state = self.state
+        if previous_persistence_error != self.persistence_error:
+            metadata["persistence_error"] = self.persistence_error
+            snapshot["doctor"] = health_view()
+            metadata["health"] = snapshot["doctor"]["overall"]
+            metadata["health_unknown_areas"] = len(snapshot["doctor"]["coverage"]["not_assessed"])
+            snapshot["ui"] = ui_model(snapshot)
+        self._snapshot = snapshot
 
     def _start_web(self):
         if not self.config.enable_web or self.web is not None:
@@ -836,6 +907,7 @@ class LiveRuntime:
         self.augur = agent
         self._cached_visual = None
         self._visual_dirty = True
+        self._visual_next_try = float("-inf")
         self._visual_sampled_utc = None
         self._cached_processing = None
         self.state = "running"
@@ -919,8 +991,12 @@ class LiveRuntime:
         self._visual_sampled_utc = None
         self._cached_processing = None
         if self.log_handle is not None:
-            self.log_handle.close()
-            self.log_handle = None
+            try:
+                self.log_handle.close()
+            except OSError as error:
+                self.log_error = f"engine log close failed: {type(error).__name__}"
+            finally:
+                self.log_handle = None
         self.iface = None
         if self.capture_file is not None:
             queued = self._handoff(self.capture_file)
@@ -1188,6 +1264,8 @@ class LiveRuntime:
         return self.state
 
     def close(self):
+        if self._lock.closed:
+            return
         # Even on stop failure, release the Python supervisor's resources and
         # exit non-zero. systemd's default KillMode=control-group then retains
         # responsibility for any surviving service child before a new start.
@@ -1201,6 +1279,13 @@ class LiveRuntime:
             self.state = "stopped" if stopped else "termination_pending"
             self._checkpoint()
         finally:
+            for worker in (self.web_thread, self._radio_inventory_thread):
+                join = getattr(worker, "join", None)
+                if callable(join) and worker is not threading.current_thread():
+                    try:
+                        join(timeout=0.25)
+                    except RuntimeError:
+                        pass  # an observer thread may have failed before start
             fcntl.flock(self._lock.fileno(), fcntl.LOCK_UN)
             self._lock.close()
         if not stopped:

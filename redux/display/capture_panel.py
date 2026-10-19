@@ -8,6 +8,8 @@ from __future__ import annotations
 import math
 import time
 
+from ..core.processing_evidence import scan_record_valid, status_counts_valid
+
 _MAX = (1 << 63) - 1
 
 
@@ -24,6 +26,7 @@ def _clock(value):
     except (ValueError, OverflowError, TypeError):
         pass
     return None
+
 
 
 def model(report, *, now=None):
@@ -54,6 +57,9 @@ def model(report, *, now=None):
     if not available or not runtime_fresh:
         return base
 
+    if not status_counts_valid(pipeline):
+        base.update(ledger="INVALID", scan_state="INVALID")
+        return base
     status = pipeline.get("by_status")
     status = status if isinstance(status, dict) else {}
     base.update(ready=_count(status.get("ready")),
@@ -70,34 +76,16 @@ def model(report, *, now=None):
                      pipeline.get("scan_error") == "invalid stored scan record")
         base["scan_state"] = "INVALID" if malformed else "NO COMPLETED SCAN"
         return base
-    scanned = _count(last.get("scanned"))
-    at = _clock(last.get("completed_utc"))
-    outcomes = last.get("outcomes")
-    if scanned is None or at is None or not isinstance(outcomes, dict):
+    if not scan_record_valid(last):
         base["scan_state"] = "INVALID"
         return base
+    scanned, at, outcomes = last["scanned"], last["completed_utc"], last["outcomes"]
     age = time_now - at
     if not -30 <= age <= 300:
         base["scan_state"] = "STALE"
         return base
-    # The heartbeat reports per-pass worker outcomes separately from the
-    # cumulative ledger. Reject invalid counters instead of showing 0.
-    wanted = ("ready", "error", "deferred", "deferred_low_storage")
-    if any(key in outcomes and _count(outcomes[key]) is None for key in wanted):
-        base["scan_state"] = "INVALID"
-        return base
-    if len(outcomes) > 32 or any(type(k) is not str or len(k) > 80 or
-                                  _count(v) is None for k, v in outcomes.items()):
-        base["scan_state"] = "INVALID"
-        return base
     if outcomes.get("paused_low_storage") is not None:
-        if outcomes != {"paused_low_storage": 1} or scanned != 0:
-            base["scan_state"] = "INVALID"
-            return base
         base.update(scan_state="PAUSED STORAGE", scan_age_seconds=round(max(0, age)))
-        return base
-    if sum(outcomes.values()) != scanned:
-        base["scan_state"] = "INVALID"
         return base
     base.update(scan_state="RECENT", scan_files=scanned,
                 scan_age_seconds=round(max(0, age)),

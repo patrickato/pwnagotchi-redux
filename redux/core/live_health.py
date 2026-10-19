@@ -9,6 +9,7 @@ import math
 import time
 
 from .doctor import Doctor, DoctorInputs, Status
+from .processing_evidence import scan_record_valid, status_counts_valid
 
 _RANK = {"ok": 0, "attention": 1, "degraded": 2, "action": 3}
 _LABEL = {
@@ -33,7 +34,8 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
                          sighting_lost=0, engine_log_error="",
                          capture_mount_ok=None, processing_report=None,
                          processing_now_utc=None, processing_stale_seconds=180,
-                         failure_streak=0, retry_in_seconds=0):
+                         failure_streak=0, retry_in_seconds=0,
+                         observer_errors=None, persistence_error=""):
     """Combine Augur's real Doctor report with physical supervisor observations.
 
     Without Augur the Doctor's normal probes are UNKNOWN, *never* silently OK.
@@ -43,7 +45,10 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
     """
     if doctor_report is None:
         doctor_report = Doctor().report(DoctorInputs())
-    findings = [dict(f) for f in doctor_report["findings"]]
+    raw_findings = doctor_report.get("findings") if isinstance(doctor_report, dict) else None
+    if not isinstance(raw_findings, list) or any(not isinstance(f, dict) or f.get("status") not in (*_RANK, "unknown") for f in raw_findings[:64]):
+        raw_findings = Doctor().report(DoctorInputs())["findings"]
+    findings = [dict(f) for f in raw_findings[:64]]
     retry_note = (
         f" Automatic retry in {math.ceil(max(0, retry_in_seconds))}s "
         f"after {failure_streak} consecutive failure(s)."
@@ -58,6 +63,11 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
                                  "Capture engine is not yet ready.",
                                  last_error or f"Live runtime state: {state}.",
                                  "Inspect engine startup if it does not progress."))
+    elif state in {"lease_blocked", "termination_pending"}:
+        findings.append(_finding("live engine", "action",
+            "Capture ownership safety gate requires attention.",
+            last_error or "Capture ownership cannot be safely established.",
+            "Inspect the lease interlock or pending child termination; do not bypass the ownership gate."))
     elif state == "storage_paused":
         findings.append(_finding("live engine", "action",
                                  "Capture paused to protect the storage reserve.",
@@ -175,9 +185,9 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
     # Ingest results from the worker's own durable SQLite ledger, not from
     # radio activity or a fabricated "conversion OK" sample. A recent empty
     # scan proves the worker ran, but does not prove a handshake was collected.
-    processing = processing_report or {"available": False,
+    processing = processing_report if isinstance(processing_report, dict) else {"available": False,
                                        "reason": "processing not yet observed"}
-    if not processing.get("available"):
+    if processing.get("available") is not True:
         reason = str(processing.get("reason", "processing unavailable"))[:180]
         unhealthy = "not present" not in reason and "not yet" not in reason
         findings.append(_finding("capture processing",
@@ -185,10 +195,10 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
                                  "Capture worker is unavailable." if unhealthy
                                  else "Capture worker has not been observed yet.",
                                  reason, "Inspect redux-capture-ingest.timer and jobs.db."))
-    elif processing.get("scan_error"):
+    elif processing.get("scan_error") or not status_counts_valid(processing) or (isinstance(processing.get("last_scan"), dict) and not scan_record_valid(processing["last_scan"])):
         findings.append(_finding("capture processing", "degraded",
                                  "Capture worker heartbeat is invalid.",
-                                 str(processing["scan_error"])[:180],
+                                 str(processing.get("scan_error") or "contradictory worker scan counters")[:180],
                                  "Inspect capture ledger integrity and timer logs."))
     elif not isinstance(processing.get("last_scan"), dict):
         findings.append(_finding("capture processing", "unknown",
@@ -226,7 +236,7 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
                                      "Recent capture conversion reported errors.",
                                      f"Last scan outcomes: {str(outcomes)[:160]}.",
                                      "Inspect converter logs, then run redux pipeline recover (dry-run); use --apply for deliberate retries."))
-        elif processing.get("by_status", {}).get("error", 0):
+        elif isinstance(processing.get("by_status"), dict) and processing["by_status"].get("error", 0):
             findings.append(_finding("capture processing", "attention",
                                      "Capture-processing ledger contains earlier errors.",
                                      f"{processing['by_status']['error']} artifact(s) "
@@ -252,6 +262,15 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
             findings.append(_finding("local dashboard", "attention",
                                      "Local dashboard has not started yet.",
                                      "No HTTP listener is currently active."))
+
+    if persistence_error:
+        findings.append(_finding("runtime checkpoint", "degraded",
+            "Runtime checkpoint cannot be persisted.", persistence_error,
+            "Inspect state storage; live observations remain available in memory."))
+    for name, error in sorted((observer_errors or {}).items())[:8]:
+        findings.append(_finding("observer " + str(name)[:24], "unknown",
+            "Diagnostic producer is unavailable.", str(error)[:80],
+            "Inspect the producer; engine ownership and capture counts are independent."))
 
     assessed = [f["area"] for f in findings if f["status"] != "unknown"]
     gaps = [f["area"] for f in findings if f["status"] == "unknown"]

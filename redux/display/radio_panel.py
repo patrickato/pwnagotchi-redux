@@ -91,7 +91,8 @@ def model(report, *, now=None):
         state = runtime.get("state")
         capture["state"] = (state.upper() if state in (
             "running", "starting", "starting_engine", "rotating",
-            "stopped", "degraded", "storage_paused") else "UNKNOWN")
+            "stopped", "degraded", "storage_paused", "lease_blocked",
+            "termination_pending", "telemetry_degraded") else "UNKNOWN")
         capture["link"] = _link(runtime.get("capture_link_type"))
         if capture["link"] in (801, 803):
             capture["framing"] = "802.11 HEADER TYPE"

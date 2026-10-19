@@ -178,7 +178,7 @@ def status_view(report, *, now=None):
         severity = {"ok": 0, "attention": 1, "degraded": 2, "action": 3}
         measured = None
         runtime_state = runtime.get("state")
-        if runtime_state == "storage_paused":
+        if runtime_state in ("storage_paused", "lease_blocked", "termination_pending"):
             measured = "action"
         elif runtime_state == "degraded" or (running and link == 1):
             measured = "degraded"
@@ -604,6 +604,7 @@ def main(argv=None):
     running = True
     touch_fd = None
     tracker = None
+    reconnect = None
     fragment = b""
     system_offset = 0
     system_detail = None
@@ -628,7 +629,12 @@ def main(argv=None):
                 axis=args.swipe_axis, threshold=args.swipe_threshold,
                 reverse=args.swipe_reverse,
             )
-        touch_fd = touch_nav.open_touch(args.touch_device)
+        try:
+            touch_fd = touch_nav.open_touch(args.touch_device)
+            reconnect = touch_nav.TouchReconnect(args.touch_device, touch_fd,
+                opener=touch_nav.open_touch, closer=os.close)
+        except OSError:
+            print("Touch unavailable at startup; display continues. Restart after verifying the selected input.", file=sys.stderr)
 
     def stop(_signum, _frame):
         nonlocal running
@@ -641,6 +647,17 @@ def main(argv=None):
         signal.signal(sig, stop)
     try:
         while running:
+            if reconnect is not None and touch_fd is None:
+                recovered = reconnect.poll()
+                if recovered is not None:
+                    touch_fd = recovered
+                    fragment = b""
+                    if args.calibration_file:
+                        tracker = NavigationGestures(calibration, physically_verified=True, rotation=args.rotate)
+                        tracker.awaiting_release = True
+                    else:
+                        tracker = touch_nav.SwipeTracker(axis=args.swipe_axis, threshold=args.swipe_threshold, reverse=args.swipe_reverse)
+                        tracker.desynced = True
             report = read_status(args.port)
             sampled_at = time.time()
             # Only genuine, independently updated live status counters advance
@@ -679,7 +696,7 @@ def main(argv=None):
                 try:
                     available, _, _ = select.select([touch_fd], [], [], remaining)
                 except OSError:
-                    os.close(touch_fd)
+                    reconnect.disconnect()
                     touch_fd = None
                     fragment = b""
                     break
@@ -690,12 +707,12 @@ def main(argv=None):
                 except BlockingIOError:
                     continue
                 except OSError:
-                    os.close(touch_fd)
+                    reconnect.disconnect()
                     touch_fd = None
                     fragment = b""
                     break
                 if not chunk:
-                    os.close(touch_fd)
+                    reconnect.disconnect()
                     touch_fd = None
                     fragment = b""
                     break  # keep status display alive after input disconnect
@@ -739,8 +756,8 @@ def main(argv=None):
                         page = touch_nav.navigate(page, directions[-1])
                         break  # redraw new page immediately
     finally:
-        if touch_fd is not None:
-            os.close(touch_fd)
+        if reconnect is not None:
+            reconnect.close()
         for sig, old in previous.items():
             signal.signal(sig, old)
     return 0

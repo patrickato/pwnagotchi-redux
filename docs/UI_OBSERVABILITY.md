@@ -37,8 +37,10 @@ row to read its value, remediation/provenance and measurement timestamp; tap
 the content again to return. Selection and scrolling only change the display. CLI `--page system`
 selects System without touch. Input remains opt-in using an explicitly selected
 node and previously verified calibration. A disconnected input device closes once
-and leaves status rendering operational; reconnecting input requires restarting
-the UI. No input device is discovered, grabbed or reconfigured.
+and leaves status rendering operational. After a measured kernel input ID and
+physical path, matching input may reconnect at a five-second retry bound; a
+release and new contact are required. Unverified or initially absent input still
+requires verification and UI restart. See [BETA_HANDOFF.md](BETA_HANDOFF.md). No input device is discovered, grabbed or reconfigured.
 
 The native header also shows actual CPU temperature, utilization and RAM with
 sensor freshness. Text uses measured glyph widths and ellipses to stay within
