@@ -43,3 +43,22 @@ The auditor enforces the same 33 MiB prepared-artifact ceiling as the
 ingestion worker. It must not reject a valid prepared artifact solely
 because the auditor and worker disagree about output size. Tests enforce
 that correspondence and reject 33 MiB + 1 byte before hashing.
+
+## Lightweight integrity receipt contract
+
+The audit CLI now emits a schema-1 JSON receipt with `completed_utc`,
+`result`, `checked`, `ready_rows`, and aggregate issue counts. The
+reusable `redux.crack.integrity_receipt.classify_receipt()` validates that
+receipt without reading the capture partition or rehashing artifacts.
+
+A receiver must check the timestamp and report shape before presenting any
+result. A receipt older than one hour is UNKNOWN, not a present-tense PASS.
+PASS requires at least one verified ready artifact, every ready row checked,
+and zero integrity errors. Malformed schemas, unknown issue codes, impossible
+counts, and future timestamps are UNKNOWN. Known integrity discrepancies
+become ATTENTION.
+
+This module is a reusable *read-side contract*, not a new background job or
+dashboard claim. Scheduling, secure publication, and Doctor/UI integration
+remain separate work; until a producer supplies a validated receipt, the
+interface must display integrity as unknown.
