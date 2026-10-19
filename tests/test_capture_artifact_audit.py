@@ -288,3 +288,33 @@ def test_readonly_transaction_refuses_inconsistent_count(tmp_path, monkeypatch):
     report = mod.audit(db, output)
     assert report["result"] == "attention"
     assert report["issues"] == {"audit_unavailable": 1}
+
+
+def test_artefact_change_with_restored_mtime_is_detected(tmp_path, monkeypatch):
+    """Reject a concurrent replacement even if its mtime is restored."""
+    import os
+    import time
+
+    db, output = fixture(tmp_path)
+    path = ready(db, output, b"original synthetic artifact")
+    original_read = os.read
+    changed = [False]
+
+    def change_after_read(fd, size):
+        data = original_read(fd, size)
+        if data and not changed[0]:
+            changed[0] = True
+            before = path.stat()
+            # Ensure the ctime changes independently of mtime resolution.
+            time.sleep(0.01)
+            path.write_bytes(b"modified synthetic artifact")
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+            assert path.stat().st_mtime_ns == before.st_mtime_ns
+            assert path.stat().st_ctime_ns != before.st_ctime_ns
+        return data
+
+    monkeypatch.setattr(mod.os, "read", change_after_read)
+    report = mod.audit(db, output)
+    assert changed == [True]
+    assert report["result"] == "attention"
+    assert report["issues"] == {"artifact_changed_during_audit": 1}
