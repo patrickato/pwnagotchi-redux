@@ -1,5 +1,6 @@
 """Offline integrity tests; never access the Pi or real captures."""
 import hashlib
+import json
 import importlib.util
 from pathlib import Path
 import sqlite3
@@ -360,3 +361,74 @@ def test_wal_writer_same_ledger_inode_is_allowed(tmp_path):
     with sqlite3.connect(db) as conn:
         conn.execute("UPDATE artifacts SET status='error'")
     assert mod.audit(db, output)["result"] == "unknown"
+
+
+def test_cached_inspection_reports_verified_without_running_audit(tmp_path, capsys, monkeypatch):
+    """This command must only read bounded receipt metadata."""
+    from redux.crack.integrity_receipt import publish_receipt
+    dest = tmp_path / "integrity.json"
+    publish_receipt(dest, {
+        "result": "pass", "checked": 1, "ready_rows": 1, "issues": {},
+    })
+    monkeypatch.setattr(mod, "audit", lambda *a, **kw: (_ for _ in ()).throw(
+        AssertionError("inspection must not read ledger or hash artifacts")))
+    assert mod.main(["--inspect-receipt", str(dest)]) == 0
+    response = json.loads(capsys.readouterr().out)
+    assert response["status"] == "ok"
+    assert response["checked"] == 1
+    assert set(response) == {
+        "status", "reason", "checked", "ready_rows", "age_seconds"}
+
+
+def test_cached_inspection_reports_action_and_missing_as_distinct(tmp_path, capsys):
+    from redux.crack.integrity_receipt import publish_receipt
+    path = tmp_path / "integrity.json"
+    assert mod.main(["--inspect-receipt", str(path)]) == 3
+    assert json.loads(capsys.readouterr().out)["status"] == "unknown"
+    publish_receipt(path, {
+        "result": "attention", "checked": 1, "ready_rows": 1,
+        "issues": {"artifact_missing": 1},
+    })
+    assert mod.main(["--inspect-receipt", str(path)]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "attention"
+    assert result["reason"] == "integrity_discrepancies"
+
+
+def test_cached_inspection_capture_mount_unavailable_fails_closed(monkeypatch, capsys):
+    from redux import storage_mount
+    from redux.crack import integrity_receipt
+    monkeypatch.setattr(storage_mount, "capture_mount_snapshot", lambda: None)
+    monkeypatch.setattr(integrity_receipt, "read_cached_receipt",
+                        lambda path: (_ for _ in ()).throw(
+                            AssertionError("unmounted cache must not be opened")))
+    assert mod.main(["--inspect-receipt",
+                     "/captures/diagnostics/artifact-integrity.json"]) == 3
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "unknown"
+    assert result["reason"] == "capture_mount_unverified"
+
+
+def test_cached_inspection_mount_swap_cannot_return_ok(monkeypatch, capsys):
+    from redux import storage_mount
+    from redux.crack import integrity_receipt
+    stamps = iter([(1, "8:1", "ext4", 2, 3),
+                   (2, "8:1", "ext4", 2, 3)])
+    monkeypatch.setattr(storage_mount, "capture_mount_snapshot",
+                        lambda: next(stamps))
+    monkeypatch.setattr(integrity_receipt, "read_cached_receipt",
+                        lambda path: {"status": "ok", "reason": "verified_ready_artifacts",
+                                      "checked": 1, "ready_rows": 1,
+                                      "age_seconds": 0})
+    assert mod.main(["--inspect-receipt",
+                     "/captures/diagnostics/artifact-integrity.json"]) == 3
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "unknown"
+    assert result["reason"] == "capture_mount_changed"
+
+
+def test_cached_inspection_and_audit_publication_are_mutually_exclusive(tmp_path):
+    with pytest.raises(SystemExit) as err:
+        mod.main(["--inspect-receipt", str(tmp_path / "a"),
+                  "--receipt", str(tmp_path / "b")])
+    assert err.value.code == 2
