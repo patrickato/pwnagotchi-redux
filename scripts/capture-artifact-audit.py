@@ -115,11 +115,25 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--db", type=Path, default=Path("/captures/jobs.db"))
     p.add_argument("--output", type=Path, default=Path("/captures/ready"))
+    p.add_argument("--receipt", type=Path,
+                   help="Opt in to atomic private publication at this explicit path")
     args = p.parse_args(argv)
     report = audit(args.db, args.output)
-    # Small stable receipt for a separate cached consumer; no paths or records.
-    report = {"schema": 1, "completed_utc": time.time(), **report}
-    print(json.dumps(report, sort_keys=True))
+    if args.receipt is not None:
+        # Standalone script execution sets sys.path[0] to scripts/, not the
+        # workbench root. Add only the source's trusted containing checkout.
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from redux.crack.integrity_receipt import publish_receipt
+        try:
+            receipt = publish_receipt(args.receipt, report, completed_utc=time.time())
+        except (OSError, ValueError, TypeError):
+            print(json.dumps({"result": "attention",
+                              "reason": "receipt_publication_failed"}, sort_keys=True))
+            return 2
+    else:
+        receipt = {"schema": 1, "completed_utc": time.time(), **report}
+    print(json.dumps(receipt, sort_keys=True))
     return 0 if report["result"] == "pass" else 3 if report["result"] == "unknown" else 1
 
 
