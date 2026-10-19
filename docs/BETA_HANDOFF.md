@@ -140,3 +140,12 @@ private-workspace, provenance, artifact verification and recovery contracts.
 The factory never elevates privileges or deploys. A successful source test or
 synthetic fixture remains separate from a complete real image and distributable
 signed release; actual Pi boot/rollback gates stay UNKNOWN.
+
+## First-boot and hardware evidence continuation
+
+Sprint 06 adds the offline `scripts/redux-acceptance.py` workflow. See
+[HARDWARE_ACCEPTANCE_KIT.md](HARDWARE_ACCEPTANCE_KIT.md) for preflight, bounded
+evidence, replay, independent gate evaluation/comparison, external attestation
+and source/candidate integration. Its explicit local collector is read-only,
+stdout-only and is not deployed or authorized to run on the Pi by this handoff.
+Unsigned/synthetic reports and missing physical observations remain UNKNOWN.

@@ -1,5 +1,5 @@
 [Unit]
-Description=redux image bootstrap (live supervisor wiring pending)
+Description=Redux passive bootstrap and persistent watchdog checkpoint
 After=local-fs.target
 
 [Service]

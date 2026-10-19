@@ -1,5 +1,9 @@
 # Redux Workbench — Independent Development Line
 
+Sprint 06 first-boot and hardware evidence tooling is documented in
+[HARDWARE_ACCEPTANCE_KIT.md](HARDWARE_ACCEPTANCE_KIT.md). Offline source/image
+qualification and externally attested physical observations remain separate.
+
 This branch is the project's **active, AI-assisted engineering workspace**.
 
 ## Why this workspace exists

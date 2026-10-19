@@ -12,6 +12,11 @@ IOSchedulingClass=idle
 NoNewPrivileges=true
 ProtectHome=true
 PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/captures
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=true
 
 [Install]
 WantedBy=multi-user.target

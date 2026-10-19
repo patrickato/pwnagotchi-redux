@@ -13,6 +13,10 @@ import os
 from pathlib import Path
 import stat
 import tomllib
+try:
+    from image import unit_readiness
+except ModuleNotFoundError:  # direct image/root_payload.py invocation
+    import unit_readiness
 
 
 _MUST_EXIST = (
@@ -65,6 +69,7 @@ _MUST_EXIST = (
     "usr/share/redux/sources.sh",
     "usr/share/redux/redux-revision",
     "usr/share/redux/packages.tsv",
+    "etc/systemd/system/redux-capture-ingest.service",
 )
 _UNITS = {
     "redux.service": ("multi-user.target.wants", "Type=notify", "RequiresMountsFor=/captures",
@@ -81,6 +86,26 @@ _UNITS = {
                            "Environment=HOME=/captures/live", "ProtectHome=true"),
     "redux-capture-ingest.timer": ("timers.target.wants", "Unit=redux-capture-ingest.service"),
 }
+
+# These are the effective installed policies, including image overlay staging.
+_UNITS['redux.service'] += ('After=local-fs.target', 'User=redux', 'Group=redux',
+    'NoNewPrivileges=true', 'ProtectSystem=strict', 'ProtectHome=true',
+    'CapabilityBoundingSet=', 'Restart=on-failure', 'RestartSec=5',
+    'ExecStartPre=+/usr/bin/install -d -o redux -g redux -m 0700 /captures/boot',
+    'ExecStart=/usr/bin/python3 -m redux.core.boot')
+_UNITS['redux-live.service'] += ('User=root', 'Group=root', 'NoNewPrivileges=true',
+    'ProtectSystem=strict', 'CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW',
+    'AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW', 'KillMode=control-group',
+    'Restart=on-failure', 'RestartSec=5',
+    'ExecStart=/usr/bin/python3 -m redux.core.live_runtime --config /etc/redux/live.toml')
+_UNITS['redux-capture-ingest.timer'] += ('OnBootSec=45s', 'OnUnitInactiveSec=20s',
+    'AccuracySec=5s', 'Persistent=true')
+_WORKER = ('After=local-fs.target', 'RequiresMountsFor=/captures', 'Type=oneshot',
+    'User=root', 'UMask=0077', 'Environment=PYTHONPATH=/opt/redux',
+    'NoNewPrivileges=true', 'ProtectHome=true', 'ProtectSystem=strict',
+    'ReadWritePaths=/captures', 'CapabilityBoundingSet=', 'AmbientCapabilities=',
+    'RestrictSUIDSGID=true',
+    'ExecStart=/usr/bin/python3 -m redux.crack.ingest --config /etc/redux/pipeline.toml --once')
 
 _AB_UNITS = {
     "redux-ota-health.service": (
@@ -150,9 +175,15 @@ def _enabled_unit_contract(root, units):
     return checked
 
 
-def unit_contract(root):
+def unit_contract(root, additional=None):
     services = root / "etc/systemd/system"
     checked = _enabled_unit_contract(root, _UNITS)
+    required = {unit: policy[1:] for unit, policy in _UNITS.items()}
+    required['redux-capture-ingest.service'] = _WORKER
+    required['redux-fbui.service'] = ('After=redux-live.service', 'Wants=redux-live.service',
+        'RequiresMountsFor=/captures', 'ConditionPathExists=/captures/config/fbui.env',
+        'NoNewPrivileges=true', 'ProtectSystem=strict', 'CapabilityBoundingSet=', 'AmbientCapabilities=')
+    required.update(additional or {})
     # The native TFT runtime must be present but never selected or started
     # without a measured panel and persistent operator-supplied config.
     fbui = text(root, "etc/systemd/system/redux-fbui.service")
@@ -180,6 +211,7 @@ def unit_contract(root):
             raise ValueError(f"unsafe systemd mask for {disabled}")
     if (root / "etc/init.d/resize2fs_once").exists():
         raise ValueError("legacy root resize init script remains")
+    unit_readiness.verify(root, required, text)
     return checked
 
 
@@ -284,7 +316,8 @@ def verify(root, *, profile="lite", other_root=None, expected_country=None):
         for filename in _MUST_EXIST:
             regular(candidate, filename)
         inventories.append(package_inventory(candidate))
-        unit_contract(candidate)
+        ab_units = {**{unit: rules[1:] for unit, rules in _AB_UNITS.items()}, **_AB_REQUIRED_UNITS} if profile=='ab' else None
+        unit_contract(candidate, ab_units)
         capture_contract(candidate, profile, expected_country=expected_country)
         if profile == "ab":
             regular(candidate, "etc/rauc/keyring.pem")

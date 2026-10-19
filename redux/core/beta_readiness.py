@@ -13,6 +13,8 @@ UI = frozenset({'test_ui_state', 'test_web_refresh', 'test_fbui_gesture_integrat
 
 def test_evidence(path, required):
     """Require execution of every named contract; skipped tests are UNKNOWN."""
+    if path is None:
+        return 'UNKNOWN', 'JUnit execution evidence unavailable'
     try:
         path = Path(path)
         if path.is_symlink() or not 0 < path.stat().st_size <= 8 * 1024 * 1024:
@@ -58,3 +60,23 @@ def assess(checks, junit):
     return {'schema': 1, 'offline_qualified': software, 'beta_ready': False,
             'assessment': 'offline-qualified / physical gates open' if software else 'software qualification incomplete',
             'matrix': [{'gate': name, 'status': state, 'detail': detail} for name, state, detail in entries]}
+
+
+def acceptance_matrix(source, candidate, hardware):
+    """Combine freshly executed source/candidate gates with separate attestations.
+
+    Callers must execute the validators; imported PASS JSON is not execution.
+    Unknown physical rows are never filled from source or image test results.
+    """
+    matrix = assess([], None)['matrix']
+    for row in matrix:
+        if row['gate']=='offline_software' and source.get('status')=='FAIL':
+            row.update(status='FAIL',detail='executed source qualification failed')
+        if source.get('status') == 'PASS':
+            match = next((r for r in source.get('matrix', []) if r['gate']==row['gate']), None)
+            if match:row.update(status=match['status'], detail='executed exact-revision source qualification')
+        if row['gate']=='release_candidate':
+            row.update(status=candidate['status'], detail='actual candidate verification' if candidate.get('reason')=='actual_artifact_gates_executed' else 'actual candidate not verified')
+    matrix.append({'gate':'hardware_attestations','status':hardware['result'],
+                   'detail':'separate externally scoped attestations; physical certification requires operator review'})
+    return matrix

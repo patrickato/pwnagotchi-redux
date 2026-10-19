@@ -32,10 +32,11 @@ def slot(tmp_path, name="lite", profile="lite"):
     for unit, (group, *directives) in gate._UNITS.items():
         target = systemd / unit
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("[Unit]\n[Service]\n" + "\n".join(directives) + "\n")
+        target.write_text(unit_text(directives))
         enabled = systemd / group / unit
         enabled.parent.mkdir(parents=True, exist_ok=True)
         enabled.symlink_to("../" + unit)
+    (systemd / 'redux-capture-ingest.service').write_text(unit_text(gate._WORKER))
     for disabled in ("bettercap.service", "resize2fs_once.service"):
         (systemd / disabled).symlink_to("/dev/null")
     config = root / "etc/redux"
@@ -70,19 +71,26 @@ def slot(tmp_path, name="lite", profile="lite"):
     else:
         for unit, (group, *directives) in gate._AB_UNITS.items():
             target = systemd / unit
-            target.write_text("[Unit]\n[Timer]\n[Service]\n" +
-                              "\n".join(directives) + "\n")
+            target.write_text(unit_text(directives))
             enabled = systemd / group / unit
             enabled.parent.mkdir(parents=True, exist_ok=True)
             enabled.symlink_to("../" + unit)
         for unit, directives in gate._AB_REQUIRED_UNITS.items():
             target = systemd / unit
-            target.write_text("[Unit]\n[Service]\n" + "\n".join(directives) + "\n")
+            target.write_text(unit_text(directives))
         rauc = root / "etc/rauc"
         rauc.mkdir()
         (rauc / "keyring.pem").write_text("fixture public certificate")
         (rauc / "system.conf").symlink_to("/run/redux-ota/system.conf")
     return root
+
+
+def unit_text(directives):
+    groups = {}
+    for directive in directives:
+        group = gate.unit_readiness.section(directive.split('=', 1)[0])
+        groups.setdefault(group, []).append(directive)
+    return ''.join('[' + name + ']\n' + '\n'.join(values) + '\n' for name, values in groups.items())
 
 
 def test_lite_assembled_root_accepts_runtime_config_and_enabled_services(tmp_path):
