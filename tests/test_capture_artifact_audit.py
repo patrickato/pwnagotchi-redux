@@ -134,3 +134,31 @@ def test_byte_budget_prevents_unbounded_hashing(tmp_path, monkeypatch):
 
 def test_default_byte_budget_is_finite():
     assert 0 < mod.MAX_ARTIFACT <= mod.MAX_TOTAL_BYTES <= 512 * 1024 * 1024
+
+
+def test_explicit_receipt_cli_publishes_verified_cache(tmp_path, capsys):
+    from redux.crack.integrity_receipt import read_cached_receipt
+    db, output = fixture(tmp_path)
+    ready(db, output)
+    parent = tmp_path / "diagnostics"
+    parent.mkdir()
+    dest = parent / "artifact-integrity.json"
+    code = mod.main(["--db", str(db), "--output", str(output),
+                     "--receipt", str(dest)])
+    assert code == 0
+    assert read_cached_receipt(dest)["status"] == "ok"
+    assert '"schema": 1' in capsys.readouterr().out
+    assert dest.stat().st_mode & 0o077 == 0
+
+
+def test_explicit_receipt_cli_never_follows_symlink(tmp_path, capsys):
+    db, output = fixture(tmp_path)
+    ready(db, output)
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"DO NOT OVERWRITE")
+    dest = tmp_path / "receipt"
+    dest.symlink_to(outside)
+    assert mod.main(["--db", str(db), "--output", str(output),
+                     "--receipt", str(dest)]) == 2
+    assert outside.read_bytes() == b"DO NOT OVERWRITE"
+    assert "receipt_publication_failed" in capsys.readouterr().out
