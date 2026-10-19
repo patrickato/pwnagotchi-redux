@@ -251,8 +251,10 @@ def test_wal_writer_cannot_split_ready_count_from_rows(tmp_path, monkeypatch):
         def close(self):
             self.conn.close()
 
-    def connect(uri, *args, **kwargs):
-        return ObserveCount(actual_connect(uri, *args, **kwargs))
+    def connect(database, *args, **kwargs):
+        # sqlite3.connect(..., uri=True) passes 'uri' as a keyword: using
+        # 'uri' as this wrapper's first parameter binds it twice.
+        return ObserveCount(actual_connect(database, *args, **kwargs))
 
     monkeypatch.setattr(mod.sqlite3, "connect", connect)
     report = mod.audit(db, output)
