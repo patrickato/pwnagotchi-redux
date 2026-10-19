@@ -19,6 +19,7 @@ from urllib.parse import quote
 
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 MAX_ARTIFACT = 33 * 1024 * 1024
+MAX_TOTAL_BYTES = 512 * 1024 * 1024
 
 
 def audit(db: Path, output_dir: Path, *, max_rows=10000):
@@ -57,6 +58,7 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
             # Integrity cannot be established when no artifacts were prepared.
             result["result"] = "unknown"
             return result
+        remaining_budget = MAX_TOTAL_BYTES
         for digest, pathname in rows:
             result["checked"] += 1
             if not isinstance(digest, str) or not SHA.fullmatch(digest):
@@ -77,6 +79,10 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
                     if not 0 < meta.st_size <= MAX_ARTIFACT:
                         issue("artifact_size_invalid")
                         continue
+                    if meta.st_size > remaining_budget:
+                        issue("audit_byte_budget_exceeded")
+                        break
+                    remaining_budget -= meta.st_size
                     hashobj = hashlib.sha256()
                     remaining = meta.st_size
                     while remaining:
