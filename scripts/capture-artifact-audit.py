@@ -178,19 +178,43 @@ def main(argv=None):
     p.add_argument("--output", type=Path, default=Path("/captures/ready"))
     p.add_argument("--receipt", type=Path,
                    help="Opt in to atomic private publication at this explicit path")
+    p.add_argument("--inspect-receipt", type=Path,
+                   help="Read and classify existing receipt; never scan captures")
     args = p.parse_args(argv)
+    if args.inspect_receipt is not None and args.receipt is not None:
+        p.error("--inspect-receipt and --receipt cannot be combined")
     # The capture partition must be verified before accessing paths beneath
     # /captures. A missing REDUXCAP must never redirect a receipt to rootfs.
     capture_root = Path("/captures")
-    paths = (args.db, args.output, args.receipt)
+    paths = ((args.inspect_receipt,) if args.inspect_receipt is not None
+             else (args.db, args.output, args.receipt))
     requires_mount = any(path is not None and
         (path.absolute() == capture_root or capture_root in path.absolute().parents)
         for path in paths)
     mount_identity = None
-    if requires_mount or args.receipt is not None:
+    if requires_mount or args.receipt is not None or args.inspect_receipt is not None:
         # Direct script invocation uses scripts/ on sys.path, not the checkout.
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    if args.inspect_receipt is not None:
+        # One bounded cached read, never a SQLite lookup or artifact hash.
+        from redux.crack.integrity_receipt import read_cached_receipt
+        if requires_mount:
+            from redux.storage_mount import capture_mount_snapshot
+            if capture_mount_snapshot() is None:
+                verdict = {"status": "unknown",
+                           "reason": "capture_mount_unverified",
+                           "checked": 0, "ready_rows": 0, "age_seconds": None}
+            else:
+                verdict = read_cached_receipt(args.inspect_receipt)
+                if capture_mount_snapshot() is None:
+                    verdict = {"status": "unknown",
+                               "reason": "capture_mount_unverified",
+                               "checked": 0, "ready_rows": 0, "age_seconds": None}
+        else:
+            verdict = read_cached_receipt(args.inspect_receipt)
+        print(json.dumps(verdict, sort_keys=True))
+        return {"ok": 0, "attention": 1}.get(verdict["status"], 3)
     if requires_mount:
         from redux.storage_mount import capture_mount_snapshot
         mount_identity = capture_mount_snapshot()
