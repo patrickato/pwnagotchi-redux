@@ -30,6 +30,7 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
         result["result"] = "attention"
 
     directory_fd = None
+    ledger_fd = None
     # Refuse symlinks for both the SQLite ledger and its artifact directory.
     # The bound matches redux.crack.ingest._MAX_PREPARED_BYTES; older
     # 32 MiB limits would falsely mark valid ingestion output as corrupt.
@@ -50,6 +51,16 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
             issue("output_directory_untrusted")
             return result
         if db.is_symlink() or not db.is_file():
+            issue("ledger_unavailable")
+            return result
+        # Pin the ledger inode independently of the SQLite connection. The
+        # connection may close after materializing rows, but its former path
+        # must not be replaced before the audit publishes PASS.
+        ledger_fd = os.open(
+            db, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+        )
+        pinned_ledger = os.fstat(ledger_fd)
+        if not stat.S_ISREG(pinned_ledger.st_mode):
             issue("ledger_unavailable")
             return result
         # SQLite mode=ro prevents ledger writes. Explicit BEGIN binds the
@@ -140,9 +151,22 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
                 issue("output_directory_changed")
         except OSError:
             issue("output_directory_changed")
+        # A reopened or symlinked jobs.db does not identify the same audited
+        # ledger, even though the original SQLite rows were internally
+        # consistent. WAL writer updates on the same inode remain permitted.
+        try:
+            current_ledger = db.lstat()
+            if (not stat.S_ISREG(current_ledger.st_mode)
+                    or (pinned_ledger.st_dev, pinned_ledger.st_ino) !=
+                    (current_ledger.st_dev, current_ledger.st_ino)):
+                issue("ledger_changed")
+        except OSError:
+            issue("ledger_changed")
     except (OSError, sqlite3.Error, ValueError):
         issue("audit_unavailable")
     finally:
+        if ledger_fd is not None:
+            os.close(ledger_fd)
         if directory_fd is not None:
             os.close(directory_fd)
     return result
