@@ -210,7 +210,10 @@ def test_artifact_directory_swap_cannot_redirect_hash_to_symlink(tmp_path, monke
     monkeypatch.setattr(mod.os, "open", swap_before_artifact_open)
     result = mod.audit(db, output)
     assert changed[0]
-    assert result["result"] == "pass"
+    # Directory pinning protects what was read, but the advertised name
+    # disappeared; that evidence must not become a healthy PASS receipt.
+    assert result["result"] == "attention"
+    assert result["issues"] == {"output_directory_changed": 1}
     assert result["checked"] == 1
     assert (saved / digest_name).read_bytes() == b"legitimate synthetic artifact"
 
