@@ -134,10 +134,10 @@ def publish_receipt(path, report, *, completed_utc=None):
     import tempfile
 
     stamp = time.time() if completed_utc is None else completed_utc
-    payload = {'schema': 1, 'completed_utc': stamp, **report}
     if not isinstance(report, dict) or set(report) != {'result', 'checked', 'ready_rows', 'issues'}:
         raise ValueError('invalid audit result')
-    if classify_receipt(payload, now=stamp)['reason'] == 'unverified_receipt':
+    payload = {'schema': 1, 'completed_utc': stamp, **report}
+    if classify_receipt(payload, now=stamp)['reason'] in ('unverified_receipt', 'invalid_timestamp'):
         raise ValueError('contradictory audit result')
     destination = Path(path)
     parent = destination.parent
