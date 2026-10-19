@@ -159,3 +159,18 @@ The classifier timestamp hardening and its edge-case unit tests were added
 after the Sprint 05 full-regression baseline. Local replay of the equivalent
 pure classifier logic passed 11 boundary cases; exact repository tests still
 require the next integrated checkout qualification.
+
+## REDUXCAP mount prerequisite for explicit audit CLI
+
+When `--db`, `--output`, or `--receipt` names a path beneath
+`/captures`, the CLI requires the shared Redux
+`storage_mount.capture_mount_snapshot()` to identify a genuine writable
+ext4 REDUXCAP mount. The identity is checked again after the audit and before
+publishing the private receipt. Unavailable mount evidence returns exit 2 with
+`capture_mount_unverified`; changed mount identity returns exit 2 with
+`capture_mount_changed`. No receipt is published in either case.
+
+Offline tests using explicit temporary paths do not need a physical mount.
+This guards against accidentally reading or publishing under the root
+filesystem when /captures is missing. It does not bypass authorization for
+operating on real captures or make a genuine Pi acceptance claim.
