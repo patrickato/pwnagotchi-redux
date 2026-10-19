@@ -201,15 +201,16 @@ def main(argv=None):
         from redux.crack.integrity_receipt import read_cached_receipt
         if requires_mount:
             from redux.storage_mount import capture_mount_snapshot
-            if capture_mount_snapshot() is None:
+            observed_mount = capture_mount_snapshot()
+            if observed_mount is None:
                 verdict = {"status": "unknown",
                            "reason": "capture_mount_unverified",
                            "checked": 0, "ready_rows": 0, "age_seconds": None}
             else:
                 verdict = read_cached_receipt(args.inspect_receipt)
-                if capture_mount_snapshot() is None:
+                if capture_mount_snapshot() != observed_mount:
                     verdict = {"status": "unknown",
-                               "reason": "capture_mount_unverified",
+                               "reason": "capture_mount_changed",
                                "checked": 0, "ready_rows": 0, "age_seconds": None}
         else:
             verdict = read_cached_receipt(args.inspect_receipt)
