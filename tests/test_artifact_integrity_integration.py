@@ -70,3 +70,36 @@ def test_old_and_empty_receipts_never_look_verified(tmp_path):
         assert finding(runtime)["status"] == "unknown"
     finally:
         runtime.close()
+
+
+def test_checkpoint_never_hashes_prepared_artifacts(tmp_path, monkeypatch):
+    from redux.crack import ingest
+    diagnostics = tmp_path / "diagnostics"
+    diagnostics.mkdir()
+    publish_receipt(diagnostics / "artifact-integrity.json",
+                    report(), completed_utc=time.time())
+
+    def refuse_digest(*args, **kwargs):
+        raise AssertionError("checkpoint must not hash capture artifacts")
+    monkeypatch.setattr(ingest, "_digest_file", refuse_digest)
+    runtime = build(tmp_path)
+    try:
+        runtime._checkpoint()
+        assert finding(runtime)["status"] == "ok"
+    finally:
+        runtime.close()
+
+
+def test_unavailable_mount_suppresses_old_cached_success(tmp_path):
+    diagnostics = tmp_path / "diagnostics"
+    diagnostics.mkdir()
+    publish_receipt(diagnostics / "artifact-integrity.json",
+                    report(), completed_utc=time.time())
+    runtime = build(tmp_path)
+    try:
+        runtime.capture_mount_lost = True
+        runtime._checkpoint()
+        assert runtime._snapshot["artifact_integrity"]["status"] == "unknown"
+        assert finding(runtime)["status"] == "unknown"
+    finally:
+        runtime.close()
