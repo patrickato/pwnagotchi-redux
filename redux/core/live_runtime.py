@@ -659,6 +659,17 @@ class LiveRuntime:
                 report = Doctor().report(DoctorInputs())
                 self.observer_errors["doctor"] = type(error).__name__
                 _LOG.warning("Doctor snapshot unavailable: %s", type(error).__name__)
+        # Read a previously published 8 KiB integrity receipt only; never
+        # hash artifacts, open the ledger, or run a scan in the live loop.
+        from ..crack.integrity_receipt import read_cached_receipt
+        artifact_integrity = (
+            read_cached_receipt(self.config.capture_dir.parent /
+                                "diagnostics" / "artifact-integrity.json")
+            if mount_ok else
+            {"status": "unknown", "reason": "receipt_unavailable",
+             "checked": 0, "ready_rows": 0, "age_seconds": None}
+        )
+        snapshot["artifact_integrity"] = artifact_integrity
         metadata["visual_sampled_utc"] = self._visual_sampled_utc if self.augur else None
         metadata["visual_max_age_seconds"] = max(12, 2 * self.config.status_sample_seconds)
         metadata["visual_revision"] = self._visual_revision if self.augur else None
@@ -680,6 +691,7 @@ class LiveRuntime:
                 processing_stale_seconds=self.config.pipeline_stale_seconds,
                 observer_errors=dict(self.observer_errors),
                 persistence_error=self.persistence_error,
+                artifact_integrity=artifact_integrity,
                 failure_streak=self.failure_streak,
                 retry_in_seconds=metadata["retry_in_seconds"],
             )
