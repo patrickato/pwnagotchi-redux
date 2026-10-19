@@ -76,3 +76,18 @@ assumed from this addition. Those require a separate controlled integration
 of an atomic receipt producer, with the current audit remaining explicitly
 read-only. In particular, a recent receipt is evidence of its audit time,
 not proof that captured data can never change afterward.
+
+## Explicit, atomic receipt publication
+
+`redux.crack.integrity_receipt.publish_receipt(destination, audit_result)`
+provides opt-in private cache publication for an already computed report.
+It validates the compact schema, writes via a same-directory 0600 temporary
+file, fsyncs it, and atomically replaces the destination. A symlinked
+destination or parent is refused. The caller must only use a trusted local
+receipt directory; this is not a safe writer for directories controlled by
+untrusted concurrent users.
+
+The function is not invoked automatically by web requests or status refreshes.
+Until an operator-selected audit job actually publishes a receipt, Doctor
+must report artifact integrity as UNKNOWN. Publication tests and a physical
+installation/permissions review are required before scheduling this on the Pi.
