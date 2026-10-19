@@ -1,5 +1,7 @@
 """Pure offline audit receipt contract tests."""
 import importlib.util
+import json
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -53,6 +55,24 @@ class IntegrityReceiptTests(unittest.TestCase):
         actual = receipt(result='attention', checked=1, ready_rows=1,
                          issues={'artifact_missing': 1})
         self.assertEqual(module.classify_receipt(actual, now=1001)['status'], 'attention')
+
+    def test_cached_receipt_loader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "receipt.json"
+            path.write_text(json.dumps(receipt()))
+            self.assertEqual(module.read_cached_receipt(path, now=1001)['status'], 'ok')
+            path.write_text('{"schema":1,"schema":1}')
+            self.assertEqual(module.read_cached_receipt(path, now=1001)['status'], 'unknown')
+
+    def test_cached_receipt_rejects_symlinks_and_oversize(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "receipt.json"
+            path.write_text(json.dumps(receipt()))
+            link = Path(tmp) / "link"
+            link.symlink_to(path)
+            self.assertEqual(module.read_cached_receipt(link, now=1001)['status'], 'unknown')
+            path.write_bytes(b'x' * (module.MAX_RECEIPT_BYTES + 1))
+            self.assertEqual(module.read_cached_receipt(path, now=1001)['status'], 'unknown')
 
     def test_limits(self):
         self.assertEqual(module.classify_receipt(receipt(ready_rows=10001), now=1001)['status'], 'unknown')
