@@ -15,6 +15,14 @@ import time
 
 MAX_RECEIPT_AGE = 3600
 MAX_ROWS = 10000
+# SQLite COUNT(*) is a signed 64-bit integer. The auditor stops before reading
+# more than MAX_ROWS ready records, but the population can exceed that bound.
+MAX_READY_ROWS = (1 << 63) - 1
+GLOBAL_ISSUES = frozenset({
+    'output_directory_untrusted', 'output_directory_changed',
+    'ledger_unavailable', 'schema_missing', 'row_limit_exceeded',
+    'audit_unavailable', 'audit_byte_budget_exceeded',
+})
 ISSUE_CODES = frozenset({
     'output_directory_untrusted', 'output_directory_changed',
     'ledger_unavailable', 'schema_missing',
@@ -64,17 +72,23 @@ def classify_receipt(receipt, *, now=None, max_age=MAX_RECEIPT_AGE):
     if age > max_age:
         return {**unknown, 'reason': 'stale_receipt', 'age_seconds': age}
     checked, ready = receipt['checked'], receipt['ready_rows']
-    if not (_integer(checked) and _integer(ready) and checked <= ready):
+    if not (_integer(checked) and _integer(ready, MAX_READY_ROWS)
+            and checked <= ready):
         return unknown
     issues = receipt['issues']
     if (not isinstance(issues, dict) or len(issues) > len(ISSUE_CODES)
             or any(code not in ISSUE_CODES or not _integer(count) or count == 0
                    for code, count in issues.items())):
         return unknown
-    # Every checked artifact can contribute at most one row-local error;
-    # global/preflight errors can exist before any row is inspected.
-    # A forged receipt must not turn contradictory counters into attention.
-    if checked > 0 and sum(issues.values()) > checked:
+    # One row can produce at most one row-local problem, but the auditor can
+    # also record a global error after a row failed (e.g. output dir replaced).
+    row_issues = sum(count for code, count in issues.items()
+                     if code not in GLOBAL_ISSUES)
+    if (row_issues > checked
+            or any(count != 1 for code, count in issues.items()
+                   if code in GLOBAL_ISSUES)
+            or ('row_limit_exceeded' in issues
+                and (ready <= MAX_ROWS or checked != 0))):
         return unknown
     reported = receipt['result']
     if reported == 'pass' and not issues and checked == ready and checked > 0:
