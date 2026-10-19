@@ -126,41 +126,72 @@ def read_cached_receipt(path, *, now=None):
 
 
 def publish_receipt(path, report, *, completed_utc=None):
-    """Atomically publish an audit result to a private regular file.
+    """Write a private audit receipt atomically through a pinned directory.
 
-    The caller must explicitly invoke the expensive audit first. Publication
-    never traverses a symlink destination and never touches capture artifacts.
+    Requires a trusted, owner-controlled destination directory. This operation
+    never reads capture artifacts or performs a hash scan. Both fsync calls
+    matter: replacing a name is atomic, but durable publication also needs a
+    directory sync after the rename.
     """
-    import tempfile
+    import secrets
 
     stamp = time.time() if completed_utc is None else completed_utc
-    if not isinstance(report, dict) or set(report) != {'result', 'checked', 'ready_rows', 'issues'}:
+    if not isinstance(report, dict) or set(report) != {
+            'result', 'checked', 'ready_rows', 'issues'}:
         raise ValueError('invalid audit result')
     payload = {'schema': 1, 'completed_utc': stamp, **report}
-    if classify_receipt(payload, now=stamp)['reason'] in ('unverified_receipt', 'invalid_timestamp'):
+    if classify_receipt(payload, now=stamp)['reason'] in (
+            'unverified_receipt', 'invalid_timestamp', 'stale_receipt'):
         raise ValueError('contradictory audit result')
-    destination = Path(path)
-    parent = destination.parent
-    if parent.is_symlink() or not parent.is_dir() or destination.is_symlink():
-        raise ValueError('unsafe receipt destination')
-    if destination.exists() and not destination.is_file():
-        raise ValueError('receipt destination must be regular')
-    encoded = json.dumps(payload, sort_keys=True, allow_nan=False, separators=(',', ':')).encode()
-    if len(encoded) > MAX_RECEIPT_BYTES:
-        raise ValueError('receipt exceeds size limit')
-    temp = None
     try:
-        with tempfile.NamedTemporaryFile(prefix='.receipt-', dir=parent, delete=False) as out:
-            temp = Path(out.name)
-            os.fchmod(out.fileno(), 0o600)
-            out.write(encoded)
-            out.flush()
-            os.fsync(out.fileno())
-        if destination.is_symlink():
-            raise ValueError('receipt destination replaced by symlink')
-        os.replace(temp, destination)
-        temp = None
+        encoded = json.dumps(payload, sort_keys=True, allow_nan=False,
+                             separators=(',', ':')).encode('utf-8')
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ValueError('invalid receipt serialization') from exc
+    if not 0 < len(encoded) <= MAX_RECEIPT_BYTES:
+        raise ValueError('receipt exceeds size limit')
+
+    destination = Path(path)
+    if not destination.name or destination.name in ('.', '..'):
+        raise ValueError('invalid receipt destination')
+    # A directory fd pins the publish location across replacement/rename.
+    # O_NOFOLLOW refuses a symlink at the final directory component. The
+    # caller must also control all ancestor directories.
+    directory_fd = os.open(destination.parent, os.O_RDONLY |
+                           os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    temporary_name = None
+    try:
+        directory = os.fstat(directory_fd)
+        if not stat.S_ISDIR(directory.st_mode) or directory.st_mode & 0o022:
+            raise ValueError('receipt directory is not private')
+        try:
+            previous = os.stat(destination.name, dir_fd=directory_fd,
+                               follow_symlinks=False)
+        except FileNotFoundError:
+            previous = None
+        if previous is not None and not stat.S_ISREG(previous.st_mode):
+            raise ValueError('unsafe existing receipt destination')
+
+        temporary_name = '.receipt-' + secrets.token_hex(16)
+        file_fd = os.open(temporary_name,
+                          os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                          os.O_NOFOLLOW | os.O_CLOEXEC,
+                          0o600, dir_fd=directory_fd)
+        with os.fdopen(file_fd, 'wb') as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # renameat does not follow a symlink destination, and both names
+        # remain anchored to the originally verified directory inode.
+        os.replace(temporary_name, destination.name,
+                   src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        temporary_name = None
+        os.fsync(directory_fd)
     finally:
-        if temp is not None:
-            temp.unlink(missing_ok=True)
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        os.close(directory_fd)
     return payload
