@@ -221,3 +221,67 @@ def test_audit_never_follows_artifact_directory_symlink(tmp_path):
     link = tmp_path / "prepared-link"
     link.symlink_to(output, target_is_directory=True)
     assert mod.audit(db, link)["issues"] == {"output_directory_untrusted": 1}
+
+
+def test_wal_writer_cannot_split_ready_count_from_rows(tmp_path, monkeypatch):
+    """An active ingest writer changing status must not make a false empty PASS."""
+    db, output = fixture(tmp_path)
+    ready(db, output)
+    with sqlite3.connect(db) as ledger:
+        assert ledger.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
+
+    actual_connect = sqlite3.connect
+    changed = [False]
+
+    class ObserveCount:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def execute(self, statement, *args):
+            result = self.conn.execute(statement, *args)
+            if statement.startswith("SELECT COUNT(*) FROM artifacts"):
+                with actual_connect(db, timeout=1.0) as writer:
+                    writer.execute("UPDATE artifacts SET status='error'")
+                changed[0] = True
+            return result
+
+        def close(self):
+            self.conn.close()
+
+    def connect(uri, *args, **kwargs):
+        return ObserveCount(actual_connect(uri, *args, **kwargs))
+
+    monkeypatch.setattr(mod.sqlite3, "connect", connect)
+    report = mod.audit(db, output)
+    assert changed == [True]
+    assert report == {"result": "pass", "ready_rows": 1, "checked": 1, "issues": {}}
+    with actual_connect(db) as ledger:
+        assert ledger.execute("SELECT status FROM artifacts").fetchone()[0] == "error"
+
+
+def test_readonly_transaction_refuses_inconsistent_count(tmp_path, monkeypatch):
+    db, output = fixture(tmp_path)
+    ready(db, output)
+    actual_connect = sqlite3.connect
+
+    class InconsistentSnapshot:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def execute(self, statement, *args):
+            cursor = self.conn.execute(statement, *args)
+            if statement.startswith("SELECT output_sha,output_path"):
+                class MissingRows:
+                    def fetchall(self):
+                        return []
+                return MissingRows()
+            return cursor
+
+        def close(self):
+            self.conn.close()
+
+    monkeypatch.setattr(mod.sqlite3, "connect",
+                        lambda *a, **kw: InconsistentSnapshot(actual_connect(*a, **kw)))
+    report = mod.audit(db, output)
+    assert report["result"] == "attention"
+    assert report["issues"] == {"audit_unavailable": 1}
