@@ -122,7 +122,8 @@ def read_cached_receipt(path, *, now=None):
         directory_fd = os.open(source.parent, os.O_RDONLY | os.O_DIRECTORY |
                                os.O_NOFOLLOW | os.O_CLOEXEC)
         directory = os.fstat(directory_fd)
-        if not stat.S_ISDIR(directory.st_mode) or directory.st_mode & 0o022:
+        if (not stat.S_ISDIR(directory.st_mode) or directory.st_mode & 0o022
+                or directory.st_uid != os.geteuid()):
             return unknown
         fd = os.open(source.name, os.O_RDONLY | os.O_NONBLOCK |
                      os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
@@ -206,7 +207,8 @@ def publish_receipt(path, report, *, completed_utc=None):
     temporary_name = None
     try:
         directory = os.fstat(directory_fd)
-        if not stat.S_ISDIR(directory.st_mode) or directory.st_mode & 0o022:
+        if (not stat.S_ISDIR(directory.st_mode) or directory.st_mode & 0o022
+                or directory.st_uid != os.geteuid()):
             raise ValueError('receipt directory is not private')
         try:
             previous = os.stat(destination.name, dir_fd=directory_fd,
