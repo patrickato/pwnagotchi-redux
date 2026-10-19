@@ -45,7 +45,8 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
             output_dir,
             os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
         )
-        if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
+        pinned_dir = os.fstat(directory_fd)
+        if not stat.S_ISDIR(pinned_dir.st_mode):
             issue("output_directory_untrusted")
             return result
         if db.is_symlink() or not db.is_file():
@@ -126,6 +127,17 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
                 issue("artifact_missing")
             except OSError:
                 issue("artifact_unreadable")
+        # A pinned fd prevents a redirected read, but cannot by itself prove
+        # the originally advertised path still resolves to that directory.
+        # Never report PASS for an old inode replaced in the namespace.
+        try:
+            current_dir = root.lstat()
+            if (not stat.S_ISDIR(current_dir.st_mode)
+                    or (pinned_dir.st_dev, pinned_dir.st_ino) !=
+                    (current_dir.st_dev, current_dir.st_ino)):
+                issue("output_directory_changed")
+        except OSError:
+            issue("output_directory_changed")
     except (OSError, sqlite3.Error, ValueError):
         issue("audit_unavailable")
     finally:
