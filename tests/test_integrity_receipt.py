@@ -220,3 +220,29 @@ def test_cached_reader_rejects_inplace_file_change(monkeypatch):
         monkeypatch.setattr(module.os, "read", changing_read)
         assert module.read_cached_receipt(dest, now=1001)["status"] == "unknown"
         assert modified[0]
+
+
+def test_huge_untrusted_timestamps_are_unknown_without_overflow():
+    massive = 10 ** 500
+    for invalid in [massive, -massive, float("inf"), float("-inf"), float("nan")]:
+        bad_stamp = receipt(completed_utc=invalid)
+        assert module.classify_receipt(bad_stamp, now=1001)["status"] == "unknown"
+        assert module.classify_receipt(receipt(), now=invalid)["status"] == "unknown"
+        assert module.classify_receipt(receipt(), now=1001, max_age=invalid)["status"] == "unknown"
+
+
+def test_huge_timestamp_in_json_receipt_cannot_crash_reader():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "receipt.json"
+        valid = receipt(completed_utc=10 ** 500)
+        path.write_text(json.dumps(valid))
+        assert module.read_cached_receipt(path, now=1001)["status"] == "unknown"
+
+
+def test_huge_epoch_cannot_be_published():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "receipt.json"
+        valid = {"result": "pass", "checked": 1, "ready_rows": 1, "issues": {}}
+        with unittest.TestCase().assertRaises(ValueError):
+            module.publish_receipt(path, valid, completed_utc=10 ** 500)
+        assert not path.exists()
