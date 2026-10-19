@@ -122,3 +122,26 @@ unverified image. The presence of valid prepared data does not prove an
 authentic wireless handshake. Receipt freshness defaults to one hour and
 only covers the audit's measured moment. Neither RF acceptance nor physical
 deployment is implied.
+
+## Cache filesystem safety (hardened)
+
+Both the receipt publisher and the cached reader now pin the actual
+diagnostics directory with a Linux directory file descriptor. They refuse
+symlinked final directory components and directories writable by other
+users or groups. They use `O_NOFOLLOW` for receipt access. The publisher
+creates a 0600 uniquely named file, fsyncs its contents, atomically replaces
+the destination using directory-relative rename, and fsyncs the directory.
+The reader checks the same opened file's identity, size, mtime, and ctime
+before/after a bounded read to reject in-place changes. The caller remains
+responsible for protecting ancestor directories.
+
+The baked `redux-live.service` and first-boot report service both run as
+root with `ReadWritePaths=/captures`. The cache remains **opt-in**, and
+these permissions do not authorize automatically enabling a new audit timer
+on a deployed image.
+
+No audit is performed in the HTTP handler. New isolated fixture checks cover
+private publication, atomic replacement, symlinked targets/directories,
+shared-directory refusal, oversized receipts and torn in-place reads.
+A complete checkout regression run is required before declaring this
+new code software-qualified.
