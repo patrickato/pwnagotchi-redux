@@ -56,7 +56,15 @@ def source_qualification(expected, runner=subprocess.run):
         report = load(evidence)
         if (result.returncode not in (0, 3) or report.get('offline_qualified') is not True
                 or report.get('source_revision')!=expected['revision'] or report.get('worktree_dirty') is not False):
-            return {'status':'FAIL', 'reason':'executed_source_qualification_failed'}
+            states={}
+            for label in ('Python suite','Image contracts','Python compile','Shell syntax','Diff whitespace'):
+                match=re.search(r'^(PASS|FAIL|UNKNOWN)\s+'+label+r':',tail,re.M)
+                if match:states[label]=match[1]
+            return {'status':'FAIL', 'reason':'executed_source_qualification_failed',
+                    'qualification_exit':result.returncode,'gate_statuses':states,'test_totals':totals,
+                    'reported_source_matches':report.get('source_revision')==expected['revision'],
+                    'reported_worktree_clean':report.get('worktree_dirty') is False,
+                    'diagnostic_hint':'use_short_pytest_basetemp_for_unix_sockets' if 'AF_UNIX path too long' in tail else 'run_redux_qualify_locally_for_failure_details'}
         return {'status':'PASS', 'reason':'existing_qualification_executed_at_exact_clean_revision',
                 'revision':expected['revision'], 'matrix':report['matrix'][:4], 'test_totals':totals}
 
@@ -88,6 +96,7 @@ def emit(result, args):
         for name in ('source_qualification','candidate_qualification'):
             if name in result:
                 print(f"{result[name]['status']:15} {name}: {result[name]['reason']}")
+                if result[name].get('diagnostic_hint'):print('Action: '+result[name]['diagnostic_hint'])
         if result.get('recovery_plan'):
             print('Recovery plan only: '+result['recovery_plan']['phase']+'; '+result['recovery_plan']['status'])
         print('Result: '+result['result']+'. Offline only; no device or network actions performed.')

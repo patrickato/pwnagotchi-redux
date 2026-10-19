@@ -346,3 +346,17 @@ def test_executed_source_report_must_match_clean_requested_revision(cli,monkeypa
         Path(command[-1]).write_text(json.dumps(report))
         return SimpleNamespace(returncode=1 if case=='bad_exit' else 3)
     assert cli.source_qualification(TARGET,runner=runner)['status']=='FAIL'
+
+
+def test_source_failure_retains_safe_gate_diagnostics_without_private_traceback(cli,monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(cli.candidate_factory,'source',lambda *a:None)
+    def runner(command,**options):
+        options['stdout'].write(b'OSError: AF_UNIX path too long /private/SSID-secret\nFAIL    Python suite: exit 1; 1 failed\n')
+        Path(command[-1]).write_text(json.dumps({'source_revision':TARGET['revision'],'worktree_dirty':False,'offline_qualified':False}))
+        return SimpleNamespace(returncode=1)
+    result=cli.source_qualification(TARGET,runner=runner)
+    assert result['status']=='FAIL' and result['gate_statuses']=={'Python suite':'FAIL'}
+    assert result['diagnostic_hint']=='use_short_pytest_basetemp_for_unix_sockets'
+    assert result['reported_source_matches'] is True and result['reported_worktree_clean'] is True
+    assert 'private' not in json.dumps(result) and 'SSID' not in json.dumps(result)

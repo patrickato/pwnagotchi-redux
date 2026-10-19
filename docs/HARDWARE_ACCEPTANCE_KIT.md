@@ -179,6 +179,12 @@ missing load/sensors remains UNKNOWN.
 `evaluate --qualify-source` executes the existing complete `redux-qualify.py
 --beta` runner against the exact clean revision, checked before and after. It does
 not import saved “tests passed” JSON or duplicate test discovery.
+Executed test totals and redacted gate failures are retained in the source result.
+Raw tracebacks stay out of public reports. The runner inherits `PYTEST_ADDOPTS`;
+if selecting ext4 scratch for large image fixtures, use a fresh **short** basetemp
+path (for example an ignored `build/s6q/pytest`). Linux Unix-domain socket tests
+cannot bind paths over the kernel socket-path limit. An overlong custom path is
+reported as FAIL with a diagnostic hint; no tests are skipped or failures masked.
 `--candidate-dir DIR` executes factory artifact verification; A/B requires
 `--keyring /external/trusted-public-keyring.pem`. `--trusted-image-sha256` must be
 independently trusted. `--scratch-dir` selects existing inspection storage.
