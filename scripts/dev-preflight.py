@@ -52,6 +52,9 @@ def checks(*, finder=importlib.util.find_spec, which=shutil.which, runner=subpro
             pass
     result.append(('browser JavaScript tests', 'PASS' if node_ok else 'FAIL' if node else 'UNKNOWN',
                    'Node.js works' if node_ok else 'install a working Node.js runtime for browser contracts'))
+    for tool in ('debugfs', 'mtype', 'mcopy', 'mkfs.ext4', 'mkfs.vfat', 'rauc', 'mksquashfs', 'unsquashfs'):
+        result.append(('release tool: '+tool, 'PASS' if which(tool) else 'UNKNOWN',
+                       'available' if which(tool) else 'optional for basic tests; required for complete release/image contracts; see docs/RELEASE_QUALIFICATION.md'))
     return result
 
 

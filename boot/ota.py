@@ -71,7 +71,8 @@ def validate_topology(parts, current, root_uuid):
                 4: "REDUXROOTA", 5: "REDUXROOTB", 6: "REDUXCAP"}
     uuids = set()
     for number, info in parts.items():
-        if info["label"] != expected[number] or not re.fullmatch(r"[a-fA-F0-9-]{36}", info["uuid"]):
+        if info["label"] != expected[number] or not re.fullmatch(
+                r"[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}", info["uuid"]):
             raise ValueError("unexpected GPT partition label/UUID")
         if info["uuid"].lower() in uuids:
             raise ValueError("partition UUIDs must be unique")
@@ -160,7 +161,16 @@ def _read_bounded_state_json(path, *, limit):
         if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
                 after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
             raise ValueError("OTA state changed during inspection")
-    return json.loads(raw)
+    def unique(pairs):
+        result = {}
+        for name, value in pairs:
+            if name in result:
+                raise ValueError("duplicate OTA state JSON field")
+            result[name] = value
+        return result
+    def invalid_constant(_):
+        raise ValueError("non-finite OTA state JSON value")
+    return json.loads(raw, object_pairs_hook=unique, parse_constant=invalid_constant)
 
 
 def load_state(path, stable):
@@ -179,7 +189,7 @@ def load_state(path, stable):
             or type(data.get("pending")) not in {str, type(None)} or not isinstance(data.get("states"), dict)
             or data.get("pending") not in {None, "A", "B"}
             or set(data.get("states", {})) != set(SLOTS)
-            or any(v not in {"good", "bad"} for v in data["states"].values())
+            or any(type(v) is not str or v not in {"good", "bad"} for v in data["states"].values())
             # A committed firmware selector is the only fallback. A ledger
             # that calls it bad must never be used to stage or commit another
             # candidate. Pending candidates are marked good when staged.
@@ -488,17 +498,43 @@ def preflight():
 
 
 def validate_manifest(text):
+    """Strict standard bundle policy, shared by preinstall and offline gates."""
     import configparser
-    manifest = configparser.ConfigParser()
-    manifest.read_string(text)
-    if manifest.get("update", "compatible") != COMPATIBLE:
-        raise ValueError("bundle targets another image profile")
-    if {s for s in manifest.sections() if s.startswith("image.")} != {"image.boot", "image.rootfs"}:
-        raise ValueError("signed update must contain both boot and rootfs, and no data slot")
-    if "handler" in manifest or manifest.get("bundle", "format") != "verity":
-        raise ValueError("only the verified standard verity install path is allowed")
-    if "post-install" not in manifest.get("image.boot", "hooks", fallback="").split(";"):
-        raise ValueError("boot image must have the slot cmdline post-install hook")
+    if type(text) is not str or len(text)>65536 or "\x00" in text:
+        raise ValueError("signed manifest is oversized or invalid")
+    manifest = configparser.ConfigParser(interpolation=None, strict=True)
+    try:
+        manifest.read_string(text)
+        if manifest.defaults():
+            raise ValueError("bundle DEFAULT inheritance is forbidden")
+        if (not re.fullmatch(r"[0-9a-f]{40}", manifest.get("update","build",fallback=""))
+                or not re.fullmatch(r"[A-Za-z0-9._+-]{1,128}", manifest.get("update","version",fallback=""))):
+            raise ValueError("signed update requires a canonical build revision and release version")
+        allowed = {"update", "bundle", "hooks", "image.boot", "image.rootfs"}
+        if set(manifest.sections()) != allowed:
+            raise ValueError("signed update requires boot/rootfs and only the standard hook")
+        if manifest.get("update", "compatible") != COMPATIBLE:
+            raise ValueError("bundle targets another image profile")
+        if manifest.get("bundle", "format") != "verity":
+            raise ValueError("only the verified standard verity install path is allowed")
+        for section, filename in (("image.boot", "boot.tar"), ("image.rootfs", "rootfs.tar"),
+                                  ("hooks", "hook.sh")):
+            if manifest.get(section,"filename") != filename:
+                raise ValueError("bundle uses an unsupported filename or path")
+        if manifest.get("image.boot", "hooks", fallback="").removesuffix(";") != "post-install":
+            raise ValueError("boot image must have only the slot cmdline post-install hook")
+        if manifest.get("image.rootfs", "hooks", fallback=""):
+            raise ValueError("rootfs hooks are forbidden")
+        options = {"update": {"compatible","version","build","description"},
+                   "bundle": {"format","verity-hash","verity-salt","verity-size"},
+                   "hooks": {"filename"},
+                   "image.boot": {"filename","hooks","sha256","size"},
+                   "image.rootfs": {"filename","sha256","size"}}
+        if any(set(manifest[section]) - keys for section,keys in options.items()):
+            raise ValueError("unsupported install options in signed bundle")
+    except configparser.Error as exc:
+        raise ValueError("malformed signed bundle manifest") from exc
+    return manifest
 
 
 def preinstall():

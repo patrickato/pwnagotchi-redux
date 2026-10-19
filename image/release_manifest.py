@@ -213,7 +213,8 @@ def _check_filesystem_signatures(expected, observed):
     return results
 
 
-def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024, expected_profile=None):
+def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024, expected_profile=None,
+                  maximum_bytes=64 * 1024 * 1024 * 1024):
     """Stream-check a disk, optionally enforcing the operator-selected profile.
 
     A/B signing configuration must never silently publish a Lite image, or
@@ -225,8 +226,9 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024, expected_profile=Non
     meta = path.lstat()
     if not stat.S_ISREG(meta.st_mode) or not path.name.endswith(".img.xz"):
         raise ValueError("artifact must be a regular *.img.xz file, not a symlink")
-    if minimum_bytes < 512:
-        raise ValueError("minimum image size must be >=512 bytes")
+    if (type(minimum_bytes) is not int or type(maximum_bytes) is not int
+            or minimum_bytes < 512 or maximum_bytes < minimum_bytes):
+        raise ValueError("invalid bounded image size policy")
     digest = hashlib.sha256()
     with path.open("rb") as source:
         for block in iter(lambda: source.read(1024 * 1024), b""):
@@ -270,6 +272,8 @@ def inspect_image(path, *, minimum_bytes=512 * 1024 * 1024, expected_profile=Non
                 if table == "gpt":
                     tail = (tail + block)[-_GPT_TAIL_SIZE:]
                 total = end
+                if total > maximum_bytes:
+                    raise ValueError("decompressed image exceeds inspection size budget")
     except (lzma.LZMAError, EOFError, OSError) as error:
         raise ValueError(f"corrupt or truncated xz image: {type(error).__name__}") from error
     if total < minimum_bytes:

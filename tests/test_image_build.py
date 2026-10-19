@@ -213,7 +213,7 @@ def test_ota_topology_and_generated_mounts(monkeypatch, tmp_path):
 
 def test_ota_manifest_requires_complete_signed_pair():
     ota = boot_module("ota")
-    manifest = f"[update]\ncompatible={ota.COMPATIBLE}\n[bundle]\nformat=verity\n[image.boot]\nfilename=boot.tar\nhooks=post-install\n[image.rootfs]\nfilename=rootfs.tar\n"
+    manifest = f"[update]\ncompatible={ota.COMPATIBLE}\nversion=test\nbuild={'a'*40}\n[bundle]\nformat=verity\n[hooks]\nfilename=hook.sh\n[image.boot]\nfilename=boot.tar\nhooks=post-install\n[image.rootfs]\nfilename=rootfs.tar\n"
     ota.validate_manifest(manifest)
     for bad in [manifest.replace("[image.rootfs]","[image.captures]"),manifest.replace("hooks=post-install","hooks="),manifest.replace("format=verity","format=plain")]:
         with pytest.raises(ValueError):

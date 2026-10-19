@@ -131,3 +131,8 @@ seven web tests (`test_runtime_doctor_report_is_transmitted_unchanged_through_lo
 The final local run allowed test sockets and passed all of them. These were
 sandbox restrictions, not unresolved software regressions. No field run,
 physical measurement, installation, image build or RF qualification is claimed.
+
+Sprint 02 adds the separate [offline release candidate, RAUC readiness and
+recovery gate](RELEASE_QUALIFICATION.md). The default preflight reports its host
+parser requirements, and image CI runs both policy and real-artifact tests.
+Release qualification does not imply Pi boot, installation or automatic rollback.

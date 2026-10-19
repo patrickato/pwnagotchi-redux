@@ -56,3 +56,11 @@ hardware qualification limits. No Pi deployment or RF qualification is implied.
 existing regression/image contracts with isolated Python caches. `--field`
 adds only an unprivileged, sanitized, read-only status probe; unavailable
 physical facts remain UNKNOWN. See [REDUX_QUALIFICATION.md](REDUX_QUALIFICATION.md).
+
+## Release, update and recovery framework
+
+`python3 scripts/redux-release.py` provides offline candidate qualification,
+RAUC snapshot readiness and recovery planning. It performs no SSH, mounts,
+update installation or boot-state writes. See
+[RELEASE_QUALIFICATION.md](RELEASE_QUALIFICATION.md) for exact evidence boundaries,
+host tools, exit codes and remaining Pi 4/5 rollback acceptance gates.

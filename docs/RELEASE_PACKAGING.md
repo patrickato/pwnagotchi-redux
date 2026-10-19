@@ -93,3 +93,13 @@ card: cold boot, stable fallback, successful candidate health commit, failed
 candidate rollback, storage interruption and repeated restart. The active
 Jayofelony card must not be touched. No synthetic test establishes actual
 Raspberry Pi EEPROM tryboot or power-loss behavior.
+
+## Consolidated Sprint 02 evidence gate
+
+Use [RELEASE_QUALIFICATION.md](RELEASE_QUALIFICATION.md) after packaging for the
+single offline candidate gate. It validates the actual embedded runtime and
+boot payload, supported RAUC configuration and (when supplied) a signed verity
+bundle using the existing validators. Read-only snapshot recovery planning is
+included. No manifest, installed RAUC package or offline PASS certifies firmware
+fallback or authorizes an update. Old bundles missing signed build identity must
+be rebuilt and signed with the operator's external key.
