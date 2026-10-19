@@ -16,7 +16,8 @@ import time
 MAX_RECEIPT_AGE = 3600
 MAX_ROWS = 10000
 ISSUE_CODES = frozenset({
-    'output_directory_untrusted', 'ledger_unavailable', 'schema_missing',
+    'output_directory_untrusted', 'output_directory_changed',
+    'ledger_unavailable', 'schema_missing',
     'row_limit_exceeded', 'invalid_digest', 'unexpected_artifact_path',
     'nonregular_artifact', 'artifact_size_invalid', 'artifact_changed_during_audit',
     'artifact_digest_mismatch', 'artifact_missing', 'artifact_unreadable',
