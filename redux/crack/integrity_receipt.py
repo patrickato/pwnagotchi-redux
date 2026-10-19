@@ -28,6 +28,12 @@ def _integer(value, maximum=MAX_ROWS):
     return type(value) is int and 0 <= value <= maximum
 
 
+def _finite_epoch(value):
+    """Reject booleans, nonfinite values and giant integers before float math."""
+    return (type(value) in (int, float) and 0 <= value <= 1e12
+            and math.isfinite(value))
+
+
 def classify_receipt(receipt, *, now=None, max_age=MAX_RECEIPT_AGE):
     """Classify a saved result. Returns only known enums and bounded counts.
 
@@ -39,9 +45,9 @@ def classify_receipt(receipt, *, now=None, max_age=MAX_RECEIPT_AGE):
                'checked': 0, 'ready_rows': 0, 'age_seconds': None}
     if now is None:
         now = time.time()
-    if not (type(now) in (int, float) and math.isfinite(now)
-            and type(max_age) in (int, float) and math.isfinite(max_age)
-            and 0 < max_age <= 86400):
+    if not (_finite_epoch(now)
+            and type(max_age) in (int, float) and 0 < max_age <= 86400
+            and math.isfinite(max_age)):
         return unknown
     if not isinstance(receipt, dict) or set(receipt) != {
             'schema', 'completed_utc', 'result', 'checked', 'ready_rows', 'issues'}:
@@ -49,9 +55,9 @@ def classify_receipt(receipt, *, now=None, max_age=MAX_RECEIPT_AGE):
     if type(receipt['schema']) is not int or receipt['schema'] != 1:
         return unknown
     stamp = receipt['completed_utc']
-    if type(stamp) not in (int, float) or not math.isfinite(stamp):
-        return unknown
-    if stamp < 0 or stamp > now + 30:
+    if not _finite_epoch(stamp):
+        return {**unknown, 'reason': 'invalid_timestamp'}
+    if stamp > now + 30:
         return {**unknown, 'reason': 'invalid_timestamp'}
     age = max(0, now - stamp)
     if age > max_age:
