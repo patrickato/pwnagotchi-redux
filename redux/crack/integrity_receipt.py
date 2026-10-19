@@ -6,7 +6,11 @@ An unverifiable receipt NEVER turns into evidence that artifacts are intact.
 """
 from __future__ import annotations
 
+import json
 import math
+import os
+from pathlib import Path
+import stat
 import time
 
 MAX_RECEIPT_AGE = 3600
@@ -71,3 +75,46 @@ def classify_receipt(receipt, *, now=None, max_age=MAX_RECEIPT_AGE):
         return unknown
     return {'status': status, 'reason': reason, 'checked': checked,
             'ready_rows': ready, 'age_seconds': age}
+
+
+MAX_RECEIPT_BYTES = 8192
+
+
+def read_cached_receipt(path, *, now=None):
+    """Load a precomputed receipt using a bounded no-follow read.
+
+    This never hashes an artifact, opens the SQLite capture ledger, or
+    publishes a new receipt. Errors always become UNKNOWN.
+    """
+    unknown = {'status': 'unknown', 'reason': 'receipt_unavailable',
+               'checked': 0, 'ready_rows': 0, 'age_seconds': None}
+    try:
+        source = Path(path)
+        fd = os.open(source, os.O_RDONLY | os.O_NONBLOCK |
+                     getattr(os, 'O_NOFOLLOW', 0))
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_RECEIPT_BYTES:
+                return unknown
+            payload = b''
+            while len(payload) <= MAX_RECEIPT_BYTES:
+                piece = os.read(fd, MAX_RECEIPT_BYTES + 1 - len(payload))
+                if not piece:
+                    break
+                payload += piece
+            if len(payload) > MAX_RECEIPT_BYTES:
+                return unknown
+            def pairs(items):
+                d = {}
+                for key, value in items:
+                    if key in d:
+                        raise ValueError('duplicate key')
+                    d[key] = value
+                return d
+            receipt = json.loads(payload.decode('utf-8'), object_pairs_hook=pairs,
+                                 parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite')))
+        finally:
+            os.close(fd)
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return unknown
+    return classify_receipt(receipt, now=now)
