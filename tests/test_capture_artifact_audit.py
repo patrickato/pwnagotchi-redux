@@ -121,3 +121,16 @@ def test_canonical_path_is_required_even_with_valid_digest(tmp_path):
         conn.execute("UPDATE artifacts SET output_path=?", (str(tmp_path / "unrelated"),))
     assert mod.audit(db, output)["issues"] == {"unexpected_artifact_path": 1}
     assert path.exists()
+
+
+def test_byte_budget_prevents_unbounded_hashing(tmp_path, monkeypatch):
+    db, output = fixture(tmp_path)
+    ready(db, output, b"artifact bigger than test budget")
+    monkeypatch.setattr(mod, "MAX_TOTAL_BYTES", 4)
+    report = mod.audit(db, output)
+    assert report["result"] == "attention"
+    assert report["issues"] == {"audit_byte_budget_exceeded": 1}
+
+
+def test_default_byte_budget_is_finite():
+    assert 0 < mod.MAX_ARTIFACT <= mod.MAX_TOTAL_BYTES <= 512 * 1024 * 1024
