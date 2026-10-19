@@ -20,6 +20,18 @@ except ModuleNotFoundError:  # direct image/root_payload.py invocation
 
 
 _MUST_EXIST = (
+    "usr/local/bin/redux-display-diag",
+    "usr/local/bin/redux-kiosk",
+    "opt/redux/redux/display/acceptance.py",
+    "opt/redux/redux/display/kiosk.py",
+    "opt/redux/redux/display/local_http.py",
+    "opt/redux/redux/packs/locations.py",
+    "opt/redux/redux/packs/control.py",
+    "opt/redux/redux/packs/manager.py",
+    "opt/redux/redux/packs/manifest.py",
+    "opt/redux/redux/packs/status.py",
+    "opt/redux/redux/packs/__init__.py",
+    "usr/share/redux/packs/field-diagnostics/pack.toml",
     "opt/redux/redux/core/boot.py",
     "opt/redux/redux/core/live_runtime.py",
     "opt/redux/redux/core/runtime_identity.py",
@@ -290,6 +302,9 @@ def package_inventory(root):
         entries[fields[0]] = fields[1]
     if not entries:
         raise ValueError("empty installed package inventory")
+    required = {'python3', 'python3-pil', 'python3-dbus-next', 'hcxtools', 'bettercap', 'iw'}
+    if not required <= {name.split(':')[0] for name in entries}:
+        raise ValueError('installed runtime dependency inventory incomplete')
     return {'count': len(entries), 'sha256': hashlib.sha256(raw.encode()).hexdigest()}
 
 
@@ -316,6 +331,10 @@ def verify(root, *, profile="lite", other_root=None, expected_country=None):
         for filename in _MUST_EXIST:
             regular(candidate, filename)
         inventories.append(package_inventory(candidate))
+        catalog_path = "usr/share/redux/packs/field-diagnostics/pack.toml"
+        reviewed = Path(__file__).parent / "stage-redux/60-packs/files/catalog/field-diagnostics/pack.toml"
+        if text(candidate, catalog_path) != reviewed.read_text():
+            raise ValueError("installed native pack catalog differs from reviewed payload")
         ab_units = {**{unit: rules[1:] for unit, rules in _AB_UNITS.items()}, **_AB_REQUIRED_UNITS} if profile=='ab' else None
         unit_contract(candidate, ab_units)
         capture_contract(candidate, profile, expected_country=expected_country)

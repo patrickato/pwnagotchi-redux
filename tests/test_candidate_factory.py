@@ -204,7 +204,7 @@ def test_actual_factory_artifact_publication_and_reverification(factory_artifact
     result=factory.build(root,**args,runner=fake_builder(artifacts,profile,certificates))
     assert result['factory_completed'] is True,result
     assert result['result']=='UNKNOWN' and result['physical_boot_verified'] is False
-    assert result['validation']['evidence']['runtime']['package_inventories'][0]['count']==1
+    assert result['validation']['evidence']['runtime']['package_inventories'][0]['count']==6  # six required runtime packages in slot fixture
     assert not list(args['output'].glob('*.key'))
     inventory=factory.inspect(args['output'])
     assert len(inventory['files'])==(5 if profile=='ab' else 3)

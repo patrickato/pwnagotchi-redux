@@ -286,6 +286,7 @@ body[data-skin="plain"] .hero::before{display:none}
    <div><div id="doctorlabel" class="doctor-label">UNKNOWN</div>
     <div id="doctorcoverage" class="reason">Waiting for health data</div></div>
   </div>
+  <p id="plugindiagnostic" class="mut" aria-live="polite"></p>
   <details class="doctor-details"><summary>Findings and recovery advice</summary>
    <div id="doctorlist" class="doctor-list"></div></details>
  </section>
@@ -705,6 +706,9 @@ function renderSystem(d){
   state:['fresh','stale','unknown'].includes(row.state)?row.state:'unknown',
   measured_at:Number.isFinite(row.measured_at)?row.measured_at:null
  }));
+ const pluginWarning=document.getElementById('plugindiagnostic');
+ const pluginIssue=rows.find(row=>row.label==='Plugin diagnostics');
+ if(pluginWarning)pluginWarning.textContent=pluginIssue?pluginIssue.value+' — System details / local packs CLI':'';
  const fingerprint=JSON.stringify(rows);
  if(fingerprint===systemFingerprint)return;
  systemFingerprint=fingerprint;
@@ -921,7 +925,11 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
                 from ..display.ui_state import model
                 try:
                     payload = dict(status_provider())
-                    payload["plugins"] = plugin_provider()
+                    try:
+                        payload["plugins"] = plugin_provider.summary()
+                    except Exception:
+                        from ..packs.status import unavailable
+                        payload["plugins"] = unavailable()
                     payload["ui"] = model(payload)
                     body = json.dumps(payload).encode()
                 except Exception:
@@ -947,7 +955,7 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
                     cards = []
                     for pack in inventory.get("plugins", []):
                         cards.append('<article><h2>' + html.escape(pack['name']) + '</h2><pre>' + html.escape(json.dumps(pack, indent=2)) + '</pre></article>')
-                    page = '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Plugin Control Center</title><style>body{font:16px sans-serif;background:#111;color:#eee;margin:16px}a{color:#9df;display:block;min-height:44px}pre{white-space:pre-wrap;overflow-wrap:anywhere}article{border:1px solid #777;padding:12px;margin:12px 0}</style><a href="/">Back to dashboard</a><h1>Plugin Control Center</h1><p>Read-only inspection. Requested state is separate from active runtime state. Activation is unverified.</p><p>Local workflow: redux packs --dir PATH --state /captures/config/packs.json enable NAME; review the preview, then repeat with --confirm REVISION. No service is restarted.</p>' + ''.join(cards) + '<p>' + html.escape(inventory.get('availability', 'unknown')) + '</p>'
+                    page = '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Plugin Control Center</title><style>body{font:16px sans-serif;background:#111;color:#eee;margin:16px}a{color:#9df;display:block;min-height:44px}pre{white-space:pre-wrap;overflow-wrap:anywhere}article{border:1px solid #777;padding:12px;margin:12px 0}</style><a href="/">Back to dashboard</a><h1>Plugin Control Center</h1><p>Read-only inspection. Requested state is separate from active runtime state. Activation is unverified.</p><p>Local workflow: redux packs list; redux packs enable NAME; review the preview, then repeat with --confirm REVISION. No service is restarted.</p>' + ''.join(cards) + ('<p>No catalog entries installed.</p>' if not cards and inventory.get('availability') == 'inspected' else '') + '<p>' + html.escape(inventory.get('availability', 'unknown')) + '</p>'
                     page += '<pre>' + html.escape(json.dumps(inventory.get('errors', []), indent=2)) + '</pre>'
                     if inventory.get('next_offset') is not None:
                         page += '<a href="/plugins?offset=' + str(inventory['next_offset']) + '">Next plugins</a>'

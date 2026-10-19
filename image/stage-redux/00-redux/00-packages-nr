@@ -20,3 +20,6 @@ libnl-genl-3-dev
 pkg-config
 xxd
 fonts-dejavu-core
+
+# Optional BlueZ integration still needs its importable D-Bus transport.
+python3-dbus-next

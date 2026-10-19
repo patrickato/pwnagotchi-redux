@@ -1,0 +1,10 @@
+name = "field-diagnostics"
+version = "1.0.0"
+kind = "tool"
+adapter = "redux"
+module = "redux.boot_readiness"
+description = "Reviewed first-party boot and display diagnostic CLI tools, installed in the base image. Requests do not launch tools or schedule services; invoke redux-boot-check and redux-display-diag manually. Runtime activation is unverified."
+provides = ["boot-diagnostics", "display-inventory"]
+requires = []
+conflicts = []
+side_effects = false

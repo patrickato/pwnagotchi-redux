@@ -114,7 +114,6 @@ apt-get purge -y build-essential gcc g++ cpp make git gawk qpdf bison flex libfl
 apt-get autoremove -y
 apt-get clean
 rm -rf /usr/local/src/nexmon /usr/local/src/install-nexmon.sh /usr/local/src/target-kernel.sh /usr/local/src/patch-nexmon-driver.py
-dpkg-query -W -f='${binary:Package}\t${Version}\n' > /usr/share/redux/packages.tsv
 EOF
 # Both boards use their distro-selected arm64 kernel, built above.
 cat >> "$ROOTFS_DIR/boot/firmware/config.txt" <<'EOF'

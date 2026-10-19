@@ -119,6 +119,9 @@ def model(report, *, now=None):
     plugins = mapping(report.get('plugins'))
     row('Plugin control', plugins.get('availability', 'unavailable'), 'unknown',
         'Read-only inventory; requested state is not activation')
+    if plugins.get('availability') == 'error':
+        row('Plugin diagnostics', 'Unavailable: check captures mount, catalog and state', 'unknown',
+            'Preserve state; inspect with the local packs CLI')
     for plugin in plugins.get('plugins', [])[:12] if isinstance(plugins.get('plugins'), list) else []:
         plugin = mapping(plugin)
         row('Plugin ' + text(plugin.get('name')), 'requested ' + text(plugin.get('state')) + '; active unknown',

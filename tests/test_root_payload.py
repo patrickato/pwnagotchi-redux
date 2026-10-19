@@ -19,7 +19,9 @@ def slot(tmp_path, name="lite", profile="lite"):
         path = root / item
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("installed fixture\n")
-    (root / "usr/share/redux/packages.tsv").write_text("python3\t3.11.2-1\n")
+    (root / "usr/share/redux/packages.tsv").write_text("".join(name + "\t1.0\n" for name in ('python3','python3-pil','python3-dbus-next','hcxtools','bettercap','iw')))
+    (root / "usr/share/redux/packs/field-diagnostics/pack.toml").write_text(
+        (ROOT / "image/stage-redux/60-packs/files/catalog/field-diagnostics/pack.toml").read_text())
     systemd = root / "etc/systemd/system"
     # The field image ships the real, disabled native TFT unit. Rootfs
     # fixtures mimic its exact policy rather than activating any display.

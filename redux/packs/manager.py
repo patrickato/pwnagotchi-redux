@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
+import uuid
 import time
 import fcntl
-from .control import read_data, digest, validate_options, compatibility
+from .control import read_data, digest, validate_options, compatibility, NAME
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -27,7 +27,8 @@ class DependencyError(Exception):
 
 
 class PackManager:
-    def __init__(self, root, state_path=None):
+    def __init__(self, root, state_path=None, *, write_guard=None):
+        self.write_guard = write_guard or (lambda: None)
         self.root = Path(root)
         self._state_path = Path(state_path) if state_path else (self.root / ".packs-state.json")
         self._packs: Dict[str, Pack] = {}
@@ -178,11 +179,17 @@ class PackManager:
 
     def apply(self, revision, action, name, options=None, authorize_side_effects=False):
         # Serialize local writers; re-read both catalog and state under the lock.
+        self.write_guard()
         parent = self._state_path.parent
         if parent.absolute() != parent.resolve() or self._state_path.is_symlink():
             raise ValueError("unsafe state path")
         lock = self._state_path.with_name(self._state_path.name + ".lock")
-        fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            self.write_guard()
+            fd = os.open(lock.name, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        finally:
+            os.close(directory)
         with os.fdopen(fd, "w") as stream:
             fcntl.flock(stream, fcntl.LOCK_EX)
             self.discover()
@@ -195,28 +202,35 @@ class PackManager:
             self._load_state()
         return {"requested": plan["requested"], "activation": plan["activation"]}
 
-    @staticmethod
-    def _atomic(path, data):
-        if path.is_symlink():
-            raise ValueError("unsafe state path")
+    def _atomic(self, path, data):
         raw = json.dumps(data, allow_nan=False).encode()
         if len(raw) > 65536:
             raise ValueError("state exceeds 64 KiB")
-        fd, temporary = tempfile.mkstemp(prefix=".packs-", dir=path.parent)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        temporary = ".packs-" + uuid.uuid4().hex
         try:
+            self.write_guard()
+            try:
+                info = os.stat(path.name, dir_fd=directory, follow_symlinks=False)
+                import stat
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError("unsafe state path")
+            except FileNotFoundError:
+                pass
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
             with os.fdopen(fd, "wb") as stream:
                 stream.write(raw)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, path)
-            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+            self.write_guard()
+            os.replace(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
+            os.fsync(directory)
         finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+            try:
+                os.unlink(temporary, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+            os.close(directory)
 
     def inventory(self, offset=0, limit=50):
         if type(offset) is not int or offset < 0 or type(limit) is not int or limit < 0:
@@ -238,7 +252,7 @@ class PackManager:
                 diagnostics.append("Platform/runtime requirements are unqualified")
             if set(pack.conflicts) & self._enabled:
                 diagnostics.append("Conflicts with requested plugin state")
-            records.append({"diagnostics": diagnostics, "name": pack.name, "version": pack.version,
+            records.append({"diagnostics": diagnostics, "name": pack.name, "version": pack.version, "description": pack.description,
                 "source": "installed manifest", "manifest_sha256": pack.manifest_sha256, "location": pack.root,
                 "state": "incompatible" if evidence["state"] == "incompatible" else ("enabled" if self.is_enabled(pack.name) else "disabled"),
                 "requested_enabled": self.is_enabled(pack.name), "active": None,
@@ -247,7 +261,7 @@ class PackManager:
                 "requirements": list(pack.requirements), "side_effects": pack.side_effects,
                 "options": {key: {k: v for k, v in spec.items() if k in ("type", "min", "max", "max_length", "sensitive") or (k == "choices" and not spec.get("sensitive"))}
                             for key, spec in pack.options.items()}})
-        return {"version": 1, "plugins": records, "errors": self.errors,
+        return {"version": 1, "plugins": records, "errors": self.errors[:32], "error_count": len(self.errors),
                 "total": len(names), "offset": offset, "next_offset": offset + limit if offset + limit < len(names) else None,
                 "partial": getattr(self, "partial", False),
                 "runtime_activation": "unknown"}
@@ -279,7 +293,7 @@ class PackManager:
             if self._state_path.exists():
                 raise ValueError("invalid plugin state; preserve it and restore reviewed backup")
             data = {}
-        if not isinstance(data, dict) or not isinstance(data.get("enabled", []), list) or any(not isinstance(n, str) for n in data.get("enabled", [])):
+        if not isinstance(data, dict) or not isinstance(data.get("enabled", []), list) or any(not isinstance(n, str) or not NAME.fullmatch(n) for n in data.get("enabled", [])):
             raise ValueError("invalid plugin state")
         if not isinstance(data.get("configuration", {}), dict):
             raise ValueError("invalid plugin configuration")

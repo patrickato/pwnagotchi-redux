@@ -455,6 +455,9 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None, s
                        else "No verified findings")
             text_line((20, 194), message, font=_font(12), fill=SUBTLE)
 
+    if page == "doctor" and any(row["label"] == "Plugin diagnostics" for row in evidence["rows"]):
+        text_line((20, 140), "PLUGIN INVENTORY UNAVAILABLE / SEE SYSTEM", font=_font(9), fill=AMBER)
+
     if page == "captures":
         draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
         status = capture["ledger"]

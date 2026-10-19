@@ -409,19 +409,27 @@ def cmd_vault(args) -> int:
 
 
 def cmd_packs(args) -> int:
+    from .packs.locations import StateUnavailable
     try:
-        mgr = PackManager(args.dir, state_path=args.state)
+        from .packs.locations import locations, mount_guard, prepare_parent
+        root, state = locations(args.dir, args.state)
+        guard = mount_guard(state)
+        mgr = PackManager(root, state_path=state, write_guard=guard)
         if args.pack_cmd == "list":
             print(json.dumps(mgr.inventory(offset=args.offset), indent=2))
         else:
             options = json.loads(args.options) if args.pack_cmd == "configure" else None
             if args.confirm:
+                prepare_parent(state, guard)
                 result = mgr.apply(args.confirm, args.pack_cmd, args.name, options, args.authorize_side_effects)
             else:
                 result = mgr.preview(args.pack_cmd, args.name, options, args.authorize_side_effects)
                 # Private configuration is never emitted, even in previews.
                 result.pop("next", None)
             print(json.dumps(result, indent=2))
+    except StateUnavailable as e:
+        print(f"plugin state unavailable: {e}; verify REDUXCAP before retrying", file=sys.stderr)
+        return 1
     except DependencyError as e:
         print(f"plugin request rejected: {e}", file=sys.stderr)
         return 1
@@ -1466,7 +1474,7 @@ def build_parser() -> argparse.ArgumentParser:
     hw.set_defaults(func=cmd_hwtest)
 
     pk = sub.add_parser("packs", help="manage Packs")
-    pk.add_argument("--dir", required=True, help="packs directory")
+    pk.add_argument("--dir", help="catalog directory (installed default: /usr/share/redux/packs)")
     pk.add_argument("--state", help="writable requested-state path; use /captures/config/packs.json on images")
     psub = pk.add_subparsers(dest="pack_cmd", required=True)
     li = psub.add_parser("list"); li.add_argument("--offset", type=int, default=0)
