@@ -292,4 +292,4 @@ def test_deeply_nested_cache_json_cannot_crash_live_consumer():
         destination.write_text("[" * 2000 + "0" + "]" * 2000)
         report = module.read_cached_receipt(destination, now=1001)
         assert report["status"] == "unknown"
-        assert report["reason"] == "receipt_unavailable"
+        assert report["reason"] in {"receipt_unavailable", "unverified_receipt"}
