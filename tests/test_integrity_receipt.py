@@ -246,3 +246,41 @@ def test_huge_epoch_cannot_be_published():
         with unittest.TestCase().assertRaises(ValueError):
             module.publish_receipt(path, valid, completed_utc=10 ** 500)
         assert not path.exists()
+
+
+def test_untrusted_cached_json_extreme_numbers_are_unknown():
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "receipt.json"
+        for stamp in ["1e9999", "NaN", "Infinity", "-Infinity",
+                      str(10 ** 500)]:
+            dest.write_text(
+                '{"schema":1,"completed_utc":' + stamp +
+                ',"result":"pass","checked":1,"ready_rows":1,"issues":{}}')
+            verdict = module.read_cached_receipt(dest, now=1001)
+            assert verdict["status"] == "unknown"
+
+
+def test_untrusted_cached_json_nonregular_or_truncated_is_unknown():
+    with tempfile.TemporaryDirectory() as tmp:
+        parent = Path(tmp)
+        directory = parent / "directory-receipt"
+        directory.mkdir()
+        assert module.read_cached_receipt(directory, now=1001)["status"] == "unknown"
+        dest = parent / "receipt.json"
+        dest.write_text('{"schema":1,"completed_utc":')
+        assert module.read_cached_receipt(dest, now=1001)["status"] == "unknown"
+        dest.write_bytes(b"x" * (module.MAX_RECEIPT_BYTES + 1))
+        assert module.read_cached_receipt(dest, now=1001)["status"] == "unknown"
+
+
+def test_invalid_receipt_cannot_demote_existing_ok_cache():
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "receipt.json"
+        valid = {"result": "pass", "checked": 1, "ready_rows": 1, "issues": {}}
+        module.publish_receipt(dest, valid, completed_utc=1000)
+        original = dest.read_bytes()
+        invalid = {"result": "attention", "checked": 1, "ready_rows": 1,
+                   "issues": {"artifact_missing": 2}}
+        with unittest.TestCase().assertRaises(ValueError):
+            module.publish_receipt(dest, invalid, completed_utc=1001)
+        assert dest.read_bytes() == original
