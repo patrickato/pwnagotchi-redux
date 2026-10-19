@@ -177,3 +177,46 @@ def test_failed_publication_leaves_old_receipt_untouched():
             module.publish_receipt(dest, invalid, completed_utc=1000)
         assert dest.read_bytes() == b"original receipt"
         assert not list(Path(tmp).glob(".receipt-*"))
+
+
+def test_cached_reader_rejects_symlinked_parent():
+    with tempfile.TemporaryDirectory() as tmp:
+        real = Path(tmp) / "private"
+        real.mkdir()
+        dest = real / "receipt.json"
+        module.publish_receipt(dest,
+            {"result": "pass", "checked": 1, "ready_rows": 1, "issues": {}},
+            completed_utc=1000)
+        symlink = Path(tmp) / "linked"
+        symlink.symlink_to(real, target_is_directory=True)
+        result = module.read_cached_receipt(symlink / "receipt.json", now=1001)
+        assert result["status"] == "unknown"
+
+
+def test_cached_reader_rejects_world_writable_parent():
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp) / "untrusted"
+        directory.mkdir()
+        path = directory / "receipt.json"
+        path.write_text(json.dumps(receipt()))
+        directory.chmod(0o777)
+        assert module.read_cached_receipt(path, now=1001)["status"] == "unknown"
+
+
+def test_cached_reader_rejects_inplace_file_change(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "receipt.json"
+        dest.write_text(json.dumps(receipt()))
+        original_read = module.os.read
+        modified = [False]
+
+        def changing_read(fd, count):
+            chunk = original_read(fd, count)
+            if chunk and not modified[0]:
+                modified[0] = True
+                dest.write_bytes(b"x" * len(chunk))
+            return chunk
+
+        monkeypatch.setattr(module.os, "read", changing_read)
+        assert module.read_cached_receipt(dest, now=1001)["status"] == "unknown"
+        assert modified[0]
