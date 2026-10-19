@@ -410,3 +410,24 @@ def test_reader_rejects_different_receipt_owner(tmp_path, monkeypatch):
 
     monkeypatch.setattr(module.os, "fstat", foreign_owned_regular)
     assert module.read_cached_receipt(dest, now=1001)["status"] == "unknown"
+
+
+def test_private_directory_must_belong_to_service_identity(tmp_path, monkeypatch):
+    """A root-run Doctor cannot trust evidence in a different user's tree."""
+    from types import SimpleNamespace
+
+    dest = tmp_path / "receipt.json"
+    valid = {"result": "pass", "checked": 1, "ready_rows": 1, "issues": {}}
+    module.publish_receipt(dest, valid, completed_utc=1000)
+    real_fstat = module.os.fstat
+
+    def foreign_owned_directory(fd):
+        result = real_fstat(fd)
+        if result.st_mode & 0o170000 == 0o040000:
+            return SimpleNamespace(st_mode=result.st_mode, st_uid=result.st_uid + 1)
+        return result
+
+    monkeypatch.setattr(module.os, "fstat", foreign_owned_directory)
+    assert module.read_cached_receipt(dest, now=1001)["status"] == "unknown"
+    with unittest.TestCase().assertRaises(ValueError):
+        module.publish_receipt(dest, valid, completed_utc=1001)
