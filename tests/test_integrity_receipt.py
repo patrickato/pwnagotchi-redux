@@ -284,3 +284,12 @@ def test_invalid_receipt_cannot_demote_existing_ok_cache():
         with unittest.TestCase().assertRaises(ValueError):
             module.publish_receipt(dest, invalid, completed_utc=1001)
         assert dest.read_bytes() == original
+
+
+def test_deeply_nested_cache_json_cannot_crash_live_consumer():
+    with tempfile.TemporaryDirectory() as tmp:
+        destination = Path(tmp) / "receipt.json"
+        destination.write_text("[" * 2000 + "0" + "]" * 2000)
+        report = module.read_cached_receipt(destination, now=1001)
+        assert report["status"] == "unknown"
+        assert report["reason"] == "receipt_unavailable"
