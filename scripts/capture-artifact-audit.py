@@ -118,12 +118,31 @@ def main(argv=None):
     p.add_argument("--receipt", type=Path,
                    help="Opt in to atomic private publication at this explicit path")
     args = p.parse_args(argv)
-    report = audit(args.db, args.output)
-    if args.receipt is not None:
-        # Standalone script execution sets sys.path[0] to scripts/, not the
-        # workbench root. Add only the source's trusted containing checkout.
+    # The capture partition must be verified before accessing paths beneath
+    # /captures. A missing REDUXCAP must never redirect a receipt to rootfs.
+    capture_root = Path("/captures")
+    paths = (args.db, args.output, args.receipt)
+    requires_mount = any(path is not None and
+        (path.absolute() == capture_root or capture_root in path.absolute().parents)
+        for path in paths)
+    mount_identity = None
+    if requires_mount or args.receipt is not None:
+        # Direct script invocation uses scripts/ on sys.path, not the checkout.
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    if requires_mount:
+        from redux.storage_mount import capture_mount_snapshot
+        mount_identity = capture_mount_snapshot()
+        if mount_identity is None:
+            print(json.dumps({"result": "attention",
+                              "reason": "capture_mount_unverified"}, sort_keys=True))
+            return 2
+    report = audit(args.db, args.output)
+    if requires_mount and capture_mount_snapshot() != mount_identity:
+        print(json.dumps({"result": "attention",
+                          "reason": "capture_mount_changed"}, sort_keys=True))
+        return 2
+    if args.receipt is not None:
         from redux.crack.integrity_receipt import publish_receipt
         try:
             receipt = publish_receipt(args.receipt, report, completed_utc=time.time())
