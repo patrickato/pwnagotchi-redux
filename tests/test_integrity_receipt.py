@@ -81,3 +81,21 @@ class IntegrityReceiptTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+def test_source_has_no_accidental_literal_newline_escape():
+    # Regression: an escaped newline inside an indented comment can swallow
+    # the assignment on its right, leaving 'reported' undefined at runtime.
+    source = FILE.read_text(encoding='utf-8')
+    assert r'\\n    reported' not in source
+
+
+def test_all_receipt_classifications_execute_without_name_error():
+    examples = [
+        receipt(),
+        receipt(result='unknown', checked=0, ready_rows=0),
+        receipt(result='attention', issues={'artifact_missing': 1}),
+        receipt(result='attention', issues={'artifact_missing': 2}),
+    ]
+    for item in examples:
+        answer = module.classify_receipt(item, now=1001)
+        assert answer['status'] in {'ok', 'unknown', 'attention'}
