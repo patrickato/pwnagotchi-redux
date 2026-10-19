@@ -214,3 +214,25 @@ database while the read transaction continues to see one consistent
 ready-row snapshot. Repository regression tests cover both the WAL
 interleaving and directory replacement, but the full integrated suite
 must be rerun after these commits.
+
+## Audit receipt classification and content-change hardening
+
+The saved receipt validator now distinguishes **per-artifact** issues from
+**audit-global** issues. A legitimate audit can record a missing prepared
+file and then detect that its output directory was replaced; both must be
+reported as ATTENTION, not suppressed as an impossible issue total.
+Global issue counters must be exactly one each; row-level issue totals
+cannot exceed checked rows. An over-limit SQLite ready-row population
+greater than 10,000 also remains ATTENTION even though no rows were hashed.
+An unauthenticated or stale receipt still cannot prove healthy captures.
+
+While hashing prepared artifacts, the auditor now compares ctime as well
+as mtime, inode, device and size. Changing a file's contents and restoring
+its mtime is detected as a concurrent content mutation rather than a PASS.
+A stale receipt never proves present-tense artifact integrity.
+
+The updated receipt classifier and auditor were copied byte-for-byte from
+their committed Git blobs into an isolated Linux test directory; the source
+blob hashes were checked against GitHub and 23 targeted tests passed.
+This validates the two audited modules, not the full Redux repository or
+its physically mounted REDUXCAP partition.
