@@ -145,3 +145,17 @@ private publication, atomic replacement, symlinked targets/directories,
 shared-directory refusal, oversized receipts and torn in-place reads.
 A complete checkout regression run is required before declaring this
 new code software-qualified.
+
+## Untrusted timestamp and malformed JSON boundaries
+
+Receipt time validation bounds UTC epochs before floating-point conversion.
+Enormous integers (including JSON integer values larger than a machine float),
+nonfinite numbers, future times, and stale observations cannot crash the
+collector or be interpreted as a recent PASS. The loader also refuses
+truncated/nonregular files and inconsistent issue totals; failure to validate
+a replacement receipt leaves the previously published file unchanged.
+
+The classifier timestamp hardening and its edge-case unit tests were added
+after the Sprint 05 full-regression baseline. Local replay of the equivalent
+pure classifier logic passed 11 boundary cases; exact repository tests still
+require the next integrated checkout qualification.
