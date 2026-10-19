@@ -192,3 +192,25 @@ contract is fail-closed UNKNOWN for non-object or unparseable receipts.
 The pinned-directory implementation was exercised in five isolated Linux
 filesystem fixtures. These fixtures are useful local behavior checks but do not
 replace the full repository test suite or physical Pi validation.
+
+## Stable SQLite observation and final directory identity
+
+Integrity evidence now holds an explicit read-only SQLite transaction for
+the schema check, ready-row count and ready-row selection. Without this,
+a concurrent ingest worker changing statuses between two SELECT statements
+could produce contradictory audit receipts. The source also refuses a
+count-versus-row mismatch instead of marking unverified rows as PASS.
+
+The prepared-artifact directory is read through its pinned directory
+descriptor, and after hashing the audit rechecks the canonical directory
+name's inode. A symlink swap cannot redirect what is read, **and** losing
+the original public directory name now causes
+`output_directory_changed` (ATTENTION) rather than a misleading PASS.
+The timestamped receipt classifier recognizes this discrepancy.
+The audit does not lock or interrupt the processing worker.
+
+Offline WAL concurrency replay verifies that a writer can update the
+database while the read transaction continues to see one consistent
+ready-row snapshot. Repository regression tests cover both the WAL
+interleaving and directory replacement, but the full integrated suite
+must be rerun after these commits.
