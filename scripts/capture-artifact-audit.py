@@ -116,8 +116,10 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
                         hashobj.update(chunk)
                         remaining -= len(chunk)
                     after = os.fstat(fd)
-                    if remaining or (meta.st_dev, meta.st_ino, meta.st_size, meta.st_mtime_ns) != (
-                            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+                    if remaining or (meta.st_dev, meta.st_ino, meta.st_size,
+                                     meta.st_mtime_ns, meta.st_ctime_ns) != (
+                            after.st_dev, after.st_ino, after.st_size,
+                            after.st_mtime_ns, after.st_ctime_ns):
                         issue("artifact_changed_during_audit")
                     elif hashobj.hexdigest() != digest:
                         issue("artifact_digest_mismatch")
