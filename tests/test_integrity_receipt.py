@@ -293,3 +293,16 @@ def test_deeply_nested_cache_json_cannot_crash_live_consumer():
         report = module.read_cached_receipt(destination, now=1001)
         assert report["status"] == "unknown"
         assert report["reason"] in {"receipt_unavailable", "unverified_receipt"}
+
+
+def test_cached_reader_catches_parser_recursion_error(tmp_path, monkeypatch):
+    source = tmp_path / "receipt.json"
+    source.write_text(json.dumps(receipt()))
+
+    def parser_recursion(*args, **kwargs):
+        raise RecursionError("malformed nested JSON")
+
+    monkeypatch.setattr(module.json, "loads", parser_recursion)
+    result = module.read_cached_receipt(source, now=1001)
+    assert result["status"] == "unknown"
+    assert result["reason"] == "receipt_unavailable"
