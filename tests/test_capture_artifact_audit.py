@@ -185,3 +185,39 @@ def test_cli_does_not_publish_after_mount_identity_changes(monkeypatch, capsys):
     assert mod.main(["--db", "/captures/jobs.db", "--output", "/captures/ready",
                      "--receipt", "/captures/diagnostics/artifact-integrity.json"]) == 2
     assert '"reason": "capture_mount_changed"' in capsys.readouterr().out
+
+
+def test_artifact_directory_swap_cannot_redirect_hash_to_symlink(tmp_path, monkeypatch):
+    """A parent-path swap after directory open must not read the replacement."""
+    import os
+    db, output = fixture(tmp_path)
+    original = ready(db, output, b"legitimate synthetic artifact")
+    digest_name = original.name
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / digest_name).write_bytes(b"outside data should never be read")
+    saved = tmp_path / "pinned-original"
+    original_open = os.open
+    changed = [False]
+
+    def swap_before_artifact_open(path, flags, *args, **kwargs):
+        if str(path) == digest_name and not changed[0]:
+            changed[0] = True
+            output.rename(saved)
+            output.symlink_to(outside, target_is_directory=True)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(mod.os, "open", swap_before_artifact_open)
+    result = mod.audit(db, output)
+    assert changed[0]
+    assert result["result"] == "pass"
+    assert result["checked"] == 1
+    assert (saved / digest_name).read_bytes() == b"legitimate synthetic artifact"
+
+
+def test_audit_never_follows_artifact_directory_symlink(tmp_path):
+    db, output = fixture(tmp_path)
+    ready(db, output)
+    link = tmp_path / "prepared-link"
+    link.symlink_to(output, target_is_directory=True)
+    assert mod.audit(db, link)["issues"] == {"output_directory_untrusted": 1}
