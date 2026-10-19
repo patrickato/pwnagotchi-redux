@@ -128,3 +128,52 @@ def test_atomic_publisher_refuses_link_destination():
         with unittest.TestCase().assertRaises(ValueError):
             module.publish_receipt(link, dict(result='pass', checked=1, ready_rows=1, issues={}), completed_utc=1000)
         assert outside.read_text() == 'DO NOT TOUCH'
+
+
+def test_publisher_replaces_existing_regular_receipt_atomically():
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "receipt.json"
+        old = {"result": "attention", "checked": 1, "ready_rows": 1,
+               "issues": {"artifact_missing": 1}}
+        ok = {"result": "pass", "checked": 1, "ready_rows": 1, "issues": {}}
+        module.publish_receipt(dest, old, completed_utc=1000)
+        assert module.read_cached_receipt(dest, now=1001)["status"] == "attention"
+        module.publish_receipt(dest, ok, completed_utc=1010)
+        assert module.read_cached_receipt(dest, now=1011)["status"] == "ok"
+        assert not list(Path(tmp).glob(".receipt-*"))
+
+
+def test_publisher_refuses_untrusted_receipt_directory():
+    with tempfile.TemporaryDirectory() as tmp:
+        parent = Path(tmp) / "shared"
+        parent.mkdir()
+        parent.chmod(0o777)
+        dest = parent / "receipt.json"
+        valid = {"result": "pass", "checked": 1, "ready_rows": 1, "issues": {}}
+        with unittest.TestCase().assertRaises(ValueError):
+            module.publish_receipt(dest, valid, completed_utc=1000)
+        assert not dest.exists()
+
+
+def test_publisher_rejects_symlink_directory():
+    with tempfile.TemporaryDirectory() as tmp:
+        real_parent = Path(tmp) / "private"
+        real_parent.mkdir()
+        linked_parent = Path(tmp) / "linked"
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+        dest = linked_parent / "receipt.json"
+        valid = {"result": "pass", "checked": 1, "ready_rows": 1, "issues": {}}
+        with unittest.TestCase().assertRaises(OSError):
+            module.publish_receipt(dest, valid, completed_utc=1000)
+        assert not (real_parent / "receipt.json").exists()
+
+
+def test_failed_publication_leaves_old_receipt_untouched():
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "receipt.json"
+        dest.write_bytes(b"original receipt")
+        invalid = {"result": "pass", "checked": 0, "ready_rows": 0, "issues": {}}
+        with unittest.TestCase().assertRaises(ValueError):
+            module.publish_receipt(dest, invalid, completed_utc=1000)
+        assert dest.read_bytes() == b"original receipt"
+        assert not list(Path(tmp).glob(".receipt-*"))
