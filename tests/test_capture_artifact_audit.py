@@ -320,3 +320,43 @@ def test_artefact_change_with_restored_mtime_is_detected(tmp_path, monkeypatch):
     assert changed == [True]
     assert report["result"] == "attention"
     assert report["issues"] == {"artifact_changed_during_audit": 1}
+
+
+def test_ledger_replaced_after_snapshot_is_not_pass(tmp_path, monkeypatch):
+    """A complete SQLite read cannot certify a subsequently replaced jobs.db."""
+    import os
+    db, output = fixture(tmp_path)
+    original = ready(db, output)
+    replacement = tmp_path / "unrelated.db"
+    with sqlite3.connect(replacement) as conn:
+        conn.execute("CREATE TABLE artifacts (source_sha TEXT, status TEXT, output_sha TEXT, output_path TEXT)")
+    saved = tmp_path / "original-jobs.db"
+    actual_open = os.open
+    swapped = [False]
+
+    def replacing_open(path, flags, *args, **kwargs):
+        if path == original.name and kwargs.get("dir_fd") is not None and not swapped[0]:
+            swapped[0] = True
+            db.rename(saved)
+            db.symlink_to(replacement)
+        return actual_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(mod.os, "open", replacing_open)
+    result = mod.audit(db, output)
+    assert swapped == [True]
+    assert result["checked"] == 1
+    assert result["issues"] == {"ledger_changed": 1}
+    assert result["result"] == "attention"
+    assert saved.is_file()
+
+
+def test_wal_writer_same_ledger_inode_is_allowed(tmp_path):
+    """Committed SQLite WAL updates may change data but not ledger identity."""
+    db, output = fixture(tmp_path)
+    ready(db, output)
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
+    assert mod.audit(db, output)["result"] == "pass"
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE artifacts SET status='error'")
+    assert mod.audit(db, output)["result"] == "unknown"
