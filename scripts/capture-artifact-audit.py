@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import sqlite3
 import stat
+import time
 from urllib.parse import quote
 
 SHA = re.compile(r"[0-9a-f]{64}\Z")
@@ -114,6 +115,8 @@ def main(argv=None):
     p.add_argument("--output", type=Path, default=Path("/captures/ready"))
     args = p.parse_args(argv)
     report = audit(args.db, args.output)
+    # Small stable receipt for a separate cached consumer; no paths or records.
+    report = {"schema": 1, "completed_utc": time.time(), **report}
     print(json.dumps(report, sort_keys=True))
     return 0 if report["result"] == "pass" else 3 if report["result"] == "unknown" else 1
 
