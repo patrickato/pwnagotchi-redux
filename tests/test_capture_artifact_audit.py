@@ -162,3 +162,26 @@ def test_explicit_receipt_cli_never_follows_symlink(tmp_path, capsys):
                      "--receipt", str(dest)]) == 2
     assert outside.read_bytes() == b"DO NOT OVERWRITE"
     assert "receipt_publication_failed" in capsys.readouterr().out
+
+
+def test_cli_refuses_capture_root_without_verified_mount(monkeypatch, capsys):
+    from redux import storage_mount
+    monkeypatch.setattr(storage_mount, "capture_mount_snapshot", lambda: None)
+    monkeypatch.setattr(mod, "audit", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("audit should never read captures without the real ext4 mount")))
+    result = mod.main(["--db", "/captures/jobs.db", "--output", "/captures/ready",
+                       "--receipt", "/captures/diagnostics/artifact-integrity.json"])
+    assert result == 2
+    assert '"reason": "capture_mount_unverified"' in capsys.readouterr().out
+
+
+def test_cli_does_not_publish_after_mount_identity_changes(monkeypatch, capsys):
+    from redux import storage_mount
+    evidence = iter([(42, "8:1", "ext4", 2, 3),
+                     (43, "8:1", "ext4", 2, 3)])
+    monkeypatch.setattr(storage_mount, "capture_mount_snapshot", lambda: next(evidence))
+    monkeypatch.setattr(mod, "audit", lambda *a, **k:
+                        {"result": "pass", "checked": 1, "ready_rows": 1, "issues": {}})
+    assert mod.main(["--db", "/captures/jobs.db", "--output", "/captures/ready",
+                     "--receipt", "/captures/diagnostics/artifact-integrity.json"]) == 2
+    assert '"reason": "capture_mount_changed"' in capsys.readouterr().out
