@@ -35,7 +35,8 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
                          capture_mount_ok=None, processing_report=None,
                          processing_now_utc=None, processing_stale_seconds=180,
                          failure_streak=0, retry_in_seconds=0,
-                         observer_errors=None, persistence_error=""):
+                         observer_errors=None, persistence_error="",
+                         artifact_integrity=None):
     """Combine Augur's real Doctor report with physical supervisor observations.
 
     Without Augur the Doctor's normal probes are UNKNOWN, *never* silently OK.
@@ -247,6 +248,30 @@ def describe_live_health(state, *, iface="", capture_link_type=None,
                                      "Capture-processing worker recently completed a scan.",
                                      f"Last scan examined {scanned} file(s); "
                                      "this does not prove conversion or handshake validity."))
+
+    # Only a separately completed, timestamp-validated audit can assess the
+    # integrity of prepared artifacts. Never hash captures in a live heartbeat.
+    if isinstance(artifact_integrity, dict):
+        integrity_state = artifact_integrity.get("status")
+        integrity_reason = artifact_integrity.get("reason")
+        if integrity_state == "ok" and integrity_reason == "verified_ready_artifacts":
+            findings.append(_finding(
+                "capture artifact integrity", "ok",
+                "Previously prepared capture artifacts passed their integrity audit.",
+                "A recent independent SHA-256 audit verified all recorded ready artifacts; "
+                "this is not evidence that a wireless handshake is authentic."))
+        elif integrity_state == "attention" and integrity_reason == "integrity_discrepancies":
+            findings.append(_finding(
+                "capture artifact integrity", "action",
+                "A prepared capture artifact failed an integrity audit.",
+                "A recent audit recorded missing, altered, or unsafe prepared artifacts.",
+                "Inspect the separate read-only artifact audit; preserve source captures."))
+        else:
+            findings.append(_finding(
+                "capture artifact integrity", "unknown",
+                "Prepared capture integrity has not been verified recently.",
+                "No valid, recent, complete artifact audit receipt is available.",
+                "Run an explicitly authorized offline integrity audit."))
 
     if dashboard_enabled:
         if dashboard_active:
