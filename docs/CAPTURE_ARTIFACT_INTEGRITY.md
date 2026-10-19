@@ -62,3 +62,17 @@ This module is a reusable *read-side contract*, not a new background job or
 dashboard claim. Scheduling, secure publication, and Doctor/UI integration
 remain separate work; until a producer supplies a validated receipt, the
 interface must display integrity as unknown.
+
+## Cached read-side integration
+
+`redux.crack.integrity_receipt.read_cached_receipt(path)` reads an existing
+JSON receipt without opening the capture ledger or prepared files. It refuses
+symlinks and nonregular sources, limits the read to 8 KiB, rejects duplicate
+JSON keys and malformed/nonfinite values, and reuses the freshness and
+counter-consistency classifier. Missing or unsafe sources report UNKNOWN.
+
+No background scheduler, file publisher, or Doctor/dashboard wiring is
+assumed from this addition. Those require a separate controlled integration
+of an atomic receipt producer, with the current audit remaining explicitly
+read-only. In particular, a recent receipt is evidence of its audit time,
+not proof that captured data can never change afterward.
