@@ -100,3 +100,24 @@ def test_empty_ledger_cli_returns_unknown_exit_code(tmp_path, capsys):
     db, output = fixture(tmp_path)
     assert mod.main(["--db", str(db), "--output", str(output)]) == 3
     assert '"result": "unknown"' in capsys.readouterr().out
+
+def test_artifact_size_ceiling_matches_ingestor():
+    from redux.crack.ingest import _MAX_PREPARED_BYTES
+    assert mod.MAX_ARTIFACT == _MAX_PREPARED_BYTES
+
+
+def test_oversized_prepared_artifact_is_flagged_without_hashing(tmp_path):
+    db, output = fixture(tmp_path)
+    path = ready(db, output)
+    with path.open("r+b") as stream:
+        stream.truncate(mod.MAX_ARTIFACT + 1)
+    assert mod.audit(db, output)["issues"] == {"artifact_size_invalid": 1}
+
+
+def test_canonical_path_is_required_even_with_valid_digest(tmp_path):
+    db, output = fixture(tmp_path)
+    path = ready(db, output)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE artifacts SET output_path=?", (str(tmp_path / "unrelated"),))
+    assert mod.audit(db, output)["issues"] == {"unexpected_artifact_path": 1}
+    assert path.exists()
