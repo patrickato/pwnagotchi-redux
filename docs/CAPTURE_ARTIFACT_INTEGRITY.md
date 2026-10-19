@@ -91,3 +91,34 @@ The function is not invoked automatically by web requests or status refreshes.
 Until an operator-selected audit job actually publishes a receipt, Doctor
 must report artifact integrity as UNKNOWN. Publication tests and a physical
 installation/permissions review are required before scheduling this on the Pi.
+
+## Runtime Doctor wiring (opt-in audit, automatic reading)
+
+The offline auditor remains read-only unless the caller explicitly passes
+`--receipt`. A trusted operator may choose the writable capture partition's
+diagnostics directory for a cached receipt:
+
+```bash
+python3 scripts/capture-artifact-audit.py \
+  --db /captures/jobs.db --output /captures/ready \
+  --receipt /captures/diagnostics/artifact-integrity.json
+```
+
+This runs the bounded SHA-256 audit once and atomically publishes only its
+private summary. The directory must already exist and be controlled by the
+trusted operator; the tool does not create it or run with escalated privileges.
+Normal runs without `--receipt` remain non-mutating.
+
+The live runtime now reads only that fixed 8 KiB receipt path, under the
+existing capture partition's diagnostics directory, during its existing
+status checkpoint. The canonical status JSON exposes
+`artifact_integrity`; live Doctor adds `capture artifact integrity`
+with status OK for recent verified artifacts, ACTION when a recent audit
+observed discrepancies, or UNKNOWN for a missing, stale or invalid receipt.
+
+**Important limitations:** no audit is scheduled automatically, dashboard
+refreshes never run the audit, and no receipt is shipped as evidence in an
+unverified image. The presence of valid prepared data does not prove an
+authentic wireless handshake. Receipt freshness defaults to one hour and
+only covers the audit's measured moment. Neither RF acceptance nor physical
+deployment is implied.
