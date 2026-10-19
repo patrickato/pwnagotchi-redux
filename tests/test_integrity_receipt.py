@@ -60,6 +60,7 @@ class IntegrityReceiptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "receipt.json"
             path.write_text(json.dumps(receipt()))
+            path.chmod(0o600)
             self.assertEqual(module.read_cached_receipt(path, now=1001)['status'], 'ok')
             path.write_text('{"schema":1,"schema":1}')
             self.assertEqual(module.read_cached_receipt(path, now=1001)['status'], 'unknown')
@@ -207,6 +208,7 @@ def test_cached_reader_rejects_inplace_file_change(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         dest = Path(tmp) / "receipt.json"
         dest.write_text(json.dumps(receipt()))
+        dest.chmod(0o600)
         original_read = module.os.read
         modified = [False]
 
@@ -236,6 +238,7 @@ def test_huge_timestamp_in_json_receipt_cannot_crash_reader():
         path = Path(tmp) / "receipt.json"
         valid = receipt(completed_utc=10 ** 500)
         path.write_text(json.dumps(valid))
+        path.chmod(0o600)
         assert module.read_cached_receipt(path, now=1001)["status"] == "unknown"
 
 
@@ -256,6 +259,7 @@ def test_untrusted_cached_json_extreme_numbers_are_unknown():
             dest.write_text(
                 '{"schema":1,"completed_utc":' + stamp +
                 ',"result":"pass","checked":1,"ready_rows":1,"issues":{}}')
+            dest.chmod(0o600)
             verdict = module.read_cached_receipt(dest, now=1001)
             assert verdict["status"] == "unknown"
 
@@ -290,6 +294,7 @@ def test_deeply_nested_cache_json_cannot_crash_live_consumer():
     with tempfile.TemporaryDirectory() as tmp:
         destination = Path(tmp) / "receipt.json"
         destination.write_text("[" * 2000 + "0" + "]" * 2000)
+        destination.chmod(0o600)
         report = module.read_cached_receipt(destination, now=1001)
         assert report["status"] == "unknown"
         assert report["reason"] in {"receipt_unavailable", "unverified_receipt"}
@@ -298,6 +303,7 @@ def test_deeply_nested_cache_json_cannot_crash_live_consumer():
 def test_cached_reader_catches_parser_recursion_error(tmp_path, monkeypatch):
     source = tmp_path / "receipt.json"
     source.write_text(json.dumps(receipt()))
+    source.chmod(0o600)
 
     def parser_recursion(*args, **kwargs):
         raise RecursionError("malformed nested JSON")
@@ -367,3 +373,40 @@ def test_ledger_replacement_receipt_is_actionable():
             "issues": {"ledger_changed": 1},
         }, completed_utc=1000)
         assert module.read_cached_receipt(destination, now=1001)['status'] == 'attention'
+
+
+def test_cached_receipt_requires_private_mode():
+    """Reader must not trust writable/shareable receipt files."""
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "receipt.json"
+        module.publish_receipt(dest, {
+            "result": "pass", "checked": 1, "ready_rows": 1, "issues": {},
+        }, completed_utc=1000)
+        assert module.read_cached_receipt(dest, now=1001)["status"] == "ok"
+        for mode in (0o640, 0o604, 0o660, 0o602, 0o777):
+            dest.chmod(mode)
+            assert module.read_cached_receipt(dest, now=1001)["status"] == "unknown"
+        dest.chmod(0o600)
+        assert module.read_cached_receipt(dest, now=1001)["status"] == "ok"
+
+
+def test_reader_rejects_different_receipt_owner(tmp_path, monkeypatch):
+    """Owner mismatch is rejected before decoding an otherwise valid file."""
+    from types import SimpleNamespace
+
+    dest = tmp_path / "receipt.json"
+    module.publish_receipt(dest, {
+        "result": "pass", "checked": 1, "ready_rows": 1, "issues": {},
+    }, completed_utc=1000)
+    real_fstat = module.os.fstat
+
+    def foreign_owned_regular(fd):
+        result = real_fstat(fd)
+        if result.st_mode & 0o170000 == 0o100000:
+            return SimpleNamespace(st_mode=result.st_mode, st_uid=result.st_uid + 1,
+                st_size=result.st_size, st_dev=result.st_dev, st_ino=result.st_ino,
+                st_mtime_ns=result.st_mtime_ns, st_ctime_ns=result.st_ctime_ns)
+        return result
+
+    monkeypatch.setattr(module.os, "fstat", foreign_owned_regular)
+    assert module.read_cached_receipt(dest, now=1001)["status"] == "unknown"
