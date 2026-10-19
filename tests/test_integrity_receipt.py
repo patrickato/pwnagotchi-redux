@@ -306,3 +306,51 @@ def test_cached_reader_catches_parser_recursion_error(tmp_path, monkeypatch):
     result = module.read_cached_receipt(source, now=1001)
     assert result["status"] == "unknown"
     assert result["reason"] == "receipt_unavailable"
+
+
+def test_global_and_row_discrepancies_remain_actionable():
+    # Auditor can discover missing content, then discover its pinned output
+    # directory was also replaced. Two problems from one checked row are valid.
+    combined = receipt(result='attention', checked=1, ready_rows=1,
+                       issues={'artifact_missing': 1,
+                               'output_directory_changed': 1})
+    assert module.classify_receipt(combined, now=1001)['status'] == 'attention'
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / 'integrity.json'
+        module.publish_receipt(dest, {
+            'result': 'attention', 'checked': 1, 'ready_rows': 1,
+            'issues': {'artifact_missing': 1,
+                       'output_directory_changed': 1},
+        }, completed_utc=1000)
+        assert module.read_cached_receipt(dest, now=1001)['status'] == 'attention'
+
+
+def test_row_limit_rejection_preserves_attention_evidence():
+    over_limit = receipt(result='attention', checked=0, ready_rows=10001,
+                         issues={'row_limit_exceeded': 1})
+    assert module.classify_receipt(over_limit, now=1001)['status'] == 'attention'
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'receipt.json'
+        module.publish_receipt(path, {
+            'result': 'attention', 'checked': 0, 'ready_rows': 10001,
+            'issues': {'row_limit_exceeded': 1},
+        }, completed_utc=1000)
+        assert module.read_cached_receipt(path, now=1001)['status'] == 'attention'
+
+
+def test_impossible_global_and_row_counters_stay_unknown():
+    cases = [
+        receipt(result='attention', checked=1, ready_rows=1,
+                issues={'artifact_missing': 2, 'output_directory_changed': 1}),
+        receipt(result='attention', checked=1, ready_rows=1,
+                issues={'output_directory_changed': 2}),
+        receipt(result='attention', checked=0, ready_rows=10001,
+                issues={'artifact_missing': 1, 'row_limit_exceeded': 1}),
+        receipt(result='attention', checked=0, ready_rows=1,
+                issues={'row_limit_exceeded': 1}),
+        receipt(result='attention', checked=0, ready_rows=2 ** 63,
+                issues={'row_limit_exceeded': 1}),
+    ]
+    for item in cases:
+        assert module.classify_receipt(item, now=1001)['status'] == 'unknown'
