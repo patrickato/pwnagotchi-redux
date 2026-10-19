@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
+import re
 import os
 from pathlib import Path
 import stat
@@ -17,6 +19,13 @@ _MUST_EXIST = (
     "opt/redux/redux/core/boot.py",
     "opt/redux/redux/core/live_runtime.py",
     "opt/redux/redux/core/runtime_identity.py",
+    "opt/redux/redux/core/telemetry.py",
+    "opt/redux/redux/core/governor.py",
+    "opt/redux/redux/core/doctor.py",
+    "opt/redux/redux/core/live_health.py",
+    "opt/redux/redux/core/processing_evidence.py",
+    "opt/redux/redux/display/ui_state.py",
+    "opt/redux/redux/web/status_page.py",
     "opt/redux/redux/radio/readiness.py",
     "opt/redux/redux/radio/live_lease.py",
     "opt/redux/redux/radio/local_evidence.py",
@@ -239,6 +248,19 @@ def capture_contract(root, profile, *, expected_country=None):
     return {"incoming": "/captures/incoming", "database": "/captures/jobs.db"}
 
 
+def package_inventory(root):
+    raw = text(root, "usr/share/redux/packages.tsv", limit=4*1024*1024)
+    entries = {}
+    for line in raw.splitlines():
+        fields = line.split('\t')
+        if len(fields) != 2 or not re.fullmatch(r'[a-z0-9][a-z0-9+.:_-]*', fields[0]) or not re.fullmatch(r'[A-Za-z0-9.+:~_-]+', fields[1]) or fields[0] in entries:
+            raise ValueError("invalid installed package inventory")
+        entries[fields[0]] = fields[1]
+    if not entries:
+        raise ValueError("empty installed package inventory")
+    return {'count': len(entries), 'sha256': hashlib.sha256(raw.encode()).hexdigest()}
+
+
 def verify(root, *, profile="lite", other_root=None, expected_country=None):
     if expected_country is not None:
         if (not isinstance(expected_country, str) or len(expected_country) != 2
@@ -255,11 +277,13 @@ def verify(root, *, profile="lite", other_root=None, expected_country=None):
         roots.append(Path(other_root))
     elif other_root is not None:
         raise ValueError("Lite export must not accept a second root slot")
+    inventories = []
     for index, candidate in enumerate(roots):
         if not candidate.is_dir() or candidate.is_symlink():
             raise ValueError("export root is missing or linked")
         for filename in _MUST_EXIST:
             regular(candidate, filename)
+        inventories.append(package_inventory(candidate))
         unit_contract(candidate)
         capture_contract(candidate, profile, expected_country=expected_country)
         if profile == "ab":
@@ -280,6 +304,7 @@ def verify(root, *, profile="lite", other_root=None, expected_country=None):
             "runtime_files_checked": len(_MUST_EXIST) * len(roots),
             "systemd_units": sorted(set(_UNITS) | (set(_AB_UNITS) if profile == "ab" else set())),
             "root_payload_verified": True,
+            "package_inventories": inventories,
             "regulatory_country_verified": expected_country is not None,
             "physical_boot_verified": False,
             "note": "Mounted image rootfs contract only; not proof of boot or peripherals"}

@@ -42,7 +42,7 @@ def _compare_snapshot(a,b,names):
 
 
 def qualify(image, *, revision, profile, country, trusted_sha256=None,
-            bundle=None,keyring=None,version=None,minimum_bytes=512*1024*1024):
+            bundle=None,keyring=None,version=None,minimum_bytes=512*1024*1024,temporary_root=None):
     stack=ExitStack()
     checks=[]
     evidence={}
@@ -50,6 +50,11 @@ def qualify(image, *, revision, profile, country, trusted_sha256=None,
     def passed(name,detail):
         checks.append(check(name,'PASS',detail)); required.append(name)
     try:
+        if temporary_root is not None:
+            temporary_root=Path(temporary_root).absolute()
+            safe_path(temporary_root.parent,temporary_root.name)
+            if not temporary_root.is_dir():
+                raise ValueError('inspection scratch parent must be an existing directory')
         if not isinstance(revision,str) or not REVISION.fullmatch(revision):
             raise ValueError('expected full source revision is required')
         if profile not in ('lite','ab'):
@@ -63,7 +68,7 @@ def qualify(image, *, revision, profile, country, trusted_sha256=None,
             safe_path(image.parent,name)
         identities={name:_identity(image.parent/name) for name in (image.name,image.name+'.release.json',image.name+'.sha256')}
         source=image
-        transport=Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='redux-release-source-')))
+        transport=Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='redux-release-source-',dir=temporary_root)))
         # Tools never reopen an operator-controlled input. Hold a no-follow
         # descriptor and copy one immutable inspection snapshot into private tmp.
         image=snapshot_file(source,transport/source.name)
@@ -82,14 +87,14 @@ def qualify(image, *, revision, profile, country, trusted_sha256=None,
         # Reuse stream inspection for measured partition offsets and UUIDs.
         measured=transferred["image_metadata"]
         evidence['image']={k:transferred[k] for k in ('sha256','image_profile','disk_bytes')}
-        with tempfile.TemporaryDirectory(prefix='redux-release-') as scratch_name:
+        with tempfile.TemporaryDirectory(prefix='redux-release-',dir=temporary_root) as scratch_name:
             scratch=Path(scratch_name)
             roots,context=extract_image(image,measured,scratch)
             for root in roots:
                 if read(root,'usr/share/redux/redux-revision',256).decode().strip()!=revision:
                     raise ValueError('embedded root revision contradicts release identity')
             kwargs={'profile':profile,'other_root':roots[1] if profile=='ab' else None}
-            root_payload.verify(roots[0],expected_country=country,**kwargs)
+            evidence["runtime"] = root_payload.verify(roots[0],expected_country=country,**kwargs)
             passed('Embedded runtime contract','actual image roots preserve immutable overlay, captures separation, passive radio policy, lease/PAN defaults and service contracts')
             boot_args={}
             if context is not None:

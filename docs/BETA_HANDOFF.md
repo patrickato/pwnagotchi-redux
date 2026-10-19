@@ -131,3 +131,12 @@ fields. Physical acceptance must establish mapping and reliability.
 
 Hardware measurements, packet reception, handshakes, physical display readability,
 controller operation and real update/rollback remain unverified by this sprint.
+
+## Release factory continuation
+
+Sprint 05 adds `scripts/redux-release.py factory preflight|build|verify|inspect`.
+Use [RELEASE_FACTORY.md](RELEASE_FACTORY.md) for exact source/profile/signing,
+private-workspace, provenance, artifact verification and recovery contracts.
+The factory never elevates privileges or deploys. A successful source test or
+synthetic fixture remains separate from a complete real image and distributable
+signed release; actual Pi boot/rollback gates stay UNKNOWN.

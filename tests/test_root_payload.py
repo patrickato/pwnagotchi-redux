@@ -19,6 +19,7 @@ def slot(tmp_path, name="lite", profile="lite"):
         path = root / item
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("installed fixture\n")
+    (root / "usr/share/redux/packages.tsv").write_text("python3\t3.11.2-1\n")
     systemd = root / "etc/systemd/system"
     # The field image ships the real, disabled native TFT unit. Rootfs
     # fixtures mimic its exact policy rather than activating any display.
@@ -417,3 +418,17 @@ def test_image_keeps_unqualified_connectivity_disabled(tmp_path, old, new):
     config.write_text(config.read_text().replace(old, new))
     with pytest.raises(ValueError, match='disabled'):
         gate.verify(root)
+
+
+@pytest.mark.parametrize('payload', ['', 'not-a-package-list\n', 'python3\t1\npython3\t2\n', 'python3\tbad version\n'])
+def test_invalid_installed_package_metadata_is_rejected(tmp_path,payload):
+    root=slot(tmp_path)
+    (root/'usr/share/redux/packages.tsv').write_text(payload)
+    with pytest.raises(ValueError):gate.verify(root)
+
+
+@pytest.mark.parametrize('name',['core/telemetry.py','core/processing_evidence.py','display/ui_state.py','web/status_page.py'])
+def test_recent_runtime_dependencies_cannot_be_missing_from_export(tmp_path,name):
+    root=slot(tmp_path)
+    (root/'opt/redux/redux'/name).unlink()
+    with pytest.raises(ValueError):gate.verify(root)

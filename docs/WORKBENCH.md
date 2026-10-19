@@ -81,3 +81,12 @@ validation, canonical checkpoint/UI state and qualified touch reconnection.
 physical RF/display and actual update/rollback UNKNOWN. Read
 [BETA_HANDOFF.md](BETA_HANDOFF.md) before continuing development or proposing any
 physical acceptance work. Offline qualification does not establish production readiness.
+
+## Release candidate factory
+
+`redux-release.py factory` now orchestrates clean-source image assembly through the
+existing builder, native manifests/checksums and actual offline image/bundle gates.
+Preflight, build, verify and inspect share one entrypoint, with new private attempts
+and no overwrite of old outputs. External A/B signing credentials are mandatory;
+no sudo, deployment or physical rollback claim is introduced. See
+[RELEASE_FACTORY.md](RELEASE_FACTORY.md) for commands, outputs and honest limits.
