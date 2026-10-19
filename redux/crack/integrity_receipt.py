@@ -64,7 +64,12 @@ def classify_receipt(receipt, *, now=None, max_age=MAX_RECEIPT_AGE):
             or any(code not in ISSUE_CODES or not _integer(count) or count == 0
                    for code, count in issues.items())):
         return unknown
-    # Every checked artifact can contribute at most one row-local error;\n    # global/preflight errors can exist before any row is inspected.\n    # A forged receipt must not turn contradictory counters into attention.\n    if checked > 0 and sum(issues.values()) > checked:\n        return unknown\n    reported = receipt['result']
+    # Every checked artifact can contribute at most one row-local error;
+    # global/preflight errors can exist before any row is inspected.
+    # A forged receipt must not turn contradictory counters into attention.
+    if checked > 0 and sum(issues.values()) > checked:
+        return unknown
+    reported = receipt['result']
     if reported == 'pass' and not issues and checked == ready and checked > 0:
         status, reason = 'ok', 'verified_ready_artifacts'
     elif reported == 'unknown' and not issues and ready == checked == 0:
