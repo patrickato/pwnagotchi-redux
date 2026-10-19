@@ -251,3 +251,26 @@ This is a consistency check of the public ledger path at the audit boundary,
 not an anti-tampering guarantee against privileged writers and not physical
 proof of the prepared files on a Pi. Tests cover a ledger-path replacement,
 WAL updates on a stable inode and actionable receipt classification.
+
+## Private receipt provenance and permissions
+
+The cached receipt is an internal diagnostic assertion, **not** an externally
+authenticated attestation. As an additional local trust boundary, the publisher
+and reader require the diagnostics directory to be owned by their own effective
+Unix user and not be group- or world-writable. Readers also require the receipt
+file to have no group/other access bits and to be owned by that directory's
+owner. Atomic publication creates mode `0600` receipts.
+
+The baked live runtime currently runs as root: a usable
+`/captures/diagnostics` directory therefore needs to be root-owned with
+private permissions, created only through an explicitly approved installation
+step. A receipt created by an unprivileged account in that account's own
+directory is deliberately UNKNOWN to the root-run live Doctor. Do not change
+service ownership, recursively chmod the capture partition, or enable an audit
+timer merely to make the cache appear healthy.
+
+Unit tests now cover readable but nonprivate receipts, foreign-owned receipts
+and foreign-owned cache directories. The exact receipt implementation matching
+Git blob `1f5d1e537ac5728786647a71c692494da034e0a9` passed 32 isolated
+Linux tests, including read/write provenance and WAL/directory-swap behavior.
+This is not a full source-tree regression or device qualification.
