@@ -123,3 +123,44 @@ def read_cached_receipt(path, *, now=None):
     except (OSError, UnicodeError, ValueError, TypeError):
         return unknown
     return classify_receipt(receipt, now=now)
+
+
+def publish_receipt(path, report, *, completed_utc=None):
+    """Atomically publish an audit result to a private regular file.
+
+    The caller must explicitly invoke the expensive audit first. Publication
+    never traverses a symlink destination and never touches capture artifacts.
+    """
+    import tempfile
+
+    stamp = time.time() if completed_utc is None else completed_utc
+    payload = {'schema': 1, 'completed_utc': stamp, **report}
+    if not isinstance(report, dict) or set(report) != {'result', 'checked', 'ready_rows', 'issues'}:
+        raise ValueError('invalid audit result')
+    if classify_receipt(payload, now=stamp)['reason'] == 'unverified_receipt':
+        raise ValueError('contradictory audit result')
+    destination = Path(path)
+    parent = destination.parent
+    if parent.is_symlink() or not parent.is_dir() or destination.is_symlink():
+        raise ValueError('unsafe receipt destination')
+    if destination.exists() and not destination.is_file():
+        raise ValueError('receipt destination must be regular')
+    encoded = json.dumps(payload, sort_keys=True, allow_nan=False, separators=(',', ':')).encode()
+    if len(encoded) > MAX_RECEIPT_BYTES:
+        raise ValueError('receipt exceeds size limit')
+    temp = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix='.receipt-', dir=parent, delete=False) as out:
+            temp = Path(out.name)
+            os.fchmod(out.fileno(), 0o600)
+            out.write(encoded)
+            out.flush()
+            os.fsync(out.fileno())
+        if destination.is_symlink():
+            raise ValueError('receipt destination replaced by symlink')
+        os.replace(temp, destination)
+        temp = None
+    finally:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
+    return payload
