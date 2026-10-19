@@ -99,3 +99,32 @@ def test_all_receipt_classifications_execute_without_name_error():
     for item in examples:
         answer = module.classify_receipt(item, now=1001)
         assert answer['status'] in {'ok', 'unknown', 'attention'}
+
+
+def test_atomic_publisher_round_trip():
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / 'status.json'
+        result = dict(result='pass', checked=1, ready_rows=1, issues={})
+        module.publish_receipt(dest, result, completed_utc=1000)
+        assert module.read_cached_receipt(dest, now=1001)['status'] == 'ok'
+        assert dest.stat().st_mode & 0o077 == 0
+
+
+def test_atomic_publisher_rejects_invalid_result():
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / 'status.json'
+        for bad in (None, [], {'result': 'pass'}, dict(result='pass', checked=0, ready_rows=0, issues={})):
+            with unittest.TestCase().assertRaises(ValueError):
+                module.publish_receipt(dest, bad, completed_utc=1000)
+        assert not dest.exists()
+
+
+def test_atomic_publisher_refuses_link_destination():
+    with tempfile.TemporaryDirectory() as tmp:
+        outside = Path(tmp) / 'private'
+        outside.write_text('DO NOT TOUCH')
+        link = Path(tmp) / 'receipt'
+        link.symlink_to(outside)
+        with unittest.TestCase().assertRaises(ValueError):
+            module.publish_receipt(link, dict(result='pass', checked=1, ready_rows=1, issues={}), completed_utc=1000)
+        assert outside.read_text() == 'DO NOT TOUCH'
