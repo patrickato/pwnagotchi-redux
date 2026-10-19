@@ -174,3 +174,21 @@ Offline tests using explicit temporary paths do not need a physical mount.
 This guards against accidentally reading or publishing under the root
 filesystem when /captures is missing. It does not bypass authorization for
 operating on real captures or make a genuine Pi acceptance claim.
+
+## Directory-replacement and nested-JSON regressions
+
+The prepared-artifact auditor opens the output directory once with
+`O_DIRECTORY | O_NOFOLLOW` and pins its descriptor throughout the hash scan.
+Each prepared artifact is opened by basename relative to that descriptor. A
+directory replaced by a symlink after the audit starts cannot redirect reads
+to a different prepared file tree. Offline regression fixtures simulate this
+race and check that the pinned original artifact is the one verified.
+
+Cached receipt readers treat an excessively recursive JSON parser exception as
+UNKNOWN rather than allowing a malformed receipt to interrupt live checkpoint
+production. JSON runtimes may accept different maximum nesting depths; the
+contract is fail-closed UNKNOWN for non-object or unparseable receipts.
+
+The pinned-directory implementation was exercised in five isolated Linux
+filesystem fixtures. These fixtures are useful local behavior checks but do not
+replace the full repository test suite or physical Pi validation.
