@@ -51,11 +51,15 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
         if db.is_symlink() or not db.is_file():
             issue("ledger_unavailable")
             return result
-        # Immutable SQLite snapshot: mode=ro prevents the audit itself from
-        # creating a ledger. No journaling changes or writer-side migrations.
+        # SQLite mode=ro prevents ledger writes. Explicit BEGIN binds the
+        # schema, ready count and ready rows to one read transaction, avoiding
+        # a writer changing the observed population between SELECT calls.
+        # SQLite may consult existing WAL sidecars; this is not immutable=1.
         uri = "file:" + quote(str(db.absolute()), safe="/") + "?mode=ro"
         conn = sqlite3.connect(uri, uri=True, timeout=1.0)
         try:
+            conn.execute("PRAGMA query_only = ON")
+            conn.execute("BEGIN")
             found = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifacts'").fetchone()
             if not found:
                 issue("schema_missing")
@@ -66,6 +70,9 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
                 issue("row_limit_exceeded")
                 return result
             rows = conn.execute("SELECT output_sha,output_path FROM artifacts WHERE status='ready'").fetchall()
+            if len(rows) != count:
+                issue("audit_unavailable")
+                return result
         finally:
             conn.close()
         if count == 0:
