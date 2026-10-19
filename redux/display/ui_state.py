@@ -116,4 +116,11 @@ def model(report, *, now=None):
     row('Dual-radio readiness', radios['readiness']['state'], source=' + '.join(radios['readiness']['blockers']))
     row('Processing ledger', captures['ledger'], source='Existing capture-processing report')
     row('Processing worker', captures['scan_state'], source='Worker scan timestamp; not runtime heartbeat')
+    plugins = mapping(report.get('plugins'))
+    row('Plugin control', plugins.get('availability', 'unavailable'), 'unknown',
+        'Read-only inventory; requested state is not activation')
+    for plugin in plugins.get('plugins', [])[:12] if isinstance(plugins.get('plugins'), list) else []:
+        plugin = mapping(plugin)
+        row('Plugin ' + text(plugin.get('name')), 'requested ' + text(plugin.get('state')) + '; active unknown',
+            'unknown', 'Use local packs CLI for validated requests')
     return {'version': 1, 'heartbeat': heartbeat, 'sensors': sensors, 'visual': visual, 'rows': rows[:80]}

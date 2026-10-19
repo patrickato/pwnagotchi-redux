@@ -409,18 +409,24 @@ def cmd_vault(args) -> int:
 
 
 def cmd_packs(args) -> int:
-    mgr = PackManager(args.dir)
     try:
+        mgr = PackManager(args.dir, state_path=args.state)
         if args.pack_cmd == "list":
-            for p in mgr.list():
-                mark = "*" if mgr.is_enabled(p.name) else " "
-                print(f"[{mark}] {p.name} {p.version} ({p.kind}) {p.description}")
-        elif args.pack_cmd == "enable":
-            print("enabled:", ", ".join(mgr.enable(args.name)) or "(already enabled)")
-        elif args.pack_cmd == "disable":
-            print("disabled:", ", ".join(mgr.disable(args.name)) or "(not enabled)")
+            print(json.dumps(mgr.inventory(offset=args.offset), indent=2))
+        else:
+            options = json.loads(args.options) if args.pack_cmd == "configure" else None
+            if args.confirm:
+                result = mgr.apply(args.confirm, args.pack_cmd, args.name, options, args.authorize_side_effects)
+            else:
+                result = mgr.preview(args.pack_cmd, args.name, options, args.authorize_side_effects)
+                # Private configuration is never emitted, even in previews.
+                result.pop("next", None)
+            print(json.dumps(result, indent=2))
     except DependencyError as e:
-        print(f"error: {e}", file=sys.stderr)
+        print(f"plugin request rejected: {e}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError, TypeError, RecursionError) as e:
+        print(f"plugin request failed: {type(e).__name__}; validate manifest, state and preview", file=sys.stderr)
         return 1
     return 0
 
@@ -1461,10 +1467,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     pk = sub.add_parser("packs", help="manage Packs")
     pk.add_argument("--dir", required=True, help="packs directory")
+    pk.add_argument("--state", help="writable requested-state path; use /captures/config/packs.json on images")
     psub = pk.add_subparsers(dest="pack_cmd", required=True)
-    psub.add_parser("list")
+    li = psub.add_parser("list"); li.add_argument("--offset", type=int, default=0)
     en = psub.add_parser("enable"); en.add_argument("name")
     di = psub.add_parser("disable"); di.add_argument("name")
+    co = psub.add_parser("configure"); co.add_argument("name"); co.add_argument("--options", required=True, help="JSON object; avoid secrets in shell history")
+    ro = psub.add_parser("rollback"); ro.add_argument("name", help="installed plugin used to scope local recovery")
+    for command in (en, di, co, ro):
+        command.add_argument("--confirm", help="reviewed preview revision; omission is a dry run")
+        command.add_argument("--authorize-side-effects", action="store_true", help="authorize requested side effects, never activate code")
     pk.set_defaults(func=cmd_packs)
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")

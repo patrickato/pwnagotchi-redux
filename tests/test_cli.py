@@ -61,10 +61,17 @@ def test_packs_list_and_enable(tmp_path):
     assert rc == 0 and "geo" in out and "viz" in out
 
     rc, out = _run(["packs", "--dir", str(tmp_path), "enable", "viz"])
-    assert rc == 0 and "geo" in out and "viz" in out   # enabling viz pulls in geo
+    assert rc == 0 and "geo" in out and "viz" in out
+    preview = json.loads(out)
+    assert "pending" in preview["activation"]
+    assert not (tmp_path / ".packs-state.json").exists()
+    rc, out = _run(["packs", "--dir", str(tmp_path), "enable", "viz", "--confirm", preview["revision"]])
+    assert rc == 0
 
     rc, out = _run(["packs", "--dir", str(tmp_path), "list"])
-    assert "[*] viz" in out and "[*] geo" in out
+    inventory = json.loads(out)
+    assert {p["name"] for p in inventory["plugins"] if p["requested_enabled"]} == {"viz", "geo"}
+    assert all(p["active"] is None for p in inventory["plugins"])
 
 
 def test_packs_missing_dependency_errors(tmp_path):

@@ -260,6 +260,7 @@ body[data-skin="plain"] .hero::before{display:none}
  <button type="button" data-view="doctor" aria-pressed="false">Doctor</button>
  <button type="button" data-view="system" aria-pressed="false">System</button>
 </nav>
+<a href="/plugins" style="display:block;min-height:44px;padding:12px">Plugin Control Center</a>
 <main id="viewroot" tabindex="-1">
  <section class="card" data-page="system" hidden aria-label="System evidence">
   <h2>System evidence</h2><p class="mut">Sensor, visual and heartbeat timestamps are independent. Unknown coverage requires evidence.</p>
@@ -875,6 +876,9 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
     and `/` serves the unlock page until the cookie is present. Token travels via
     an `Authorization: Bearer <token>` header or an `augur_token` cookie, compared
     in constant time. `token=None` means open (the localhost default)."""
+    from ..packs.status import configured_provider
+    plugin_provider = configured_provider()
+
     def _present(headers) -> Optional[str]:
         auth = headers.get("Authorization", "")
         if auth.startswith("Bearer "):
@@ -908,6 +912,8 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
 
         def do_GET(self):
             authed = self._authed()
+            from urllib.parse import urlsplit, parse_qs
+            route = urlsplit(self.path).path
             if self.path.rstrip("/") == "/api/status" or self.path == "/api/status":
                 if not authed:
                     self._send(401, b'{"error":"unauthorized"}', "application/json")
@@ -915,12 +921,37 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
                 from ..display.ui_state import model
                 try:
                     payload = dict(status_provider())
+                    payload["plugins"] = plugin_provider()
                     payload["ui"] = model(payload)
                     body = json.dumps(payload).encode()
                 except Exception:
                     self._send(503, b'{"error":"status unavailable"}', "application/json")
                     return
                 self._send(200, body, "application/json")
+            elif route in ("/plugins", "/api/packs"):
+                if not authed:
+                    self._send(401, b'{"error":"unauthorized"}', "application/json")
+                    return
+                try:
+                    offset = int(parse_qs(urlsplit(self.path).query, max_num_fields=4).get('offset', ['0'])[0])
+                    if not 0 <= offset <= 1000000:
+                        raise ValueError("invalid offset")
+                except ValueError:
+                    self._send(400, b'{"error":"invalid pagination"}', "application/json")
+                    return
+                inventory = plugin_provider(offset)
+                if route == "/api/packs":
+                    self._send(200, json.dumps(inventory).encode(), "application/json")
+                else:
+                    import html
+                    cards = []
+                    for pack in inventory.get("plugins", []):
+                        cards.append('<article><h2>' + html.escape(pack['name']) + '</h2><pre>' + html.escape(json.dumps(pack, indent=2)) + '</pre></article>')
+                    page = '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Plugin Control Center</title><style>body{font:16px sans-serif;background:#111;color:#eee;margin:16px}a{color:#9df;display:block;min-height:44px}pre{white-space:pre-wrap;overflow-wrap:anywhere}article{border:1px solid #777;padding:12px;margin:12px 0}</style><a href="/">Back to dashboard</a><h1>Plugin Control Center</h1><p>Read-only inspection. Requested state is separate from active runtime state. Activation is unverified.</p><p>Local workflow: redux packs --dir PATH --state /captures/config/packs.json enable NAME; review the preview, then repeat with --confirm REVISION. No service is restarted.</p>' + ''.join(cards) + '<p>' + html.escape(inventory.get('availability', 'unknown')) + '</p>'
+                    page += '<pre>' + html.escape(json.dumps(inventory.get('errors', []), indent=2)) + '</pre>'
+                    if inventory.get('next_offset') is not None:
+                        page += '<a href="/plugins?offset=' + str(inventory['next_offset']) + '">Next plugins</a>'
+                    self._send(200, page.encode(), "text/html; charset=utf-8")
             elif self.path == "/" or self.path == "":
                 if not authed:
                     self._send(401, LOGIN_PAGE.encode(), "text/html; charset=utf-8")
