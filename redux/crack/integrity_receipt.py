@@ -20,12 +20,12 @@ MAX_ROWS = 10000
 MAX_READY_ROWS = (1 << 63) - 1
 GLOBAL_ISSUES = frozenset({
     'output_directory_untrusted', 'output_directory_changed',
-    'ledger_unavailable', 'schema_missing', 'row_limit_exceeded',
+    'ledger_unavailable', 'ledger_changed', 'schema_missing', 'row_limit_exceeded',
     'audit_unavailable', 'audit_byte_budget_exceeded',
 })
 ISSUE_CODES = frozenset({
     'output_directory_untrusted', 'output_directory_changed',
-    'ledger_unavailable', 'schema_missing',
+    'ledger_unavailable', 'ledger_changed', 'schema_missing',
     'row_limit_exceeded', 'invalid_digest', 'unexpected_artifact_path',
     'nonregular_artifact', 'artifact_size_invalid', 'artifact_changed_during_audit',
     'artifact_digest_mismatch', 'artifact_missing', 'artifact_unreadable',
