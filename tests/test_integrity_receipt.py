@@ -44,6 +44,16 @@ class IntegrityReceiptTests(unittest.TestCase):
                     receipt(issues={'artifact_missing': 1}), receipt(result='wrong')):
             self.assertEqual(module.classify_receipt(row, now=1001)['status'], 'unknown')
 
+    def test_contradictory_issue_totals(self):
+        forged = receipt(result='attention', checked=1, ready_rows=1,
+                         issues={'artifact_missing': 2})
+        self.assertEqual(module.classify_receipt(forged, now=1001)['status'], 'unknown')
+
+    def test_valid_single_issue(self):
+        actual = receipt(result='attention', checked=1, ready_rows=1,
+                         issues={'artifact_missing': 1})
+        self.assertEqual(module.classify_receipt(actual, now=1001)['status'], 'attention')
+
     def test_limits(self):
         self.assertEqual(module.classify_receipt(receipt(ready_rows=10001), now=1001)['status'], 'unknown')
         self.assertEqual(module.classify_receipt(receipt(completed_utc=float('nan')), now=1001)['status'], 'unknown')
