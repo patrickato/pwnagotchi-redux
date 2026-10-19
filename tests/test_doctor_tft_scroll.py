@@ -85,7 +85,6 @@ def test_full_fbui_loop_scrolls_doctor_not_radio(monkeypatch):
     monkeypatch.setattr(fbui, "framebuffer_info",
                         lambda *_a: {"ok": True, "stride": 960})
     monkeypatch.setattr(fbui, "read_status", lambda *_a: report())
-    monkeypatch.setattr(fbui, "rgb565_bytes", lambda *_a, **_k: b"frame")
     pages = []
     renderer = fbui.render
     def record_renderer(status, *, page, **kwargs):

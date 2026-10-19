@@ -31,7 +31,7 @@ def test_footer_is_rendered_in_shared_four_tab_geometry():
     from redux.display import fbui
     image = fbui.render(None, page="captures")
     assert image.size == (480, 320)
-    assert TAB_TOP == 296 and TAB_WIDTH * 5 == 480
+    assert TAB_TOP == 276 and TAB_WIDTH * 5 == 480
     # Selected tab has a distinct filled background.
     assert image.getpixel((140, 300)) != image.getpixel((410, 300))
 
@@ -43,7 +43,7 @@ def test_calibrated_tap_redraws_selected_page_without_opening_radio(tmp_path, mo
     monkeypatch.setattr(fbui, "read_status", lambda *_a: None)
     pages = []
     monkeypatch.setattr(fbui, "render", lambda *_a, page, **_kw: pages.append(page) or object())
-    monkeypatch.setattr(fbui, "rgb565_bytes", lambda *_a, **_k: b"frame")
+    monkeypatch.setattr(fbui, "rgb565_bytes", lambda *_a, **_k: pages[-1].encode())
     writes = []
     def writer(_device, _frame):
         writes.append(1)
@@ -75,3 +75,51 @@ def test_unverified_calibration_flag_cannot_enable_taps(tmp_path, monkeypatch):
                    "--touch-device", "/dev/input/event4",
                    "--calibration-file", str(path)])
     assert failure.value.code == 2
+
+
+@pytest.mark.parametrize('read_error', [False, True])
+def test_input_disconnect_keeps_ui_running_and_closes_once(monkeypatch, read_error):
+    monkeypatch.setattr(fbui, 'framebuffer_info', lambda *_: {'ok': True, 'stride': 960})
+    monkeypatch.setattr(fbui, 'read_status', lambda *_: None)
+    monkeypatch.setattr(fbui, 'render', lambda *a, **k: object())
+    frames = []
+    monkeypatch.setattr(fbui, 'rgb565_bytes', lambda *a, **k: str(len(frames)).encode())
+    def write(*args):
+        frames.append(args)
+        if len(frames) == 2:
+            raise RuntimeError('display survived')
+    monkeypatch.setattr(fbui, 'write_frame', write)
+    monkeypatch.setattr(touch_nav, 'open_touch', lambda *_: 123)
+    monkeypatch.setattr(fbui.select, 'select', lambda *_: ([123], [], []))
+    def read(*_):
+        if read_error:
+            raise OSError('device disappeared')
+        return b''
+    monkeypatch.setattr(fbui.os, 'read', read)
+    closed = []
+    monkeypatch.setattr(fbui.os, 'close', closed.append)
+    with pytest.raises(RuntimeError, match='display survived'):
+        fbui.main(['--framebuffer', '/dev/fb1', '--run', '--touch-device', '/dev/input/event4'])
+    assert closed == [123]
+    assert len(frames) == 2
+
+
+def test_identical_frames_skip_writes_with_bounded_previous_state(monkeypatch):
+    monkeypatch.setattr(fbui, 'framebuffer_info', lambda *_: {'ok': True, 'stride': 960})
+    reads = []
+    def read(*_):
+        reads.append(1)
+        if len(reads) == 3:
+            raise RuntimeError('two polls completed')
+        return None
+    monkeypatch.setattr(fbui, 'read_status', read)
+    monkeypatch.setattr(fbui, 'render', lambda *a, **k: object())
+    monkeypatch.setattr(fbui, 'rgb565_bytes', lambda *a, **k: b'identical frame')
+    clock = iter(range(0, 100, 3))
+    monkeypatch.setattr(fbui, 'time', SimpleNamespace(time=lambda: 100,
+                        monotonic=lambda: next(clock), sleep=lambda _: None))
+    writes = []
+    monkeypatch.setattr(fbui, 'write_frame', lambda *args: writes.append(args))
+    with pytest.raises(RuntimeError, match='two polls completed'):
+        fbui.main(['--framebuffer', '/dev/fb1', '--run'])
+    assert len(reads) == 3 and len(writes) == 1

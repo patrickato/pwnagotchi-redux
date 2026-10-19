@@ -11,9 +11,9 @@ from math import hypot, isfinite
 from .calibration import Calibration
 from .touch_nav import _EVENT, EV_ABS, EV_KEY, EV_SYN, ABS_X, ABS_Y, BTN_TOUCH
 
-PAGES = ("overview", "captures", "doctor", "radios", "trends")
-TAB_TOP = 296
-TAB_WIDTH = 480 // len(PAGES)
+from .ui_state import PAGES, navigation
+TAB_TOP = 276
+TAB_WIDTH = 96
 _SYN_REPORT = 0
 _SYN_DROPPED = 3
 
@@ -33,6 +33,7 @@ class NavigationGestures:
     start: tuple | None = None
     end: tuple | None = None
     maximum_motion: float = 0.0
+    page: str = "overview"
 
     def __post_init__(self):
         if self.physically_verified is not True:
@@ -104,12 +105,16 @@ class NavigationGestures:
             return ("scroll", 1 if dy < 0 else -1)
         if self.maximum_motion > self.tap_slop_pixels:
             return None
+        if self.page == "system" and 157 <= sy < 259 and 157 <= ey < 259:
+            first, last = int(sy - 157) // 34, int(ey - 157) // 34
+            if first == last:
+                return ("detail", first)
         if sy < TAB_TOP or ey < TAB_TOP:
             return None
         first, last = int(sx) // TAB_WIDTH, int(ex) // TAB_WIDTH
-        if first != last or not 0 <= first < len(PAGES):
+        if first != last or not 0 <= first < len(navigation(self.page)):
             return None
-        return ("page", PAGES[first])
+        return ("page", navigation(self.page)[first])
 
     def feed(self, event_type: int, code: int, value: int):
         """One complete evdev record; return a UI-only action or None."""

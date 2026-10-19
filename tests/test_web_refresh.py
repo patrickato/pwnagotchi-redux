@@ -44,7 +44,7 @@ function elem(id){
  if(!nodes.has(id))nodes.set(id,new Element());
  return nodes.get(id);
 }
-const routes=['overview','radio','captures','doctor'];
+const routes=['overview','radio','captures','doctor','system'];
 const navTabs=routes.map(name=>{
  const tab=new Element();
  tab.dataset={view:name};
@@ -157,6 +157,8 @@ async function deliver(request,data){
  assert.equal(panes[0].hidden,true);
  assert.equal(navTabs[3]['aria-pressed'],'true');
  const key={key:'ArrowRight',preventDefault(){this.prevented=true}};
+ elem('viewnav').onkeydown(key);
+ assert.equal(context.currentView,'system');
  elem('viewnav').onkeydown(key);
  assert.equal(context.currentView,'overview','keyboard nav wraps around');
  assert.equal(key.prevented,true);
@@ -300,6 +302,24 @@ async function deliver(request,data){
  context.markStale('frozen');
  assert.match(elem('resourcesource').textContent,/STALE/);
  assert.match(elem('visualfreshness').textContent,/STALE/);
+ context.renderSystem({ui:{version:1,rows:[{label:'CPU',value:'Unavailable',state:'unknown',source:'<script>malicious</script>',measured_at:null}]}});
+ const evidence=elem('systemevidence').firstChild;
+ assert.equal(evidence.firstChild.textContent,'CPU · Unavailable · unknown');
+ assert.match(evidence.children[1].textContent,/<script>malicious/);
+ for(let i=0;i<100;i++)context.renderSystem({ui:{version:1,rows:[{label:'CPU',value:'Unavailable',state:'unknown',source:'<script>malicious</script>',measured_at:null}]}});
+ assert.strictEqual(elem('systemevidence').firstChild,evidence,'unchanged evidence preserves expanded details');
+ evidence.open=true;
+ context.renderSystem({ui:{version:1,rows:[{label:'CPU',value:'46 C',state:'fresh',source:'sysfs',measured_at:123}]}});
+ assert.strictEqual(elem('systemevidence').firstChild,evidence,'live changes preserve selected details');
+ assert.equal(evidence.open,true);
+ assert.match(evidence.firstChild.textContent,/46 C/);
+ context.renderSystem({ui:{version:1,rows:Array(1000).fill({label:'x',value:'y'})}});
+ assert.equal(elem('systemevidence').children.length,80,'evidence DOM is bounded');
+ context.markStale('offline');
+ assert.match(elem('systemevidence').textContent,/STALE/);
+ context.renderSystem({ui:{version:1,rows:[null,'bad',{}]}});
+ context.setView('system');
+ assert.equal(context.currentView,'system');
  console.log('browser polling contract passed');
 })().catch(error=>{console.error(error);process.exitCode=1});
 """

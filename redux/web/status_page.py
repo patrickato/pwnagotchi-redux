@@ -234,6 +234,11 @@ body[data-skin="plain"] .hero::before{display:none}
  .brand-mark{display:none}
  .view-nav button{font-size:11px}
 }
+
+#systemevidence details{border-bottom:1px solid var(--line);padding:8px 0;overflow-wrap:anywhere}
+#systemevidence summary{min-height:44px;cursor:pointer;display:list-item;padding:10px 4px;box-sizing:border-box}
+#systemevidence p{color:var(--mut);font-size:12px;overflow-wrap:anywhere}
+.view-nav{overflow-x:auto;flex-wrap:nowrap}.view-nav button{flex-shrink:0;min-height:44px}
 </style></head><body data-skin="rich">
 <header id="devicebar" aria-label="Device status">
  <div class="brand"><span class="brand-mark" aria-hidden="true">◈</span><h1>Augur</h1></div>
@@ -253,8 +258,13 @@ body[data-skin="plain"] .hero::before{display:none}
  <button type="button" data-view="radio" aria-pressed="false">Radio</button>
  <button type="button" data-view="captures" aria-pressed="false">Captures</button>
  <button type="button" data-view="doctor" aria-pressed="false">Doctor</button>
+ <button type="button" data-view="system" aria-pressed="false">System</button>
 </nav>
 <main id="viewroot" tabindex="-1">
+ <section class="card" data-page="system" hidden aria-label="System evidence">
+  <h2>System evidence</h2><p class="mut">Sensor, visual and heartbeat timestamps are independent. Unknown coverage requires evidence.</p>
+  <div id="systemevidence" aria-live="polite">Evidence unavailable</div>
+ </section>
  <div class="card hero" data-page="overview" aria-label="Live Augur persona">
   <div class="hero-top"><span class="hero-overline">AUGUR / LIVE OBSERVATIONS</span>
    <span id="herocapture" class="hero-capture">CAPTURE UNKNOWN</span></div>
@@ -396,6 +406,8 @@ viewRoot.onpointercancel=function(){swipeStart=null};
 setView(location.hash.slice(1),false);
 var fetchPending=false,lastRuntimeVersion=null,lastVersionChanged=0;
 function markStale(why){
+ systemFingerprint=null;
+ document.getElementById("systemevidence").textContent="STALE / received evidence is no longer current · "+why;
  document.getElementById('resourcesource').textContent='STALE / invalid · last received measurements unverified';
  document.getElementById('visualfreshness').textContent='STALE visual observations · '+why;
  document.getElementById('sub').textContent='STALE · '+why;
@@ -681,7 +693,40 @@ async function tick(){
   clearTimeout(deadline);fetchPending=false;
  }
 }
+var systemFingerprint=null;
+function renderSystem(d){
+ const el=document.getElementById('systemevidence');
+ const ui=d.ui&&d.ui.version===1?d.ui:null;
+ const safe=v=>typeof v==='string'?v.slice(0,160):'Unavailable';
+ const raw=ui&&Array.isArray(ui.rows)?ui.rows.slice(0,80):[];
+ const rows=raw.filter(row=>row&&typeof row==='object'&&!Array.isArray(row)).map(row=>({
+  label:safe(row.label),value:safe(row.value),source:safe(row.source),
+  state:['fresh','stale','unknown'].includes(row.state)?row.state:'unknown',
+  measured_at:Number.isFinite(row.measured_at)?row.measured_at:null
+ }));
+ const fingerprint=JSON.stringify(rows);
+ if(fingerprint===systemFingerprint)return;
+ systemFingerprint=fingerprint;
+ if(!rows.length){el.textContent='Evidence unavailable';return}
+ const same=el.children.length===rows.length&&rows.every((row,i)=>el.children[i].evidenceLabel===row.label);
+ if(!same){
+  el.replaceChildren();
+  rows.forEach(function(row){
+   const item=document.createElement('details');
+   item.evidenceLabel=row.label;
+   item.appendChild(document.createElement('summary'));
+   item.appendChild(document.createElement('p'));
+   el.appendChild(item);
+  });
+ }
+ rows.forEach(function(row,i){
+  const item=el.children[i];
+  item.children[0].textContent=row.label+' · '+row.value+' · '+row.state;
+  item.children[1].textContent='Source: '+row.source+' · Measured: '+(row.measured_at??'unavailable');
+ });
+}
 function paint(d){
+ renderSystem(d);
  renderDoctor(d.doctor||null);
  renderPipeline(d);
  renderRuntimePanels(d);
@@ -867,7 +912,10 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
                 if not authed:
                     self._send(401, b'{"error":"unauthorized"}', "application/json")
                     return
-                self._send(200, json.dumps(status_provider()).encode(), "application/json")
+                from ..display.ui_state import model
+                payload = dict(status_provider())
+                payload["ui"] = model(payload)
+                self._send(200, json.dumps(payload).encode(), "application/json")
             elif self.path == "/" or self.path == "":
                 if not authed:
                     self._send(401, LOGIN_PAGE.encode(), "text/html; charset=utf-8")

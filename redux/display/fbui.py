@@ -7,6 +7,8 @@ loopback live-status API and never represents a missing sample as healthy.
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 import argparse
 import json
 import math
@@ -264,6 +266,7 @@ def doctor_window(view, offset=0):
             "more": max(0, total - first - 3)}
 
 
+@lru_cache(maxsize=24)
 def _font(size=13, *, bold=False):
     from PIL import ImageFont
     root = "/usr/share/fonts/truetype/dejavu/"
@@ -274,7 +277,22 @@ def _font(size=13, *, bold=False):
         return ImageFont.load_default()
 
 
-def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
+
+def fit_text(draw, value, font, width):
+    """Fit bounded literal text to measured glyph widths, keeping an ellipsis."""
+    value = _safe_text(value, 180)
+    if draw.textlength(value, font=font) <= width:
+        return value
+    left, right = 0, len(value)
+    while left < right:
+        middle = (left + right + 1) // 2
+        if draw.textlength(value[:middle] + "...", font=font) <= width:
+            left = middle
+        else:
+            right = middle - 1
+    return value[:left] + "..." if left else ""
+
+def render(report, *, page="overview", now=None, doctor_offset=0, trends=None, system_offset=0, system_detail=None):
     """Pillow RGB image, no placeholder activity, no radio-facing operations."""
     from PIL import Image, ImageDraw
     data = status_view(report, now=now)
@@ -291,24 +309,37 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
             if falloff:
                 px[x, y] = (10, 15 + falloff // 9, 24 + falloff // 6)
     draw = ImageDraw.Draw(img)
+
+    def text_line(position, message, *, font, fill):
+        draw.text(position, fit_text(draw, message, font, 462 - position[0]), font=font, fill=fill)
+
+    from .ui_state import model as evidence_model
+    evidence = evidence_model(report, now=now)
     colors = {"ok": TEAL, "attention": AMBER, "degraded": RED,
               "action": RED, "unknown": BLUE}
     accent = colors[data["health"]]
-    draw.text((18, 12), "REDUX", font=_font(21, bold=True), fill=INK)
-    draw.text((108, 18), "AUGUR / LIVE", font=_font(11), fill=SUBTLE)
+    text_line((18, 12), "REDUX", font=_font(21, bold=True), fill=INK)
+    text_line((108, 18), "AUGUR / LIVE", font=_font(11), fill=SUBTLE)
+    text_line((260, 18), f"{PAGES.index(page) + 1}/{len(PAGES)}  < >", font=_font(11), fill=SUBTLE)
     draw.ellipse((434, 21, 447, 34), fill=accent)
-    draw.text((354, 40), data["health"].upper(), font=_font(11, bold=True), fill=accent)
-    draw.line((18, 65, 462, 65), fill=(36, 57, 69), width=2)
-    draw.text((20, 78), "ENGINE  " + data["engine"], font=_font(20, bold=True), fill=accent)
-    draw.text((20, 113), "RADIO  " + data["iface"], font=_font(13), fill=SUBTLE)
+    text_line((354, 40), data["health"].upper(), font=_font(11, bold=True), fill=accent)
+    draw.line((18, 55, 462, 55), fill=(36, 57, 69), width=2)
+    text_line((20, 65), "ENGINE  " + data["engine"], font=_font(20, bold=True), fill=accent)
+    text_line((20, 98), "RADIO  " + data["iface"], font=_font(13), fill=SUBTLE)
     # Link-layer compatibility is not evidence of received RF frames.
     rf_color = RED if data["rf_link_type"] == 1 else SUBTLE
-    draw.text((180, 113), data["rf_label"], font=_font(10, bold=True), fill=rf_color)
-    draw.line((18, 147, 462, 147), fill=(36, 57, 69), width=1)
+    text_line((180, 98), data["rf_label"], font=_font(10, bold=True), fill=rf_color)
+    draw.line((18, 123, 462, 123), fill=(36, 57, 69), width=1)
+
+    if page != "radios":
+        cpu, load, memory = evidence["rows"][:3]
+        summary = "CPU " + cpu["value"] + " / " + load["value"] + " / RAM " + memory["value"]
+        summary += " / " + evidence["sensors"]["state"].upper()
+        text_line((20, 112), summary, font=_font(9), fill=TEAL if cpu["state"] == "fresh" else AMBER)
 
     def metric(x, label, value):
-        draw.text((x, 164), label, font=_font(11), fill=SUBTLE)
-        draw.text((x, 187), value, font=_font(23, bold=True), fill=INK)
+        text_line((x, 164), label, font=_font(11), fill=SUBTLE)
+        text_line((x, 187), value, font=_font(23, bold=True), fill=INK)
 
     value = lambda n: str(n) if n is not None else "--"
     if page == "overview":
@@ -321,6 +352,38 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
         metric(20, "PREPARED", compact_count(capture["ready"]))
         metric(180, "FAILED", compact_count(capture["errors"]))
         metric(350, "HASH ROWS", compact_count(capture["hash_records"]))
+    elif page == "system":
+        system = evidence
+        rows = system["rows"]
+        offset = min(max(0, system_offset), max(0, len(rows) - 3))
+        if system_detail is not None:
+            selected = rows[min(max(0, system_detail), len(rows) - 1)]
+            text_line((20, 155), selected["label"].upper(), font=_font(12, bold=True), fill=INK)
+            detail = selected["value"] + " / " + selected["source"]
+            remaining = _safe_text(detail, 340)
+            y = 175
+            while remaining and y <= 271:
+                fitted = fit_text(draw, remaining, _font(10), 440)
+                length = len(fitted) - 3 if fitted.endswith("...") else len(fitted)
+                if length <= 0:
+                    break
+                text_line((20, y), remaining[:length], font=_font(10), fill=INK)
+                remaining = remaining[length:]
+                y += 12
+            stamp = selected["measured_at"]
+            measured = f"at {stamp:g}" if stamp is not None else "timestamp unavailable"
+            text_line((20, 285), selected["state"].upper() + " / " + measured + " / TAP TO RETURN", font=_font(9), fill=AMBER)
+        else:
+            text_line((20, 155), "SYSTEM / tap detail / swipe up-down", font=_font(11, bold=True), fill=SUBTLE)
+            for index, row in enumerate(rows[offset:offset + 3]):
+                y = 177 + index * 34
+                text_line((20, y), fit_text(draw, row["label"], _font(11), 166), font=_font(11), fill=SUBTLE)
+                text_line((196, y), _safe_text(row["value"], 30), font=_font(12, bold=True), fill=INK)
+                stamp = row["measured_at"]
+                measured = f"at {stamp:g} / " if stamp is not None else ""
+                detail = row["state"].upper() + " / " + measured + row["source"]
+                text_line((20, y + 16), _safe_text(detail, 100), font=_font(9), fill=TEAL if row["state"] == "fresh" else AMBER)
+            text_line((20, 285), f"{offset + 1}-{min(offset + 3, len(rows))} / {len(rows)} / Independent measurement timestamps", font=_font(8), fill=SUBTLE)
     elif page == "trends":
         from .trend_chart import draw_trends
         draw_trends(draw, trends, font=_font, ink=INK, subtle=SUBTLE,
@@ -334,79 +397,79 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
         inv_age = readiness["inventory_age_seconds"]
         age_label = ("RT -- / INV --" if rt_age is None or inv_age is None else
                      f"RT {rt_age:g}s / INV {inv_age:g}s")
-        draw.text((20, 132),
+        text_line((20, 112),
                   "SAVED INVENTORY / HISTORICAL - NOT LIVE" if snapshot_only
                   else "DUAL / " + readiness["state"] + " / " + age_label,
                   font=_font(10, bold=True),
                   fill=AMBER if snapshot_only or readiness["state"] != "UNVERIFIED" else SUBTLE)
         blockers = readiness["blockers"]
-        draw.text((20, 147), "BLOCK / " + (" + ".join(blockers[:2]) if blockers else "NONE"),
+        text_line((20, 147), "BLOCK / " + (" + ".join(blockers[:2]) if blockers else "NONE"),
                   font=_font(8), fill=AMBER)
         radio_capture = radios["capture"]
-        draw.text((20, 162), "BETTERCAP / " + radio_capture["iface"],
+        text_line((20, 162), "BETTERCAP / " + radio_capture["iface"],
                   font=_font(12, bold=True), fill=INK)
-        draw.text((20, 181), radio_capture["state"] + " / " + radio_capture["framing"],
+        text_line((20, 181), radio_capture["state"] + " / " + radio_capture["framing"],
                   font=_font(10), fill=SUBTLE)
-        draw.text((20, 197), "KERNEL TYPE " +
+        text_line((20, 197), "KERNEL TYPE " +
                   (str(radio_capture["link"]) if radio_capture["link"] is not None else "--") +
                   " / RX UNVERIFIED", font=_font(10), fill=AMBER)
         draw.line((18, 214, 462, 214), fill=(36, 57, 69), width=1)
         onboard = radios["onboard"]
-        draw.text((20, 219), "ONBOARD / " + onboard["iface"] + " / " +
+        text_line((20, 219), "ONBOARD / " + onboard["iface"] + " / " +
                   onboard["state"] + " / " + onboard["driver"],
                   font=_font(10, bold=True),
                   fill=INK if onboard["state"] == "OBSERVED" else AMBER)
-        draw.text((20, 237), "MODE " + onboard["mode"] + " / LINK " +
+        text_line((20, 237), "MODE " + onboard["mode"] + " / LINK " +
                   (str(onboard["link"]) if onboard["link"] is not None else "--") +
                   " / RX UNVERIFIED", font=_font(9), fill=AMBER)
         draw.line((18, 253, 462, 253), fill=(36, 57, 69), width=1)
         usb = radios["usb"]
-        draw.text((20, 258), "USB / " + usb["iface"] + " / " +
+        text_line((20, 258), "USB / " + usb["iface"] + " / " +
                   usb["state"] + " / " + usb["driver"],
                   font=_font(10, bold=True), fill=INK if usb["state"] == "OBSERVED" else AMBER)
-        draw.text((20, 278), "MODE " + usb["mode"] + " / LINK " +
+        text_line((20, 278), "MODE " + usb["mode"] + " / LINK " +
                   (str(usb["link"]) if usb["link"] is not None else "--") +
                   " / RX UNVERIFIED / OWNER UNVERIFIED",
                   font=_font(8), fill=AMBER)
     else:
-        draw.text((20, 160), "DOCTOR / ACTIONABLE FINDINGS",
+        text_line((20, 160), "DOCTOR / ACTIONABLE FINDINGS",
                   font=_font(12, bold=True), fill=SUBTLE)
         if data["stale"]:
-            draw.text((20, 194), "REPORT STALE / NO VERIFIED FINDINGS",
+            text_line((20, 194), "REPORT STALE / NO VERIFIED FINDINGS",
                       font=_font(12), fill=AMBER)
         elif doctor["rows"]:
             for index, finding in enumerate(doctor["rows"]):
                 y = 190 + index * 30
                 color = colors[finding["status"]]
                 draw.ellipse((20, y + 5, 28, y + 13), fill=color)
-                draw.text((35, y), finding["status"].upper() + " / " + finding["summary"],
+                text_line((35, y), finding["status"].upper() + " / " + finding["summary"],
                           font=_font(11), fill=INK)
             if doctor["total"] > 3:
                 visible = doctor["start"] + len(doctor["rows"])
-                draw.text((35, 282),
+                text_line((35, 282),
                           f"FINDINGS {doctor['start'] + 1}-{visible} / {doctor['total']}"
                           "  SWIPE UP/DOWN",
                           font=_font(9), fill=SUBTLE)
         else:
             message = ("No actionable findings" if data["health"] == "ok"
                        else "No verified findings")
-            draw.text((20, 194), message, font=_font(12), fill=SUBTLE)
+            text_line((20, 194), message, font=_font(12), fill=SUBTLE)
 
     if page == "captures":
         draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
         status = capture["ledger"]
         scan = capture["scan_state"]
         indicator = RED if status != "AVAILABLE" else SUBTLE
-        draw.text((20, 247), "LEDGER / " + status,
+        text_line((20, 247), "LEDGER / " + status,
                   font=_font(11, bold=True), fill=indicator)
         scan_label = "WORKER / " + scan
         if scan == "RECENT":
             scan_label += f" / {capture['scan_age_seconds']}s ago"
-        draw.text((20, 266), scan_label, font=_font(11),
+        text_line((20, 266), scan_label, font=_font(11),
                   fill=AMBER if scan in ("STALE", "PAUSED STORAGE", "INVALID")
                   else SUBTLE)
         if scan == "RECENT":
-            draw.text((20, 282),
+            text_line((20, 282),
                       "PASS " + compact_count(capture["scan_files"]) +
                       " FILES   READY " + compact_count(capture["last_ready"]) +
                       "   ERROR " + compact_count(capture["last_errors"]) +
@@ -414,8 +477,8 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
                       font=_font(9), fill=SUBTLE)
     elif page == "overview":
         draw.line((18, 238, 462, 238), fill=(36, 57, 69), width=1)
-        draw.text((20, 250), "DOCTOR / " + data["finding"], font=_font(12, bold=True), fill=accent)
-        draw.text((20, 272), data["detail"], font=_font(10), fill=SUBTLE)
+        text_line((20, 250), "DOCTOR / " + data["finding"], font=_font(12, bold=True), fill=accent)
+        text_line((20, 272), data["detail"], font=_font(10), fill=SUBTLE)
         retry = f"{data['retry_seconds']}s" if data["retry_seconds"] is not None else "--"
         failures = value(data["failure_streak"])
         attempts = value(data["engine_attempts"])
@@ -423,14 +486,19 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
                  "MISSING" if data["capture_mount"] is False else "UNKNOWN")
         runtime_color = (AMBER if data["failure_streak"] not in (None, 0)
                          or data["capture_mount"] is False else SUBTLE)
-        draw.text((20, 285),
+        text_line((20, 285),
                   f"RETRY {retry} / FAILURES {failures} / STARTS {attempts} / REDUXCAP {mount}",
                   font=_font(8), fill=runtime_color)
     # Footer tabs share geometry with gesture_nav.TAB_TOP/TAB_WIDTH.
     # They are visual only until the physical touch path is opted in.
     from .gesture_nav import PAGES, TAB_TOP, TAB_WIDTH
+    from .ui_state import navigation
+    # Move the content intact: no glyph resampling on a small physical panel.
+    content = img.crop((0, 147, 480, 296))
+    draw.rectangle((0, 124, 479, 319), fill=BACKGROUND)
+    img.paste(content, (0, 127))
     draw.rectangle((0, TAB_TOP, 479, 319), fill=(15, 24, 35))
-    for index, tab in enumerate(PAGES):
+    for index, tab in enumerate(navigation(page)):
         left = index * TAB_WIDTH
         selected = tab == page
         if selected:
@@ -439,10 +507,10 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None):
             draw.rectangle((left + 6, TAB_TOP, left + TAB_WIDTH - 7, TAB_TOP + 2),
                            fill=TEAL)
         label = tab.upper()
-        draw.text((left + 12, TAB_TOP + 6), label,
+        text_line((left + 12, TAB_TOP + 14), label,
                   font=_font(11, bold=selected), fill=INK if selected else SUBTLE)
     if data["stale"]:
-        draw.text((185, 43), "NOT VERIFIED", font=_font(10, bold=True), fill=AMBER)
+        text_line((185, 43), "NOT VERIFIED", font=_font(10, bold=True), fill=AMBER)
     return img
 
 
@@ -537,6 +605,9 @@ def main(argv=None):
     touch_fd = None
     tracker = None
     fragment = b""
+    system_offset = 0
+    system_detail = None
+    last_frame = None
     page = args.page
     doctor_offset = 0
     from .telemetry_history import TelemetryWindow
@@ -583,6 +654,8 @@ def main(argv=None):
                     doctor_offset = doctor_window(current_doctor, doctor_offset)["start"]
                 image = render(report, page=page, now=sampled_at,
                                doctor_offset=doctor_offset)
+            elif page == "system":
+                image = render(report, page=page, now=sampled_at, system_offset=system_offset, system_detail=system_detail)
             elif page == "trends":
                 image = render(report, page=page, now=sampled_at,
                                trends=history.snapshot(now=sampled_at))
@@ -591,8 +664,10 @@ def main(argv=None):
             if args.rotate == 180:
                 from PIL import Image
                 image = image.transpose(Image.Transpose.ROTATE_180)
-            write_frame(args.framebuffer,
-                        rgb565_bytes(image, stride=fb["stride"], order=args.order))
+            frame = rgb565_bytes(image, stride=fb["stride"], order=args.order)
+            if frame != last_frame:
+                write_frame(args.framebuffer, frame)
+                last_frame = frame
             if args.once:
                 break
             deadline = time.monotonic() + 2
@@ -601,34 +676,58 @@ def main(argv=None):
                 if touch_fd is None:
                     time.sleep(remaining)
                     continue
-                available, _, _ = select.select([touch_fd], [], [], remaining)
+                try:
+                    available, _, _ = select.select([touch_fd], [], [], remaining)
+                except OSError:
+                    os.close(touch_fd)
+                    touch_fd = None
+                    fragment = b""
+                    break
                 if not available:
                     continue
                 try:
                     chunk = os.read(touch_fd, 4096)
                 except BlockingIOError:
                     continue
+                except OSError:
+                    os.close(touch_fd)
+                    touch_fd = None
+                    fragment = b""
+                    break
                 if not chunk:
-                    raise OSError("touch device disconnected")
+                    os.close(touch_fd)
+                    touch_fd = None
+                    fragment = b""
+                    break  # keep status display alive after input disconnect
                 fragment += chunk
                 if len(fragment) > 8192:
                     raise OSError("unexpected unbounded touch input")
                 if args.calibration_file:
                     from .gesture_nav import consume_gestures
+                    tracker.page = page
                     actions, fragment = consume_gestures(fragment, tracker)
                     if actions:
                         action, value = actions[-1]
-                        if action == "scroll":
+                        if action == "detail" and page == "system":
+                            system_detail = system_offset + value if system_detail is None else None
+                        elif action == "scroll":
+                            if page == "system":
+                                system_detail = None
+                                from .ui_state import model
+                                system_offset = min(max(0, len(model(report)["rows"]) - 3), max(0, system_offset + value * 3))
+                                break
                             if page != "doctor":
                                 continue
                             count = len(status_view(report)["doctor_all"])
                             doctor_offset = min(max(0, count - 3),
                                                 max(0, doctor_offset + value * 3))
                         elif action == "page":
+                            system_detail = None
                             if value != page:
                                 doctor_offset = 0
                             page = value
                         elif action == "swipe":
+                            system_detail = None
                             page = touch_nav.navigate(page, value)
                             doctor_offset = 0
                         else:

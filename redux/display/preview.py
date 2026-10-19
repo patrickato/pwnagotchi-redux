@@ -101,7 +101,7 @@ def publish(directory: str, images: dict[str, bytes]) -> list[str]:
         os.close(dirfd)
 
 
-def build(*, report=None, pages=PAGES, rotate=0, doctor_offset=0) -> dict[str, bytes]:
+def build(*, report=None, pages=PAGES, rotate=0, doctor_offset=0, system_offset=0) -> dict[str, bytes]:
     """Render exactly the same source pixels as the actual framebuffer path."""
     if rotate not in (0, 180):
         raise ValueError("rotation must be 0 or 180")
@@ -109,10 +109,13 @@ def build(*, report=None, pages=PAGES, rotate=0, doctor_offset=0) -> dict[str, b
         raise ValueError("invalid bounded Doctor scroll offset")
     if not pages or len(set(pages)) != len(pages) or not set(pages).issubset(PAGES):
         raise ValueError("unsupported pages")
+    if type(system_offset) is not int or not 0 <= system_offset <= 77:
+        raise ValueError("invalid bounded System scroll offset")
     output = {}
     for page in pages:
         img = (fbui.render(report, page=page, doctor_offset=doctor_offset)
-               if page == "doctor" else fbui.render(report, page=page))
+               if page == "doctor" else fbui.render(report, page=page, system_offset=system_offset)
+               if page == "system" else fbui.render(report, page=page))
         if rotate == 180:
             from PIL import Image
             img = img.transpose(Image.Transpose.ROTATE_180)
@@ -132,10 +135,13 @@ def main(argv=None) -> int:
     parser.add_argument("--page", choices=PAGES, help="one page; default: all available pages")
     parser.add_argument("--doctor-offset", type=int, default=0,
                         help="preview a scrolled Doctor finding window (0-61)")
+    parser.add_argument("--system-offset", type=int, default=0, help="System evidence scroll offset (0-77)")
     parser.add_argument("--rotate", type=int, choices=(0, 180), default=0)
     args = parser.parse_args(argv)
     if args.port < 1 or args.port > 65535:
         parser.error("invalid port")
+    if args.system_offset and args.page != "system":
+        parser.error("--system-offset requires --page system")
     if args.doctor_offset and args.page != "doctor":
         parser.error("--doctor-offset requires --page doctor")
     if not 0 <= args.doctor_offset <= 61:
@@ -163,7 +169,8 @@ def main(argv=None) -> int:
         names = publish(args.output_dir, build(report=report,
                                               pages=selected_pages,
                                               rotate=args.rotate,
-                                              doctor_offset=args.doctor_offset))
+                                              doctor_offset=args.doctor_offset,
+                                              system_offset=args.system_offset))
     except (OSError, ValueError, TypeError) as exc:
         parser.error(f"preview refused: {type(exc).__name__}")
     print(json.dumps({"source": source_name, "files": names, "resolution": [480, 320],

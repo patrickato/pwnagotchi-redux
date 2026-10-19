@@ -64,3 +64,11 @@ RAUC snapshot readiness and recovery planning. It performs no SSH, mounts,
 update installation or boot-state writes. See
 [RELEASE_QUALIFICATION.md](RELEASE_QUALIFICATION.md) for exact evidence boundaries,
 host tools, exit codes and remaining Pi 4/5 rollback acceptance gates.
+
+## Shared UI evidence and navigation
+
+The read-only System workspace now shares a bounded evidence contract between
+HTTP and native framebuffer renderers. It exposes independent sensor, visual and
+heartbeat freshness, provenance and unknown coverage. Native navigation uses an
+extensible sliding footer with 44-pixel targets. See [UI_OBSERVABILITY.md](UI_OBSERVABILITY.md)
+for controls, software acceptance and remaining physical display/touch gates.

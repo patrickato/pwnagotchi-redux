@@ -157,10 +157,11 @@ def test_chart_rejects_corrupted_input_without_partial_curve(mutation):
     assert fbui.render(None, page="trends", trends=view).size == (480, 320)
 
 
-def test_five_page_swipe_wraps_correctly():
+def test_extensible_page_swipe_wraps_correctly():
     assert touch_nav.navigate("radios", 1) == "trends"
-    assert touch_nav.navigate("trends", 1) == "overview"
-    assert touch_nav.navigate("overview", -1) == "trends"
+    assert touch_nav.navigate("trends", 1) == "system"
+    assert touch_nav.navigate("system", 1) == "overview"
+    assert touch_nav.navigate("overview", -1) == "system"
 
 
 def test_native_refresh_loop_accumulates_real_status_samples(monkeypatch):
@@ -179,7 +180,6 @@ def test_native_refresh_loop_accumulates_real_status_samples(monkeypatch):
         shown.append(kw.get("trends"))
         return renderer(record, page=page, **kw)
     monkeypatch.setattr(fbui, "render", draw)
-    monkeypatch.setattr(fbui, "rgb565_bytes", lambda *_a, **_k: b"frame")
     writes = []
     def writer(*_a):
         writes.append(1)
