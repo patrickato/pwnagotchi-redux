@@ -12,7 +12,7 @@ python3 scripts/capture-artifact-audit.py --db /path/to/jobs.db --output /path/t
 ```
 
 It checks each `ready` row against its canonical SHA-256-named prepared file,
-checks regular-file type and a 32 MiB ceiling, pins files through
+checks regular-file type and a 33 MiB ceiling (matching the ingest worker), pins files through
 `O_NOFOLLOW`, verifies digest against ledger, checks for concurrent changes,
 and refuses a symlinked ledger or output directory. It imposes a 10,000
 ready-row bound per invocation. Its JSON output contains only aggregate
@@ -34,3 +34,10 @@ This audit is **not** part of the live runtime, does not scan wireless traffic,
 and must not be mistaken for cryptographic verification that a handshake is
 genuine. It is an additional forensics/integrity gate suitable for eventual
 integration into release and support diagnostics. No Pi deployment is implied.
+
+## Cross-component size contract
+
+The auditor enforces the same 33 MiB prepared-artifact ceiling as the
+ingestion worker. It must not reject a valid prepared artifact solely
+because the auditor and worker disagree about output size. Tests enforce
+that correspondence and reject 33 MiB + 1 byte before hashing.
