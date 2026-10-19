@@ -271,13 +271,15 @@ def test_source_integration_executes_existing_runner_at_exact_revision(cli,tmp_p
         calls.append(command)
         assert command[1].endswith('scripts/redux-qualify.py')
         assert command[2]=='--beta'
-        Path(command[-1]).write_text(json.dumps({'offline_qualified':True,'matrix':[
+        options['stdout'].write(b'PASS    Python suite: exit 0; 10 passed\nPASS    Image contracts: exit 0; 4 passed\n')
+        Path(command[-1]).write_text(json.dumps({'offline_qualified':True,'source_revision':TARGET['revision'],'worktree_dirty':False,'matrix':[
             dict(gate=g,status='PASS',detail='synthetic execution fixture') for g in
             ('offline_software','integration_tests','ui_behavior','image_contracts')]}))
         return SimpleNamespace(returncode=3)
     result=cli.source_qualification(TARGET,runner=runner)
     assert result['status']=='PASS' and len(calls)==1
     assert checks==[TARGET['revision'],TARGET['revision']]
+    assert result['test_totals']['python']=={'passed':10,'skipped':0,'exit_code':0}
 
 
 def test_actual_candidate_verifier_is_reused_and_wrong_source_never_accepted(cli,monkeypatch):
@@ -321,3 +323,26 @@ def test_wrong_target_rejected_even_when_selected_observation_is_absent():
     p=scenario();p['payload']['observations']=[]
     result=gate.evaluate(p,expected=dict(TARGET,profile='lite'),now=NOW,gates=['rollback'])
     assert result['result']=='FAIL' and result['matrix'][0]['reason']=='wrong_target'
+
+
+def test_fittable_calibration_is_not_proof_of_correct_active_projection(signer):
+    p=scenario();data=row(p,'display')['data'];data.pop('observed_points')
+    assert qualified(signer,p,gates=['display'])['result']=='UNKNOWN'
+    p=scenario()
+    for point in row(p,'display')['data']['observed_points']:point['pixel_x']=479-point['pixel_x']
+    result=qualified(signer,p,gates=['display'])
+    assert result['result']=='FAIL' and result['matrix'][0]['reason']=='active_touch_projection_mismatch'
+
+
+@pytest.mark.parametrize('case',['wrong_revision','dirty','offline_failed','bad_exit'])
+def test_executed_source_report_must_match_clean_requested_revision(cli,monkeypatch,case):
+    from types import SimpleNamespace
+    monkeypatch.setattr(cli.candidate_factory,'source',lambda *args:None)
+    def runner(command,**options):
+        report={'source_revision':TARGET['revision'],'worktree_dirty':False,'offline_qualified':True,'matrix':[]}
+        if case=='wrong_revision':report['source_revision']='0'*40
+        elif case=='dirty':report['worktree_dirty']=True
+        elif case=='offline_failed':report['offline_qualified']=False
+        Path(command[-1]).write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1 if case=='bad_exit' else 3)
+    assert cli.source_qualification(TARGET,runner=runner)['status']=='FAIL'

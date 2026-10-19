@@ -99,7 +99,7 @@ examples are in `redux/acceptance_scenarios.py`. Gates are:
 | services | Named systemd properties, lifecycle, valid fresh worker heartbeat |
 | radio | Native ARPHRD/PCAP framing, advancing RX, validated decoded header counts, unchanged TX |
 | processing | Closed handoff/conversion counts and scan outcomes; artifact integrity remains separate |
-| display | Actual dimensions/rotation, physical corner/center samples evaluated by existing calibration fitter, navigation |
+| display | Actual dimensions/rotation, physical corner/center samples, corresponding observed active UI coordinates and navigation |
 | resources | Bounded measured-load series with complete temperature/load/RAM/frequency/flags |
 | persistence | Different boots, unchanged nonempty inventory/storage identity, recovered services |
 | update_install / trial_boot / rollback | Cross-boot backend transitions, independently authenticated bundle and preserved captures |
@@ -114,6 +114,12 @@ This is not endurance, battery or power-supply certification. Missing
 battery is never healthy. Firmware version strings alone do not establish EEPROM
 or tryboot compatibility. Pending slots or a stable snapshot do not prove rollback.
 Lite update gates are NOT APPLICABLE only without contradictory A/B observations.
+
+A fittable touch calibration is only a candidate. Display PASS also requires
+`observed_points`, the active UI's corresponding pixel outputs for the physical
+corner/center targets, within 20 pixels of the targets. Missing outputs stay
+UNKNOWN; a mirrored or incorrectly configured active mapping fails even when the
+raw samples could be fitted to a different, correct candidate calibration.
 
 ## External authorization and attestation
 

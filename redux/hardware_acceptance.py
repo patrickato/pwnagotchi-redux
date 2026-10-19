@@ -272,7 +272,7 @@ def processing(data, _policy, _expected, now):
 
 
 def display(data, *_):
-    fields(data, ('framebuffer_width', 'framebuffer_height', 'width', 'height', 'rotation', 'points', 'navigation'))
+    fields(data, ('framebuffer_width', 'framebuffer_height', 'width', 'height', 'rotation', 'points', 'navigation'), ('observed_points',))
     if (any(type(data[k]) is not int or not 2 <= data[k] <= 4096 for k in ('framebuffer_width', 'framebuffer_height', 'width', 'height'))
             or type(data['rotation']) is not int or data['rotation'] not in (0, 90, 180, 270)):
         raise ValueError('invalid display geometry')
@@ -287,6 +287,15 @@ def display(data, *_):
         points.append(TouchPoint(**p))
     if calibrate(points, width=data['width'], height=data['height'], tolerance_px=20) is None:
         return 'FAIL', 'inconsistent_touch_mapping'
+    observed=data.get('observed_points')
+    if not isinstance(observed,list) or len(observed)!=len(points):
+        return 'UNKNOWN', 'active_touch_projection_unavailable'
+    for target_point,actual in zip(points,observed):
+        fields(actual, ('pixel_x','pixel_y'))
+        if (not number(actual['pixel_x']) or not number(actual['pixel_y'])
+                or not 0<=actual['pixel_x']<data['width'] or not 0<=actual['pixel_y']<data['height']
+                or math.hypot(actual['pixel_x']-target_point.pixel_x,actual['pixel_y']-target_point.pixel_y)>20):
+            return 'FAIL', 'active_touch_projection_mismatch'
     if (not isinstance(data['navigation'], list) or len(data['navigation']) > 32
             or any(x not in ('next', 'previous', 'select', 'back', 'scroll') for x in data['navigation'])):
         raise ValueError('invalid navigation observations')

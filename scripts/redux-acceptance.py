@@ -5,6 +5,7 @@ import sys
 sys.dont_write_bytecode = True
 import argparse
 import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -42,12 +43,22 @@ def source_qualification(expected, runner=subprocess.run):
         with (Path(folder)/'qualification.log').open('wb') as log:
             result = runner([sys.executable, str(ROOT/'scripts/redux-qualify.py'), '--beta', '--beta-report', str(evidence)],
                 cwd=ROOT, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, timeout=1800, check=False)
+        with (Path(folder)/'qualification.log').open('rb') as log:
+            log.seek(0,2);length=log.tell();log.seek(max(0,length-16384))
+            tail=log.read(16384).decode('utf-8',errors='replace')
+        totals={}
+        for label,name in (('Python suite','python'),('Image contracts','image')):
+            match=re.search(r'PASS\s+'+label+r': exit 0; ([0-9]+) passed([^\n]*)',tail)
+            if match:
+                skips=re.search(r'([0-9]+) skipped',match[2])
+                totals[name]={'passed':int(match[1]),'skipped':int(skips[1]) if skips else 0,'exit_code':0}
         candidate_factory.source(ROOT, expected['revision'])
         report = load(evidence)
-        if result.returncode not in (0, 3) or report.get('offline_qualified') is not True:
+        if (result.returncode not in (0, 3) or report.get('offline_qualified') is not True
+                or report.get('source_revision')!=expected['revision'] or report.get('worktree_dirty') is not False):
             return {'status':'FAIL', 'reason':'executed_source_qualification_failed'}
         return {'status':'PASS', 'reason':'existing_qualification_executed_at_exact_clean_revision',
-                'revision':expected['revision'], 'matrix':report['matrix'][:4]}
+                'revision':expected['revision'], 'matrix':report['matrix'][:4], 'test_totals':totals}
 
 
 def candidate_qualification(directory, expected, keyring=None, trusted_sha256=None, scratch=None):
