@@ -29,7 +29,9 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
         result["issues"][code] = result["issues"].get(code, 0) + 1
         result["result"] = "attention"
 
-    # Refuse symlinks for both the SQLite ledger and its artifact directory.\n    # The bound matches redux.crack.ingest._MAX_PREPARED_BYTES; older\n    # 32 MiB limits would falsely mark valid ingestion output as corrupt.
+    # Refuse symlinks for both the SQLite ledger and its artifact directory.
+    # The bound matches redux.crack.ingest._MAX_PREPARED_BYTES; older
+    # 32 MiB limits would falsely mark valid ingestion output as corrupt.
     try:
         root = output_dir.resolve(strict=True)
         if output_dir.is_symlink() or not root.is_dir():
