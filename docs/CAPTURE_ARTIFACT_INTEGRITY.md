@@ -274,3 +274,28 @@ and foreign-owned cache directories. The exact receipt implementation matching
 Git blob `1f5d1e537ac5728786647a71c692494da034e0a9` passed 32 isolated
 Linux tests, including read/write provenance and WAL/directory-swap behavior.
 This is not a full source-tree regression or device qualification.
+
+## Zero-scan operator inspection
+
+The audit command now supports reading the **existing** cached verdict
+without opening `jobs.db`, reading prepared artifacts, or running SHA-256:
+
+```sh
+python3 scripts/capture-artifact-audit.py \
+  --inspect-receipt /captures/diagnostics/artifact-integrity.json
+```
+
+This prints only bounded and sanitized keys:
+`status`, `reason`, `checked`, `ready_rows` and `age_seconds`.
+Exit **0** means a recent verified ready-artifact audit, exit **1** means
+the cached audit reported an actionable discrepancy, and exit **3** means
+unavailable, invalid, stale or otherwise unverifiable evidence. The
+inspection option cannot be combined with `--receipt` publication.
+It never triggers an audit or refreshes an old cache.
+
+For a receipt beneath `/captures`, inspection checks the shared
+REDUXCAP mount identity before and after the read. Missing or changed
+mount evidence reports UNKNOWN even when a JSON file appears readable.
+For isolated test receipts outside that mount, normal private-file and
+ownership protections still apply. A cached receipt describes the last
+audit moment; it is not proof of currently receiving Wi-Fi frames.
