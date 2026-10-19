@@ -128,7 +128,14 @@ def read_cached_receipt(path, *, now=None):
                      os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
         try:
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_RECEIPT_BYTES:
+            # A cached verdict is only trusted if the regular receipt is
+            # owner-private and owned by the trusted cache directory owner.
+            # A world/group writable file can be replaced in place without
+            # acquiring permission to create entries in the directory.
+            if (not stat.S_ISREG(info.st_mode)
+                    or not 0 < info.st_size <= MAX_RECEIPT_BYTES
+                    or info.st_uid != directory.st_uid
+                    or stat.S_IMODE(info.st_mode) & 0o077):
                 return unknown
             payload = bytearray()
             while len(payload) <= MAX_RECEIPT_BYTES:
