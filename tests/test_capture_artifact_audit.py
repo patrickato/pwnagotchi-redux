@@ -489,3 +489,36 @@ def test_prepared_filename_swap_to_symlink_is_not_a_pass(tmp_path, monkeypatch):
     assert observed["result"] == "attention"
     assert observed["issues"] == {"artifact_changed_during_audit": 1}
     assert outside.read_bytes() == payload
+
+
+def test_parent_alias_swap_after_audit_open_must_not_report_pass(tmp_path, monkeypatch):
+    """A parent symlink alias changing must invalidate the advertised path."""
+    import os
+
+    db, original_dir = fixture(tmp_path)
+    prepared = ready(db, original_dir, b"prepared test artifact")
+    alternative = tmp_path / "alternative"
+    alternative.mkdir()
+    other_output = alternative / "ready"
+    other_output.mkdir()
+    (other_output / prepared.name).write_bytes(b"alternate contents")
+    alias_parent = tmp_path / "parent-alias"
+    alias_parent.symlink_to(tmp_path, target_is_directory=True)
+    alias_output = alias_parent / "ready"
+    original_open = os.open
+    moved = [False]
+
+    def move_alias_before_artifact_open(path, flags, *args, **kwargs):
+        if str(path) == prepared.name and kwargs.get("dir_fd") is not None and not moved[0]:
+            moved[0] = True
+            alias_parent.unlink()
+            alias_parent.symlink_to(alternative, target_is_directory=True)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(mod.os, "open", move_alias_before_artifact_open)
+    report = mod.audit(db, alias_output)
+    assert moved == [True]
+    assert report["result"] == "attention"
+    assert report["issues"] == {"output_directory_changed": 1}
+    assert report["checked"] == 1
+    assert prepared.read_bytes() == b"prepared test artifact"
