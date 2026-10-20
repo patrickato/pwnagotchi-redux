@@ -335,3 +335,28 @@ directory is opened, preserving the original directory and changing its
 advertised location. This is a best-effort race detector, not a permanent
 filesystem lock; full combined Redux regression against these latest changes
 is still required.
+
+## Bounded SQLite read phase
+
+The auditor limits the read-only SQLite phase to a **10-second monotonic VM
+deadline**, checked every 1,000 SQLite VM operations. The ordinary SQLite
+one-second busy timeout still applies to database locks. Each SQLite string
+or BLOB cell the audit may materialize is constrained by
+`SQLITE_LIMIT_LENGTH` to 8 KiB before the ready-row SELECT is performed.
+This prevents an abnormal ledger row with a multi-megabyte `output_path`
+from unexpectedly allocating that entire value in the diagnostic process.
+Schema checks, COUNT and ready-row selection still share one read-only
+transaction, and an interrupted/oversized SQLite operation produces
+`audit_unavailable` (ATTENTION), never an integrity PASS.
+
+These bounds apply to **SQLite query execution**, not the SHA-256 file
+phase. File hashing retains separate 33 MiB per-artifact and 512 MiB
+aggregate byte limits; operating system storage stalls cannot be assigned
+a guaranteed wall-clock deadline by those byte bounds alone.
+
+The three new deterministic unit tests cover oversized ledger values, forced
+SQLite VM interruption and ordinary passing records. On the local Linux
+SQLite runtime, these specific low-level behaviors reproduced as
+`DataError: string or blob too big`, `OperationalError: interrupted`,
+and successful retrieval of an ordinary ready row. Full checkout
+qualification remains necessary after these commits.
