@@ -377,3 +377,70 @@ print('DASHBOARD_OK')
         capture_output=True, cwd=tmp_path, timeout=10, check=False)
     assert run.returncode == 0, run.stderr
     assert run.stdout.strip() == "DASHBOARD_OK"
+
+
+def test_inspect_existing_session_surfaces_safe_hardware_blockers(tmp_path):
+    """Saved data can explain TFT/radio/storage blockers without another Pi read."""
+    fake_root(tmp_path)
+    record=snapshot(tmp_path)
+    record['display'].update(
+        state='BLOCKED',
+        blockers=['FRAMEBUFFER MISSING','TOUCH DEVICE MISSING'],
+        framebuffer_candidates=0, ili9486_candidates=1, touch_candidates=0,
+        framebuffers=[{'ordinal':1,'dimensions':'1920,1080',
+                       'bits_per_pixel':'32','stride':'7680',
+                       'device':'/dev/fbPRIVATE'}])
+    record['radio']={'inventory_status':'fresh','radios':[
+        {'radio':1,'transport':'onboard','kernel_mode':'monitor','arphrd':1,
+         'nm_managed':True,'nm_state':20,'identity_stable':True,
+         'iface':'PRIVATE_WLAN','driver':'PRIVATE'},
+        {'radio':2,'transport':'usb','kernel_mode':'monitor','arphrd':803,
+         'usb_ancestry':True,'identity_stable':True,'iface':'PRIVATE_USB'}]}
+    record['storage']['captures']={
+        'status':'ok','filesystem':'ext4','device_major_minor':'PRIVATE_DEVICE'}
+    record['storage']['available_bytes']=128*1024*1024
+    record['processing']={'available':True,'fresh':False,'artifact_count':4,
+                          'capture_paths':['PRIVATE_CAPTURE']}
+    record['plugins']={'available':False,'secret':'PRIVATE_PLUGIN'}
+    record['status']={'acceptance':{
+        'checkpoint_freshness':'fresh','live_state':'running','events_seen':'42',
+        'network_identifiers':'PRIVATE_AP'}}
+    summary=launcher().session_inspect(record,now=100)
+    ob=summary['observations']
+    assert summary['result']=='UNKNOWN'
+    assert ob['display_blockers']==['FRAMEBUFFER MISSING','TOUCH DEVICE MISSING']
+    assert ob['framebuffer_metadata'][0]['dimensions']=='1920,1080'
+    assert ob['storage']['captures']=={'status':'ok','filesystem':'ext4'}
+    assert ob['captures_available_mib']==128
+    assert ob['radio_inventory_details'][0]['transport']=='onboard'
+    assert ob['radio_inventory_details'][1]['transport']=='usb'
+    assert ob['radio_inventory_details'][1]['arphrd']==803
+    assert ob['capture_processing']['artifact_count']==4
+    assert ob['plugin_inventory_available'] is False
+    assert ob['live_runtime']['events_seen']==42
+    assert 'PRIVATE' not in json.dumps(summary)
+
+
+def test_saved_session_detail_rejects_untrusted_free_text(tmp_path):
+    fake_root(tmp_path)
+    record=snapshot(tmp_path)
+    record['display']={'state':'BLOCKED','blockers':['PRIVATE_REASON'],
+                       'framebuffer_candidates':100000,'framebuffers':[
+                           {'dimensions':'PRIVATE_RESOLUTION'}]}
+    record['storage']={'captures':{'status':'PRIVATE','filesystem':'PRIVATE'},
+                       'available_bytes':-1}
+    record['radio']={'inventory_status':'PRIVATE','radios':[
+        {'transport':'PRIVATE','kernel_mode':'PRIVATE','arphrd':-1,
+         'iface':'PRIVATE_IDENTIFIER'}]}
+    record['status']={'acceptance':{
+        'live_state':'PRIVATE','checkpoint_freshness':'PRIVATE',
+        'events_seen':'9'*1000}}
+    observed=launcher().session_inspect(record,now=100)['observations']
+    assert observed['display_blockers']==[]
+    assert observed['display_candidates']['framebuffer_candidates'] is None
+    assert observed['framebuffer_metadata'][0]['dimensions'] is None
+    assert observed['radio_inventory_status'] is None
+    assert observed['radio_inventory_details'][0]['transport'] is None
+    assert observed['captures_available_mib'] is None
+    assert observed['live_runtime']['events_seen'] is None
+    assert 'PRIVATE' not in json.dumps(observed)
