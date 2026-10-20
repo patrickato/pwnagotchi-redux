@@ -49,7 +49,12 @@ def test_extended_memory_bundle_imports_without_installed_source(tmp_path):
     _,_,source=launcher().session_support()
     prefix=source.split('import json, os, sys\n',1)[0]
     # -I plus a different cwd excludes this checkout and any installed Redux.
-    program=prefix+'\nimport redux.acceptance_session, redux.session_helpers, redux.acceptance\nprint("MEMORY_OK")\n'
+    # Import modules used only when remote_snapshot executes. Merely importing
+    # the snapshot module missed transitive kiosk/HTTP dependencies and allowed
+    # a valid SSH login to fail before producing a session JSON response.
+    program=(prefix+'\nimport redux.acceptance_session, redux.session_helpers, redux.acceptance\n'
+             'import redux.boot_readiness, redux.display.acceptance, redux.display.local_http\n'
+             'print("MEMORY_OK")\n')
     result=subprocess.run([sys.executable,'-I','-B','-'],input=program,text=True,capture_output=True,cwd=tmp_path,timeout=10)
     assert result.returncode==0,result.stderr
     assert result.stdout.strip()=='MEMORY_OK'
