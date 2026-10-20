@@ -162,3 +162,23 @@ Ethernet Pi address and card identification remain prerequisites for acquisition
 Continue with the offline plan, approve the documented exact scope, execute once,
 inspect the saved report and choose the next operation from actual evidence.
 Do not turn missing measurements into a speculative Pi repair or a root retry.
+
+## October 20, 2026: collector bundle dependency correction
+
+The Pi 4 Rev 1.5 at the previously used Ethernet address responded to a
+strict-host-key, public-key-only SSH request. The returned hardware model is
+direct physical metadata; it does not certify the booted card or Redux image.
+The original memory-only `session-collect` failed without saving a JSON
+session. Inspection of the bundler found that `redux.display.kiosk` imports
+`redux.display.local_http`, but the memory module bundle omitted that module.
+An older installed image cannot supply a missing dependency because the in-memory
+package namespace intentionally hides unbundled installed sources.
+
+The host bundler now includes the missing dependency, and the
+`test_extended_memory_bundle_imports_without_installed_source` regression
+imports the boot-readiness and display modules under isolated Python `-I`
+to catch this transitive dependency. This correction was made entirely in
+the host repository; no Pi file, config or service was changed. Run the
+offline regression after `git pull --ff-only` and review its result before
+conducting a new separately scoped read-only collection. Use a fresh
+report filename; do not inspect an unsaved report or change SSH host keys.
