@@ -230,3 +230,38 @@ fake-successful-dashboard test. This is a host source-only correction;
 the Pi remains unchanged. The `remote_NameError` class alone does not
 prove which variable was missing, so the next approved attempt must still
 confirm whether this resolves the complete collection.
+
+## Saved-session offline detail (October 20)
+
+A successful first read-only Pi 4 session was saved under a private WSL
+filename (operator-selected `redux-bringup-20261020-d.json`). Its hardware
+identity stayed stable, confirmed ARM64 Pi 4 and two observed interface
+link types, 1 and 803; a 1-second RX/TX sample contained zero deltas.
+The screen metadata state was BLOCKED. Physical reception and screen
+acceptance remain UNKNOWN. The running image embeds
+`4f907ff93ce0c6bc0b2c9d4f68025ba7dd1f9a84`, which is older than
+the host checkout; do not infer installed Sprint 10 functionality.
+
+The first `session-inspect` projection did not show the saved radio
+transport/mode/ownership diagnostics, filesystem statuses, named TFT
+blockers, or aggregate capture-processing availability. The local
+`session-inspect` projection now additionally exposes only allowlisted,
+bounded fields from the **already-saved** report: interface ordinals and
+link types, onboard/USB metadata, existing manager state, display blocker
+codes and framebuffer dimensions, core storage mount statuses and REDUXCAP
+free MiB, aggregate capture-processing status, plugin inventory availability,
+and cached live-state/freshness. It never opens the Pi, raw capture data or
+hardware paths, and never reports physical acceptance as PASS.
+
+To inspect a previous report after pulling the host source:
+
+```sh
+python3 -m pytest -q tests/test_acceptance_session.py
+python3 scripts/redux-acceptance.py --json session-inspect \
+  --session-file "$HOME/redux-bringup-20261020-d.json"
+```
+
+Old observations can become stale when inspected later; historical saved
+metadata is still useful for identifying hardware blockers but must not
+be relabeled current acceptance. The full private session must remain
+on the owner's workstation and out of GitHub.
