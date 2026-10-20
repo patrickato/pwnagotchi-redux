@@ -432,3 +432,60 @@ def test_cached_inspection_and_audit_publication_are_mutually_exclusive(tmp_path
         mod.main(["--inspect-receipt", str(tmp_path / "a"),
                   "--receipt", str(tmp_path / "b")])
     assert err.value.code == 2
+
+
+def test_prepared_filename_replacement_is_not_a_false_pass(tmp_path, monkeypatch):
+    """The old open inode can hash correctly while its name points elsewhere."""
+    import os
+
+    db, output = fixture(tmp_path)
+    payload = b"stable synthetic prepared artifact"
+    path = ready(db, output, payload)
+    old_inode = path.stat().st_ino
+    original_read = os.read
+    swapped = [False]
+
+    def replace_name_during_read(fd, count):
+        chunk = original_read(fd, count)
+        if chunk and not swapped[0]:
+            swapped[0] = True
+            path.unlink()
+            # Even identical content and digest must not hide inode churn.
+            path.write_bytes(payload)
+            assert path.stat().st_ino != old_inode
+        return chunk
+
+    monkeypatch.setattr(mod.os, "read", replace_name_during_read)
+    observed = mod.audit(db, output)
+    assert swapped == [True]
+    assert observed["checked"] == 1
+    assert observed["issues"] == {"artifact_changed_during_audit": 1}
+    assert observed["result"] == "attention"
+
+
+def test_prepared_filename_swap_to_symlink_is_not_a_pass(tmp_path, monkeypatch):
+    """Only the pinned original inode may be read, not replacement symlink data."""
+    import os
+
+    db, output = fixture(tmp_path)
+    payload = b"synthetic private capture conversion"
+    path = ready(db, output, payload)
+    outside = tmp_path / "different-tree"
+    outside.write_bytes(payload)
+    original_read = os.read
+    changed = [False]
+
+    def replace_name_with_link(fd, count):
+        chunk = original_read(fd, count)
+        if chunk and not changed[0]:
+            changed[0] = True
+            path.unlink()
+            path.symlink_to(outside)
+        return chunk
+
+    monkeypatch.setattr(mod.os, "read", replace_name_with_link)
+    observed = mod.audit(db, output)
+    assert changed == [True]
+    assert observed["result"] == "attention"
+    assert observed["issues"] == {"artifact_changed_during_audit": 1}
+    assert outside.read_bytes() == payload
