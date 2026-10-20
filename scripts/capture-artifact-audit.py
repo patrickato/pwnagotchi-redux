@@ -127,10 +127,28 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
                         hashobj.update(chunk)
                         remaining -= len(chunk)
                     after = os.fstat(fd)
-                    if remaining or (meta.st_dev, meta.st_ino, meta.st_size,
-                                     meta.st_mtime_ns, meta.st_ctime_ns) != (
-                            after.st_dev, after.st_ino, after.st_size,
-                            after.st_mtime_ns, after.st_ctime_ns):
+                    # Hashing an open inode alone cannot prove the same inode
+                    # still occupies its advertised filename: a writer could
+                    # rename a different file into place mid-audit. Recheck
+                    # the name relative to the same pinned directory.
+                    try:
+                        named = os.stat(
+                            expected.name, dir_fd=directory_fd,
+                            follow_symlinks=False,
+                        )
+                    except OSError:
+                        named = None
+                    if (
+                        remaining
+                        or named is None
+                        or not stat.S_ISREG(named.st_mode)
+                        or (meta.st_dev, meta.st_ino, meta.st_size,
+                            meta.st_mtime_ns, meta.st_ctime_ns) != (
+                                after.st_dev, after.st_ino, after.st_size,
+                                after.st_mtime_ns, after.st_ctime_ns)
+                        or (after.st_dev, after.st_ino) != (
+                            named.st_dev, named.st_ino)
+                    ):
                         issue("artifact_changed_during_audit")
                     elif hashobj.hexdigest() != digest:
                         issue("artifact_digest_mismatch")
