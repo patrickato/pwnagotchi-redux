@@ -120,7 +120,7 @@ def session_support():
         return value
     pi=module('pi-acceptance');field=module('field-status')
     from redux.acceptance_collect import cached_status
-    helper='import math, urllib.request\n'+inspect.getsource(field.sanitize)+'\n'+inspect.getsource(cached_status)
+    helper='import json, math, urllib.request\n'+inspect.getsource(field.sanitize)+'\n'+inspect.getsource(cached_status)
     modules=tuple(dict.fromkeys(pi.MODULES+('redux.acceptance_session','redux.boot_readiness',
         'redux.display.acceptance','redux.display.kiosk','redux.display.local_http',
          'redux.core.processing_evidence')))
