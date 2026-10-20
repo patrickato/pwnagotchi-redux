@@ -47,7 +47,7 @@ class PackManager:
             return []
         started = time.monotonic()
         self.partial = False
-        for child in self.root.iterdir():
+        for child in sorted(self.root.iterdir()):
             if time.monotonic() - started > 0.25:
                 self.partial = True
                 self.errors.append({"state": "unavailable", "reason": "Discovery time budget exceeded; requests refused"})
@@ -252,11 +252,13 @@ class PackManager:
                 diagnostics.append("Platform/runtime requirements are unqualified")
             if set(pack.conflicts) & self._enabled:
                 diagnostics.append("Conflicts with requested plugin state")
-            records.append({"diagnostics": diagnostics, "name": pack.name, "version": pack.version, "description": pack.description,
+            from .registry import eligibility
+            records.append({"kind": pack.kind, "native": eligibility(pack), "diagnostics": diagnostics, "name": pack.name, "version": pack.version, "description": pack.description,
                 "source": "installed manifest", "manifest_sha256": pack.manifest_sha256, "location": pack.root,
                 "state": "incompatible" if evidence["state"] == "incompatible" else ("enabled" if self.is_enabled(pack.name) else "disabled"),
                 "requested_enabled": self.is_enabled(pack.name), "active": None,
-                "activation": "unverified; controlled restart required", "compatibility": evidence,
+                "activation": ("manual tool; runtime activation not applicable" if pack.kind == "tool"
+                               else "unverified; native owner evidence unavailable"), "compatibility": evidence,
                 "dependencies": list(pack.requires), "conflicts": list(pack.conflicts),
                 "requirements": list(pack.requirements), "side_effects": pack.side_effects,
                 "options": {key: {k: v for k, v in spec.items() if k in ("type", "min", "max", "max_length", "sensitive") or (k == "choices" and not spec.get("sensitive"))}

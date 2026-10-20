@@ -873,7 +873,7 @@ def auth_token(bind_scope: str, token: Optional[str] = None) -> Optional[str]:
     return secrets.token_urlsafe(18)
 
 
-def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = None):
+def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = None, *, plugin_runtime=None):
     """Build a request handler for `/` and `/api/status`.
 
     If `token` is set, every route is gated: `/api/status` needs it (401 without),
@@ -881,7 +881,7 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
     an `Authorization: Bearer <token>` header or an `augur_token` cookie, compared
     in constant time. `token=None` means open (the localhost default)."""
     from ..packs.status import configured_provider
-    plugin_provider = configured_provider()
+    plugin_provider = configured_provider() if plugin_runtime is None else configured_provider(runtime=plugin_runtime)
 
     def _present(headers) -> Optional[str]:
         auth = headers.get("Authorization", "")
@@ -955,7 +955,7 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
                     cards = []
                     for pack in inventory.get("plugins", []):
                         cards.append('<article><h2>' + html.escape(pack['name']) + '</h2><pre>' + html.escape(json.dumps(pack, indent=2)) + '</pre></article>')
-                    page = '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Plugin Control Center</title><style>body{font:16px sans-serif;background:#111;color:#eee;margin:16px}a{color:#9df;display:block;min-height:44px}pre{white-space:pre-wrap;overflow-wrap:anywhere}article{border:1px solid #777;padding:12px;margin:12px 0}</style><a href="/">Back to dashboard</a><h1>Plugin Control Center</h1><p>Read-only inspection. Requested state is separate from active runtime state. Activation is unverified.</p><p>Local workflow: redux packs list; redux packs enable NAME; review the preview, then repeat with --confirm REVISION. No service is restarted.</p>' + ''.join(cards) + ('<p>No catalog entries installed.</p>' if not cards and inventory.get('availability') == 'inspected' else '') + '<p>' + html.escape(inventory.get('availability', 'unknown')) + '</p>'
+                    page = '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Plugin Control Center</title><style>body{font:16px sans-serif;background:#111;color:#eee;margin:16px}a{color:#9df;display:block;min-height:44px}pre{white-space:pre-wrap;overflow-wrap:anywhere}article{border:1px solid #777;padding:12px;margin:12px 0}</style><a href="/">Back to dashboard</a><h1>Plugin Control Center</h1><p>Read-only inspection. Requested state is separate from active runtime state. Runtime evidence is valid only for the current owner generation and requested revision.</p><p>Local workflow: redux packs list; redux packs enable NAME; review the preview, then repeat with --confirm REVISION. No service is restarted.</p>' + ''.join(cards) + ('<p>No catalog entries installed.</p>' if not cards and inventory.get('availability') == 'inspected' else '') + '<p>' + html.escape(inventory.get('availability', 'unknown')) + '</p>'
                     page += '<pre>' + html.escape(json.dumps(inventory.get('errors', []), indent=2)) + '</pre>'
                     if inventory.get('next_offset') is not None:
                         page += '<a href="/plugins?offset=' + str(inventory['next_offset']) + '">Next plugins</a>'

@@ -30,6 +30,10 @@ _MUST_EXIST = (
     "opt/redux/redux/packs/manager.py",
     "opt/redux/redux/packs/manifest.py",
     "opt/redux/redux/packs/status.py",
+    "opt/redux/redux/packs/registry.py",
+    "opt/redux/redux/packs/runtime.py",
+    "opt/redux/redux/packs/native_observer.py",
+    "usr/share/redux/packs/resource-summary/pack.toml",
     "opt/redux/redux/packs/__init__.py",
     "usr/share/redux/packs/field-diagnostics/pack.toml",
     "opt/redux/redux/core/boot.py",
@@ -331,10 +335,16 @@ def verify(root, *, profile="lite", other_root=None, expected_country=None):
         for filename in _MUST_EXIST:
             regular(candidate, filename)
         inventories.append(package_inventory(candidate))
-        catalog_path = "usr/share/redux/packs/field-diagnostics/pack.toml"
-        reviewed = Path(__file__).parent / "stage-redux/60-packs/files/catalog/field-diagnostics/pack.toml"
-        if text(candidate, catalog_path) != reviewed.read_text():
-            raise ValueError("installed native pack catalog differs from reviewed payload")
+        for name in ('field-diagnostics', 'resource-summary'):
+            catalog_path = f"usr/share/redux/packs/{name}/pack.toml"
+            reviewed = Path(__file__).parent / f"stage-redux/60-packs/files/catalog/{name}/pack.toml"
+            if text(candidate, catalog_path) != reviewed.read_text():
+                raise ValueError("installed native pack catalog differs from reviewed payload")
+        for filename in ('registry.py', 'runtime.py', 'native_observer.py'):
+            installed = regular(candidate, f"opt/redux/redux/packs/{filename}")
+            reviewed = Path(__file__).resolve().parents[1] / 'redux/packs' / filename
+            if installed.stat().st_size > 65536 or installed.read_bytes() != reviewed.read_bytes():
+                raise ValueError("installed native implementation differs from reviewed registry")
         ab_units = {**{unit: rules[1:] for unit, rules in _AB_UNITS.items()}, **_AB_REQUIRED_UNITS} if profile=='ab' else None
         unit_contract(candidate, ab_units)
         capture_contract(candidate, profile, expected_country=expected_country)

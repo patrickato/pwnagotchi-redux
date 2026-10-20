@@ -124,6 +124,12 @@ def model(report, *, now=None):
             'Preserve state; inspect with the local packs CLI')
     for plugin in plugins.get('plugins', [])[:12] if isinstance(plugins.get('plugins'), list) else []:
         plugin = mapping(plugin)
-        row('Plugin ' + text(plugin.get('name')), 'requested ' + text(plugin.get('state')) + '; active unknown',
-            'unknown', 'Use local packs CLI for validated requests')
+        confirmed = plugin.get('active') is True and plugins.get('runtime_fresh') is True
+        activation = ('active' if confirmed else text(plugin.get('activation'))
+                      if plugin.get('active') is False else 'active unknown')
+        row('Plugin ' + text(plugin.get('name')),
+            'requested ' + text(plugin.get('state')) + '; ' + activation,
+            'fresh' if confirmed else 'unknown',
+            'Current native runtime evidence; local packs CLI manages requests',
+            plugins.get('runtime_observed_at'))
     return {'version': 1, 'heartbeat': heartbeat, 'sensors': sensors, 'visual': visual, 'rows': rows[:80]}

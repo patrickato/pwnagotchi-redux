@@ -163,3 +163,83 @@ and unstaged whitespace checks passed. Nineteen new installed-integration tests
 exercise the real copied sources and stage scripts without privileged execution.
 Physical boot, captures preservation, actual plugin activation and TFT/RF operation
 remain separate hardware gates; no real image or deployment is implied.
+
+## Trusted native runtime (Sprint 10)
+
+The installed catalog now includes `resource-summary`, a read-only native plugin.
+It consumes the supervisor's **existing** `ResourceMonitor` observations over
+`Signal.RESOURCE_OBSERVATION`. Its identifiable output contains executed
+observation count, original measurement time, freshness and available CPU
+temperature/load and RAM utilization. It never reads hardware, queries a ledger,
+changes a radio, or treats missing battery/power readings as measurements.
+`field-diagnostics` remains a manual command/tool pack; it has no daemon activation.
+
+The shipped `redux.packs.registry` is the trust boundary, backed by the verified
+image/source revision. It pins both the reviewed manifest bytes and implementation
+SHA-256, and uses a fixed first-party import. An arbitrary manifest/module name,
+legacy adapter, imported Python file or self-provided digest cannot authorize
+execution. This is **not a sandbox**. Adding a native implementation requires a
+source review, registry entry and updated image/lifecycle tests. Currently only
+`resource-summary` is supported, with no configuration options or elevated/hardware
+requirements. Legacy settings remain preserved by the manager but are not passed
+to this implementation.
+
+### Local activation workflow
+
+On a future approved installed-system session:
+
+1. Inspect `redux packs list`. `native.eligible` describes registry qualification,
+   independently of requested and actual active state.
+2. Run `redux packs enable resource-summary`, review the returned preview, then
+   repeat with `--confirm REVISION`. Existing atomic state/backup and mount guards
+   apply. This command alone does not start anything.
+3. The reviewed live owner must be deliberately enabled with
+   `[live] enable_native_plugins = true` in the live service configuration.
+   The shipped default is **false**. Applying that configuration to a Pi and
+   restarting its service require separate physical authorization; no CLI control
+   or web request silently restarts services.
+4. Inspect `redux packs runtime` (optional `--url http://127.0.0.1:PORT/api/status`)
+   for current live-process evidence. This bounded, proxy-free, no-redirect reader
+   uses the existing loopback status endpoint. The authenticated browser also
+   exposes evidence at `/api/packs` and `/api/status`; remote writes remain absent.
+5. Disable using the existing preview/confirmation CLI workflow. The enabled
+   owner reconciles catalog/request changes at most every ten seconds, stopping
+   prior instances in reverse dependency order before replacing them. No disk
+   writes occur during native execution. The inventory itself has a ten-second
+   inspection cache; its sample age remains visible.
+
+The live checkpoint reads the worker's cached inventory without filesystem scans.
+The worker publishes starting, confirmed active, degraded, stopped or unavailable
+states. Successful `start()` completion is necessary for active evidence; the
+request revision is checked again after startup. Evidence carries an unpredictable
+current owner generation, exact requested-state digest, manifest and reviewed
+implementation identity. Only an in-process owner supplier is accepted by the
+inventory integration: saved checkpoints are never loaded as active proof. A new
+process starts without active evidence. CLI `packs list` remains offline manifest
+inspection; `packs runtime` explicitly asks the running owner. Requested-state
+changes may take up to the bounded reconciliation/inspection interval to appear.
+
+The radio loop only replaces one pending telemetry projection. Manifest IO and
+plugin callbacks execute on a daemon worker; repeated start does not add duplicate
+subscriptions. Shutdown detaches subscriptions immediately and joins for at most
+250 ms. Callback failures are isolated and redacted, with no automatic same-request
+retry after a plugin failure; a changed request revision or fresh owner is needed.
+Python cannot forcibly interrupt a hung trusted callback. A callback exceeding one
+second loses fresh active evidence and is quarantined after returning, and a worker without a completed heartbeat for
+five seconds is stale. Shutdown of a hung callback is reported as degraded, not
+successful. Other plugins share this worker; that bounded isolation does not make
+untrusted code safe. Sensor freshness remains separate from worker freshness.
+
+Doctor adds a native-plugin finding only when this owner is explicitly enabled.
+Unknown/stale evidence remains UNKNOWN; failed requested native activation is
+DEGRADED. Tool packs are excluded from daemon expectations. The native System page
+and authenticated web inspection consume the same compact inventory. A missing
+REDUXCAP prevents the installed supervisor starting (existing storage safety);
+a later mount loss stops native instances and never creates fallback state.
+
+Host tests execute the shipped implementation in source and copied installed-root
+fixtures, assert output and cleanup, and exercise loopback HTTP, missing radio,
+corrupt state, startup revision races, failure/timeout isolation and restart
+freshness. These are software results, **not physical Pi acceptance**. No Pi
+startup, actual sensor behavior, framebuffer/touch operation or radio behavior is
+certified by these tests. No real image was assembled during this sprint.

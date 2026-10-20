@@ -411,6 +411,17 @@ def cmd_vault(args) -> int:
 def cmd_packs(args) -> int:
     from .packs.locations import StateUnavailable
     try:
+        if args.pack_cmd == "runtime":
+            from .display.local_http import open_status
+            with open_status(args.url) as response:
+                raw = response.read(65537)
+            if len(raw) > 65536:
+                raise ValueError("runtime status too large")
+            report = json.loads(raw)
+            if not isinstance(report, dict):
+                raise ValueError("invalid runtime report")
+            print(json.dumps(report.get("plugins", {"runtime_activation": "unknown"}), indent=2))
+            return 0
         from .packs.locations import locations, mount_guard, prepare_parent
         root, state = locations(args.dir, args.state)
         guard = mount_guard(state)
@@ -1477,6 +1488,8 @@ def build_parser() -> argparse.ArgumentParser:
     pk.add_argument("--dir", help="catalog directory (installed default: /usr/share/redux/packs)")
     pk.add_argument("--state", help="writable requested-state path; use /captures/config/packs.json on images")
     psub = pk.add_subparsers(dest="pack_cmd", required=True)
+    rt = psub.add_parser("runtime", help="read current process evidence from local status; never activate")
+    rt.add_argument("--url", default="http://127.0.0.1:8080/api/status")
     li = psub.add_parser("list"); li.add_argument("--offset", type=int, default=0)
     en = psub.add_parser("enable"); en.add_argument("name")
     di = psub.add_parser("disable"); di.add_argument("name")

@@ -20,6 +20,11 @@ def slot(tmp_path, name="lite", profile="lite"):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("installed fixture\n")
     (root / "usr/share/redux/packages.tsv").write_text("".join(name + "\t1.0\n" for name in ('python3','python3-pil','python3-dbus-next','hcxtools','bettercap','iw')))
+    for filename in ('registry.py', 'runtime.py', 'native_observer.py'):
+        (root / f"opt/redux/redux/packs/{filename}").write_bytes(
+            (ROOT / 'redux/packs' / filename).read_bytes())
+    (root / "usr/share/redux/packs/resource-summary/pack.toml").write_text(
+        (ROOT / "image/stage-redux/60-packs/files/catalog/resource-summary/pack.toml").read_text())
     (root / "usr/share/redux/packs/field-diagnostics/pack.toml").write_text(
         (ROOT / "image/stage-redux/60-packs/files/catalog/field-diagnostics/pack.toml").read_text())
     systemd = root / "etc/systemd/system"

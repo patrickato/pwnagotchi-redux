@@ -58,6 +58,7 @@ class LiveConfig:
     api_port: int = 8081
     web_port: int = 8080
     enable_web: bool = True
+    enable_native_plugins: bool = False
     retry_seconds: int = 10
     probe_seconds: int = 30
     rotation_seconds: int = 300
@@ -86,6 +87,7 @@ class LiveConfig:
             api_port=int(values.get("api_port", 8081)),
             web_port=int(values.get("web_port", 8080)),
             enable_web=values.get("enable_web", True),
+            enable_native_plugins=values.get("enable_native_plugins", False),
             retry_seconds=int(values.get("retry_seconds", 10)),
             probe_seconds=int(values.get("probe_seconds", 30)),
             rotation_seconds=int(values.get("rotation_seconds", 300)),
@@ -133,6 +135,8 @@ class LiveConfig:
             raise ValueError("pipeline_stale_seconds must be 60-3600 seconds")
         if not 1 <= self.status_sample_seconds <= 30:
             raise ValueError("status_sample_seconds must be 1-30 seconds")
+        if type(self.enable_native_plugins) is not bool:
+            raise ValueError("enable_native_plugins must be a boolean")
         if self.enable_web is not True and self.enable_web is not False:
             raise ValueError("enable_web must be a boolean")
         if type(self.allow_connected_capture) is not bool:
@@ -314,6 +318,8 @@ class LiveRuntime:
         self._radio_inventory_inflight = False
         self._radio_inventory_thread = None
         self._closing = False
+        self.native_plugins = None
+        self.native_next_try = float("-inf")
         self.executor = executor
         self.spawn = spawn
         self.clock = clock
@@ -673,6 +679,18 @@ class LiveRuntime:
         metadata["visual_sampled_utc"] = self._visual_sampled_utc if self.augur else None
         metadata["visual_max_age_seconds"] = max(12, 2 * self.config.status_sample_seconds)
         metadata["visual_revision"] = self._visual_revision if self.augur else None
+        if self.native_plugins is not None:
+            try:
+                snapshot["plugins"] = self.native_plugins.summary()
+            except Exception:
+                from ..packs.status import unavailable
+                snapshot["plugins"] = unavailable()
+        elif self.config.enable_native_plugins:
+            from ..packs.status import unavailable
+            snapshot["plugins"] = unavailable()
+        if self.config.enable_native_plugins:
+            from .doctor import with_native_plugins
+            report = with_native_plugins(report, snapshot.get("plugins", {}))
         def health_view():
             return describe_live_health(
                 self.state, iface=self.iface or "",
@@ -740,7 +758,8 @@ class LiveRuntime:
             return
         server = ThreadingHTTPServer(
             ("127.0.0.1", self.config.web_port),
-            make_handler(lambda: self._snapshot, token=None),
+            make_handler(lambda: self._snapshot, token=None,
+                         plugin_runtime=lambda: self.native_plugins.snapshot() if self.native_plugins else {}),
         )
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         try:
@@ -1111,6 +1130,27 @@ class LiveRuntime:
 
     def tick(self):
         self.resources.sample()
+        if (self.config.enable_native_plugins and self.native_plugins is None
+                and self.clock() >= self.native_next_try):
+            try:
+                from .signals import SignalBus
+                from ..packs.runtime import NativeRuntime
+                owner = NativeRuntime(SignalBus(), clock=self.clock)
+                owner.start()
+                self.native_plugins = owner
+                self.observer_errors.pop("plugins", None)
+            except Exception:
+                # Optional plugin startup must not become a capture failure.
+                self.observer_errors['plugins'] = 'native owner startup failed'
+                self.native_next_try = self.clock() + 30
+        if self.native_plugins is not None:
+            try:
+                self.native_plugins.bus.emit(Signal.RESOURCE_OBSERVATION,
+                                             observation=self.resources.status())
+                self.observer_errors.pop("plugins", None)
+            except Exception:
+                self.observer_errors['plugins'] = 'resource publication failed'
+
         now = self.clock()
         # A forced/lazy unmount invalidates the original flock/partition
         # identity. Never resume on a newly mounted filesystem under a stale
@@ -1282,6 +1322,12 @@ class LiveRuntime:
         # exit non-zero. systemd's default KillMode=control-group then retains
         # responsibility for any surviving service child before a new start.
         self._closing = True
+        if self.native_plugins is not None:
+            try:
+                self.native_plugins.close()
+            except Exception:
+                self.observer_errors['plugins'] = 'native shutdown failed'
+                _LOG.warning('Optional native runtime shutdown failed')
         stopped = self._drop()
         try:
             if self.web is not None:

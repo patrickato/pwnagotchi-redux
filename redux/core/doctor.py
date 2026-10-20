@@ -241,3 +241,37 @@ class Doctor:
         return {"assessed": assessed, "not_assessed": gaps,
                 "reason": (f"{len(gaps)} area(s) could not be assessed: {', '.join(gaps)}"
                            if gaps else "all probed areas were assessed")}
+
+
+def with_native_plugins(report, inventory):
+    """Add an opt-in native-owner assessment, without sampling or trusting disk claims."""
+    inventory = inventory if isinstance(inventory, dict) else {}
+    report = report if isinstance(report, dict) else {}
+    fresh = inventory.get('runtime_fresh') is True
+    rows = inventory.get('plugins')
+    schema_valid = isinstance(rows, list) and all(isinstance(row, dict) for row in rows[:12])
+    rows = rows if isinstance(rows, list) else []
+    requested = [row for row in rows[:12]
+                 if isinstance(row, dict) and row.get('requested_enabled') is True and row.get('kind') != 'tool']
+    if (inventory.get('availability') != 'inspected' or inventory.get('runtime_error')
+            or not inventory.get('runtime_generation') or not fresh or not schema_valid):
+        status, summary = Status.UNKNOWN, 'Native plugin runtime evidence unavailable or stale.'
+    elif inventory.get('next_offset') is not None or inventory.get('partial') or len(rows) > 12:
+        status, summary = Status.UNKNOWN, 'Native plugin assessment covers only a partial inventory.'
+    elif any(row.get('active') is not True for row in requested):
+        status, summary = Status.DEGRADED, 'Requested native plugins are not all active.'
+    else:
+        status, summary = Status.OK, 'Requested native plugins confirmed by current runtime owner.'
+    finding = Finding('native plugins', status, summary,
+                      'Current process generation and requested-state revision; tools remain manual.',
+                      remediation='Inspect redux packs runtime; review registry, state and local service configuration.')
+    raw = report.get('findings')
+    findings = []
+    for row in raw[:64] if isinstance(raw, list) else []:
+        try:
+            findings.append(Finding(row['area'], Status(row['status']), row['summary'],
+                                    row.get('reason', ''), row.get('detail', {}), row.get('remediation', '')))
+        except (KeyError, ValueError, TypeError):
+            findings.append(Finding('upstream diagnosis', Status.UNKNOWN, 'Invalid upstream Doctor evidence.'))
+    findings.append(finding)
+    return Doctor(probes=[lambda inp, value=value: value for value in findings]).report(DoctorInputs())

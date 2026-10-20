@@ -320,3 +320,35 @@ def test_long_manifest_labels_cannot_expand_compact_status(installed):
     summary=InventoryProvider(catalog,state).summary()
     assert len(json.dumps(summary).encode())<8192
     assert all(len(row['version'] or '')<=96 for row in summary['plugins'])
+
+
+def test_extracted_source_runs_pinned_native_consumer_and_cleans_up(installed):
+    root,catalog,state=installed
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({'enabled':['resource-summary']}))
+    code='''
+import json, time
+from redux.core.signals import Signal, SignalBus
+from redux.packs.runtime import NativeRuntime
+bus=SignalBus()
+owner=NativeRuntime(bus)
+owner.start()
+try:
+    bus.emit(Signal.RESOURCE_OBSERVATION,observation={"measured_at":time.time(),"fresh":True,"values":{"cpu_temp_c":49}})
+    deadline=time.monotonic()+4
+    while time.monotonic()<deadline:
+        row=owner.snapshot()['plugins'].get('resource-summary',{})
+        if row.get('result'): break
+        time.sleep(.005)
+    assert row['active'] is True
+    assert row['result']['measurement']['cpu_temp_c']==49
+    print(json.dumps(row))
+finally:
+    owner.close()
+assert not owner.instances and not owner.thread.is_alive()
+'''
+    env={**os.environ,'PYTHONPATH':str(root/'opt/redux'),'REDUX_PACKS_DIR':str(catalog),
+         'REDUX_PACKS_STATE':str(state),'PYTHONDONTWRITEBYTECODE':'1'}
+    result=subprocess.run([sys.executable,'-B','-c',code],cwd=root,env=env,capture_output=True,text=True,timeout=10)
+    assert result.returncode==0,result.stderr
+    assert json.loads(result.stdout)['implementation']=='redux.resource-summary/v1'

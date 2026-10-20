@@ -29,6 +29,7 @@ class Signal(str, Enum):
     WARNING = "warning"                  # payload: reason (str)
     ALERT = "alert"                      # payload: alert (detector Alert)
     EVENT = "event"                      # payload: event (driver Event)
+    RESOURCE_OBSERVATION = "resource_observation"  # existing measured telemetry, read-only consumers
     BATTERY = "battery"                  # payload: percent (0..100), charging (bool)
     SUGGESTION = "suggestion"            # payload: decision (brain Decision)
     ACTION = "action"                    # payload: name, args, result, tx

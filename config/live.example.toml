@@ -1,5 +1,7 @@
 # Standalone Redux passive runtime; no active wireless operations.
 [live]
+# Explicit opt-in runtime owner; only pinned first-party plugins can activate.
+enable_native_plugins = false
 # Root-owned live supervisor state. Keep separate from redux/ (unprivileged service-owned).
 state_dir = "/captures/live"
 capture_dir = "/captures/incoming"
