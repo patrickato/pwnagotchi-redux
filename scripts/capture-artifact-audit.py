@@ -165,9 +165,12 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
         # Never report PASS for an old inode replaced in the namespace.
         try:
             current_dir = root.lstat()
+            advertised_dir = output_dir.lstat()
+            pinned_identity = (pinned_dir.st_dev, pinned_dir.st_ino)
             if (not stat.S_ISDIR(current_dir.st_mode)
-                    or (pinned_dir.st_dev, pinned_dir.st_ino) !=
-                    (current_dir.st_dev, current_dir.st_ino)):
+                    or not stat.S_ISDIR(advertised_dir.st_mode)
+                    or pinned_identity != (current_dir.st_dev, current_dir.st_ino)
+                    or pinned_identity != (advertised_dir.st_dev, advertised_dir.st_ino)):
                 issue("output_directory_changed")
         except OSError:
             issue("output_directory_changed")
