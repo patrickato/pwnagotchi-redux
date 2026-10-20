@@ -252,6 +252,12 @@ def test_wal_writer_cannot_split_ready_count_from_rows(tmp_path, monkeypatch):
         def close(self):
             self.conn.close()
 
+        def set_progress_handler(self, *args):
+            return self.conn.set_progress_handler(*args)
+
+        def setlimit(self, *args):
+            return self.conn.setlimit(*args)
+
     def connect(database, *args, **kwargs):
         # sqlite3.connect(..., uri=True) passes 'uri' as a keyword: using
         # 'uri' as this wrapper's first parameter binds it twice.
@@ -285,6 +291,12 @@ def test_readonly_transaction_refuses_inconsistent_count(tmp_path, monkeypatch):
 
         def close(self):
             self.conn.close()
+
+        def set_progress_handler(self, *args):
+            return self.conn.set_progress_handler(*args)
+
+        def setlimit(self, *args):
+            return self.conn.setlimit(*args)
 
     monkeypatch.setattr(mod.sqlite3, "connect",
                         lambda *a, **kw: InconsistentSnapshot(actual_connect(*a, **kw)))
@@ -522,3 +534,37 @@ def test_parent_alias_swap_after_audit_open_must_not_report_pass(tmp_path, monke
     assert report["issues"] == {"output_directory_changed": 1}
     assert report["checked"] == 1
     assert prepared.read_bytes() == b"prepared test artifact"
+
+
+def test_audit_bounded_sqlite_cell_length(tmp_path):
+    """A huge ledger cell must never be materialized as an arbitrary Python string."""
+    db, output = fixture(tmp_path)
+    enormous = "private-record-" * 100000
+    with sqlite3.connect(db) as conn:
+        conn.execute("INSERT INTO artifacts VALUES (?,?,?,?)",
+                     ("a" * 64, "ready", "b" * 64, enormous))
+    verdict = mod.audit(db, output)
+    assert verdict["result"] == "attention"
+    assert verdict["issues"] == {"audit_unavailable": 1}
+    assert enormous not in str(verdict)
+
+
+def test_audit_bounded_sqlite_query_steps(tmp_path, monkeypatch):
+    """SQLite VM progress interruption must be an actionable unknown audit, not PASS."""
+    db, output = fixture(tmp_path)
+    with sqlite3.connect(db) as conn:
+        conn.executemany("INSERT INTO artifacts VALUES (?,?,?,?)",
+                         (("a" * 64, "error", None, None) for _ in range(1200)))
+    monkeypatch.setattr(mod, "MAX_LEDGER_QUERY_SECONDS", -1.0)
+    verdict = mod.audit(db, output)
+    assert verdict["result"] == "attention"
+    assert verdict["issues"] == {"audit_unavailable": 1}
+    assert verdict["checked"] == 0
+
+
+def test_audit_bounded_query_still_verifies_valid_artifacts(tmp_path):
+    db, output = fixture(tmp_path)
+    ready(db, output, b"controlled synthetic prepared conversion")
+    verdict = mod.audit(db, output)
+    assert verdict == {"result": "pass", "checked": 1,
+                       "ready_rows": 1, "issues": {}}
