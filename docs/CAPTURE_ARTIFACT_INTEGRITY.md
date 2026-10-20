@@ -299,3 +299,22 @@ mount evidence reports UNKNOWN even when a JSON file appears readable.
 For isolated test receipts outside that mount, normal private-file and
 ownership protections still apply. A cached receipt describes the last
 audit moment; it is not proof of currently receiving Wi-Fi frames.
+
+## Prepared filename identity during digest verification
+
+SHA-256 verification keeps an artifact's file descriptor open for the entire
+bounded read, but a correct hash of that inode alone does not prove the
+canonical prepared filename still points to it. After hashing, the auditor
+rechecks the basename relative to the **same pinned output directory**, with
+`follow_symlinks=False`, comparing regular-file type, device/inode, size,
+mtime and ctime to the already opened descriptor. A missing/replaced filename,
+symlink substitution, or concurrent metadata mutation produces
+`artifact_changed_during_audit` (ATTENTION), even if a replacement has
+identical contents and an identical digest.
+
+This is a bounded, best-effort consistency check of one audit instant; it is
+not a filesystem lock or an anti-tampering guarantee against subsequent
+privileged writes. Two source regression tests cover same-content inode
+replacement and symlink substitution during hashing. Four isolated Linux
+filesystem identity checks passed, including a no-change control; complete
+checkout qualification against these commits remains outstanding.
