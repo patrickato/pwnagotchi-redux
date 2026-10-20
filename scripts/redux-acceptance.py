@@ -125,14 +125,28 @@ def session_support():
         'redux.display.acceptance','redux.display.kiosk','redux.display.local_http',
          'redux.core.processing_evidence')))
     entry='''import json, os, sys
-from redux.acceptance_session import remote_snapshot
-from redux.session_helpers import cached_status, sanitize
-connection=os.environ.get('SSH_CONNECTION','').split()
-if len(connection)!=4:raise SystemExit(2)
-import ipaddress
-peer=str(ipaddress.ip_address(connection[0]))
-result=remote_snapshot(peer,sys.argv[1],sys.argv[2],status_supplier=cached_status,sanitizer=sanitize)
-print(json.dumps(result,sort_keys=True,allow_nan=False))
+try:
+    from redux.acceptance_session import remote_snapshot
+    from redux.session_helpers import cached_status, sanitize
+    connection=os.environ.get('SSH_CONNECTION','').split()
+    if len(connection)!=4:raise ValueError('no verified SSH connection')
+    import ipaddress
+    peer=str(ipaddress.ip_address(connection[0]))
+    result=remote_snapshot(peer,sys.argv[1],sys.argv[2],status_supplier=cached_status,sanitizer=sanitize)
+    print(json.dumps(result,sort_keys=True,allow_nan=False))
+except Exception as exc:
+    # The host needs one bounded *class* of failure, not a traceback, paths,
+    # exception messages, SSIDs, identifiers or arbitrary stderr from the Pi.
+    category=type(exc).__name__
+    if category not in ('ImportError','ModuleNotFoundError','AttributeError',
+                        'TypeError','ValueError','OSError','KeyError',
+                        'IndexError','TimeoutError','NameError','RuntimeError'):
+        category='InternalError'
+    print(json.dumps({'format':'redux-bringup-session-v1',
+                      'hardware_changes':False,'collector_error':category,
+                      'session_id':sys.argv[1] if len(sys.argv)>1 else None,
+                      'host_revision':sys.argv[2] if len(sys.argv)>2 else None},
+                     sort_keys=True))
 '''
     source=pi.bundle(modules=modules,extra_sources={'redux.session_helpers':helper},entrypoint=entry)
     return pi,field,source
@@ -179,10 +193,31 @@ def session_collect(args):
     from redux.radio.local_evidence import Unavailable
     try:
         report=pi.fetch(argv,source,format_name=FORMAT)
-    except Unavailable:
+    except Unavailable as exc:
+        # Only locally generated, allowlisted Unavailable reasons may leave the
+        # host. Never print SSH stderr, exception arguments or remote output.
+        reason = {
+            'command_timeout': 'ssh_or_collector_timeout',
+            'deadline': 'ssh_or_collector_timeout',
+            'command_overflow': 'ssh_output_overflow',
+            'command_failed': 'ssh_or_remote_process_failed',
+            'invalid_acceptance_response': 'ssh_invalid_collector_response',
+            'command_unavailable': 'ssh_process_unavailable',
+        }.get(str(exc), 'ssh_unavailable_check_verified_ethernet_host_key_identity_no_retry')
         return {'schema':1,'result':'UNKNOWN','session_report_saved':False,'network_actions_performed':True,
-                'checks':[{'gate':'read_only_transport','status':'UNKNOWN',
-                           'reason':'ssh_unavailable_check_verified_ethernet_host_key_identity_no_retry'}]}
+                'checks':[{'gate':'read_only_transport','status':'UNKNOWN','reason':reason}]}
+    if report.get('collector_error') is not None:
+        if report.get('session_id')!=session or report.get('host_revision')!=revision:
+            raise ValueError('session response identity mismatch')
+        category = report['collector_error']
+        supported = {'ImportError','ModuleNotFoundError','AttributeError',
+                     'TypeError','ValueError','OSError','KeyError','IndexError',
+                     'TimeoutError','NameError','RuntimeError','InternalError'}
+        if category not in supported:
+            raise ValueError('invalid collector error code')
+        return {'schema':1,'result':'UNKNOWN','session_report_saved':False,'network_actions_performed':True,
+                'checks':[{'gate':'remote_collector','status':'UNKNOWN',
+                           'reason':'remote_'+category}]}
     if report.get('session_id')!=session or report.get('host_revision')!=revision:
         raise ValueError('session response identity mismatch')
     if report.get('physical_acceptance')!='UNKNOWN' or report.get('unsigned') is not True:
