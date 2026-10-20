@@ -122,7 +122,8 @@ def session_support():
     from redux.acceptance_collect import cached_status
     helper='import math, urllib.request\n'+inspect.getsource(field.sanitize)+'\n'+inspect.getsource(cached_status)
     modules=tuple(dict.fromkeys(pi.MODULES+('redux.acceptance_session','redux.boot_readiness',
-        'redux.display.acceptance','redux.display.kiosk','redux.core.processing_evidence')))
+        'redux.display.acceptance','redux.display.kiosk','redux.display.local_http',
+         'redux.core.processing_evidence')))
     entry='''import json, os, sys
 from redux.acceptance_session import remote_snapshot
 from redux.session_helpers import cached_status, sanitize
