@@ -182,3 +182,35 @@ the host repository; no Pi file, config or service was changed. Run the
 offline regression after `git pull --ff-only` and review its result before
 conducting a new separately scoped read-only collection. Use a fresh
 report filename; do not inspect an unsaved report or change SSH host keys.
+
+## October 20: safe collector failure differentiation
+
+Strict SSH authentication to the Pi 4 Rev 1.5 at the established host address
+succeeded, but two attempts at `session-collect` returned generic UNKNOWN and
+no report. A prior isolated test exercised memory bundle *imports* but not the
+entrypoint's real execution path. A later host-only correction adds a bounded
+remote exception **class-only** error envelope and distinguishes known SSH
+transport failures from remote Python exceptions. It never transmits raw stderr,
+exception messages, paths, filenames, packet captures or credentials. Failure
+reports remain UNKNOWN and are not saved as physical evidence.
+
+The new offline test
+`test_full_memory_collector_executes_without_installed_redux` launches the
+complete bundled entrypoint in an isolated Linux interpreter with a synthetic
+SSH connection header and no remote host, to find import-time and call-time
+problems before any hardware retry. Additional tests cover the redacted
+diagnostic envelope and a failed SSH process.
+
+After pulling, run this offline focused test first:
+
+```sh
+python3 -m pytest -q \
+  tests/test_acceptance_session.py::test_full_memory_collector_executes_without_installed_redux \
+  tests/test_acceptance_session.py::test_remote_collector_failure_is_classified_without_raw_error \
+  tests/test_acceptance_session.py::test_failed_ssh_process_is_distinct_from_remote_python_fault
+```
+
+Only after passing tests and reviewing the approved read-only scope should an
+operator retry with a **new** host report filename. A remote collector failure
+now displays a fixed class such as `remote_ModuleNotFoundError` rather than
+falsely suggesting an SSH-key failure. A failure result never qualifies hardware.
