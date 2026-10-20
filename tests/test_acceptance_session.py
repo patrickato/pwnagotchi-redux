@@ -267,3 +267,82 @@ def test_failed_radio_inventory_discards_partial_counter_results(tmp_path,monkey
     report=remote_snapshot('192.0.2.1','1'*64,'b'*40,root=tmp_path,runner=lambda args:'',
         radio_supplier=partial,display_supplier=lambda:{},sleep=lambda seconds:None)
     assert report['rx_observations']==[]
+
+
+def test_full_memory_collector_executes_without_installed_redux(tmp_path):
+    """Run the complete entrypoint, not merely imports, in isolated Linux Python.
+
+    An unavailable local Pi/sysfs/status producer is UNKNOWN, not a traceback.
+    This test never reaches an SSH host or samples remote hardware.
+    """
+    import os
+    _, _, source = launcher().session_support()
+    environment = {
+        "SSH_CONNECTION": "192.0.2.1 50000 192.0.2.2 22",
+        "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+        "LC_ALL": "C",
+    }
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-", "1" * 64, "b" * 40],
+        input=source, text=True, capture_output=True, cwd=tmp_path,
+        env=environment, timeout=45, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report.get("collector_error") is None, report.get("collector_error")
+    assert report["format"] == "redux-bringup-session-v1"
+    assert report["session_id"] == "1" * 64
+    assert report["host_revision"] == "b" * 40
+    assert report["hardware_changes"] is False
+    assert report["physical_acceptance"] == "UNKNOWN"
+    assert report["card_identity"] == "UNKNOWN"
+
+
+def test_remote_collector_failure_is_classified_without_raw_error(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    module = launcher()
+    _, field, source = module.session_support()
+    identity = tmp_path / "key"
+    identity.write_text("placeholder")
+
+    def remote_error(argv, program, format_name):
+        session, revision = argv[-1].split()[-2:]
+        return {"format": format_name, "hardware_changes": False,
+                "session_id": session, "host_revision": revision,
+                "collector_error": "ModuleNotFoundError"}
+
+    monkeypatch.setattr(module, "session_support",
+                        lambda: (SimpleNamespace(fetch=remote_error), field, source))
+    output = tmp_path / "private-report.json"
+    result = module.session_collect(
+        SimpleNamespace(host="192.168.1.2", key=identity, output=output))
+    assert result["result"] == "UNKNOWN"
+    assert result["session_report_saved"] is False
+    assert result["checks"] == [{
+        "gate": "remote_collector", "status": "UNKNOWN",
+        "reason": "remote_ModuleNotFoundError",
+    }]
+    assert not output.exists()
+
+
+def test_failed_ssh_process_is_distinct_from_remote_python_fault(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from redux.radio.local_evidence import Unavailable
+    module = launcher()
+    _, field, source = module.session_support()
+    identity = tmp_path / "key"
+    identity.write_text("placeholder")
+
+    def failed_process(*args, **kwargs):
+        raise Unavailable("command_failed")
+
+    monkeypatch.setattr(module, "session_support",
+                        lambda: (SimpleNamespace(fetch=failed_process), field, source))
+    result = module.session_collect(SimpleNamespace(
+        host="192.168.1.2", key=identity, output=tmp_path / "result.json"))
+    assert result["result"] == "UNKNOWN"
+    assert result["checks"] == [{
+        "gate": "read_only_transport", "status": "UNKNOWN",
+        "reason": "ssh_or_remote_process_failed",
+    }]
+    assert not (tmp_path / "result.json").exists()
