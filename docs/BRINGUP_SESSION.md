@@ -214,3 +214,19 @@ Only after passing tests and reviewing the approved read-only scope should an
 operator retry with a **new** host report filename. A remote collector failure
 now displays a fixed class such as `remote_ModuleNotFoundError` rather than
 falsely suggesting an SSH-key failure. A failure result never qualifies hardware.
+
+## Successful cached-dashboard path: host helper fix
+
+A subsequent read-only Pi collector attempt returned the now-redacted
+`remote_NameError` and saved no session. The in-memory
+`redux.session_helpers` module was assembled from
+`field_status.sanitize` and `acceptance_collect.cached_status`,
+but its import prelude omitted `json`, despite the latter calling
+`json.loads` after a **successful** dashboard HTTP read. In an offline
+host with no running dashboard, the HTTP request failed first, so the
+previous complete-collector smoke test did not exercise this code path.
+The host bundle now imports `json` explicitly and includes an isolated
+fake-successful-dashboard test. This is a host source-only correction;
+the Pi remains unchanged. The `remote_NameError` class alone does not
+prove which variable was missing, so the next approved attempt must still
+confirm whether this resolves the complete collection.
