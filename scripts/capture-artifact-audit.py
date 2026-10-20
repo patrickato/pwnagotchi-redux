@@ -146,8 +146,10 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
                             meta.st_mtime_ns, meta.st_ctime_ns) != (
                                 after.st_dev, after.st_ino, after.st_size,
                                 after.st_mtime_ns, after.st_ctime_ns)
-                        or (after.st_dev, after.st_ino) != (
-                            named.st_dev, named.st_ino)
+                        or (after.st_dev, after.st_ino, after.st_size,
+                            after.st_mtime_ns, after.st_ctime_ns) != (
+                                named.st_dev, named.st_ino, named.st_size,
+                                named.st_mtime_ns, named.st_ctime_ns)
                     ):
                         issue("artifact_changed_during_audit")
                     elif hashobj.hexdigest() != digest:
