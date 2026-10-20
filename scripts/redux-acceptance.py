@@ -274,9 +274,102 @@ def session_inspect(record, now=None):
             if not isinstance(row,dict):continue
             observations['radios'].append({key:row.get(key) if type(row.get(key)) is int and 0<=row[key]<=2**63-1 else None
                                            for key in ('radio','arphrd','rx_delta','tx_delta')})
+    # Project already-saved evidence, never read hardware or emit unbounded
+    # free-text names, paths, network identifiers, capture fields or secrets.
+    def one_of(value, choices):
+        return value if type(value) is str and value in choices else None
+    def count(value, maximum=2**63-1):
+        return value if type(value) is int and 0 <= value <= maximum else None
+    def boolean(value):
+        return value if type(value) is bool else None
+
     display=record.get('display')
     if isinstance(display,dict) and display.get('state') in ('READY_FOR_OPERATOR_SELECTION','BLOCKED','UNAVAILABLE','INVALID'):
         observations['display_metadata_state']=display['state']
+        choices={'INVENTORY TRUNCATED','FRAMEBUFFER MISSING','FRAMEBUFFER AMBIGUOUS',
+                 'ILI9486 MISSING','ILI9486 AMBIGUOUS','ILI9486 DRIVER UNBOUND',
+                 'TOUCH DEVICE MISSING','TOUCH DEVICE AMBIGUOUS',
+                 'TOUCH CAPABILITIES MISSING','INVENTORY INVALID'}
+        blockers=display.get('blockers')
+        observations['display_blockers']=([b for b in blockers[:16] if type(b) is str and b in choices]
+                                          if isinstance(blockers,list) else [])
+        observations['display_candidates']={
+            key:count(display.get(key),64) for key in
+            ('framebuffer_candidates','ili9486_candidates','touch_candidates')}
+        framebuffers=display.get('framebuffers')
+        observations['framebuffer_metadata']=[]
+        if isinstance(framebuffers,list):
+            for row in framebuffers[:16]:
+                if not isinstance(row,dict):continue
+                observations['framebuffer_metadata'].append({
+                    'ordinal':count(row.get('ordinal'),64),
+                    'dimensions':token(row.get('dimensions'),r'[0-9]{1,5},[0-9]{1,5}'),
+                    'bits_per_pixel':token(row.get('bits_per_pixel'),r'[0-9]{1,3}'),
+                    'stride':token(row.get('stride'),r'[0-9]{1,8}')})
+
+    storage=record.get('storage')
+    if isinstance(storage,dict):
+        observations['storage']={}
+        for name in ('root','root_lower','boot','captures'):
+            row=storage.get(name)
+            observations['storage'][name]=(
+                {'status':one_of(row.get('status'),('ok','action','unknown')),
+                 'filesystem':one_of(row.get('filesystem'),('overlay','ext4','vfat'))}
+                if isinstance(row,dict) else {'status':None,'filesystem':None})
+        bytes_free=count(storage.get('available_bytes'))
+        observations['captures_available_mib']=(
+            bytes_free//(1024*1024) if bytes_free is not None else None)
+
+    radios=record.get('radio')
+    if isinstance(radios,dict):
+        inventory_status=one_of(radios.get('inventory_status'),(
+            'fresh','unavailable','capabilities_unknown','observation_changed',
+            'observation_stale','radio_inventory_changed','boot_changed',
+            'ethernet_changed','iw_identity_changed','process_ownership_changed',
+            'nm_changed','inventory_disagreement','radio_identity_disagreement',
+            'ethernet_unverified','process_inventory_overflow','inventory_overflow',
+            'radio_overflow','iw_identity_invalid','interface_invalid',
+            'file_overflow','command_denied','command_timeout','command_overflow',
+            'command_failed','command_unavailable','deadline','permission_denied',
+            'device_or_process_disappeared','io_unavailable','invalid_measurement'))
+        observations['radio_inventory_status']=inventory_status
+        radio_details=[]
+        for row in radios.get('radios',[])[:8] if isinstance(radios.get('radios'),list) else []:
+            if not isinstance(row,dict):continue
+            radio_details.append({
+                'radio':count(row.get('radio'),64),
+                'transport':one_of(row.get('transport'),('onboard','usb','unknown')),
+                'kernel_mode':one_of(row.get('kernel_mode'),('managed','monitor','unknown')),
+                'arphrd':count(row.get('arphrd'),65535),
+                'nm_managed':boolean(row.get('nm_managed')),
+                'nm_state':count(row.get('nm_state'),120),
+                'usb_ancestry':boolean(row.get('usb_ancestry')),
+                'identity_stable':boolean(row.get('identity_stable')),
+                'conflicting_processes':count(row.get('conflicting_processes'),8192)})
+        observations['radio_inventory_details']=radio_details
+
+    processing=record.get('processing')
+    if isinstance(processing,dict):
+        observations['capture_processing']={
+            'available':boolean(processing.get('available')),
+            'fresh':boolean(processing.get('fresh')),
+            'artifact_count':count(processing.get('artifact_count'))}
+    plugins=record.get('plugins')
+    if isinstance(plugins,dict):
+        observations['plugin_inventory_available']=boolean(plugins.get('available'))
+    if isinstance(status,dict):
+        acceptance=status.get('acceptance')
+        if isinstance(acceptance,dict):
+            observations['live_runtime']={
+                'checkpoint_freshness':one_of(acceptance.get('checkpoint_freshness'),('fresh','stale','future','invalid')),
+                'live_state':one_of(acceptance.get('live_state'),(
+                    'running','starting','starting_engine','rotating','degraded',
+                    'telemetry_degraded','storage_paused','stopped','lease_blocked',
+                    'termination_pending')),
+                'events_seen':count(int(acceptance['events_seen']))
+                    if type(acceptance.get('events_seen')) is str
+                    and acceptance['events_seen'].isdigit()
+                    and len(acceptance['events_seen'])<=19 else None}
     return {'schema':1,'result':'UNKNOWN','host_revision':record['host_revision'], 'observations':observations,
             'embedded_revision':record.get('embedded_revision'),'checks':checks,
             'physical_acceptance':'UNKNOWN','evidence_origin':'saved_unsigned_session'}
