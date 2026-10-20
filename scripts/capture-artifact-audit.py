@@ -21,6 +21,11 @@ from urllib.parse import quote
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 MAX_ARTIFACT = 33 * 1024 * 1024
 MAX_TOTAL_BYTES = 512 * 1024 * 1024
+# SQLite can contain a small number of arbitrarily large TEXT/BLOB cells.
+# Reject such cells before Python materializes them; never let a pathological
+# ledger monopolize the worker indefinitely while answering COUNT/SELECT.
+MAX_LEDGER_CELL_BYTES = 8192
+MAX_LEDGER_QUERY_SECONDS = 10.0
 
 
 def audit(db: Path, output_dir: Path, *, max_rows=10000):
@@ -70,6 +75,14 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
         uri = "file:" + quote(str(db.absolute()), safe="/") + "?mode=ro"
         conn = sqlite3.connect(uri, uri=True, timeout=1.0)
         try:
+            # A ready-row query has a fixed work deadline independent of the
+            # SQLite lock timeout. Progress checks run on the query VM only,
+            # never on the later bounded SHA-256 file reads.
+            deadline = time.monotonic() + MAX_LEDGER_QUERY_SECONDS
+            conn.set_progress_handler(
+                lambda: int(time.monotonic() >= deadline), 1000,
+            )
+            conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_LEDGER_CELL_BYTES)
             conn.execute("PRAGMA query_only = ON")
             conn.execute("BEGIN")
             found = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifacts'").fetchone()
