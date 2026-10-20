@@ -318,3 +318,20 @@ privileged writes. Two source regression tests cover same-content inode
 replacement and symlink substitution during hashing. Four isolated Linux
 filesystem identity checks passed, including a no-change control; complete
 checkout qualification against these commits remains outstanding.
+
+## Advertised path identity during final verification
+
+Some operator-supplied output directories may be reached through a symlinked
+ancestor (for example, an alias parent in a fixture). A fixed canonical path
+alone is not evidence that the **operator-supplied** path still leads to the
+same prepared-artifact directory at audit completion. Final verification now
+compares both canonical and advertised path identities with the directory
+descriptor used for hashing. If the alias/ancestor is redirected while the
+audit runs, the verdict is ATTENTION (`output_directory_changed`) rather
+than PASS, even though the originally opened records hashed successfully.
+
+An offline regression fixture replaces only the parent alias after the output
+directory is opened, preserving the original directory and changing its
+advertised location. This is a best-effort race detector, not a permanent
+filesystem lock; full combined Redux regression against these latest changes
+is still required.
