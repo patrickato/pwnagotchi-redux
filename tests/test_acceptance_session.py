@@ -346,3 +346,34 @@ def test_failed_ssh_process_is_distinct_from_remote_python_fault(tmp_path, monke
         "reason": "ssh_or_remote_process_failed",
     }]
     assert not (tmp_path / "result.json").exists()
+
+
+def test_memory_dashboard_helper_decodes_successful_cached_status_offline(tmp_path):
+    """Exercise the successful Pi dashboard branch in an isolated interpreter.
+
+    A host without the loopback dashboard only tests the error path, so missing
+    imports such as json in the in-memory helper would previously go unnoticed.
+    This uses a fake opener and does not connect to anything.
+    """
+    _, _, source = launcher().session_support()
+    prefix = source.split('import json, os, sys\n', 1)[0]
+    program = prefix + '''
+import io, urllib.request
+import redux.session_helpers as helper
+
+class StubOpener:
+    def open(self, url, *, timeout):
+        assert url == 'http://127.0.0.1:8080/api/status'
+        assert timeout == 2
+        return io.BytesIO(b'{"runtime":{"state":"running"}}')
+
+urllib.request.build_opener = lambda *args: StubOpener()
+status = helper.cached_status()
+assert status['runtime']['state'] == 'running'
+print('DASHBOARD_OK')
+'''
+    run = subprocess.run(
+        [sys.executable, "-I", "-B", "-"], input=program, text=True,
+        capture_output=True, cwd=tmp_path, timeout=10, check=False)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip() == "DASHBOARD_OK"
