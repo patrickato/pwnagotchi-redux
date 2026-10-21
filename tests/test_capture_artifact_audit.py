@@ -568,3 +568,32 @@ def test_audit_bounded_query_still_verifies_valid_artifacts(tmp_path):
     verdict = mod.audit(db, output)
     assert verdict == {"result": "pass", "checked": 1,
                        "ready_rows": 1, "issues": {}}
+
+
+def test_offline_artifact_plan_exposes_bounds_without_ledger_io(monkeypatch, capsys):
+    """A hardware authorization plan must not inspect /captures or SQLite."""
+    def forbidden(*args, **kwargs):
+        pytest.fail("offline plan touched capture evidence")
+    monkeypatch.setattr(mod, "audit", forbidden)
+    assert mod.main(["--plan"]) == 3
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["format"] == "redux-artifact-audit-plan-v1"
+    assert plan["requires_separate_hardware_authorization"] is True
+    assert plan["changes_capture_files"] is False
+    assert plan["writes_receipt"] is False
+    assert plan["inspects_raw_pcap"] is False
+    assert plan["proves_handshake_authenticity"] is False
+    assert plan["physical_acceptance"] == "UNKNOWN"
+    assert plan["limits"]["ready_rows"] == 10000
+    assert plan["limits"]["total_hash_bytes"] == mod.MAX_TOTAL_BYTES
+    assert plan["limits"]["sqlite_cell_bytes"] == mod.MAX_LEDGER_CELL_BYTES
+
+
+def test_offline_artifact_plan_cannot_request_receipt_or_cached_read(tmp_path):
+    with pytest.raises(SystemExit) as publication:
+        mod.main(["--plan", "--receipt", str(tmp_path / "file.json")])
+    assert publication.value.code == 2
+    with pytest.raises(SystemExit) as inspection:
+        mod.main(["--plan", "--inspect-receipt", str(tmp_path / "file.json")])
+    assert inspection.value.code == 2
+    assert not list(tmp_path.iterdir())
