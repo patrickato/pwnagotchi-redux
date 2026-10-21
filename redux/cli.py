@@ -7,7 +7,7 @@
     redux selftest                                             on-device software battery (paste the report back)
     redux hwtest   --iface wlan1mon [--out FILE]                validation battery: software + synthetic detection + live passive
     redux demo     [--intent I] [--live] [--offense]            hands-off pass (gate 1.6): arrange radios → capture, one command
-    redux benchpass prep | preflight | run | report            the one lump-sum hardware session (resumable; see docs/BENCH_SESSION.md)
+    redux benchpass prep | preflight | auto | run | report     the one lump-sum hardware session (resumable; `auto` self-grades; see docs/BENCH_SESSION.md)
 
 The hardware paths (live probe, a real BettercapDriver) are used when asked; the
 default/testable paths (stub radios, a replay driver) need no Pi. Everything it
@@ -889,6 +889,69 @@ def cmd_benchpass(args) -> int:
             print(json.dumps(rep.as_dict(), indent=2))
             return 0 if rep.clean else 1
         _render_benchpass_report(rep)
+        return 0 if rep.clean else 1
+
+    if sub == "auto":
+        from .bench_auto import AutoExecutor, measure_facts
+        led = bp.Ledger.load(ledger_path)
+        if board:
+            led.board = board
+        only = getattr(args, "only", None) or None
+        # Auto-measured preflight first — never start blind.
+        facts = measure_facts()
+        pf = bp.preflight(facts)
+        print("=== redux benchpass — auto (self-grading; physical steps prompted) ===")
+        for key, label, _ in bp.PREREQS:
+            v = pf[key]
+            mark = "OK  " if v["ok"] else ("----" if key == "crypto" else "MISS")
+            print(f"  [{mark}] {v['label']}: {v['detail']}")
+        if not bp.preflight_ready(pf):
+            print("\nheads-up: some prerequisites are MISSING — those gates will SKIP honestly, not fake a pass.")
+        print("\nWalking gates. Machine-checkable ones grade themselves; you'll be")
+        print("prompted only for physical actions (plug a radio, trigger a handshake)"
+              + (" — and those auto-SKIP with --yes." if getattr(args, "yes", False) else "."))
+
+        def _confirm(msg):
+            if getattr(args, "yes", False):
+                print(f"  {msg} → skipped (--yes)")
+                return False
+            try:
+                return input(f"  {msg} [Enter=yes / n=skip]: ").strip().lower() in ("", "y", "yes")
+            except EOFError:
+                return False
+
+        def _ask(g):
+            if getattr(args, "yes", False):
+                return "skip", "needs operator judgment (--yes: skipped)"
+            print(f"      run:  {g.live}")
+            print(f"      pass: {g.passes}")
+            try:
+                a = input("  your result [pass/fail/skip]: ").strip().lower()
+            except EOFError:
+                return "skip", "non-interactive, no verdict"
+            note = ""
+            if a in ("f", "fail", "s", "skip"):
+                try:
+                    note = input("  note: ").strip()
+                except EOFError:
+                    note = ""
+            return {"p": "pass", "pass": "pass", "f": "fail", "fail": "fail",
+                    "s": "skip", "skip": "skip"}.get(a, "skip"), note
+
+        ax = AutoExecutor(confirm=_confirm, ask=_ask)
+        try:
+            rep = bp.run_benchpass(bp.GATES, ax, led,
+                                   resume=getattr(args, "resume", False), only=only)
+        except KeyboardInterrupt:
+            led.save()
+            print("\n(paused — progress saved; resume with:  redux benchpass auto --resume)")
+            return 2
+        print()
+        _render_benchpass_report(rep)
+        print(f"\nledger: {ledger_path}")
+        if getattr(args, "markdown", False):
+            print()
+            print(bp.report_markdown(rep, board=(board or led.board)), end="")
         return 0 if rep.clean else 1
 
     # run: guided walk, resumable ledger
@@ -1953,6 +2016,13 @@ def build_parser() -> argparse.ArgumentParser:
     bpr.add_argument("--board", default="", help="board under test, e.g. pi4 / pi5 (done = both pass)")
     bpr.add_argument("--resume", action="store_true", help="skip gates already recorded")
     bpr.add_argument("--only", nargs="*", help="limit to these gate ids (e.g. 1.6 2b.6)")
+    bpa = bpsub.add_parser("auto", help="auto-grade every machine-checkable gate; prompt only for physical steps")
+    bpa.add_argument("--ledger", default="", help="resumable progress file (default benchpass-<board>.json)")
+    bpa.add_argument("--board", default="", help="board under test, e.g. pi4 / pi5 (done = both pass)")
+    bpa.add_argument("--resume", action="store_true", help="skip gates already recorded")
+    bpa.add_argument("--only", nargs="*", help="limit to these gate ids (e.g. 1.6 2b.6)")
+    bpa.add_argument("--yes", action="store_true", help="auto-skip (not fail) gates that need a physical action you can't do now")
+    bpa.add_argument("--markdown", action="store_true", help="also print a paste-ready results block at the end")
     bprep = bpsub.add_parser("report", help="render the consolidated result from the ledger")
     bprep.add_argument("--ledger", default="", help="progress file (default benchpass-<board>.json)")
     bprep.add_argument("--board", default="", help="board name (selects the default ledger)")
