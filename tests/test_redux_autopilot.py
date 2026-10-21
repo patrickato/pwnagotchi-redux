@@ -48,6 +48,7 @@ def test_source_path_allowlist_is_strict(tmp_path):
     assert instance.allowable(tmp_path, ["redux/new_worker.py"])[0]
     assert not instance.allowable(tmp_path, ["scripts/redux-autopilot.py"])[0]
     assert not instance.allowable(tmp_path, ["scripts/redux-field-bridge.py"])[0]
+    assert not instance.allowable(tmp_path, ["scripts/freeze-redux-field-bridge.py"])[0]
     assert not instance.allowable(tmp_path, ["scripts/redux-field-feedback.py"])[0]
     assert not instance.allowable(tmp_path, ["redux/field_feedback.py"])[0]
     assert not instance.allowable(tmp_path, ["redux/field_feedback_contract.py"])[0]
