@@ -193,7 +193,7 @@ The new **source-only** migration utility
 approved* Git revision as a separate, locally private detached worktree and
 verifies its original collector launcher/bundle SHA-256 and private approval
 record. It then changes only the user-level systemd field service's
-`ExecStart` to this detached snapshot. It does **not** reset, extend, or
+`ExecStart` and `WorkingDirectory` to this detached snapshot. It does **not** reset, extend, or
 rewrite the approval; change the timer; open SSH; restart the Pi; or grant
 Codex credentials. If a read-only observation is currently active it refuses
 to migrate. Failed systemd reload restores the existing service path.
