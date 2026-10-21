@@ -330,7 +330,7 @@ def report_markdown(report: "Report", *, board: str = "", image_sha: str = "",
         datetime.timezone.utc).strftime("%Y-%m-%d")
     head = f"### {model or 'Pi'} — {ts} · benchpass"
     lines = [head, "",
-             "**Operator-recorded results; independent hardware acceptance not established.**",
+             "**Operator-recorded results: not independently qualified; independent hardware acceptance NOT established.**",
              ""]
     if board:
         lines.append(f"- board: `{board}`")
