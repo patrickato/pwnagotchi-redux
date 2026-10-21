@@ -389,3 +389,28 @@ Even a passing SHA-256 audit proves file integrity at audit time, not packet
 origin, valid RF monitor framing, successful over-the-air reception, or
 handshake authenticity. The old Oct 20 field report is already stale; do not
 convert its historical counts into present-time PASS.
+
+## SQLite pathname-to-file-descriptor continuity (October 21)
+
+The auditor independently opens the ledger with `O_NOFOLLOW`, but Python's
+SQLite connection still resolves a **pathname** rather than reusing that
+descriptor. It now compares the advertised regular-file inode with the
+pinned ledger **immediately after SQLite connects**, again after the
+transaction's ready-row selection, and once more after prepared-file hashing.
+If the path has changed, the audit reports `ledger_changed` (ATTENTION)
+instead of using untrusted replacement rows. New synthetic regression tests
+swap the database precisely between the initial file-descriptor pin and the
+separate SQLite connection. A symlink or different inode cannot be mistaken
+for the original trusted ledger.
+
+This protects against ordinary races and accidental path replacement, not
+against a malicious privileged process deliberately swapping and restoring
+the path between all identity checks. The auditor is for a verified,
+owner-controlled capture partition; it is not an adversarial filesystem
+attestation service and does not validate actual handshake authenticity.
+
+This is entirely **source-only**. It has not accessed the real Pi's capture
+ledger, read any capture data, altered the deployed image, or reset the
+separate hourly metadata observer's authorization. A future live integrity
+audit requires the owner's separately scoped read-only permission, including
+preflight verification of REDUXCAP and strict evidence-bounded output.
