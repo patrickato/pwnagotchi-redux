@@ -29,6 +29,9 @@ OLD_EXEC = "ExecStart=/usr/bin/python3 -B %h/redux-workbench-src/scripts/redux-f
 NEW_EXEC = ("ExecStart=/usr/bin/python3 -B "
             "%h/.local/share/redux-field-bridge/approved-worktree/"
             "scripts/redux-field-bridge.py observe")
+OLD_WORKDIR = "WorkingDirectory=%h/redux-workbench-src"
+NEW_WORKDIR = ("WorkingDirectory=%h/.local/share/redux-field-bridge/"
+               "approved-worktree")
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 
 
@@ -98,14 +101,17 @@ def unit_text():
     with SERVICE.open("r", encoding="utf-8") as handle:
         content = handle.read(8193)
     if (content.count(OLD_EXEC) != 1
-            or NEW_EXEC in content
-            or content.count("ExecStart=") != 1):
+            or NEW_EXEC in content or content.count("ExecStart=") != 1
+            or content.count(OLD_WORKDIR) != 1
+            or NEW_WORKDIR in content
+            or content.count("WorkingDirectory=") != 1):
         raise ValueError("unrecognized_field_service")
     timer = TIMER.read_text(encoding="utf-8")
     if ("Unit=redux-field-bridge.service" not in timer
             or "OnCalendar=*-*-* *:20:00" not in timer):
         raise ValueError("unrecognized_field_timer")
-    return content, content.replace(OLD_EXEC, NEW_EXEC)
+    return content, content.replace(OLD_EXEC, NEW_EXEC).replace(
+        OLD_WORKDIR, NEW_WORKDIR)
 
 
 def private_folder(path):
