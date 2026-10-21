@@ -27,9 +27,9 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path.home() / ".local" / "state" / "redux-field-bridge"
 SCHEMA = 1
-MIN_INTERVAL = 4 * 3600
+MIN_INTERVAL = 3600
 MAX_DURATION_DAYS = 14
-MAX_SESSIONS = 84
+MAX_SESSIONS = 40
 ALLOWED_STATES = ("observed", "unknown", "expired", "rate_limited",
                   "exhausted", "unavailable", "revoked", "not_enrolled",
                   "source_changed")
@@ -214,7 +214,7 @@ def enroll(host, key, *, interval_hours, days, sessions, approve, now=None,
            renewal=False):
     if not approve:
         raise ValueError("explicit_recurring_approval_required")
-    if (type(interval_hours) is not int or interval_hours < 4
+    if (type(interval_hours) is not int or interval_hours < 1
             or type(days) is not int or not 1 <= days <= MAX_DURATION_DAYS
             or type(sessions) is not int or not 1 <= sessions <= MAX_SESSIONS):
         raise ValueError("unsafe_recurring_scope")
@@ -355,14 +355,14 @@ def main(argv=None):
     setup = sub.add_parser("enroll", help="One explicit time-limited recurring read-only approval")
     setup.add_argument("--host", required=True)
     setup.add_argument("--key", required=True)
-    setup.add_argument("--interval-hours", type=int, default=6)
+    setup.add_argument("--interval-hours", type=int, default=1)
     setup.add_argument("--days", type=int, default=14)
     setup.add_argument("--max-sessions", type=int, default=40)
     setup.add_argument("--approve-recurring-read-only", action="store_true")
     renewal = sub.add_parser("renew", help="Explicitly renew an expired or revoked approval")
     renewal.add_argument("--host", required=True)
     renewal.add_argument("--key", required=True)
-    renewal.add_argument("--interval-hours", type=int, default=6)
+    renewal.add_argument("--interval-hours", type=int, default=1)
     renewal.add_argument("--days", type=int, default=14)
     renewal.add_argument("--max-sessions", type=int, default=40)
     renewal.add_argument("--approve-recurring-read-only", action="store_true")
