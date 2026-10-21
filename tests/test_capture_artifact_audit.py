@@ -597,3 +597,45 @@ def test_offline_artifact_plan_cannot_request_receipt_or_cached_read(tmp_path):
         mod.main(["--plan", "--inspect-receipt", str(tmp_path / "file.json")])
     assert inspection.value.code == 2
     assert not list(tmp_path.iterdir())
+
+
+def test_sqlite_path_replaced_between_fd_pin_and_connection_never_passes(tmp_path, monkeypatch):
+    """Opening sqlite by a pathname must not rebind the trusted ledger inode."""
+    db, output = fixture(tmp_path)
+    prepared = ready(db, output, b"known fixture, never Pi data")
+    other_db = tmp_path / "other.db"
+    with sqlite3.connect(other_db) as co:
+        co.execute("CREATE TABLE artifacts (source_sha TEXT, status TEXT, output_sha TEXT, output_path TEXT)")
+    saved = tmp_path / "original.db"
+    original_connect = sqlite3.connect
+    swapped = [False]
+
+    def replaced_during_sqlite_connect(database, *args, **kwargs):
+        if kwargs.get("uri") is True and not swapped[0]:
+            swapped[0] = True
+            db.rename(saved)
+            other_db.rename(db)
+        return original_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(mod.sqlite3, "connect", replaced_during_sqlite_connect)
+    verdict = mod.audit(db, output)
+    assert swapped == [True]
+    assert verdict["result"] == "attention"
+    assert verdict["issues"] == {"ledger_changed": 1}
+    assert verdict["checked"] == 0
+    assert prepared.read_bytes() == b"known fixture, never Pi data"
+    assert saved.exists()
+
+
+def test_ledger_path_guard_rejects_symlink_and_replaced_inode(tmp_path):
+    db, output = fixture(tmp_path)
+    pinned = db.stat()
+    assert mod.ledger_path_still_matches(db, pinned)
+    backup = tmp_path / "original-jobs.db"
+    db.rename(backup)
+    db.symlink_to(backup)
+    assert not mod.ledger_path_still_matches(db, pinned)
+    db.unlink()
+    with sqlite3.connect(db) as co:
+        co.execute("CREATE TABLE artifacts (status TEXT)")
+    assert not mod.ledger_path_still_matches(db, pinned)
