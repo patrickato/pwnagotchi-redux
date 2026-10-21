@@ -136,6 +136,31 @@ def test_failed_reload_restores_old_service_and_approval(tmp_path, monkeypatch):
     assert timer.read_bytes() == before_timer
 
 
+def test_systemd_reload_timeout_restores_existing_service(tmp_path, monkeypatch):
+    mod, pin, service, timer, frozen = synthetic(monkeypatch, tmp_path)
+    original = service.read_bytes()
+    calls = []
+    def local(argv, **kwargs):
+        calls.append(argv)
+        if argv[:3] == ["git", "cat-file", "-t"]:
+            return SimpleNamespace(returncode=0, stdout="commit\n")
+        if argv[:3] == ["git", "worktree", "add"]:
+            frozen.mkdir()
+            return SimpleNamespace(returncode=0, stdout="")
+        if argv[:4] == ["systemctl", "--user", "is-active", "--quiet"]:
+            return SimpleNamespace(returncode=3, stdout="")
+        if argv == ["systemctl", "--user", "daemon-reload"]:
+            if len([c for c in calls if c == argv]) == 1:
+                raise ValueError("local_command_unavailable")
+            return SimpleNamespace(returncode=0, stdout="")
+        pytest.fail("unexpected operation")
+    monkeypatch.setattr(mod, "command", local)
+    with pytest.raises(ValueError, match="systemd_reload_failed"):
+        mod.migration()
+    assert service.read_bytes() == original
+    assert timer.read_text().count("OnCalendar=*-*-* *:20:00") == 1
+
+
 def test_refuses_currently_active_observer(tmp_path, monkeypatch):
     mod, pin, service, timer, frozen = synthetic(monkeypatch, tmp_path)
     def local(argv, **kwargs):
