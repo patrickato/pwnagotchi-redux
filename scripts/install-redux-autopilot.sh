@@ -32,6 +32,13 @@ case "${1:---plan}" in
     }
     command -v python3 >/dev/null || exit 2
     command -v git >/dev/null || exit 2
+    # User-systemd typically has a minimal PATH. Carry only Codex/Node's
+    # bin directory, not ambient shell exports or secret environment data.
+    CODEX_BIN="$(command -v codex)"
+    [[ "${CODEX_BIN}" =~ ^/[A-Za-z0-9_./+-]+$ ]] || {
+      printf 'Refusing: Codex executable path cannot be safely pinned\n' >&2; exit 2;
+    }
+    CODEX_DIR="$(dirname -- "${CODEX_BIN}")"
     systemctl --user show-environment >/dev/null 2>&1 || {
       printf 'Refusing: systemd user manager unavailable in this WSL session\n' >&2; exit 2;
     }
@@ -53,6 +60,7 @@ ExecStart=/usr/bin/python3 %h/redux-workbench-src/scripts/redux-autopilot.py cyc
 TimeoutStartSec=100min
 NoNewPrivileges=yes
 UNIT
+    printf 'Environment=PATH=%s:%%h/.local/bin:/usr/local/bin:/usr/bin:/bin\n' "${CODEX_DIR}" >> "${UNIT_DIR}/${NAME}.service"
     cat > "${UNIT_DIR}/${NAME}.timer" <<'UNIT'
 [Unit]
 Description=Run Redux source-only Codex cycle every six hours
