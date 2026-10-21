@@ -583,11 +583,12 @@ def cmd_captap(args) -> int:
 
 
 def cmd_demo(args) -> int:
-    """The hands-off pass (Phase-1 gate 1.6) in one command: arrange radios by
-    intent → repoint the capture engine → bounded capture, every step glass-box.
-    Default is a dry run on a sample inventory (no hardware). `--live` probes the
-    real radios on the Pi; it is honest when none are present and never fabricates.
-    Nothing transmits unless posture + Scope allow it."""
+    """Preview the intended orchestration and capture route, but NEVER execute.
+
+    Default uses synthetic radio inventory; --live is a read-only live radio
+    probe and capture-engine availability check. Neither mode applies radio
+    roles, repoints bettercap, starts capture, or transmits. Hardware gate
+    1.6 remains UNKNOWN until a separately authorized live executor exists."""
     import shutil
     from .capstone import plan_capstone, sample_inventory
     from .core import persona as _persona
@@ -612,10 +613,12 @@ def cmd_demo(args) -> int:
                         seconds=int(args.seconds), engine_available=engine)
 
     if getattr(args, "json", False):
-        print(json.dumps(cap.as_dict(), indent=2))
-        return 0 if cap.ok else 1
+        report = cap.as_dict()
+        report["mode"] = "read_only_hardware_probe_plan" if args.live else "synthetic_dry_run"
+        print(json.dumps(report, indent=2))
+        return 3 if args.live else (0 if cap.ok else 1)
 
-    print(f"=== redux demo — hands-off pass ({source}; intent={cap.intent}, "
+    print(f"=== redux demo — PLAN ONLY; NO CAPTURE EXECUTED ({source}; intent={cap.intent}, "
           f"offense={'on' if offense else 'off'}) ===")
     for s in cap.steps:
         print(f"  [{'ok  ' if s.ok else 'STOP'}] {s.step:13} {s.detail}")
@@ -623,9 +626,11 @@ def cmd_demo(args) -> int:
     for w in cap.warnings:
         print(f"  [warn] {w}")
     print(f"summary: {cap.summary}")
-    if not args.live and cap.ok:
-        print("next:    run it for real on the Pi →  redux demo --live --intent "
-              f"{cap.intent}" + (" --offense" if offense else ""))
+    if args.live:
+        print("hardware: read-only inventory probed; no role applied, no capture started")
+        print("acceptance: UNKNOWN — gate 1.6 requires a separately approved real execution")
+        return 3
+    print("hardware: synthetic dry run only; no physical acceptance")
     return 0 if cap.ok else 1
 
 
@@ -728,13 +733,13 @@ def cmd_benchpass(args) -> int:
             print(json.dumps({"boards": boards, "matrix": matrix,
                               "all_done": bp.all_boards_done(matrix)}, indent=2))
             return 0 if bp.all_boards_done(matrix) else 1
-        print("=== redux benchpass — cross-board matrix (done = every board passes) ===")
+        print("=== redux benchpass — OPERATOR-RECORDED matrix (not release-certified) ===")
         print(f"  {'gate':8} " + " ".join(f"{b:>6}" for b in boards) + "  done")
         for r in matrix:
             cells = " ".join(f"{r['per_board'][b]:>6}" for b in boards)
             print(f"  {r['id']:8} {cells}  {'✓' if r['done'] else ''}")
         done = bp.all_boards_done(matrix)
-        print(f"\n{'ALL BOARDS DONE' if done else 'not done on every board yet'}")
+        print(f"\n{'both boards operator-recorded all passes' if done else 'operator records incomplete'}; independently qualified: NO")
         return 0 if done else 1
 
     if sub == "report":
@@ -802,9 +807,9 @@ def _render_benchpass_report(rep) -> None:
     print(f"\n{c.get('pass',0)} pass · {c.get('fail',0)} fail · {c.get('skip',0)} skip · "
           f"{c.get('pending',0)} pending")
     if rep.clean:
-        print("CLEAN — every gate walked, no failures.")
+        print("ALL OPERATOR-RECORDED PASS — independent Pi evidence still required.")
     elif rep.complete:
-        print("complete, but with failures — see the FAIL rows above.")
+        print("complete but with failures/skips — do not certify release.")
     else:
         print("incomplete — pending gates remain; resume with:  redux benchpass run --resume")
 
@@ -1743,10 +1748,10 @@ def build_parser() -> argparse.ArgumentParser:
     cad_.add_argument("--targets", nargs="*", help="targets to run the chain against")
     ca.set_defaults(func=cmd_campaign)
 
-    dm = sub.add_parser("demo", help="hands-off pass (gate 1.6): arrange radios → capture, one command")
+    dm = sub.add_parser("demo", help="PLAN ONLY: preview intent → radio roles → capture (no execution)")
     dm.add_argument("--intent", default="recon", choices=[i.value for i in Intent],
                     help="declared intent (default recon; hunt = active capture)")
-    dm.add_argument("--live", action="store_true", help="probe the real radios on the Pi (default: dry run)")
+    dm.add_argument("--live", action="store_true", help="read-only actual radio probe; no configuration or capture")
     dm.add_argument("--persona", help="posture (red/purple = offense; blue/recon = detection-only)")
     dm.add_argument("--offense", action="store_true", help="enable offense without a persona (still Scope-gated)")
     dm.add_argument("--seconds", type=float, default=30.0, help="capture duration (default 30)")
