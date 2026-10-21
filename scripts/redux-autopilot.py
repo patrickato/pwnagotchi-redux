@@ -44,6 +44,7 @@ PROTECTED = {
     # The private-report privacy boundary must never be rewritten by the
     # model that will later consume its filtered output.
     "redux/field_feedback.py",
+    "redux/field_feedback_contract.py",
     "scripts/redux-field-feedback.py",
     "docs/FIELD_FEEDBACK.md",
 }
