@@ -21,7 +21,9 @@ jobs:
       - name: Compile check
         run: python -m compileall redux
       - name: Tests
-        run: pytest
+        # Module invocation puts the checkout on sys.path so repository-local
+        # namespace packages (including boot/) resolve under Python 3.11.
+        run: python -m pytest
       - name: Shell syntax
         run: for f in $(git ls-files '*.sh'); do bash -n "$f"; done
 
