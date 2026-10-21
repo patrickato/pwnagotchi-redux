@@ -16,6 +16,8 @@ def rssi_histogram(
     """Bucket RSSI values (e.g. -90..-81 → '-90')."""
     if bucket <= 0:
         raise ValueError("bucket must be > 0")
+    if hasattr(store, "rssi_distribution"):
+        return store.rssi_distribution(bucket=bucket, kind=kind)
     c: Counter[str] = Counter()
     rows = store.query(kind=kind) if kind else store.query()
     for s in rows:

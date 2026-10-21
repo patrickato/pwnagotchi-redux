@@ -56,6 +56,7 @@ class DoctorInputs:
     scope: Optional[object] = None        # a Scope (summary())
     detector_count: Optional[int] = None
     sightings: Optional[int] = None
+    telemetry: Optional[dict] = None
 
 
 # --- built-in probes --------------------------------------------------------- #
@@ -66,17 +67,70 @@ def probe_thermal_power(inp: DoctorInputs) -> Finding:
         return Finding("thermal/power", Status.UNKNOWN,
                        "No thermal/power readings yet.",
                        "needs a hardware collector feeding the Governor")
-    mode = getattr(getattr(g, "mode", None), "value", "full")
+    mode = getattr(getattr(g, "mode", None), "value", None)
+    observed = getattr(g, "observed_axes", ())
+    telemetry = inp.telemetry
+    if telemetry is not None:
+        from .governor import finite_number
+        from .telemetry import FLAGS, MAX_AGE_SECONDS
+        if (not isinstance(telemetry, dict)
+                or not isinstance(telemetry.get("values"), dict)
+                or telemetry.get("flags") is not None and not isinstance(telemetry.get("flags"), dict)):
+            return Finding("thermal/power", Status.UNKNOWN,
+                           "Resource telemetry has an invalid schema.")
+        if (telemetry.get("fresh") is not True
+                or not finite_number(telemetry.get("measured_at"))
+                or not finite_number(telemetry.get("age_seconds"))
+                or not 0 <= telemetry["age_seconds"] <= MAX_AGE_SECONDS):
+            return Finding("thermal/power", Status.UNKNOWN,
+                           "Resource telemetry is stale or invalid.", detail=telemetry)
+        flags = telemetry.get("flags") or {}
+        mask = telemetry["values"].get("throttled_mask")
+        firmware_valid = (type(mask) is int and 0 <= mask <= 0xffffffff
+                          and all(type(flags.get(name)) is bool
+                                  and flags[name] == bool(mask & (1 << bit))
+                                  for bit, name in FLAGS.items()))
+        if flags and not firmware_valid:
+            return Finding("thermal/power", Status.UNKNOWN,
+                           "Firmware telemetry is malformed or inconsistent.")
+        if mode != "survival" and any(flags.get(name) is True for name in
+               ("undervoltage", "frequency_capped", "throttled", "soft_temperature_limit")):
+            return Finding("thermal/power", Status.DEGRADED,
+                           "Firmware reports active power/thermal limits.", detail=telemetry)
+        values = telemetry.get("values") or {}
+        if mode == "full" and (not finite_number(values.get("cpu_temp_c"))
+                               or not -20 <= values["cpu_temp_c"] <= 150
+                               or not firmware_valid):
+            return Finding("thermal/power", Status.UNKNOWN,
+                           "Thermal/power sensor coverage is incomplete.", detail=telemetry)
+    valid_axes = {"cpu_temp", "cpu_load", "ram", "battery"}
+    # A Governor decision with no measured sensor axes is a scheduling
+    # decision, NOT evidence that temperatures, memory or power are healthy.
+    if (mode not in ("full", "guarded", "reduced", "survival")
+            or not isinstance(observed, tuple) or not observed
+            or any(type(name) is not str or name not in valid_axes for name in observed)
+            or len(set(observed)) != len(observed)):
+        return Finding("thermal/power", Status.UNKNOWN,
+                       "Thermal/power readings not verified.",
+                       "no valid independently supplied sensor coverage")
     reason = getattr(g, "reason", "")
+    if telemetry is not None:
+        missing = []
+        if values.get("battery_pct") is None:
+            missing.append("battery level")
+        if values.get("on_battery") is None:
+            missing.append("power source")
+        if missing:
+            reason += "; unmeasured: " + ", ".join(missing)
     st = {"full": Status.OK, "guarded": Status.ATTENTION,
-          "reduced": Status.DEGRADED, "survival": Status.ACTION_REQUIRED}.get(mode, Status.UNKNOWN)
-    summ = {"full": "Running at full performance.",
+          "reduced": Status.DEGRADED, "survival": Status.ACTION_REQUIRED}[mode]
+    summ = {"full": "Measured resources are within limits.",
             "guarded": "Easing off slightly under load.",
             "reduced": "Throttled to manage heat/power.",
             "survival": "Shedding load hard — hot or low battery."}.get(mode, "Unknown resource state.")
     rem = "Improve airflow or move to power; the Governor recovers on its own once it cools/charges." \
         if st in (Status.DEGRADED, Status.ACTION_REQUIRED) else ""
-    return Finding("thermal/power", st, summ, reason, {"mode": mode}, rem)
+    return Finding("thermal/power", st, summ, reason, {"mode": mode, "telemetry": telemetry}, rem)
 
 
 def _cap_probe(inp: DoctorInputs, cap: Cap, area: str, *, needed: bool) -> Finding:
@@ -103,8 +157,9 @@ def probe_location(inp: DoctorInputs) -> Finding:
 
 
 def probe_detectors(inp: DoctorInputs) -> Finding:
-    if inp.detector_count is None:
-        return Finding("detectors", Status.UNKNOWN, "Can't assess detectors.", "no detector count provided")
+    if type(inp.detector_count) is not int or inp.detector_count < 0:
+        return Finding("detectors", Status.UNKNOWN, "Can't assess detectors.",
+                       "a verified nonnegative detector count was not provided")
     if inp.detector_count > 0:
         return Finding("detectors", Status.OK, f"{inp.detector_count} detectors armed and watching.",
                        "the detect engine is populated")
@@ -186,3 +241,37 @@ class Doctor:
         return {"assessed": assessed, "not_assessed": gaps,
                 "reason": (f"{len(gaps)} area(s) could not be assessed: {', '.join(gaps)}"
                            if gaps else "all probed areas were assessed")}
+
+
+def with_native_plugins(report, inventory):
+    """Add an opt-in native-owner assessment, without sampling or trusting disk claims."""
+    inventory = inventory if isinstance(inventory, dict) else {}
+    report = report if isinstance(report, dict) else {}
+    fresh = inventory.get('runtime_fresh') is True
+    rows = inventory.get('plugins')
+    schema_valid = isinstance(rows, list) and all(isinstance(row, dict) for row in rows[:12])
+    rows = rows if isinstance(rows, list) else []
+    requested = [row for row in rows[:12]
+                 if isinstance(row, dict) and row.get('requested_enabled') is True and row.get('kind') != 'tool']
+    if (inventory.get('availability') != 'inspected' or inventory.get('runtime_error')
+            or not inventory.get('runtime_generation') or not fresh or not schema_valid):
+        status, summary = Status.UNKNOWN, 'Native plugin runtime evidence unavailable or stale.'
+    elif inventory.get('next_offset') is not None or inventory.get('partial') or len(rows) > 12:
+        status, summary = Status.UNKNOWN, 'Native plugin assessment covers only a partial inventory.'
+    elif any(row.get('active') is not True for row in requested):
+        status, summary = Status.DEGRADED, 'Requested native plugins are not all active.'
+    else:
+        status, summary = Status.OK, 'Requested native plugins confirmed by current runtime owner.'
+    finding = Finding('native plugins', status, summary,
+                      'Current process generation and requested-state revision; tools remain manual.',
+                      remediation='Inspect redux packs runtime; review registry, state and local service configuration.')
+    raw = report.get('findings')
+    findings = []
+    for row in raw[:64] if isinstance(raw, list) else []:
+        try:
+            findings.append(Finding(row['area'], Status(row['status']), row['summary'],
+                                    row.get('reason', ''), row.get('detail', {}), row.get('remediation', '')))
+        except (KeyError, ValueError, TypeError):
+            findings.append(Finding('upstream diagnosis', Status.UNKNOWN, 'Invalid upstream Doctor evidence.'))
+    findings.append(finding)
+    return Doctor(probes=[lambda inp, value=value: value for value in findings]).report(DoctorInputs())

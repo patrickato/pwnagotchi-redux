@@ -63,11 +63,81 @@ def test_page_has_access_points_panel():
     assert "renderAPs" in html and "aptbl" in html and "access_points" in html
 
 
+def test_doctor_health_panel_uses_real_status_not_demo_values():
+    html = render_page()
+    assert 'aria-label="Device Doctor"' in html
+    assert 'id="doctorheart"' in html
+    assert 'id="doctorcoverage"' in html
+    assert 'id="doctorlist"' in html
+    assert "renderDoctor(d.doctor||null)" in html
+    assert "All reported Doctor areas assessed." in html
+    assert "Doctor snapshot unavailable" in html
+    # No runtime data interpolated as HTML: escaping happens via DOM textContent.
+    assert "header.textContent=" in html
+    assert "reason.textContent=" in html
+    assert "remedy.textContent=" in html
+
+
+def test_runtime_doctor_report_is_transmitted_unchanged_through_local_api():
+    snapshot = {
+        "runtime": {"state": "degraded"},
+        "doctor": {
+            "overall": "degraded",
+            "coverage": {"assessed": ["live engine"],
+                         "not_assessed": ["thermal/power"]},
+            "findings": [{
+                "area": "live engine", "status": "degraded",
+                "summary": "Capture unavailable", "reason": "real probe",
+                "remediation": "Inspect device", "detail": {},
+            }],
+        },
+    }
+    srv, port = _serve(make_handler(lambda: snapshot))
+    try:
+        status, body = _get(port, "/api/status")
+        assert status == 200
+        report = json.loads(body)["doctor"]
+        assert report == snapshot["doctor"]
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_capture_pipeline_panel_uses_ledger_and_doctor_not_demo_data():
+    html = render_page()
+    assert 'aria-label="Capture processing"' in html
+    assert 'id="pipelinestate"' in html
+    assert 'id="pipelinecounts"' in html
+    assert 'id="pipelinereason"' in html
+    assert "renderPipeline(d)" in html
+    assert "capture_processing" in html
+    assert "No completed worker scan recorded" in html
+    # User-controlled errors, status, and worker outcomes are assigned as text.
+    assert "state.textContent=" in html
+    assert "counts.textContent=" in html
+    assert "getElementById('pipelinereason').textContent=" in html
+
+
 def test_page_has_rich_skin_toggle_and_moving_track():
     html = render_page()
     assert "skinbtn" in html and "data-skin" in html      # plain/rich skin toggle
     assert "TRACK" in html and "renderMap" in html         # client-accumulated track
     assert "src=" not in html and "cdn" not in html.lower()  # still self-contained
+
+
+def test_dashboard_browser_script_parses_with_node_when_available():
+    import shutil
+    import subprocess
+    import pytest
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js unavailable for browser JavaScript syntax validation")
+    html = render_page()
+    assert "<script>" in html and "</script>" in html
+    script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+    parsed = subprocess.run([node, "--check"], input=script,
+                            text=True, capture_output=True, timeout=10)
+    assert parsed.returncode == 0, parsed.stderr
 
 
 def test_page_is_self_contained_html():

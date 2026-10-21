@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import sqlite3
 import time
 from dataclasses import dataclass, asdict
@@ -100,10 +101,17 @@ class SightingStore:
         self.close()
 
     def insert(self, sighting: Sighting) -> Sighting:
-        """Insert or merge one sighting, committing immediately. Returns the
-        stored row state. For a batch, prefer insert_many (one transaction)."""
-        self._apply(sighting)
-        self._conn.commit()
+        """Insert or merge a sighting atomically.
+
+        If a write, commit, or validation fails, reset the transaction so the
+        next ingest attempt does not inherit a half-applied batch.
+        """
+        try:
+            self._apply(sighting)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
         return self.get(sighting.kind, sighting.mac)  # type: ignore[return-value]
 
     def _apply(self, sighting: Sighting) -> None:
@@ -202,9 +210,15 @@ class SightingStore:
         """Insert/merge a batch in ONE transaction — one commit, one fsync, not
         N. This is the SD-friendly write path for coalesced sighting flushes."""
         items = list(sightings)
-        for s in items:
-            self._apply(s)
-        self._conn.commit()
+        try:
+            for s in items:
+                self._apply(s)
+            self._conn.commit()
+        except Exception:
+            # The same SQLite connection persists across live pump cycles.
+            # A failed batch must not leak writes into the next successful one.
+            self._conn.rollback()
+            raise
         return [self.get(s.kind, s.mac) for s in items]  # type: ignore[list-item]
 
     def get(self, kind: str, mac: str) -> Optional[Sighting]:
@@ -253,6 +267,39 @@ class SightingStore:
             ).fetchone()
         return int(row["n"]) if row else 0
 
+    def channel_distribution(self, kind: Optional[str] = None) -> dict[int, int]:
+        """Aggregate channel occupancy in SQLite, not Python sighting objects.
+
+        Long-running field caches can hold thousands of observations; live
+        dashboard calls must not materialize every row each refresh.
+        """
+        sql = ("SELECT channel, COUNT(*) FROM sightings "
+               "WHERE channel IS NOT NULL")
+        params: list[object] = []
+        if kind is not None:
+            sql += " AND kind = ?"
+            params.append(kind.lower())
+        sql += " GROUP BY channel"
+        return {int(ch): int(count) for ch, count in self._conn.execute(sql, params)}
+
+    def rssi_distribution(self, bucket: int = 10,
+                          kind: Optional[str] = None) -> dict[str, int]:
+        """RSSI bins computed by SQLite with correct negative floor rounding."""
+        if type(bucket) is not int or bucket <= 0:
+            raise ValueError("bucket must be a positive integer")
+        # SQLite remainder retains the sign of negative RSSI; normalize it
+        # before subtracting so -81 falls into -90 for a 10 dBm bucket.
+        expression = "(rssi - (((rssi % ?) + ?) % ?))"
+        sql = ("SELECT " + expression + " AS band, COUNT(*) "
+               "FROM sightings WHERE rssi IS NOT NULL")
+        params: list[object] = [bucket, bucket, bucket]
+        if kind is not None:
+            sql += " AND kind = ?"
+            params.append(kind.lower())
+        sql += " GROUP BY band ORDER BY band"
+        return {str(int(band)): int(count)
+                for band, count in self._conn.execute(sql, params)}
+
     # --- data lifecycle (a field device runs for days; bound the growth) ----- #
 
     def prune(self, *, older_than: Optional[float] = None,
@@ -263,20 +310,33 @@ class SightingStore:
         Both may be combined. Returns rows deleted; commits once (SD-friendly).
         Does not VACUUM — reclaiming pages rewrites the whole DB, the opposite of
         SD-friendly; call the separate vacuum() method sparingly after a big prune."""
+        if older_than is not None:
+            if not math.isfinite(float(older_than)) or float(older_than) < 0:
+                raise ValueError("sighting retention age must be finite and non-negative")
+        if max_rows is not None and (
+            type(max_rows) is not int or max_rows < 0
+        ):
+            raise ValueError("sighting max_rows must be a non-negative integer")
         now = time.time() if now is None else now
         deleted = 0
-        if older_than is not None:
-            cutoff = now - float(older_than)
-            c = self._conn.execute("DELETE FROM sightings WHERE ts < ?", (cutoff,))
-            deleted += c.rowcount or 0
-        if max_rows is not None and max_rows >= 0:
-            c = self._conn.execute(
-                "DELETE FROM sightings WHERE id NOT IN "
-                "(SELECT id FROM sightings ORDER BY ts DESC, id DESC LIMIT ?)",
-                (int(max_rows),),
-            )
-            deleted += c.rowcount or 0
-        self._conn.commit()
+        try:
+            if older_than is not None:
+                cutoff = now - float(older_than)
+                c = self._conn.execute("DELETE FROM sightings WHERE ts < ?", (cutoff,))
+                deleted += c.rowcount or 0
+            if max_rows is not None:
+                c = self._conn.execute(
+                    "DELETE FROM sightings WHERE id NOT IN "
+                    "(SELECT id FROM sightings ORDER BY ts DESC, id DESC LIMIT ?)",
+                    (max_rows,),
+                )
+                deleted += c.rowcount or 0
+            self._conn.commit()
+        except Exception:
+            # Either all retention filters commit or none do. In particular, a
+            # failed second DELETE must not silently commit the first one later.
+            self._conn.rollback()
+            raise
         return deleted
 
     def vacuum(self) -> None:

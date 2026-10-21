@@ -9,8 +9,8 @@ def replace_once(text, old, new):
 
 
 def captures_layout(text, size_mib=512):
-    if not isinstance(size_mib, int) or size_mib < 64 or size_mib > 32768:
-        raise ValueError("captures partition must be 64–32768 MiB")
+    if not isinstance(size_mib, int) or size_mib < 64 or size_mib > 262144:
+        raise ValueError("captures partition must be 64–262144 MiB")
     old = 'IMG_SIZE=$((BOOT_PART_START + BOOT_PART_SIZE + ROOT_PART_SIZE))'
     text = replace_once(text, old,
         f'CAPTURE_PART_START=$((ROOT_PART_START + ROOT_PART_SIZE))\n'

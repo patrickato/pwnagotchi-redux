@@ -1,7 +1,11 @@
 [Unit]
 Description=Return an uncommitted candidate to the stable slot
 RequiresMountsFor=/boot/redux-control
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/libexec/redux-rauc-deadline
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=30

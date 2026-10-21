@@ -18,8 +18,9 @@ Every decision carries a human-readable reason (glass-box).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
+import math
 from typing import List, Optional, Tuple
 
 
@@ -55,6 +56,26 @@ class Reading:
     on_battery: bool = False
 
 
+def finite_number(value) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def valid_reading(reading: Reading) -> Reading:
+    """Discard nonnumeric, nonfinite and physically invalid sensor values."""
+    bounds = {"cpu_temp_c": (-20, 150), "cpu_load_pct": (0, 100),
+              "ram_pct": (0, 100), "battery_pct": (0, 100)}
+    clean = {}
+    for name, (low, high) in bounds.items():
+        value = getattr(reading, name)
+        clean[name] = value if (finite_number(value) and low <= value <= high) else None
+    return replace(reading, **clean, on_battery=reading.on_battery is True)
+
+
 @dataclass(frozen=True)
 class GovDecision:
     mode: Mode
@@ -62,6 +83,9 @@ class GovDecision:
     reason: str
     drivers: Tuple[str, ...] = ()       # which axes are at/over the current mode
     holding: bool = False               # recovering, waiting out the cooldown
+    # Explicit coverage lets Doctor refuse an invented green state when the
+    # Governor is initialized but has no independently supplied sensor data.
+    observed_axes: Tuple[str, ...] = ()
 
 
 def _rising_mode(thresholds, value: Optional[float]) -> Mode:
@@ -107,6 +131,8 @@ class Governor:
         return want, drivers
 
     def evaluate(self, reading: Reading, now: float) -> GovDecision:
+        # Reject malformed external readings before comparisons and coverage.
+        reading = valid_reading(reading)
         want, drivers = self._desired(reading)
         holding = False
         if _RANK[want] >= _RANK[self.mode]:
@@ -134,5 +160,16 @@ class Governor:
             if holding:
                 left = self.recovery_hold_s - (now - (self._cooldown_since or now))
                 reason += f" (holding {left:.0f}s before easing)"
+        # Only independently supplied, finite numeric readings count as
+        # coverage. Battery percentage applies only when on battery; a mode
+        # of FULL alone says nothing about which sensors were actually read.
+        axes = (("cpu_temp", reading.cpu_temp_c),
+                ("cpu_load", reading.cpu_load_pct),
+                ("ram", reading.ram_pct))
+        if reading.on_battery is True:
+            axes += (("battery", reading.battery_pct),)
+        observed = tuple(name for name, value in axes
+                         if finite_number(value))
         return GovDecision(mode=self.mode, interval_scale=scale, reason=reason,
-                           drivers=tuple(drivers), holding=holding)
+                           drivers=tuple(drivers), holding=holding,
+                           observed_axes=observed)

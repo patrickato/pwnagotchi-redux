@@ -1,0 +1,39 @@
+# Standalone Redux passive runtime; no active wireless operations.
+[live]
+# Explicit opt-in runtime owner; only pinned first-party plugins can activate.
+enable_native_plugins = false
+# Root-owned live supervisor state. Keep separate from redux/ (unprivileged service-owned).
+state_dir = "/captures/live"
+capture_dir = "/captures/incoming"
+active_dir = "/captures/active" # Bettercap writes here; never watched by converter
+bettercap_binary = "bettercap"
+preferred_iface = "" # Auto-select real monitor-capable radio. Example: wlan1mon
+require_usb_lease = false # Opt-in only after external radio qualification and reviewed deployment
+# usb_evidence_file = "/captures/qualified-usb.json" # root-owned, <=3s monotonic collector receipt
+# usb_management_peer = "192.0.2.1" # explicit Ethernet return-path destination
+allow_connected_capture = false # Never disconnect an active Wi-Fi uplink unless explicitly chosen
+# Fail closed until the explicitly baked, real regulatory country is active.
+# Doctor stays available even if the country file is missing or rfkill is blocked.
+require_regulatory_country = true
+regulatory_country_file = "/etc/redux/regulatory-country"
+api_port = 8081
+web_port = 8080
+enable_web = true # Localhost only. Later UI may expose via an authenticated proxy.
+retry_seconds = 10
+probe_seconds = 30
+rotation_seconds = 300 # Close each session and hand off its completed capture
+min_free_bytes = 67108864 # Pause capture if /captures has less than 64 MiB free
+max_log_bytes = 4194304 # Limit Bettercap diagnostic log to 4 MiB; checked each runtime tick
+pipeline_database = "/captures/jobs.db" # Processing worker ledger; read-only from live runtime
+pipeline_stale_seconds = 180 # Timer normally runs every 20 seconds after boot
+status_sample_seconds = 5 # Heavy dashboard queries no more than every 5s at idle; busy events coalesce to >=2s
+
+# Optional PAN executor; not a boot service. No bus access while disabled.
+[phone]
+enabled = false
+# adapter = "/org/bluez/hci0"
+# peer = "<private pinned BlueZ device path>"
+# management_probe_peer = "192.0.2.1"
+pairing_window_s = 90
+call_timeout_s = 2
+connect_timeout_s = 10

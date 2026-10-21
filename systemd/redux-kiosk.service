@@ -1,0 +1,23 @@
+[Unit]
+Description=Redux local touchscreen kiosk (operator opt-in)
+Documentation=man:systemd.service(5)
+After=graphical-session.target
+ConditionPathExists=%h/.config/redux/kiosk.env
+StartLimitIntervalSec=1800
+StartLimitBurst=3
+
+[Service]
+Type=simple
+# EnvironmentFile is mandatory: no guessed framebuffer or preconfigured seat.
+EnvironmentFile=%h/.config/redux/kiosk.env
+ExecStartPre=/usr/local/bin/redux-kiosk --check --framebuffer ${REDUX_FRAMEBUFFER} --port ${REDUX_DASHBOARD_PORT}
+ExecStart=/usr/local/bin/redux-kiosk --supervise --framebuffer ${REDUX_FRAMEBUFFER} --port ${REDUX_DASHBOARD_PORT}
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=12
+KillMode=control-group
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

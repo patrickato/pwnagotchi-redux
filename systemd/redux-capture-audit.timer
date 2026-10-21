@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic opt-in Redux Pi-local audit worker
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=15min
+Persistent=true
+Unit=redux-capture-audit.service
+
+[Install]
+WantedBy=timers.target

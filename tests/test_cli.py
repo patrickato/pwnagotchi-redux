@@ -61,10 +61,17 @@ def test_packs_list_and_enable(tmp_path):
     assert rc == 0 and "geo" in out and "viz" in out
 
     rc, out = _run(["packs", "--dir", str(tmp_path), "enable", "viz"])
-    assert rc == 0 and "geo" in out and "viz" in out   # enabling viz pulls in geo
+    assert rc == 0 and "geo" in out and "viz" in out
+    preview = json.loads(out)
+    assert "pending" in preview["activation"]
+    assert not (tmp_path / ".packs-state.json").exists()
+    rc, out = _run(["packs", "--dir", str(tmp_path), "enable", "viz", "--confirm", preview["revision"]])
+    assert rc == 0
 
     rc, out = _run(["packs", "--dir", str(tmp_path), "list"])
-    assert "[*] viz" in out and "[*] geo" in out
+    inventory = json.loads(out)
+    assert {p["name"] for p in inventory["plugins"] if p["requested_enabled"]} == {"viz", "geo"}
+    assert all(p["active"] is None for p in inventory["plugins"])
 
 
 def test_packs_missing_dependency_errors(tmp_path):
@@ -148,3 +155,70 @@ def test_init_scope_path_matches_firing_default(tmp_path, monkeypatch):
     # the path init tells the operator to arm is the one the firing tools read
     from redux.cli import _DEFAULT_SCOPE_PATH
     assert rc == 0 and _DEFAULT_SCOPE_PATH in out
+
+def test_live_doctor_uses_local_actual_health_not_synthetic_augmentations(monkeypatch):
+    import urllib.request
+    served = []
+    report = {
+        "doctor": {
+            "overall": "degraded", "label": "DEGRADED",
+            "coverage": {"reason": "storage unknown; no fabricated pass"},
+            "findings": [{
+                "area": "sighting persistence", "status": "degraded",
+                "summary": "Database writes deferred.",
+                "reason": "synthetic read-only SQLite disk",
+                "remediation": "Check capture storage.",
+            }],
+        }
+    }
+    def response(url, timeout):
+        served.append((url, timeout))
+        return io.BytesIO(json.dumps(report).encode())
+    monkeypatch.setattr(urllib.request, "urlopen", response)
+    code, output = _run(["live", "doctor", "--port", "8085"])
+    assert code == 0
+    assert served == [("http://127.0.0.1:8085/api/status", 2)]
+    assert "DEGRADED" in output
+    assert "sighting persistence" in output
+    assert "storage unknown" in output
+    assert "Check capture storage." in output
+
+
+def test_live_doctor_refuses_unavailable_or_unverified_dashboard(monkeypatch):
+    import urllib.request
+    def unavailable(*args, **kwargs):
+        raise OSError("synthetic disconnected service")
+    monkeypatch.setattr(urllib.request, "urlopen", unavailable)
+    rc, output = _run(["live", "doctor"])
+    assert rc == 3
+    assert "unavailable" in output and "check redux-live.service" in output
+    assert "OK" not in output
+
+    def bogus(*args, **kwargs):
+        return io.BytesIO(json.dumps({"creature": "demo"}).encode())
+    monkeypatch.setattr(urllib.request, "urlopen", bogus)
+    rc, output = _run(["live", "doctor"])
+    assert rc == 3 and "unavailable" in output
+
+
+def test_live_doctor_sanitizes_terminal_sequences(monkeypatch):
+    import urllib.request
+    report = {
+        "doctor": {
+            "overall": "attention", "label": "ATTENTION",
+            "findings": [{
+                "area": "capture", "status": "attention",
+                "summary": "Danger\x1b[31mRED",
+                "reason": "", "remediation": "",
+            }],
+            "coverage": {"reason": "partial"},
+        }
+    }
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: io.BytesIO(json.dumps(report).encode()))
+    rc, output = _run(["live", "doctor"])
+    assert rc == 0
+    assert "\\x1b" not in output
+    assert "Danger" in output and "RED" in output
+
+

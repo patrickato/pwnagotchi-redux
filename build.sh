@@ -4,9 +4,10 @@ set -euo pipefail
 REPO_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 usage() {
     cat <<'EOF'
-Usage: ./build.sh [--prepare-only]
+Usage: ./build.sh [--prepare-only|--check-host]
 Build an arm64 Raspberry Pi 4/5 image on a Debian/Ubuntu Linux host as root.
 --prepare-only stages pinned sources and configuration without building an image.
+--check-host reports read-only build-host prerequisites as JSON and exits.
 Optional: REDUX_BUILD_DIR (default build/image), REDUX_IMAGE_CONFIG (local config).
 See docs/IMAGE_BUILD.md for host dependencies and the physical boot gate.
 EOF
@@ -16,6 +17,7 @@ PREPARE_ONLY=0
 case ${1:-} in
     --help|-h) usage; exit 0 ;;
     --prepare-only) PREPARE_ONLY=1 ;;
+    --check-host) exec python3 "$REPO_DIR/image/host_preflight.py" --workspace "${REDUX_BUILD_DIR:-$REPO_DIR/build/image}" ;;
     '') ;;
     *) usage >&2; exit 2 ;;
 esac
@@ -27,14 +29,28 @@ fi
 for tool in git realpath install tar python3; do
     command -v "$tool" >/dev/null || { echo "Missing build prerequisite: $tool" >&2; exit 1; }
 done
-if [[ $PREPARE_ONLY == 0 ]]; then
-    command -v arch-test >/dev/null || { echo 'Missing arch-test; install the host prerequisites in docs/IMAGE_BUILD.md.' >&2; exit 1; }
-    arch-test arm64 >/dev/null || { echo 'Host cannot execute arm64 binaries. Enable qemu-aarch64 binfmt_misc; see docs/IMAGE_BUILD.md.' >&2; exit 1; }
-fi
 BUILD_DIR=$(realpath -m -- "${REDUX_BUILD_DIR:-$REPO_DIR/build/image}")
 [[ $BUILD_DIR != *' '* ]] || { echo 'pi-gen requires a build path without spaces.' >&2; exit 1; }
 [[ ! -e $BUILD_DIR ]] || { echo "Build directory already exists: $BUILD_DIR. Choose a fresh REDUX_BUILD_DIR." >&2; exit 1; }
 [[ $REPO_DIR != *' '* ]] || { echo 'Use a repository path without spaces for pi-gen.' >&2; exit 1; }
+if [[ $PREPARE_ONLY == 0 ]]; then
+    # Fail before fetching sources, creating build directories or using loop mounts.
+    python3 "$REPO_DIR/image/host_preflight.py" --workspace "$BUILD_DIR"
+fi
+# Disposable short console login can coexist with explicitly provisioned
+# SSH public-key-only access. The console password is never SSH-authenticated.
+# Optional explicit physical regulatory country. Empty/unset keeps Wi-Fi capture
+# unavailable, while diagnostic services still run. No country is inferred.
+if [[ -n ${REDUX_REGULATORY_COUNTRY:-} ]]; then
+    [[ ${REDUX_REGULATORY_COUNTRY} =~ ^[A-Z]{2}$ && ${REDUX_REGULATORY_COUNTRY} != ZZ && ${REDUX_REGULATORY_COUNTRY} != AA ]] || {
+        echo 'REDUX_REGULATORY_COUNTRY must be an operator-chosen uppercase two-letter country, e.g. US.' >&2
+        exit 1
+    }
+fi
+case ${REDUX_DEV_LOGIN:-0} in
+    0|1) ;;
+    *) echo 'REDUX_DEV_LOGIN must be 0 or 1.' >&2; exit 1 ;;
+esac
 source "$REPO_DIR/image/sources.sh"
 mkdir -p "$BUILD_DIR"
 
@@ -47,6 +63,14 @@ checkout_source() {
     [[ $(git -C "$dest" rev-parse HEAD) == "$rev" ]] || { echo "Source revision mismatch: $dest" >&2; exit 1; }
 }
 checkout_source "$PI_GEN_URL" "$PI_GEN_REV" "$BUILD_DIR/pi-gen"
+# Validate exact upstream export hooks before fetching Nexmon or staging Redux.
+# A successful source revision alone does not prove compatibility with patches.
+python3 "$REPO_DIR/image/pinned_pigen_contract.py" "$BUILD_DIR/pi-gen"
+# Adapt the pinned ARMHF QEMU dependency only after ARM64 execution verifies.
+python3 "$REPO_DIR/image/pigen_dependencies.py" "$BUILD_DIR/pi-gen"
+# The pinned upstream debootstrap wrapper otherwise tolerates missing Release
+# signature verification. Hard-stop rather than accepting untrusted packages.
+python3 "$REPO_DIR/image/pigen_release_auth.py" "$BUILD_DIR/pi-gen"
 # Fetch nexmon lazily: use the distro compiler, excluding bundled compilers.
 NEXMON_DIR="$BUILD_DIR/nexmon"
 git init -q "$NEXMON_DIR"
@@ -65,6 +89,43 @@ git -C "$NEXMON_DIR" checkout -q --detach FETCH_HEAD
 
 PI_GEN_DIR="$BUILD_DIR/pi-gen"
 cp -a "$REPO_DIR/image/stage-redux" "$PI_GEN_DIR/stage-redux"
+# Include a native framebuffer UI in every Lite image. It remains disabled
+# until the operator verifies the actual TFT fbN, pixel order and orientation.
+cp "$REPO_DIR/systemd/redux-fbui.service" \
+    "$PI_GEN_DIR/stage-redux/00-redux/files/redux-fbui.service"
+cp "$REPO_DIR/config/fbui.example.env" \
+    "$PI_GEN_DIR/stage-redux/00-redux/files/fbui.example.env"
+if [[ -n ${REDUX_REGULATORY_COUNTRY:-} ]]; then
+    printf '%s\n' "$REDUX_REGULATORY_COUNTRY" > "$PI_GEN_DIR/stage-redux/00-redux/files/regulatory-country"
+    chmod 0644 "$PI_GEN_DIR/stage-redux/00-redux/files/regulatory-country"
+fi
+# Desktop packages consume significant space and must remain an explicit
+# operator selection. A browser alone does not guarantee SPI fbdev or touch.
+case ${REDUX_KIOSK_PROFILE:-none} in
+    none) ;;
+    manual-x11)
+        cat >> "$PI_GEN_DIR/stage-redux/00-redux/00-packages-nr" <<'KIOSK_PACKAGES'
+chromium
+xinit
+xauth
+x11-utils
+xinput
+xserver-xorg-core
+xserver-xorg-legacy
+xserver-xorg-video-fbdev
+xserver-xorg-input-libinput
+KIOSK_PACKAGES
+        printf '%s\n' 'manual-x11 (operator-started, hardware-unverified)' > \
+            "$PI_GEN_DIR/stage-redux/00-redux/files/kiosk-profile"
+        # The unit is merely installed, not enabled: a logged-in operator
+        # must configure their actual fbN and X11 seat before starting it.
+        cp "$REPO_DIR/systemd/redux-kiosk.service" \
+            "$PI_GEN_DIR/stage-redux/00-redux/files/redux-kiosk.service"
+        cp "$REPO_DIR/config/kiosk.example.env" \
+            "$PI_GEN_DIR/stage-redux/00-redux/files/kiosk.example.env"
+        ;;
+    *) echo 'Unsupported REDUX_KIOSK_PROFILE: choose none or manual-x11.' >&2; exit 1 ;;
+esac
 mkdir -p "$PI_GEN_DIR/stage-redux/20-boot-budget/files"
 cp -a "$REPO_DIR/boot" "$PI_GEN_DIR/stage-redux/20-boot-budget/files/boot"
 mkdir -p "$PI_GEN_DIR/stage-redux/40-power/files"
@@ -90,21 +151,53 @@ case ${REDUX_TFT_PROFILE:-none} in
 esac
 mkdir -p "$PI_GEN_DIR/stage-redux/00-redux/files/redux"
 cp -a "$REPO_DIR/redux/." "$PI_GEN_DIR/stage-redux/00-redux/files/redux/"
+# Stage the exact same capture configuration and unit templates as the source checkout.
+install -d "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline"
+cp "$REPO_DIR/config/pipeline.example.toml" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/pipeline.toml"
+cp "$REPO_DIR/config/live.example.toml" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/live.toml"
+cp "$REPO_DIR/scripts/redux-live-diag.sh" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/redux-live-diag.sh"
+cp "$REPO_DIR/scripts/redux-field-report.py" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/redux-field-report.py"
+for unit in redux-capture-ingest redux-capture-audit; do
+    cp "$REPO_DIR/systemd/$unit.service" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/"
+    cp "$REPO_DIR/systemd/$unit.timer" "$PI_GEN_DIR/stage-redux/00-redux/files/pipeline/"
+done
 # Do not ship development bytecode or require pip/network access at boot.
 find "$PI_GEN_DIR/stage-redux/00-redux/files/redux" -name '__pycache__' -type d -exec rm -r -- {} +
 mv "$NEXMON_DIR" "$PI_GEN_DIR/stage-redux/00-redux/files/nexmon"
 cp "$REPO_DIR/image/sources.sh" "$PI_GEN_DIR/stage-redux/00-redux/files/sources.sh"
 git -C "$REPO_DIR" rev-parse HEAD > "$PI_GEN_DIR/stage-redux/00-redux/files/redux-revision"
 [[ -z $(git -C "$REPO_DIR" status --porcelain --untracked-files=normal) ]] || printf '%s\n' 'dirty working tree' >> "$PI_GEN_DIR/stage-redux/00-redux/files/redux-revision"
+# An explicitly supplied SSH public key makes disposable field cards
+# remotely accessible on Ethernet. All SSH authentication stays key-only.
+if [[ -n ${REDUX_OPERATOR_PUBKEY_FILE:-} ]]; then
+    printf 'openssh-server\navahi-daemon\n' >> "$PI_GEN_DIR/stage-redux/00-redux/00-packages-nr"
+    touch "$PI_GEN_DIR/stage-redux/00-redux/files/field-ssh-profile"
+fi
 cp "$REPO_DIR/image/config" "$PI_GEN_DIR/config"
 if [[ -n ${REDUX_IMAGE_CONFIG:-} ]]; then
     cat "$REDUX_IMAGE_CONFIG" >> "$PI_GEN_DIR/config"
 fi
+# Build-time authorized-key provisioning avoids a shared password. Validated
+# before pi-gen sources this config, including protection against shell injection.
+if [[ -n ${REDUX_OPERATOR_PUBKEY_FILE:-} ]]; then
+    python3 "$REPO_DIR/image/operator_provision.py" "$REDUX_OPERATOR_PUBKEY_FILE" >> "$PI_GEN_DIR/config"
+fi
+# These topology choices and the noninteractive account identity cannot be
+# overridden by local configuration: the stock firstboot init was removed.
+# Disable user renaming as a separate, explicit first-boot action.
 # These topology choices cannot be overridden by local login/locale settings.
 cat >> "$PI_GEN_DIR/config" <<'EOF'
 RELEASE=bookworm
 STAGE_LIST="stage0 stage1 stage2 stage-redux"
+DISABLE_FIRST_BOOT_USER_RENAME=1
 EOF
+# Create a unique build-local password required by pinned pi-gen; no shared default.
+if [[ ${REDUX_DEV_LOGIN:-0} == 1 ]]; then
+    python3 "$REPO_DIR/image/build_credentials.py" "$PI_GEN_DIR/config" "$BUILD_DIR/operator-login.txt" --dev-login
+    printf '\nexport REDUX_DEV_LOGIN=1\n' >> "$PI_GEN_DIR/config"
+else
+    python3 "$REPO_DIR/image/build_credentials.py" "$PI_GEN_DIR/config" "$BUILD_DIR/operator-login.txt"
+fi
 touch "$PI_GEN_DIR/stage2/SKIP_IMAGES"
 # Both supported boards use arm64, with their respective kernel packages.
 cat > "$PI_GEN_DIR/stage0/02-firmware/01-packages" <<'EOF'
@@ -116,10 +209,24 @@ linux-headers-rpi-v8
 linux-headers-rpi-2712
 EOF
 chmod +x "$PI_GEN_DIR/stage-redux/prerun.sh" "$PI_GEN_DIR/stage-redux/00-redux/00-run.sh"
-python3 "$REPO_DIR/image/export_layout.py" "$PI_GEN_DIR/export-image/prerun.sh"
+# Optional per-card capture capacity; the exporter validates 64 MiB–256 GiB.
+python3 "$REPO_DIR/image/export_layout.py" "$PI_GEN_DIR/export-image/prerun.sh" \
+    --captures-mib "${REDUX_CAPTURES_MIB:-512}"
 if [[ -n ${REDUX_OTA_CERT:-} ]]; then
     python3 "$REPO_DIR/image/prepare_ota.py" "$REPO_DIR/image" "$PI_GEN_DIR"
+    BOOT_GATE_PROFILE=ab
+else
+    BOOT_GATE_PROFILE=lite
 fi
+# Validate final boot files while the exporter has its FAT/root partitions
+# mounted. A/B runs its paired-slot gate inside redux-ota-clone.sh.
+# Bind the operator country to the ACTUAL mounted rootfs at export time.
+boot_gate_args=(--profile "$BOOT_GATE_PROFILE")
+if [[ -n ${REDUX_REGULATORY_COUNTRY:-} ]]; then
+    boot_gate_args+=(--expected-country "$REDUX_REGULATORY_COUNTRY")
+fi
+python3 "$REPO_DIR/image/prepare_boot_gate.py" "$REPO_DIR/image" "$PI_GEN_DIR" \
+    "${boot_gate_args[@]}"
 chmod +x "$PI_GEN_DIR/stage-redux/10-overlay/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/20-boot-budget/00-run.sh"
 chmod +x "$PI_GEN_DIR/stage-redux/30-watchdog/00-run.sh"
@@ -134,4 +241,18 @@ if [[ $PREPARE_ONLY == 1 ]]; then
 fi
 cd "$PI_GEN_DIR"
 ./build.sh
-echo "Image and build logs: $PI_GEN_DIR/deploy"
+# Refuse to publish a missing, ambiguous, corrupt or undersized image.
+# Verification does not claim the Pi actually booted.
+shopt -s nullglob
+release_images=( "$PI_GEN_DIR"/deploy/*.img.xz )
+[[ ${#release_images[@]} -eq 1 ]] || {
+    echo "Expected exactly one compressed disk image in $PI_GEN_DIR/deploy; found ${#release_images[@]}." >&2
+    exit 1
+}
+python3 "$REPO_DIR/image/release_manifest.py" "${release_images[0]}" \
+    --revision "$(git -C "$REPO_DIR" rev-parse HEAD)" \
+    --pi-gen-revision "$PI_GEN_REV" \
+    --nexmon-revision "$NEXMON_REV" \
+    --expected-profile "$BOOT_GATE_PROFILE"
+echo "Image, SHA256 and provenance manifest: $PI_GEN_DIR/deploy"
+echo "Physical ARM64 boot, radio and capture validation remain REQUIRED."

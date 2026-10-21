@@ -1,0 +1,18 @@
+[Unit]
+Description=Redux bounded first-boot diagnostic snapshot
+After=local-fs.target redux-live.service
+RequiresMountsFor=/captures
+
+[Service]
+Type=oneshot
+User=root
+Environment=PYTHONPATH=/opt/redux
+ExecStart=/usr/local/bin/redux-report --full --save
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ReadWritePaths=/captures
+ProtectHome=true
+PrivateTmp=true
+UMask=0077
+TimeoutStartSec=25s

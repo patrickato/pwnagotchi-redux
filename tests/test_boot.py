@@ -9,6 +9,7 @@ import pytest
 
 from redux.core.boot import run
 from redux.core.boot import atomic_checkpoint, previous_checkpoint, watchdog_interval, notify
+from redux.core.boot import boot_identity, validate_state_mount
 
 
 def test_boot_waits_for_shutdown_and_reports_actual_scope(caplog):
@@ -70,11 +71,15 @@ def test_shutdown_commits_record_and_notification_after_loop_progress(tmp_path):
         messages.append(message)
         if message.startswith('WATCHDOG='):
             stop.set()
-    run(stop, logging.getLogger('test'), path, send, 0.001)
+    run(stop, logging.getLogger('test'), path, send, 0.001,
+        pid=123, boot_id="00000000-0000-0000-0000-000000000001")
     assert messages[0].startswith('READY=1')
     assert any(m.startswith('WATCHDOG=1') for m in messages)
     assert messages[-1].startswith('STOPPING=1')
-    assert json.loads(path.read_text())['clean_shutdown'] is True
+    record = json.loads(path.read_text())
+    assert record['clean_shutdown'] is True
+    assert record['pid'] == 123
+    assert record['boot_id'] == "00000000-0000-0000-0000-000000000001"
     assert not list(tmp_path.glob('.boot-*'))
 
 
@@ -105,6 +110,23 @@ def test_checkpoint_does_not_overwrite_symlink_target(tmp_path):
     with pytest.raises(ValueError, match='symlink'):
         atomic_checkpoint(path, {'schema': 1})
     assert target.read_text() == 'preserve'
+
+
+def test_image_bootstrap_refuses_missing_or_unwritable_capture_mount():
+    validate_state_mount('/captures/boot', probe=lambda: (42, '0:17', 'ext4', 1, 2))
+    with pytest.raises(ValueError, match='mount identity'):
+        validate_state_mount('/captures/boot', probe=lambda: None)
+    with pytest.raises(ValueError, match='under /captures'):
+        validate_state_mount('/var/lib/redux', probe=lambda: (1,))
+
+
+def test_kernel_boot_identity_requires_canonical_uuid(tmp_path):
+    identity = tmp_path / 'boot-id'
+    identity.write_text('00000000-0000-0000-0000-000000000001\n')
+    assert boot_identity(identity).endswith('0001')
+    identity.write_text('not-a-boot-id\n')
+    with pytest.raises(ValueError, match='malformed'):
+        boot_identity(identity)
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='Linux directory fsync')

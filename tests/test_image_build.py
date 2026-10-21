@@ -213,7 +213,7 @@ def test_ota_topology_and_generated_mounts(monkeypatch, tmp_path):
 
 def test_ota_manifest_requires_complete_signed_pair():
     ota = boot_module("ota")
-    manifest = f"[update]\ncompatible={ota.COMPATIBLE}\n[bundle]\nformat=verity\n[image.boot]\nfilename=boot.tar\nhooks=post-install\n[image.rootfs]\nfilename=rootfs.tar\n"
+    manifest = f"[update]\ncompatible={ota.COMPATIBLE}\nversion=test\nbuild={'a'*40}\n[bundle]\nformat=verity\n[hooks]\nfilename=hook.sh\n[image.boot]\nfilename=boot.tar\nhooks=post-install\n[image.rootfs]\nfilename=rootfs.tar\n"
     ota.validate_manifest(manifest)
     for bad in [manifest.replace("[image.rootfs]","[image.captures]"),manifest.replace("hooks=post-install","hooks="),manifest.replace("format=verity","format=plain")]:
         with pytest.raises(ValueError):
@@ -227,6 +227,62 @@ def test_ota_corrupt_checkpoint_cannot_change_selector(tmp_path):
     path.write_text('{"schema":1,"pending":[],"states":{"A":"good","B":"bad"}}')
     with pytest.raises(ValueError, match="invalid OTA state"):
         ota.load_state(path,"A")
+
+
+def test_ota_health_checkpoint_belongs_to_current_boot_and_process(tmp_path):
+    ota = boot_module("ota")
+    checkpoint = tmp_path / "boot.json"
+    boot_id = tmp_path / "boot-id"
+    boot_id.write_text("00000000-0000-0000-0000-000000000001\n")
+    good = {"schema": 1, "clean_shutdown": False, "pid": 321,
+            "boot_id": boot_id.read_text().strip(), "started_utc": "2026-10-17T20:00:00+00:00"}
+    checkpoint.write_text(__import__("json").dumps(good))
+    assert ota.validate_boot_checkpoint(321, checkpoint=checkpoint,
+                                        boot_id=boot_id)["pid"] == 321
+    for changed in (
+            {**good, "pid": 322},
+            {**good, "boot_id": "00000000-0000-0000-0000-000000000002"},
+            {**good, "clean_shutdown": True},
+            {k: v for k, v in good.items() if k != "started_utc"}):
+        checkpoint.write_text(__import__("json").dumps(changed))
+        with pytest.raises(ValueError, match="stale or incomplete"):
+            ota.validate_boot_checkpoint(321, checkpoint=checkpoint, boot_id=boot_id)
+
+
+def test_ota_health_checkpoint_refuses_missing_link_and_oversize(tmp_path):
+    ota = boot_module("ota")
+    boot_id = tmp_path / "boot-id"
+    boot_id.write_text("00000000-0000-0000-0000-000000000001\n")
+    checkpoint = tmp_path / "boot.json"
+    with pytest.raises(ValueError, match="unavailable"):
+        ota.validate_boot_checkpoint(1, checkpoint=checkpoint, boot_id=boot_id)
+    target = tmp_path / "target"
+    target.write_text("{}")
+    checkpoint.symlink_to(target)
+    with pytest.raises(ValueError, match="unavailable"):
+        ota.validate_boot_checkpoint(1, checkpoint=checkpoint, boot_id=boot_id)
+    checkpoint.unlink()
+    checkpoint.write_bytes(b"x" * 65537)
+    with pytest.raises(ValueError, match="oversized"):
+        ota.validate_boot_checkpoint(1, checkpoint=checkpoint, boot_id=boot_id)
+
+
+def test_ota_deadline_retries_when_accepted_reboot_does_not_complete(monkeypatch):
+    ota = boot_module("ota")
+    original = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda p, *a, **k:
+                        "rauc.slot=B" if str(p) == "/proc/cmdline" else
+                        ota.autoboot("A") if str(p) == "/fixture/control" else
+                        original(p, *a, **k))
+    monkeypatch.setattr(ota, "CONTROL", Path("/fixture/control"))
+    monkeypatch.setattr(ota, "stable_from_autoboot", lambda _text: "A")
+    monkeypatch.setattr(ota, "dt_integer", lambda name: 1 if name == "tryboot" else 3)
+    calls = []
+    monkeypatch.setattr(ota, "command", lambda argv: calls.append(argv) or "")
+    monkeypatch.setattr(ota.time, "sleep", lambda seconds: None)
+    with pytest.raises(ValueError, match="did not complete"):
+        ota.deadline()
+    assert calls == [["systemctl", "reboot", "--no-block"]]
 
 
 def test_ota_interrupted_health_commit_keeps_old_checkpoint(monkeypatch,tmp_path):
@@ -356,7 +412,7 @@ def invoke(args, **kwargs):
 def prepared(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    for name in ("build.sh", "image", "redux", "boot"):
+    for name in ("build.sh", "image", "redux", "boot", "config", "systemd", "scripts"):
         source = REPO / name
         if source.is_dir():
             shutil.copytree(source, repo / name)
@@ -375,11 +431,36 @@ case $1 in
   checkout)
     if [[ $dir == */pi-gen ]]; then
       mkdir -p "$dir/stage0/02-firmware" "$dir/stage2"
-      mkdir -p "$dir/export-image"
+      mkdir -p "$dir/export-image/05-finalise" "$dir/export-image/04-set-partuuid"
+      touch "$dir/stage2/EXPORT_IMAGE"
+      echo "qemu-arm-static:qemu-user-static" > "$dir/depends"
+      mkdir -p "$dir/scripts"
+      cat > "$dir/scripts/common" <<'COMMON'
+bootstrap(){
+	BOOTSTRAP_ARGS+=(--arch arm64)
+	BOOTSTRAP_ARGS+=(--include gnupg)
+}
+COMMON
+      cat > "$dir/export-image/05-finalise/01-run.sh" <<'FINALISE'
+update-initramfs -k all -c
+unmount "${ROOTFS_DIR}"
+zerofree "${ROOT_DEV}"
+case "${DEPLOY_COMPRESSION}" in
+xz --compress --force
+FINALISE
+      cat > "$dir/export-image/04-set-partuuid/00-run.sh" <<'PARTUUID'
+sed -i "s/BOOTDEV/PARTUUID=${BOOT_PARTUUID}/" "${ROOTFS_DIR}/etc/fstab"
+sed -i "s/ROOTDEV/PARTUUID=${ROOT_PARTUUID}/" "${ROOTFS_DIR}/etc/fstab"
+sed -i "s/ROOTDEV/PARTUUID=${ROOT_PARTUUID}/" "${ROOTFS_DIR}/boot/firmware/cmdline.txt"
+PARTUUID
       cat > "$dir/export-image/prerun.sh" <<'LAYOUT'
 IMG_SIZE=$((BOOT_PART_START + BOOT_PART_SIZE + ROOT_PART_SIZE))
 echo "Creating loop device..."
 ROOT_DEV="${LOOP_DEV}p2"
+parted --script "${IMG_FILE}" mklabel msdos
+mkdosfs -n bootfs -F "$FAT_SIZE"
+mkfs.ext4 -L rootfs
+mount -v "$BOOT_DEV" "${ROOTFS_DIR}/boot/firmware" -t vfat
 LAYOUT
       echo 'exit 91' > "$dir/build.sh"
     fi ;;
@@ -390,10 +471,14 @@ LAYOUT
 esac
 ''')
     git.chmod(0o755)
+    # Preparation-only fixture represents an older host with pinned QEMU tool.
+    (shim / "qemu-arm-static").write_text("#!/bin/sh\nexit 0\n")
+    (shim / "qemu-arm-static").chmod(0o755)
     env = dict(os.environ, PATH=f"{shim}:{os.environ['PATH']}")
     result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
     assert result.returncode == 0, result.stderr
     assert "no image has been built" in result.stdout
+    assert "redux-boot-payload.py" in (repo / "build/image/pi-gen/export-image/05-finalise/01-run.sh").read_text()
     return repo, env
 
 
@@ -401,8 +486,31 @@ def test_preparation_exports_only_redux_and_targets_pi4(prepared):
     repo, env = prepared
     tree = repo / "build/image/pi-gen"
     assert (tree / "stage2/SKIP_IMAGES").exists()
+    secret = tree.parent / "operator-login.txt"
+    assert secret.is_file() and secret.stat().st_mode & 0o077 == 0
+    assert "Password: " in secret.read_text()
+    assert "FIRST_USER_PASS=" in (tree / "config").read_text()
+    assert (tree / "config").stat().st_mode & 0o077 == 0
     assert (tree / "stage-redux/EXPORT_IMAGE").exists()
     assert (tree / "stage-redux/00-redux/files/redux/core/boot.py").exists()
+    assert "--force-check-gpg" in (tree / "scripts/common").read_text()
+    assert (tree / "stage-redux/00-redux/files/pipeline/pipeline.toml").exists()
+    live_settings = tree / "stage-redux/00-redux/files/pipeline/live.toml"
+    assert live_settings.exists()
+    assert "max_log_bytes = 4194304" in live_settings.read_text()
+    assert "min_free_bytes = 67108864" in live_settings.read_text()
+    assert "status_sample_seconds = 5" in live_settings.read_text()
+    assert (tree / "stage-redux/00-redux/files/pipeline/redux-live-diag.sh").exists()
+    assert (tree / "stage-redux/00-redux/files/redux/core/live_runtime.py").exists()
+    assert (tree / "stage-redux/00-redux/files/redux/display/kiosk.py").exists()
+    assert (tree / "stage-redux/00-redux/files/redux/display/fbui.py").exists()
+    assert (tree / "stage-redux/00-redux/files/redux-fbui.service").is_file()
+    assert (tree / "stage-redux/00-redux/files/fbui.example.env").is_file()
+    assert "fonts-dejavu-core" in (tree / "stage-redux/00-redux/00-packages-nr").read_text().splitlines()
+    assert not (tree / "stage-redux/00-redux/files/kiosk-profile").exists()
+    base_pkgs = (tree / "stage-redux/00-redux/00-packages-nr").read_text().splitlines()
+    assert "chromium" not in base_pkgs and "xinit" not in base_pkgs
+    assert (tree / "stage-redux/00-redux/files/pipeline/redux-capture-ingest.service").exists()
     config = invoke(["bash", "-c", 'source "$1"; printf "%s|%s|%s" "$RELEASE" "$STAGE_LIST" "$ENABLE_SSH"', "bash", str(tree / "config")], env=env)
     assert config.stdout == "bookworm|stage0 stage1 stage2 stage-redux|0"
     country = invoke(["bash", "-c", 'source "$1"; [[ ! -v WPA_COUNTRY ]]', "bash", str(tree / "config")], env=env)
@@ -434,12 +542,112 @@ bash ./00-run.sh
     assert result.returncode == 0, result.stderr
     unit = (root / "etc/systemd/system/redux.service").read_text()
     assert "ExecStart=/usr/bin/python3 -m redux.core.boot" in unit
+    launcher = root / "usr/local/bin/redux"
+    assert launcher.is_file()
+    assert "PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.cli" in launcher.read_text()
+    assert launcher.stat().st_mode & 0o111
+    kiosk = root / "usr/local/bin/redux-kiosk"
+    assert kiosk.is_file()
+    assert "redux.display.kiosk" in kiosk.read_text()
+    assert kiosk.stat().st_mode & 0o111
+    native = root / "usr/local/bin/redux-fbui"
+    assert native.is_file()
+    assert "redux.display.fbui" in native.read_text()
+    assert native.stat().st_mode & 0o111
+    native_unit = root / "etc/systemd/system/redux-fbui.service"
+    assert native_unit.is_file()
+    assert "ExecStart=/usr/local/bin/redux-fbui --run" in native_unit.read_text()
+    assert "ConditionPathExists=/captures/config/fbui.env" in native_unit.read_text()
+    assert (root / "usr/share/redux/fbui.example.env").is_file()
+    assert not (root / "captures/config/fbui.env").exists()
+    assert not (root / "etc/systemd/system/multi-user.target.wants/redux-fbui.service").exists()
+    assert "systemctl enable redux-fbui.service" not in (stage / "00-run.sh").read_text()
+    assert not (root / "usr/share/redux/kiosk-profile").exists()
+    assert not (root / "usr/lib/systemd/user/redux-kiosk.service").exists()
+    assert not (root / "usr/share/redux/kiosk.example.env").exists()
     assert "User=redux" in unit
+    assert "Type=notify" in unit
+    assert "NotifyAccess=main" in unit
+    assert "WatchdogSec=15s" in unit
+    assert "ExecStartPre=+/usr/bin/install -d -o redux -g redux -m 0700 /captures/boot" in unit
     assert "WantedBy=multi-user.target" in unit
     assert "arm_64bit=1" in (root / "boot/firmware/config.txt").read_text()
     chroot = Path(env["CHROOT_INPUT"]).read_text()
     assert "systemctl enable redux.service" in chroot
+    assert (root / "etc/redux/pipeline.toml").is_file()
+    assert (root / "etc/redux/live.toml").is_file()
+    live_unit = (root / "etc/systemd/system/redux-live.service").read_text()
+    assert "ExecStart=/usr/bin/python3 -m redux.core.live_runtime" in live_unit
+    assert "KillMode=control-group" in live_unit
+    assert "Restart=on-failure" in live_unit
+    assert "systemctl enable redux-live.service" in chroot
+    assert (root / "usr/local/bin/redux-live-diag").is_file()
+    assert (root / "usr/local/bin/redux-report").is_file()
+    assert (root / "usr/local/bin/r").is_symlink()
+    assert (root / "usr/local/lib/redux/report.py").is_file()
+    assert (root / "etc/systemd/system/redux-field-report.service").is_file()
+    assert (root / "etc/systemd/system/redux-field-report.timer").is_file()
+    assert "systemctl enable redux-capture-ingest.timer" in chroot
+    assert "/captures/jobs.db" in (root / "etc/redux/pipeline.toml").read_text()
+    pipeline_unit = (root / "etc/systemd/system/redux-capture-ingest.service").read_text()
+    assert "Environment=PYTHONPATH=/opt/redux" in pipeline_unit
+    assert "RequiresMountsFor=/captures" in pipeline_unit
+    assert "hcx" in chroot
+    assert "systemctl disable redux-capture-audit.timer" in chroot
     assert "systemctl mask bettercap.service" in chroot
+
+
+def test_opt_in_kiosk_profile_stages_chromium_x11_without_enabling_service(
+    prepared, tmp_path
+):
+    repo, env = prepared
+    root = tmp_path / "kiosk-profile-build"
+    env = dict(env, REDUX_KIOSK_PROFILE="manual-x11",
+               REDUX_BUILD_DIR=str(root))
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode == 0, result.stderr
+    staged = root / "pi-gen/stage-redux/00-redux"
+    pkgs = (staged / "00-packages-nr").read_text().splitlines()
+    for package in ("chromium", "xinit", "xauth", "x11-utils",
+                    "xserver-xorg-core", "xserver-xorg-legacy",
+                    "xserver-xorg-video-fbdev",
+                    "xserver-xorg-input-libinput"):
+        assert pkgs.count(package) == 1
+    assert (staged / "files/kiosk-profile").read_text().startswith("manual-x11")
+    service = (staged / "files/redux-kiosk.service")
+    assert service.is_file()
+    unit_text = service.read_text()
+    assert "EnvironmentFile=%h/.config/redux/kiosk.env" in unit_text
+    assert "ExecStartPre=/usr/local/bin/redux-kiosk --check" in unit_text
+    assert "ExecStart=/usr/local/bin/redux-kiosk --supervise" in unit_text
+    assert "KillMode=control-group" in unit_text
+    assert "Restart=on-failure" in unit_text
+    assert "StartLimitBurst=3" in unit_text
+    assert "ConditionPathExists=%h/.config/redux/kiosk.env" in unit_text
+    assert "REDUX_FRAMEBUFFER=/dev/fbN" in (staged / "files/kiosk.example.env").read_text()
+    assert "systemctl enable redux-kiosk" not in (staged / "00-run.sh").read_text()
+    fsroot = tmp_path / "opt-in-rootfs"
+    (fsroot / "boot/firmware").mkdir(parents=True)
+    (fsroot / "boot/firmware/config.txt").write_text("[all]\\n")
+    stage_env = dict(env, ROOTFS_DIR=str(fsroot))
+    run = invoke(["bash", "-c",
+                  "on_chroot() { cat >/dev/null; }; export -f on_chroot; bash ./00-run.sh"],
+                 cwd=staged, env=stage_env)
+    assert run.returncode == 0, run.stderr
+    deployed = fsroot / "usr/lib/systemd/user/redux-kiosk.service"
+    assert deployed.read_text() == unit_text
+    assert (fsroot / "usr/share/redux/kiosk.example.env").is_file()
+    assert not (fsroot / "etc/systemd/system/redux-kiosk.service").exists()
+    assert not (fsroot / "etc/systemd/user/graphical-session.target.wants/redux-kiosk.service").exists()
+
+
+def test_unsupported_kiosk_profile_refused(prepared, tmp_path):
+    repo, env = prepared
+    env = dict(env, REDUX_KIOSK_PROFILE="unsafe-autostart",
+               REDUX_BUILD_DIR=str(tmp_path / "invalid-profile"))
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode != 0
+    assert "Unsupported REDUX_KIOSK_PROFILE" in result.stderr
 
 
 def test_untracked_runtime_code_marks_image_provenance_dirty(prepared, tmp_path):
@@ -531,7 +739,18 @@ def test_captures_layout_adds_separate_partition_before_loop_attachment():
         layout_module().captures_layout(result)
 
 
-@pytest.mark.parametrize("size", [0, 63, 32769, "512"])
+def test_capture_size_uses_explicit_capacity_instead_of_fixed_partition():
+    source = (
+        'IMG_SIZE=$((BOOT_PART_START + BOOT_PART_SIZE + ROOT_PART_SIZE))\n'
+        'echo "Creating loop device..."\n'
+        'ROOT_DEV="${LOOP_DEV}p2"\n'
+    )
+    text = layout_module().captures_layout(source, size_mib=8192)
+    assert "8192 * 1024 * 1024" in text
+    assert "CAPTURE_DEV=" in text
+
+
+@pytest.mark.parametrize("size", [0, 63, 262145, "512"])
 def test_capture_size_rejects_unbounded_or_invalid_inputs(size):
     with pytest.raises(ValueError, match="partition"):
         layout_module().captures_layout("", size)
@@ -542,6 +761,14 @@ def test_overlay_stage_preserves_capture_writes_and_hardens_service(tmp_path):
     (root / "etc/systemd/system").mkdir(parents=True)
     (root / "etc/fstab").write_text('ROOTDEV / ext4 defaults 0 1\nBOOTDEV /boot/firmware vfat defaults 0 2\n')
     (root / "etc/systemd/system/redux.service").write_text('[Unit]\n[Service]\nStateDirectory=redux\n')
+    boot = root / "boot/firmware"
+    boot.mkdir(parents=True)
+    (boot / "cmdline.txt").write_text(
+        "console=tty1 root=ROOTDEV rootwait quiet "
+        "init=/usr/lib/raspberrypi-sys-mods/firstboot\\n".replace("\\n", "\n"))
+    script = root / "etc/init.d/resize2fs_once"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\\n".replace("\\n", "\n"))
     stage = REPO / "image/stage-redux/10-overlay"
     result = invoke(["bash", "-c", 'on_chroot() { cat >/dev/null; }; export -f on_chroot; bash 00-run.sh'], cwd=stage, env=dict(os.environ, ROOTFS_DIR=str(root)))
     assert result.returncode == 0, result.stderr
@@ -552,7 +779,11 @@ def test_overlay_stage_preserves_capture_writes_and_hardens_service(tmp_path):
     unit = (root / "etc/systemd/system/redux.service").read_text()
     assert 'RequiresMountsFor=/captures' in unit
     assert 'StateDirectory=' not in unit
-    assert 'ReadWritePaths=/captures/redux' in unit
+    assert 'ReadWritePaths=/captures' in unit
+    assert 'firstboot' not in (boot / 'cmdline.txt').read_text()
+    assert (root / 'etc/systemd/system/resize2fs_once.service').is_symlink()
+    assert (root / 'etc/systemd/system/resize2fs_once.service').readlink() == Path('/dev/null')
+    assert not script.exists()
 
 
 def boot_policy_module():
@@ -624,7 +855,7 @@ def flash_cli_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(flash, 'disk_snapshot', lambda *_: (1, {'path': str(target)}))
     monkeypatch.setattr(flash.os, 'geteuid', lambda: 0)
     monkeypatch.setattr(sys, 'argv', ['flash', str(image), '--sha256', hashlib.sha256(raw).hexdigest(),
-                                    '--device', str(target), '--confirm-device', str(target)])
+                                    '--device', str(target), '--confirm-device', str(target), '--checksum-only'])
     return flash, target, bytes(raw)
 
 
@@ -774,3 +1005,132 @@ def test_boot_budget_stage_uses_target_inventory_and_installs_actual_timing_tool
     manifest = (root / 'usr/share/redux/boot-policy.txt').read_text()
     assert 'rpt-rpi-2712' in manifest and 'rpt-rpi-v8' in manifest
     assert 'redux boot needs local storage, not an uplink' in manifest
+
+
+def test_explicit_dev_login_is_staged_without_ssh(prepared, tmp_path):
+    repo, env = prepared
+    workspace = tmp_path / "dev-build"
+    env = dict(env, REDUX_BUILD_DIR=str(workspace), REDUX_DEV_LOGIN="1")
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode == 0, result.stderr
+    config = workspace / "pi-gen/config"
+    login = workspace / "operator-login.txt"
+    assert login.read_text().splitlines()[-2:] == ["Username: pi", "Password: redux"]
+    assert login.stat().st_mode & 0o077 == 0
+    assert config.stat().st_mode & 0o077 == 0
+    sourced = invoke(["bash", "-c",
+        'source "$1"; printf "%s|%s|%s|%s" "$FIRST_USER_NAME" "$FIRST_USER_PASS" "$ENABLE_SSH" "$REDUX_DEV_LOGIN"',
+        "bash", str(config)], env=env)
+    assert sourced.stdout == "pi|redux|0|1"
+    assert sourced.returncode == 0
+
+
+def test_dev_login_with_provisioned_ssh_is_key_only(prepared, tmp_path):
+    repo, env = prepared
+    workspace = tmp_path / "field-build"
+    key = tmp_path / "field.pub"
+    key.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg4QERITFBUWFxgZGhscHR4f field@lab\n")
+    env = dict(env, REDUX_BUILD_DIR=str(workspace),
+               REDUX_DEV_LOGIN="1", REDUX_OPERATOR_PUBKEY_FILE=str(key))
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode == 0, result.stderr
+    config = workspace / "pi-gen/config"
+    sourced = invoke(["bash", "-c",
+        'source "$1"; printf "%s|%s|%s|%s" "$FIRST_USER_NAME" "$FIRST_USER_PASS" "$ENABLE_SSH" "$PUBKEY_ONLY_SSH"',
+        "bash", str(config)], env=env)
+    assert sourced.returncode == 0, sourced.stderr
+    assert sourced.stdout == "pi|redux|1|1"
+    pkgs = (workspace / "pi-gen/stage-redux/00-redux/00-packages-nr").read_text()
+    assert "openssh-server" in pkgs and "avahi-daemon" in pkgs
+    assert (workspace / "pi-gen/stage-redux/00-redux/files/field-ssh-profile").exists()
+
+
+
+def test_dev_watchdog_is_disarmed_but_app_supervision_remains(tmp_path):
+    import os
+    stage = REPO / "image/stage-redux/30-watchdog"
+    root = tmp_path / "dev-rootfs"
+    (root / "etc/systemd/system").mkdir(parents=True)
+    (root / "boot/firmware").mkdir(parents=True)
+    (root / "boot/firmware/config.txt").write_text("[all]\n")
+    unit = root / "etc/systemd/system/redux.service"
+    unit.write_text("[Service]\nType=notify\n")
+    env = dict(os.environ, ROOTFS_DIR=str(root), REDUX_DEV_LOGIN="1")
+    result = invoke(["bash", str(stage / "00-run.sh")], cwd=stage, env=env)
+    assert result.returncode == 0, result.stderr
+    settings = (root / "etc/systemd/system.conf.d/redux-watchdog.conf").read_text()
+    assert "RuntimeWatchdogSec=0" in settings
+    assert "RebootWatchdogSec=0" in settings
+    assert "watchdog=on" not in (root / "boot/firmware/config.txt").read_text()
+    assert "WatchdogSec=15s" in unit.read_text()
+
+
+def test_regular_build_still_arms_watchdog(tmp_path):
+    import os
+    stage = REPO / "image/stage-redux/30-watchdog"
+    root = tmp_path / "release-rootfs"
+    (root / "etc/initramfs-tools").mkdir(parents=True)
+    (root / "etc/initramfs-tools/modules").write_text("bcm2835_wdt\n")
+    (root / "etc/systemd/system").mkdir(parents=True)
+    (root / "boot/firmware").mkdir(parents=True)
+    (root / "boot/firmware/config.txt").write_text("[all]\n")
+    unit = root / "etc/systemd/system/redux.service"
+    unit.write_text("[Service]\nType=notify\n")
+    env = dict(os.environ, ROOTFS_DIR=str(root), REDUX_DEV_LOGIN="0")
+    result = invoke(["bash", str(stage / "00-run.sh")], cwd=stage, env=env)
+    assert result.returncode == 0, result.stderr
+    assert "RuntimeWatchdogSec=15s" in (root / "etc/systemd/system.conf.d/redux-watchdog.conf").read_text()
+    assert "dtparam=watchdog=on" in (root / "boot/firmware/config.txt").read_text()
+
+
+def test_us_disposable_build_prepares_matching_country_service_and_export(prepared, tmp_path):
+    """Full real source-staging flow with fake upstream; no Pi, network or sudo."""
+    repo, env = prepared
+    work = tmp_path / "us-field-stage"
+    env = dict(env, REDUX_BUILD_DIR=str(work),
+               REDUX_REGULATORY_COUNTRY="US", REDUX_DEV_LOGIN="1")
+    out = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert out.returncode == 0, out.stderr
+    stage = work / "pi-gen/stage-redux/00-redux"
+    assert (stage / "files/regulatory-country").read_text() == "US\n"
+    assert (stage / "files/regulatory-country").stat().st_mode & 0o022 == 0
+    assert "require_regulatory_country = true" in (
+        stage / "files/pipeline/live.toml").read_text()
+    assert "def configure(" in (stage / "files/redux/core/regulatory.py").read_text()
+    assert "Before=redux-live.service" in (
+        stage / "files/redux-regdom.service").read_text()
+    final = work / "pi-gen/export-image/05-finalise/01-run.sh"
+    assert '--expected-country US' in final.read_text()
+    assert final.read_text().index("redux-root-payload.py") < (
+        final.read_text().index('unmount "${ROOTFS_DIR}"'))
+
+    # Simulate the entire Redux file-install phase into an unmounted fake
+    # root. Intercept chroot rather than executing apt/Nexmon on the runner.
+    root = tmp_path / "mock-root"
+    (root / "boot/firmware").mkdir(parents=True)
+    (root / "boot/firmware/config.txt").write_text("[all]\n")
+    install_env = dict(env, ROOTFS_DIR=str(root))
+    done = invoke(["bash", "-c",
+                   "on_chroot() { cat >/dev/null; }; "
+                   "export -f on_chroot; bash ./00-run.sh"],
+                  cwd=stage, env=install_env)
+    assert done.returncode == 0, done.stderr
+    assert (root / "etc/redux/regulatory-country").read_text() == "US\n"
+    assert "ExecStart=/usr/bin/python3 -m redux.core.regulatory" in (
+        root / "etc/systemd/system/redux-regdom.service").read_text()
+    assert "Wants=redux-regdom.service" in (
+        root / "etc/systemd/system/redux-live.service").read_text()
+    assert (root / "opt/redux/redux/core/regulatory.py").is_file()
+    assert (root / "usr/local/bin/redux-report").is_file()
+
+
+@pytest.mark.parametrize("invalid", ["us", "USA", "00", "ZZ", "US;reboot"])
+def test_invalid_country_refused_before_any_build_workspace(prepared, tmp_path, invalid):
+    repo, env = prepared
+    work = tmp_path / "must-not-build"
+    env = dict(env, REDUX_BUILD_DIR=str(work),
+               REDUX_REGULATORY_COUNTRY=invalid)
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode != 0
+    assert "REDUX_REGULATORY_COUNTRY" in result.stderr
+    assert not work.exists()

@@ -1,13 +1,14 @@
 #!/bin/bash
 # Sign an exported A/B image; private keys remain exclusively on the release host.
 set -euo pipefail
-[[ $# == 5 && $EUID == 0 ]] || { echo 'Usage (root): image/make-bundle.sh IMAGE OUTPUT.raucb CERT KEY VERSION' >&2; exit 2; }
+[[ ( $# == 5 || $# == 6 ) && $EUID == 0 ]] || { echo 'Usage (root): image/make-bundle.sh IMAGE OUTPUT.raucb CERT KEY VERSION [TRUST_KEYRING]' >&2; exit 2; }
 image=$(realpath "$1")
 output=$(realpath -m "$2")
 cert=$(realpath "$3")
 key=$(realpath "$4")
 version=$5
-[[ ! -e $output && $version =~ ^[A-Za-z0-9._+-]+$ ]] || { echo 'Choose a new output and a simple release version.' >&2; exit 1; }
+trust=$(realpath "${6:-$3}")
+[[ ! -e $output && ! -L $output && ${#version} -le 128 && $version =~ ^[A-Za-z0-9._+-]+$ ]] || { echo 'Choose a new output and a simple release version.' >&2; exit 1; }
 for tool in rauc mksquashfs losetup mount tar; do command -v "$tool" >/dev/null; done
 scratch=$(mktemp -d)
 loop=''
@@ -28,10 +29,13 @@ tar --numeric-owner --xattrs --acls --one-file-system --exclude=./lost+found --e
 tar -C "$scratch/boot" -cf "$scratch/bundle/boot.tar" .
 printf '#!/bin/sh\nexec /usr/local/bin/redux-ota hook "$@"\n' > "$scratch/bundle/hook.sh"
 chmod 0755 "$scratch/bundle/hook.sh"
+revision=$(cat "$scratch/root/usr/share/redux/redux-revision")
+[[ $revision =~ ^[0-9a-f]{40}$ ]] || { echo 'Bundle root has no canonical Redux revision.' >&2; exit 1; }
 cat > "$scratch/bundle/manifest.raucm" <<EOF
 [update]
 compatible=pwnagotchi-redux-pi4-pi5-arm64-ab-v1
 version=$version
+build=$revision
 [bundle]
 format=verity
 [hooks]
@@ -42,6 +46,6 @@ hooks=post-install
 [image.rootfs]
 filename=rootfs.tar
 EOF
-rauc --cert "$cert" --key "$key" bundle "$scratch/bundle" "$output"
-rauc --keyring "$cert" info "$output"
+rauc --cert "$cert" --key "$key" bundle --mksquashfs-args="-processors 1" "$scratch/bundle" "$output"
+rauc --keyring "$trust" info "$output"
 echo "Signed bundle: $output"

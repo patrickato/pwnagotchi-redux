@@ -409,18 +409,43 @@ def cmd_vault(args) -> int:
 
 
 def cmd_packs(args) -> int:
-    mgr = PackManager(args.dir)
+    from .packs.locations import StateUnavailable
     try:
+        if args.pack_cmd == "runtime":
+            from .display.local_http import open_status
+            with open_status(args.url) as response:
+                raw = response.read(65537)
+            if len(raw) > 65536:
+                raise ValueError("runtime status too large")
+            report = json.loads(raw)
+            if not isinstance(report, dict):
+                raise ValueError("invalid runtime report")
+            print(json.dumps(report.get("plugins", {"runtime_activation": "unknown"}), indent=2))
+            return 0
+        from .packs.locations import locations, mount_guard, prepare_parent
+        root, state = locations(args.dir, args.state)
+        guard = mount_guard(state)
+        mgr = PackManager(root, state_path=state, write_guard=guard)
         if args.pack_cmd == "list":
-            for p in mgr.list():
-                mark = "*" if mgr.is_enabled(p.name) else " "
-                print(f"[{mark}] {p.name} {p.version} ({p.kind}) {p.description}")
-        elif args.pack_cmd == "enable":
-            print("enabled:", ", ".join(mgr.enable(args.name)) or "(already enabled)")
-        elif args.pack_cmd == "disable":
-            print("disabled:", ", ".join(mgr.disable(args.name)) or "(not enabled)")
+            print(json.dumps(mgr.inventory(offset=args.offset), indent=2))
+        else:
+            options = json.loads(args.options) if args.pack_cmd == "configure" else None
+            if args.confirm:
+                prepare_parent(state, guard)
+                result = mgr.apply(args.confirm, args.pack_cmd, args.name, options, args.authorize_side_effects)
+            else:
+                result = mgr.preview(args.pack_cmd, args.name, options, args.authorize_side_effects)
+                # Private configuration is never emitted, even in previews.
+                result.pop("next", None)
+            print(json.dumps(result, indent=2))
+    except StateUnavailable as e:
+        print(f"plugin state unavailable: {e}; verify REDUXCAP before retrying", file=sys.stderr)
+        return 1
     except DependencyError as e:
-        print(f"error: {e}", file=sys.stderr)
+        print(f"plugin request rejected: {e}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError, TypeError, RecursionError) as e:
+        print(f"plugin request failed: {type(e).__name__}; validate manifest, state and preview", file=sys.stderr)
         return 1
     return 0
 
@@ -1239,6 +1264,110 @@ def cmd_scope(args) -> int:
     return 0
 
 
+def cmd_pipeline(args) -> int:
+    """Run or inspect the independent capture artifact workflow."""
+    from .crack.ingest import Settings, CaptureIngestor, read_summary
+    if args.pipeline_cmd == "status":
+        print(json.dumps(read_summary(Settings.load(args.config).database), indent=2))
+        return 0
+    if args.pipeline_cmd == "ingest":
+        with CaptureIngestor(Settings.load(args.config)) as worker:
+            print(json.dumps(worker.scan(), indent=2))
+        return 0
+    if args.pipeline_cmd == "recover":
+        from .crack.recovery import recovery_report
+        report = recovery_report(Settings.load(args.config),
+                                 apply=args.apply, max_files=args.max_files)
+        print(json.dumps(report, indent=2))
+        return 0
+    if args.pipeline_cmd == "prune":
+        from .crack.retention import retention_report
+        report = retention_report(Settings.load(args.config),
+                                  apply=args.apply,
+                                  older_than_days=args.older_than_days,
+                                  max_files=args.max_files)
+        print(json.dumps(report, indent=2))
+        return 0
+    if args.pipeline_cmd == "audit":
+        from .crack.audit import AuditSettings, AuditWorker
+        from .core.scope import Scope
+        cfg = AuditSettings.load(args.config)
+        if not cfg.enabled:
+            print(json.dumps({"status": "disabled", "reason": "audit opt-in is off"}))
+            return 0
+        with AuditWorker(cfg, Scope.load(str(cfg.scope_file))) as worker:
+            print(json.dumps(worker.once(), indent=2))
+        return 0
+    raise ValueError("unknown pipeline command")
+
+
+def cmd_live(args) -> int:
+    """Inspect actual on-device state without creating synthetic radio records."""
+    if args.live_cmd == "doctor":
+        # Only consult the loopback dashboard owned by the running supervisor.
+        # A missing listener is UNKNOWN, not a synthetic healthy Doctor report.
+        from urllib.request import urlopen
+        from urllib.error import URLError
+        port = args.port
+        if not 1 <= port <= 65535:
+            print("live doctor: localhost port must be 1-65535")
+            return 4
+        try:
+            with urlopen(f"http://127.0.0.1:{port}/api/status", timeout=2) as response:
+                raw = response.read(65537)
+            if len(raw) > 65536:
+                raise ValueError("live health response too large")
+            snapshot = json.loads(raw)
+            report = snapshot.get("doctor") if isinstance(snapshot, dict) else None
+            if (not isinstance(report, dict) or not isinstance(report.get("findings"), list)
+                    or report.get("overall") not in
+                    {"ok", "attention", "degraded", "action", "unknown"}):
+                raise ValueError("no verified Doctor report in runtime snapshot")
+        except (OSError, URLError, ValueError, json.JSONDecodeError) as error:
+            print(f"live doctor: unavailable ({type(error).__name__}); "
+                  "check redux-live.service or use 'redux live status'")
+            return 3
+
+        def safe(value):
+            # Avoid embedding untrusted terminal control codes in diagnostics.
+            return "".join(ch if ch.isprintable()
+                           else "?" for ch in str(value))[:240]
+        print(f"redux live doctor: {safe(report.get('label', report['overall']))}")
+        for finding in report["findings"]:
+            if not isinstance(finding, dict):
+                continue
+            print(f"  [{safe(finding.get('status', 'unknown')).upper():8}] "
+                  f"{safe(finding.get('area', 'unknown'))}: "
+                  f"{safe(finding.get('summary', ''))}")
+            if finding.get("reason"):
+                print(f"             why: {safe(finding['reason'])}")
+            if finding.get("remediation"):
+                print(f"             do:  {safe(finding['remediation'])}")
+        coverage = report.get("coverage")
+        if isinstance(coverage, dict):
+            print(f"coverage: {safe(coverage.get('reason', 'not reported'))}")
+        else:
+            print("coverage: UNKNOWN — not reported")
+        return 0
+
+    from pathlib import Path
+    snapshot = Path(args.file)
+    if snapshot.is_symlink() or not snapshot.is_file():
+        print(f"live: no verified runtime snapshot at {snapshot}")
+        return 3
+    try:
+        if snapshot.stat().st_size > 65536:
+            raise ValueError("runtime snapshot exceeds expected maximum")
+        data = json.loads(snapshot.read_text())
+        if not isinstance(data, dict) or not isinstance(data.get("state"), str):
+            raise ValueError("runtime snapshot is not a status record")
+    except (OSError, ValueError) as error:
+        print(f"live: unable to parse runtime snapshot: {error}")
+        return 4
+    print(json.dumps(data, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="redux", description="redux field-OS control")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1307,7 +1436,38 @@ def build_parser() -> argparse.ArgumentParser:
     cs.add_argument("--config", default=None, help="config path (default: built-in defaults)")
     cc = cfsub.add_parser("check", help="validate a config and list problems")
     cc.add_argument("--config", default=None, help="config path to validate")
+    lv = sub.add_parser("live", help="real standalone runtime status (no stub radios)")
+    lv_sub = lv.add_subparsers(dest="live_cmd", required=True)
+    lvs = lv_sub.add_parser("status", help="read actual on-device radio/engine state")
+    lvs.add_argument("--file", default="/captures/redux/live.json",
+                     help="runtime checkpoint file; defaults to /captures/redux/live.json")
+    lvd = lv_sub.add_parser("doctor", help="actual live Doctor findings from localhost runtime")
+    lvd.add_argument("--port", type=int, default=8080,
+                     help="local Redux dashboard port (default 8080)")
+    lv.set_defaults(func=cmd_live)
+
     cf.set_defaults(func=cmd_config)
+
+    pl = sub.add_parser("pipeline", help="local capture processing and audit jobs")
+    pl.add_argument("--config", default="/etc/redux/pipeline.toml",
+                    help="pipeline TOML file (default /etc/redux/pipeline.toml)")
+    plc = pl.add_subparsers(dest="pipeline_cmd", required=True)
+    plc.add_parser("status", help="read capture conversion and audit statistics")
+    plc.add_parser("ingest", help="process one bounded pass of saved captures")
+    recovery = plc.add_parser("recover", help="inspect or retry failed and incomplete capture processing (dry-run default)")
+    recovery.add_argument("--max-files", type=int, default=100,
+                          help="retry at most 1000 recorded source captures")
+    recovery.add_argument("--apply", action="store_true",
+                          help="explicitly retry failed or missing-output sources; no deletion")
+    plc.add_parser("audit", help="run one opt-in scope-checked local audit job")
+    retention = plc.add_parser("prune", help="report verified raw capture cleanup candidates (dry-run default)")
+    retention.add_argument("--older-than-days", type=int, default=30,
+                           help="minimum age of source and ledger record (>=7)")
+    retention.add_argument("--max-files", type=int, default=100,
+                           help="limit processing to at most 1000 files")
+    retention.add_argument("--apply", action="store_true",
+                           help="explicitly delete only verified source captures; results preserved")
+    pl.set_defaults(func=cmd_pipeline)
 
     ini = sub.add_parser("init", help="first-run setup: write config + swarm key + operator checklist")
     ini.add_argument("--dir", default="/etc/redux", help="config directory (default /etc/redux)")
@@ -1325,11 +1485,19 @@ def build_parser() -> argparse.ArgumentParser:
     hw.set_defaults(func=cmd_hwtest)
 
     pk = sub.add_parser("packs", help="manage Packs")
-    pk.add_argument("--dir", required=True, help="packs directory")
+    pk.add_argument("--dir", help="catalog directory (installed default: /usr/share/redux/packs)")
+    pk.add_argument("--state", help="writable requested-state path; use /captures/config/packs.json on images")
     psub = pk.add_subparsers(dest="pack_cmd", required=True)
-    psub.add_parser("list")
+    rt = psub.add_parser("runtime", help="read current process evidence from local status; never activate")
+    rt.add_argument("--url", default="http://127.0.0.1:8080/api/status")
+    li = psub.add_parser("list"); li.add_argument("--offset", type=int, default=0)
     en = psub.add_parser("enable"); en.add_argument("name")
     di = psub.add_parser("disable"); di.add_argument("name")
+    co = psub.add_parser("configure"); co.add_argument("name"); co.add_argument("--options", required=True, help="JSON object; avoid secrets in shell history")
+    ro = psub.add_parser("rollback"); ro.add_argument("name", help="installed plugin used to scope local recovery")
+    for command in (en, di, co, ro):
+        command.add_argument("--confirm", help="reviewed preview revision; omission is a dry run")
+        command.add_argument("--authorize-side-effects", action="store_true", help="authorize requested side effects, never activate code")
     pk.set_defaults(func=cmd_packs)
 
     dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")

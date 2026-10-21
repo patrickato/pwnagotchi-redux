@@ -1,0 +1,9 @@
+name = "resource-summary"
+version = "1.0.0"
+kind = "plugin"
+adapter = "redux"
+module = "redux.packs.native_observer"
+description = "Read-only native runtime consumer of existing measured resource observations. Reports observation count, freshness and available CPU/RAM measurements; never samples hardware or controls capture."
+requires = []
+conflicts = []
+side_effects = false

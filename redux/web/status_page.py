@@ -35,10 +35,13 @@ _SCOPE_HOST = {
 }
 
 
-def status_payload(augur) -> Dict:
+def status_payload(augur, *, processing_report=None) -> Dict:
     """The snapshot the dashboard renders: Augur.status() + recent narration +
-    located sightings + this device's own position (for the moving map)."""
-    data = dict(augur.status())
+    located sightings + this device's own position (for the moving map).
+
+    A live runtime may supply its already-read capture-processing report.
+    """
+    data = dict(augur.status(processing_report=processing_report))
     data["narration"] = [l.text for l in augur.narrator.lines(12)]
     data["located"] = (
         augur.located_sightings() if hasattr(augur, "located_sightings") else []
@@ -74,13 +77,15 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Augur</title><style>
 :root{--bg:#0a0e13;--fg:#e6edf3;--mut:#8b98a5;--dim:#5a7187;--acc:#4ec9b0;--warn:#e3b341;
 --crit:#f85149;--card:#121922;--line:#1f2a35;--wifi:#5aa0ff;--ble:#9a7bff;--me:#4ec9b0;
---mono:ui-monospace,Menlo,Consolas,monospace}
+--mono:ui-monospace,Menlo,Consolas,monospace;
+--halo:#11202e;--hero-start:#10272c;--hero-mid:#111a27;--hero-end:#1d2430}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--mono)}
-header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center}
+header{position:sticky;top:0;z-index:2;background:var(--bg);padding:8px 12px;
+border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center}
 h1{font-size:17px;margin:0;letter-spacing:1px}.sp{flex:1}
 .mut{color:var(--mut)}.dim{color:var(--dim)}
 button{font:12px var(--mono);background:#18222d;color:var(--fg);border:1px solid var(--line);
-border-radius:7px;padding:5px 10px;cursor:pointer}button.on{border-color:var(--acc);color:var(--acc)}
+border-radius:7px;padding:5px 10px;min-height:42px;cursor:pointer;touch-action:manipulation}button.on{border-color:var(--acc);color:var(--acc)}
 main{max-width:900px;margin:0 auto;padding:16px;display:grid;gap:13px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
 .row{display:flex;flex-wrap:wrap;gap:12px}.kv{flex:1 1 120px}
@@ -111,18 +116,206 @@ ul{margin:6px 0 0;padding-left:16px}li{color:var(--mut);font-size:12px}
 body[data-skin="plain"] .rich{display:none}
 body[data-skin="plain"]{--card:#0d1319}
 body[data-skin="plain"] .card{border-color:#16202a}
+.doctor-top{display:flex;align-items:center;gap:12px}
+.doctor-heart{font-size:32px;color:var(--dim)}
+.doctor-heart.ok,.doctor-title.ok{color:var(--acc)}
+.doctor-heart.attention,.doctor-title.attention{color:var(--warn)}
+.doctor-heart.degraded,.doctor-heart.action,.doctor-title.degraded,.doctor-title.action{color:var(--crit)}
+.doctor-label{font-weight:bold}.doctor-list{display:grid;gap:7px;margin-top:9px}
+.doctor-finding{border-top:1px solid var(--line);padding-top:7px;font-size:12px}
+.doctor-title{font-weight:bold}.doctor-remedy{color:var(--fg);margin-top:2px}
+.doctor-details{margin-top:9px;color:var(--mut);font-size:12px}
+.doctor-details summary{cursor:pointer;min-height:44px;display:flex;align-items:center;
+touch-action:manipulation}
+[hidden]{display:none!important}
+.view-nav{width:min(900px,100%);margin:0 auto;padding:7px 12px;display:grid;
+grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;background:var(--bg)}
+.view-nav button{font-size:12px;min-width:0;white-space:nowrap;padding:5px 2px}
+.view-nav button[aria-pressed="true"]{color:var(--acc);border-color:var(--acc);
+background:#13332e;font-weight:700}
+.view-nav button:focus-visible{outline:2px solid var(--wifi);outline-offset:2px}
+/* Device shell: health and engine truth remain visible on every page. */
+:root{--info:#67b7e5;--card-hi:#172331;--ink-sub:#a5b5c5}
+body{background:radial-gradient(ellipse at 15% 0%,var(--halo) 0%,var(--bg) 53%);
+ -webkit-font-smoothing:antialiased}
+#devicebar{min-width:0;min-height:47px;box-shadow:0 3px 16px #0007;
+ border-bottom:1px solid #324252}
+.brand{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.brand-mark{color:var(--acc);font-size:18px}
+#sub{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:22ch}
+.runtime-pill{display:inline-flex;align-items:center;justify-content:center;
+ min-height:24px;max-width:125px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+ padding:3px 8px;border-radius:6px;border:1px solid var(--line);
+ font-size:10px;letter-spacing:.4px;font-weight:700}
+.runtime-pill::before{content:"";display:inline-block;width:6px;height:6px;
+ flex:0 0 6px;border-radius:50%;background:currentColor;margin-right:6px}
+.runtime-pill.ok{color:var(--acc);border-color:#1f584d}
+.runtime-pill.attention{color:var(--warn);border-color:#72571d}
+.runtime-pill.degraded,.runtime-pill.action{color:var(--crit);border-color:#762626}
+.runtime-pill.unknown{color:var(--info);border-color:#295675}
+.health-shortcut{display:grid;place-items:center;font-size:22px;font-weight:800;
+ width:44px;min-width:44px;padding:0;border-radius:10px;border:1px solid #354552}
+.health-shortcut.ok{color:var(--acc)}.health-shortcut.attention{color:var(--warn)}
+.health-shortcut.degraded,.health-shortcut.action{color:var(--crit)}
+.health-shortcut.unknown{color:var(--info)}
+.health-shortcut.ok #healthglyph{animation:health-glow 2.8s ease-in-out infinite}
+.health-shortcut.attention #healthglyph{animation:health-glow 1.5s ease-in-out infinite}
+.health-shortcut.degraded #healthglyph,.health-shortcut.action #healthglyph{
+ animation:health-alert .9s ease-in-out infinite}
+@keyframes health-glow{0%,100%{opacity:.65}50%{opacity:1;text-shadow:0 0 10px currentColor}}
+@keyframes health-alert{0%,100%{opacity:.5}50%{opacity:1;transform:scale(1.12)}}
+.hero{position:relative;overflow:hidden;border-color:#254e55;
+ background:linear-gradient(127deg,var(--hero-start) 0%,var(--hero-mid) 58%,var(--hero-end) 100%)}
+.hero::before{content:"";position:absolute;width:110px;height:110px;
+ right:-42px;top:-53px;border:1px solid #4ec9b040;border-radius:50%;
+ box-shadow:0 0 0 18px #4ec9b008,0 0 0 35px #4ec9b008;pointer-events:none}
+.hero-top{display:flex;justify-content:space-between;gap:8px;color:var(--ink-sub);
+ font-size:10px;font-weight:700;letter-spacing:.7px}
+.hero-capture{color:var(--info);white-space:nowrap;text-transform:uppercase}
+.hero-capture.ok{color:var(--acc)}
+.hero-capture.attention{color:var(--warn)}
+.hero-capture.degraded,.hero-capture.action{color:var(--crit)}
+.hero-main{display:flex;align-items:center;gap:20px;padding:10px 4px 7px}
+.hero .face{font-size:52px;text-shadow:0 0 23px #4ec9b040;flex-shrink:0}
+.hero-identity{min-width:0}
+.hero .creature{font-size:21px;font-weight:700}
+.hero .reason{margin-top:1px}
+.overview-metrics .row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.overview-metrics .kv{min-width:0;overflow-wrap:anywhere}
+.overview-metrics .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.resource-provenance{overflow-wrap:anywhere}
+.overview-advice{border-left:3px solid var(--acc)}
+.theme-selector{display:flex;align-items:center;justify-content:space-between;
+ gap:9px;margin-top:8px;padding-top:7px;border-top:1px solid var(--line)}
+.theme-selector button{min-width:90px}
+.card{box-shadow:0 4px 16px #0002}
+.k{color:var(--ink-sub)}
+.doctor-heart.unknown,.doctor-title.unknown{color:var(--info)}
+.doctor-primary{border-top:3px solid var(--acc)}
+.doctor-primary.action,.doctor-primary.degraded{border-color:var(--crit)}
+.doctor-primary.attention{border-color:var(--warn)}
+.doctor-primary.unknown{border-color:var(--info)}
+.capture-primary{border-top:3px solid #345f80}
+body[data-skin="plain"] .hero{background:var(--card)}
+body[data-skin="plain"] .hero::before{display:none}
+@media(prefers-reduced-motion:reduce){
+ *,*::before,*::after{animation:none!important;transition:none!important}
+}
+
+@media(max-width:520px){
+ html,body{height:100%;height:100dvh}
+ body{display:flex;flex-direction:column;overflow:hidden}
+ header{flex:0 0 auto}
+ #viewnav{flex:0 0 auto;order:3;padding:4px;gap:4px;border-top:1px solid var(--line)}
+ #viewnav button{height:46px;min-height:46px;font-size:12px}
+ #viewroot{flex:1;min-height:0;width:100%;overflow-y:auto;overscroll-behavior:contain;
+ -webkit-overflow-scrolling:touch}
+ main{padding:8px;gap:7px}.card{border-radius:7px;padding:8px 10px}
+ header{padding:4px 7px;gap:6px}h1{font-size:15px}
+ .brand{gap:4px}.brand-mark{font-size:14px}
+ #sub{font-size:9px;max-width:85px}
+ .runtime-pill{max-width:115px;min-height:25px;padding:3px 5px;font-size:9px}
+ .health-shortcut{height:44px;min-height:44px;width:44px;min-width:44px}
+ #skinbtn{min-height:44px;padding:4px 7px;font-size:10px}
+ .hero-main{gap:11px;padding:8px 2px 4px}
+ .hero .face{font-size:42px}.hero .creature{font-size:18px}
+ .hero-overline,.hero-capture{font-size:9px}
+ .overview-metrics .row{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .overview-metrics .k{font-size:9px}.overview-metrics .v{font-size:14px}
+ .card{box-shadow:none}
+ #map{height:174px}.aptbl{grid-template-columns:24px minmax(0,1fr) 37px 42px;
+ gap:2px 4px;font-size:11px;overflow-wrap:anywhere}
+ .row{gap:7px}.kv{flex:1 1 92px}.v{font-size:15px}
+ .leg{gap:7px;flex-wrap:wrap}.doctor-top{gap:8px}
+}
+@media(max-width:360px){
+ #sub{display:none}
+ .runtime-pill{max-width:94px}
+ .brand-mark{display:none}
+ .view-nav button{font-size:11px}
+}
+
+#systemevidence details{border-bottom:1px solid var(--line);padding:8px 0;overflow-wrap:anywhere}
+#systemevidence summary{min-height:44px;cursor:pointer;display:list-item;padding:10px 4px;box-sizing:border-box}
+#systemevidence p{color:var(--mut);font-size:12px;overflow-wrap:anywhere}
+.view-nav{overflow-x:auto;flex-wrap:nowrap}.view-nav button{flex-shrink:0;min-height:44px}
 </style></head><body data-skin="rich">
-<header><h1>Augur</h1><span class="mut" id="sub">glass-box</span><span class="sp"></span>
- <button id="skinbtn" title="toggle skin">rich</button></header>
-<main>
- <div class="card"><div class="face" id="face">‹·_·›</div><div class="creature" id="creature">…</div><div class="reason" id="mood"></div></div>
- <div class="card rich"><div class="k">airspace · real GPS fixes only · moves as you move</div>
+<header id="devicebar" aria-label="Device status">
+ <div class="brand"><span class="brand-mark" aria-hidden="true">◈</span><h1>Augur</h1></div>
+ <span class="mut" id="sub" role="status" aria-live="polite">glass-box</span>
+ <span class="sp"></span>
+ <span class="runtime-pill unknown" id="engineindicator" role="status"
+  aria-label="Capture supervisor: unknown">NO SESSION</span>
+ <button type="button" id="healthjump" class="health-shortcut unknown"
+  aria-label="Open Doctor: health unknown" title="Open Doctor">
+  <span aria-hidden="true" id="healthglyph">♡</span>
+ </button>
+ <button type="button" id="skinbtn" aria-label="Switch between rich and plain appearance"
+  title="Switch appearance">rich</button>
+</header>
+<nav id="viewnav" class="view-nav" aria-label="Redux workspace pages">
+ <button type="button" data-view="overview" aria-pressed="true">Overview</button>
+ <button type="button" data-view="radio" aria-pressed="false">Radio</button>
+ <button type="button" data-view="captures" aria-pressed="false">Captures</button>
+ <button type="button" data-view="doctor" aria-pressed="false">Doctor</button>
+ <button type="button" data-view="system" aria-pressed="false">System</button>
+</nav>
+<a href="/plugins" style="display:block;min-height:44px;padding:12px">Plugin Control Center</a>
+<main id="viewroot" tabindex="-1">
+ <section class="card" data-page="system" hidden aria-label="System evidence">
+  <h2>System evidence</h2><p class="mut">Sensor, visual and heartbeat timestamps are independent. Unknown coverage requires evidence.</p>
+  <div id="systemevidence" aria-live="polite">Evidence unavailable</div>
+ </section>
+ <div class="card hero" data-page="overview" aria-label="Live Augur persona">
+  <div class="hero-top"><span class="hero-overline">AUGUR / LIVE OBSERVATIONS</span>
+   <span id="herocapture" class="hero-capture">CAPTURE UNKNOWN</span></div>
+  <div class="hero-main"><div class="face" id="face">‹·_·›</div>
+   <div class="hero-identity"><div class="creature" id="creature">…</div>
+    <div class="reason" id="mood">Waiting for the first actual report</div></div></div>
+ </div>
+ <div class="card rich radio-map" data-page="radio" hidden><div class="k">airspace · real GPS fixes only · moves as you move</div>
    <div id="wrap"><svg id="map" viewBox="0 0 400 340" preserveAspectRatio="xMidYMid meet"
      aria-label="live sighting map"></svg></div>
    <div class="leg mut"><span><i style="background:var(--me)"></i>you</span>
      <span><i style="background:var(--wifi)"></i>wifi</span>
      <span><i style="background:var(--ble)"></i>ble</span><span id="maprange" class="dim"></span></div></div>
- <div class="card"><div class="row">
+ <section class="card doctor-primary" data-page="doctor" hidden aria-label="Device Doctor">
+  <div class="k">Doctor · measured device health</div>
+  <div class="doctor-top" role="status" aria-live="polite">
+   <span id="doctorheart" class="doctor-heart unknown" aria-hidden="true">♡</span>
+   <div><div id="doctorlabel" class="doctor-label">UNKNOWN</div>
+    <div id="doctorcoverage" class="reason">Waiting for health data</div></div>
+  </div>
+  <p id="plugindiagnostic" class="mut" aria-live="polite"></p>
+  <details class="doctor-details"><summary>Findings and recovery advice</summary>
+   <div id="doctorlist" class="doctor-list"></div></details>
+ </section>
+ <section class="card" data-page="captures" hidden aria-label="Capture processing">
+  <div class="k">Capture processing · worker ledger</div>
+  <div id="pipelinestate" class="doctor-title unknown">UNKNOWN · not assessed</div>
+  <div id="pipelinecounts" class="reason">No durable worker scan observed</div>
+  <div id="pipelinereason" class="reason"></div>
+ </section>
+ <section class="card capture-primary" data-page="captures" hidden aria-label="Capture lifecycle">
+  <div class="k">Capture lifecycle · live supervisor</div>
+  <div class="row">
+   <div class="kv"><div class="k">Capture state</div><div class="v" id="capturestate">UNKNOWN</div></div>
+   <div class="kv"><div class="k">Handed off</div><div class="v" id="capturehanded">—</div></div>
+   <div class="kv"><div class="k">Pending sightings</div><div class="v" id="capturepending">—</div></div>
+  </div>
+  <div id="capturefile" class="reason">No configured capture path</div>
+  <div id="capturewarning" class="reason">Waiting for a live supervisor</div>
+ </section>
+ <section class="card" data-page="doctor" hidden aria-label="Runtime diagnostics">
+  <div class="k">Runtime diagnostics · measured state</div>
+  <div class="row">
+   <div class="kv"><div class="k">State</div><div class="v" id="runtimestate">UNKNOWN</div></div>
+   <div class="kv"><div class="k">Free storage</div><div class="v" id="runtimefree">—</div></div>
+   <div class="kv"><div class="k">Log resets</div><div class="v" id="runtimelogs">—</div></div>
+  </div>
+  <div id="runtimeerror" class="reason">Waiting for live diagnostics</div>
+ </section>
+ <div class="card overview-metrics" data-page="overview"><div class="row">
    <div class="kv"><div class="k">persona</div><div class="v" id="persona">—</div></div>
    <div class="kv"><div class="k">intent</div><div class="v" id="intent">—</div></div>
    <div class="kv"><div class="k">capture radio</div><div class="v" id="cap">—</div></div>
@@ -130,37 +323,418 @@ body[data-skin="plain"] .card{border-color:#16202a}
    <div class="kv"><div class="k">sightings</div><div class="v" id="sight">—</div></div>
    <div class="kv"><div class="k">alerts</div><div class="v" id="alerts">—</div></div>
  </div>
- <svg id="spark" class="rich" viewBox="0 0 400 40" preserveAspectRatio="none"></svg></div>
- <div class="card"><div class="k">brain recommends</div>
-   <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div></div>
- <div class="card rich" id="sensecard" style="display:none"><div class="k">presence (CSI)</div>
+ <svg id="spark" class="rich" viewBox="0 0 400 40" preserveAspectRatio="none"></svg>
+ <div class="reason" id="visualfreshness">Visual observations unavailable</div></div>
+ <section class="card" data-page="overview" aria-label="Hardware telemetry">
+  <div class="k">Hardware telemetry</div><div id="resourcevalues">No measurements yet</div>
+  <div class="reason" id="resourcesource"></div>
+  <details><summary>Measurement sources</summary><div class="reason resource-provenance" id="resourceprovenance"></div></details>
+ </section>
+ <div class="card overview-advice" data-page="overview"><div class="k">brain recommends</div>
+   <div class="v"><span class="badge" id="rec">—</span></div><div class="reason" id="recwhy"></div>
+   <div class="theme-selector"><span class="k">Theme</span>
+    <button type="button" id="palettebtn" aria-label="Switch visual theme">Signal</button>
+   </div></div>
+ <div class="card rich" data-page="radio" hidden id="sensecard" style="display:none"><div class="k">presence (CSI)</div>
    <div class="v"><span class="badge" id="sense">—</span> <span class="badge" id="occ">—</span></div>
    <div class="reason" id="sensewhy"></div></div>
- <div class="card" id="sentcard" style="display:none"><div class="k">sentinel</div>
+ <div class="card" data-page="radio" hidden id="sentcard" style="display:none"><div class="k">sentinel</div>
    <div class="v"><span class="badge" id="sentarm">—</span> dispatched <span id="sentd">0</span> · suppressed <span id="sents">0</span></div>
    <div class="reason" id="sentlast"></div></div>
- <div class="card rich"><div class="k">airspace · channel occupancy / RSSI distribution</div>
+ <div class="card rich" data-page="radio" hidden><div class="k">airspace · channel occupancy / RSSI distribution</div>
    <svg id="chanbars" viewBox="0 0 400 92" preserveAspectRatio="none"></svg>
    <svg id="rssibars" viewBox="0 0 400 72" preserveAspectRatio="none"></svg>
    <div class="leg mut"><span id="airnote">no channel/RSSI data yet</span></div></div>
- <div class="card"><div class="k">access points · seen in range (from the Cache · listen-only)</div>
+ <div class="card" data-page="radio" hidden><div class="k">access points · seen in range (from the Cache · listen-only)</div>
    <div class="aptbl" id="aptbl"></div>
    <div class="leg mut"><span id="apnote">no APs recorded yet</span></div></div>
- <div class="card"><div class="k">recent narration</div><ul id="narr"></ul></div>
+ <div class="card" data-page="overview"><div class="k">recent narration</div><ul id="narr"></ul></div>
 </main>
 <script>
-var TRACK=[],SPARK=[],lastSight=null;
+var TRACK=[],SPARK=[],lastSight=null,lastVisualSample=null;
+const viewRoot=document.getElementById('viewroot');
+const navButtons=Array.from(document.querySelectorAll('#viewnav [data-view]'));
+const viewPanels=Array.from(document.querySelectorAll('#viewroot [data-page]'));
+const pageNames=navButtons.map(function(button){return button.dataset.view});
+var currentView=null;
+function setView(name,updateHash){
+ const chosen=pageNames.includes(name)?name:pageNames[0];
+ if(!chosen)return false;
+ if(currentView===chosen)return true;
+ currentView=chosen;
+ navButtons.forEach(function(button){
+  const active=button.dataset.view===chosen;
+  button.setAttribute('aria-pressed',active?'true':'false');
+ });
+ viewPanels.forEach(function(panel){panel.hidden=panel.dataset.page!==chosen});
+ viewRoot.scrollTop=0;
+ if(updateHash!==false&&location.hash!=='#'+chosen)location.hash=chosen;
+ return true;
+}
+navButtons.forEach(function(button){
+ button.onclick=function(){setView(button.dataset.view);};
+});
+window.addEventListener('hashchange',function(){
+ setView(location.hash.slice(1),false);
+});
+document.getElementById('healthjump').onclick=function(){setView('doctor')};
+document.getElementById('viewnav').onkeydown=function(event){
+ if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+ const at=pageNames.indexOf(currentView);
+ const next=event.key==='Home'?0:event.key==='End'?pageNames.length-1:
+  (at+(event.key==='ArrowRight'?1:-1)+pageNames.length)%pageNames.length;
+ event.preventDefault();
+ setView(pageNames[next]);
+ navButtons[next].focus();
+};
+// A horizontal touch swipe moves one workspace page. Vertical scroll and
+// gestures over controls/maps are left to the native browser.
+var swipeStart=null;
+viewRoot.onpointerdown=function(event){
+ if(event.pointerType!=='touch'||event.target.closest('button,summary,input,select,textarea,a,svg')){
+  swipeStart=null;return;
+ }
+ swipeStart={x:event.clientX,y:event.clientY};
+};
+viewRoot.onpointerup=function(event){
+ if(!swipeStart||event.pointerType!=='touch')return;
+ const dx=event.clientX-swipeStart.x,dy=event.clientY-swipeStart.y;
+ swipeStart=null;
+ if(Math.abs(dx)<65||Math.abs(dx)<Math.abs(dy)*1.5)return;
+ const at=pageNames.indexOf(currentView);
+ setView(pageNames[(at+(dx<0?1:-1)+pageNames.length)%pageNames.length]);
+};
+viewRoot.onpointercancel=function(){swipeStart=null};
+setView(location.hash.slice(1),false);
+var fetchPending=false,lastRuntimeVersion=null,lastVersionChanged=0;
+function markStale(why){
+ systemFingerprint=null;
+ document.getElementById("systemevidence").textContent="STALE / received evidence is no longer current · "+why;
+ document.getElementById('resourcesource').textContent='STALE / invalid · last received measurements unverified';
+ document.getElementById('visualfreshness').textContent='STALE visual observations · '+why;
+ document.getElementById('sub').textContent='STALE · '+why;
+ document.getElementById('doctorheart').className='doctor-heart unknown';
+ document.getElementById('doctorheart').textContent='♡';
+ const shortcut=document.getElementById('healthjump');
+ shortcut.className='health-shortcut unknown';
+ shortcut.setAttribute('aria-label','Open Doctor: stale health data');
+ document.getElementById('healthglyph').textContent='♡';
+ document.querySelector('.doctor-primary').className='card doctor-primary unknown';
+ document.getElementById('engineindicator').className='runtime-pill unknown';
+ document.getElementById('engineindicator').textContent='STALE';
+ document.getElementById('engineindicator').setAttribute(
+  'aria-label','Capture supervisor: stale data');
+ document.getElementById('herocapture').className='hero-capture unknown';
+ document.getElementById('herocapture').textContent='CAPTURE UNVERIFIED';
+ document.getElementById('doctorlabel').textContent='UNKNOWN · STALE';
+ document.getElementById('doctorcoverage').textContent=
+  'Live health cannot be verified. Last known findings may be out of date.';
+ const pipeline=document.getElementById('pipelinestate');
+ pipeline.className='doctor-title unknown';
+ pipeline.textContent='UNKNOWN · STALE';
+ document.getElementById('capturestate').textContent='UNKNOWN · STALE';
+ document.getElementById('runtimestate').textContent='UNKNOWN · STALE';
+ document.getElementById('pipelinereason').textContent=
+  'Latest capture-processing reading is unverified until reconnection.';
+}
 var skin=(function(){try{return localStorage.getItem('augur.skin')||'rich'}catch(e){return 'rich'}})();
 function applySkin(){document.body.setAttribute('data-skin',skin);
  var b=document.getElementById('skinbtn');b.textContent=skin;b.className=skin==='rich'?'on':''}
 document.getElementById('skinbtn').onclick=function(){skin=(skin==='rich')?'plain':'rich';
  try{localStorage.setItem('augur.skin',skin)}catch(e){}applySkin()};
 applySkin();
+// Validated palette data only: no CSS text, URLs, scripts, or arbitrary keys.
+// Additional theme packs can register palettes without altering page routing.
+const THEME_KEYS=[
+ '--bg','--fg','--mut','--dim','--acc','--warn','--crit','--card',
+ '--line','--wifi','--ble','--me','--info','--ink-sub',
+ '--halo','--hero-start','--hero-mid','--hero-end'
+];
+const themeRegistry=Object.create(null);
+const themeOrder=[];
+function registerTheme(name,tokens){
+ if(typeof name!=='string'||!/^[a-z][a-z0-9-]{0,31}$/.test(name)||
+   Object.prototype.hasOwnProperty.call(themeRegistry,name)||!tokens||
+   typeof tokens!=='object'||Array.isArray(tokens))return false;
+ const keys=Object.keys(tokens);
+ if(!keys.length||keys.some(function(key){
+  return !THEME_KEYS.includes(key)||typeof tokens[key]!=='string'||
+   !/^#[0-9a-fA-F]{6}$/.test(tokens[key]);
+ }))return false;
+ themeRegistry[name]=Object.freeze(Object.assign(Object.create(null),tokens));
+ themeOrder.push(name);
+ return true;
+}
+registerTheme('signal',{'--acc':'#4ec9b0','--wifi':'#5aa0ff',
+ '--hero-start':'#10272c','--halo':'#11202e'});
+registerTheme('ember',{'--acc':'#ffa36f','--wifi':'#ffce8d',
+ '--info':'#85b9db','--hero-start':'#322016','--hero-mid':'#241d20',
+ '--hero-end':'#302329','--halo':'#2a1b1c'});
+registerTheme('glacier',{'--acc':'#7cd4f5','--wifi':'#9cbcff',
+ '--info':'#85b9db','--hero-start':'#112b3b','--hero-mid':'#142033',
+ '--hero-end':'#192b3d','--halo':'#122736'});
+var currentTheme=null;
+function applyTheme(name){
+ if(!Object.prototype.hasOwnProperty.call(themeRegistry,name))name=themeOrder[0];
+ if(!name)return false;
+ const tokens=themeRegistry[name];
+ THEME_KEYS.forEach(function(key){
+  if(Object.prototype.hasOwnProperty.call(tokens,key))
+   document.body.style.setProperty(key,tokens[key]);
+  else document.body.style.removeProperty(key);
+ });
+ currentTheme=name;
+ document.body.setAttribute('data-theme',name);
+ const button=document.getElementById('palettebtn');
+ button.textContent=name.charAt(0).toUpperCase()+name.slice(1);
+ button.setAttribute('aria-label','Switch visual theme, currently '+name);
+ return true;
+}
+document.getElementById('palettebtn').onclick=function(){
+ const index=themeOrder.indexOf(currentTheme);
+ const next=themeOrder[(index+1)%themeOrder.length];
+ applyTheme(next);
+ try{localStorage.setItem('augur.theme',next)}catch(e){}
+};
+var savedTheme=(function(){try{return localStorage.getItem('augur.theme')}
+ catch(e){return null}})();
+applyTheme(savedTheme);
 function setb(id,txt,cls){var e=document.getElementById(id);e.textContent=txt;e.className='badge'+(cls?' '+cls:'')}
-async function tick(){try{const r=await fetch('/api/status');const d=await r.json();
- document.getElementById('sub').textContent='glass-box';paint(d);
-}catch(e){document.getElementById('sub').textContent='disconnected'}}
+var lastDoctorFindings=null;
+function renderDoctor(report){
+ const modes=['ok','attention','degraded','action','unknown'];
+ const d=report&&Array.isArray(report.findings)&&report.findings.every(f=>
+  f&&typeof f==='object'&&!Array.isArray(f)&&modes.includes(f.status))?report:null;
+ const mode=d&&modes.includes(d.overall)?d.overall:'unknown';
+ const labels={ok:'OK',attention:'ATTENTION',degraded:'DEGRADED',
+  action:'ACTION REQUIRED',unknown:'UNKNOWN'};
+ const heart=document.getElementById('doctorheart');
+ heart.className='doctor-heart '+mode;heart.textContent=mode==='ok'?'♥':'♡';
+ document.getElementById('doctorlabel').textContent=labels[mode];
+ const shortcut=document.getElementById('healthjump');
+ shortcut.className='health-shortcut '+mode;
+ shortcut.setAttribute('aria-label','Open Doctor: '+labels[mode]);
+ document.getElementById('healthglyph').textContent=mode==='unknown'?'♡':'♥';
+ document.querySelector('.doctor-primary').className='card doctor-primary '+mode;
+ const gaps=d&&d.coverage&&Array.isArray(d.coverage.not_assessed)&&d.coverage.not_assessed.every(g=>typeof g==='string')
+  ?d.coverage.not_assessed:null;
+ document.getElementById('doctorcoverage').textContent=
+  !d?'Doctor snapshot unavailable — health has not been assessed.'
+  :gaps===null?'Doctor coverage is unverified.'
+  :gaps.length?gaps.length+' unassessed area(s): '+gaps.join(', ')
+  :'All reported Doctor areas assessed.';
+ const list=document.getElementById('doctorlist');
+ // Preserve expanded Doctor contents and scroll focus during unchanged
+ // status polls. The severity label and coverage still update every poll.
+ const fingerprint=d?JSON.stringify(d.findings):null;
+ if(fingerprint===lastDoctorFindings)return;
+ lastDoctorFindings=fingerprint;
+ list.replaceChildren();
+ if(!d)return;
+ d.findings.forEach(function(f){
+  const item=document.createElement('div');item.className='doctor-finding';
+  const severity=modes.includes(f.status)?f.status:'unknown';
+  const header=document.createElement('div');
+  header.className='doctor-title '+severity;
+  header.textContent=(f.area||'Unknown area')+' · '+severity.toUpperCase();
+  item.appendChild(header);
+  const reason=document.createElement('div');
+  reason.textContent=(f.summary||'')+(f.reason?' — '+f.reason:'');
+  item.appendChild(reason);
+  if(f.remediation){const remedy=document.createElement('div');
+   remedy.className='doctor-remedy';remedy.textContent='Action: '+f.remediation;
+   item.appendChild(remedy);}
+  list.appendChild(item);
+ });
+}
+function renderPipeline(d){
+ const p=d.capture_processing||{},doctor=d.doctor||{};
+ const checks=Array.isArray(doctor.findings)?doctor.findings:[];
+ const finding=checks.find(function(x){return x.area==='capture processing'})||null;
+ const status=finding&&typeof finding.status==='string'?finding.status:'unknown';
+ const state=document.getElementById('pipelinestate');
+ state.className='doctor-title '+status;
+ state.textContent=status.toUpperCase()+' · '+(finding?finding.summary:'Not assessed');
+ const counts=document.getElementById('pipelinecounts');
+ const recent=p.last_scan;
+ if(recent&&typeof recent.scanned==='number'&&recent.outcomes){
+  const outcome=Object.entries(recent.outcomes).map(function(pair){
+   return pair[0]+': '+pair[1];
+  }).join(' · ');
+  counts.textContent='Last pass: '+recent.scanned+' file(s) · '+
+   (outcome||'no processing outcomes');
+ }else{
+  counts.textContent=p.available?'No completed worker scan recorded':
+   'Processing ledger unavailable';
+ }
+ document.getElementById('pipelinereason').textContent=
+  finding?(finding.reason||''):(p.reason||'No verified worker status');
+}
+var lastResourceStamp=null,resourceChangedAt=0;
+function resourceView(t,runtime){
+ const obj=t&&typeof t==='object'&&!Array.isArray(t)?t:{};
+ const values=obj.values&&typeof obj.values==='object'&&!Array.isArray(obj.values)?obj.values:{};
+ const bounds={cpu_temp_c:[-20,150],cpu_load_pct:[0,100],ram_pct:[0,100],
+  cpu_frequency_mhz:[1,10000],battery_pct:[0,100]};
+ const clean={};
+ Object.keys(bounds).forEach(key=>{
+  const v=values[key],b=bounds[key];
+  clean[key]=Number.isFinite(v)&&v>=b[0]&&v<=b[1]?v:null;
+ });
+ clean.on_battery=typeof values.on_battery==='boolean'?values.on_battery:null;
+ const mask=values.throttled_mask;
+ clean.throttled_mask=Number.isInteger(mask)&&mask>=0&&mask<=0xffffffff?mask:null;
+ const stamp=obj.measured_at,now=performance.now();
+ if(stamp!==lastResourceStamp){lastResourceStamp=stamp;resourceChangedAt=now}
+ const reference=runtime&&Number.isFinite(runtime.updated_utc)?runtime.updated_utc:Date.now()/1000;
+ const age=Number.isFinite(stamp)?reference-stamp:null;
+ const fresh=obj.fresh===true&&Number.isFinite(stamp)&&stamp>=0&&
+  Number.isFinite(obj.age_seconds)&&obj.age_seconds>=0&&obj.age_seconds<=10&&
+  Number.isFinite(age)&&age>=0&&age<=10&&now-resourceChangedAt>=0&&now-resourceChangedAt<=10000;
+ return {values:clean,fresh,measured_at:Number.isFinite(stamp)?stamp:null,
+  age_seconds:Number.isFinite(age)?Math.max(age,obj.age_seconds||0):null,
+  provenance:obj.provenance&&typeof obj.provenance==='object'&&!Array.isArray(obj.provenance)?obj.provenance:{}};
+}
+function renderResources(d){
+ const t=resourceView(d.telemetry,d.runtime),v=t.values;
+ const number=(key,unit)=>v[key]===null?'unavailable':v[key].toFixed(1)+unit;
+ document.getElementById('resourcevalues').textContent=
+  'CPU '+number('cpu_temp_c','°C')+' · CPU use '+number('cpu_load_pct','%')+
+  ' · RAM '+number('ram_pct','%')+' · Clock '+number('cpu_frequency_mhz',' MHz')+
+  ' · Battery '+number('battery_pct','%')+
+  ' · Firmware '+(v.throttled_mask===null?'unavailable':'0x'+v.throttled_mask.toString(16));
+ const power=v.on_battery===null?'Power source unavailable':v.on_battery?'On battery':'External power reported';
+ document.getElementById('resourcesource').textContent=d.telemetry?
+  (t.fresh?'Fresh':'STALE / invalid')+' · measured '+(t.measured_at??'unavailable')+
+  ' · age '+(t.age_seconds??'unavailable')+'s · '+power:'No measurements yet';
+ document.getElementById('resourceprovenance').textContent=Object.keys(v)
+  .filter(key=>v[key]!==null&&typeof t.provenance[key]==='string')
+  .map(key=>key+': '+t.provenance[key].slice(0,160)).join(' · ')||
+  (typeof t.provenance.reading==='string'?t.provenance.reading.slice(0,160):'No measured source attribution');
+}
+var visualStamp=null,visualChangedAt=0;
+function visualFreshness(d){
+ const r=d.runtime||{},stamp=r.visual_sampled_utc;
+ const version=Number.isInteger(r.visual_revision)&&r.visual_revision>=0?r.visual_revision:stamp;
+ const now=performance.now();
+ if(version!==visualStamp){visualStamp=version;visualChangedAt=now}
+ const maximum=Number.isFinite(r.visual_max_age_seconds)&&r.visual_max_age_seconds>=1&&r.visual_max_age_seconds<=300?r.visual_max_age_seconds:12;
+ const age=Number.isFinite(stamp)&&Number.isFinite(r.updated_utc)?r.updated_utc-stamp:null;
+ const fresh=Number.isFinite(age)&&age>=0&&age<=maximum&&now-visualChangedAt>=0&&now-visualChangedAt<=maximum*1000;
+ document.getElementById('visualfreshness').textContent=fresh?
+  'Visual observations fresh · sampled '+stamp:'STALE / unavailable visual observations · runtime heartbeat is separate';
+ return fresh;
+}
+function renderRuntimePanels(d){
+ renderResources(d);
+ const runtime=d.runtime||{};
+ const connected=Number.isFinite(runtime.updated_utc);
+ const state=connected&&typeof runtime.state==='string'?runtime.state:'';
+ const statuses={running:'ok',starting:'attention',
+  starting_engine:'attention',rotating:'attention',
+  telemetry_degraded:'degraded',degraded:'degraded',
+  storage_paused:'action',termination_pending:'action',lease_blocked:'action',stopped:'attention'};
+ const condition=Object.prototype.hasOwnProperty.call(statuses,state)?
+  statuses[state]:'unknown';
+ const pill=document.getElementById('engineindicator');
+ pill.className='runtime-pill '+condition;
+ pill.textContent=state?state.replaceAll('_',' ').toUpperCase():'NO SESSION';
+ pill.setAttribute('aria-label','Capture supervisor: '+(state||'unknown'));
+ const capture=document.getElementById('herocapture');
+ capture.className='hero-capture '+condition;
+ capture.textContent=state?'ENGINE '+state.replaceAll('_',' ').toUpperCase():
+  'CAPTURE UNKNOWN';
+ document.getElementById('capturestate').textContent=
+  connected?String(runtime.state||'UNKNOWN'):'UNKNOWN';
+ document.getElementById('capturehanded').textContent=
+  Number.isInteger(runtime.handed_off)?String(runtime.handed_off):'—';
+ document.getElementById('capturepending').textContent=
+  Number.isInteger(runtime.sightings_pending)?String(runtime.sightings_pending):'—';
+ const path=typeof runtime.capture_file==='string'?runtime.capture_file:'';
+ document.getElementById('capturefile').textContent=
+  path?'Configured capture path: '+path.split('/').pop()+' (existence unverified)':'No configured capture path';
+ document.getElementById('capturewarning').textContent=
+  runtime.handoff_error||runtime.sightings_write_error||
+  (connected?'No current capture handoff error reported':'Waiting for a live supervisor');
+ document.getElementById('runtimestate').textContent=
+  connected?String(runtime.state||'UNKNOWN'):'UNKNOWN';
+ document.getElementById('runtimefree').textContent=
+  typeof runtime.free_bytes==='number'&&Number.isFinite(runtime.free_bytes)
+   ?(runtime.free_bytes/(1024*1024)).toFixed(0)+' MiB':'—';
+ document.getElementById('runtimelogs').textContent=
+  Number.isInteger(runtime.log_truncations)?String(runtime.log_truncations):'—';
+ const retryText=runtime.state==='degraded' &&
+  Number.isFinite(runtime.retry_in_seconds) && runtime.failure_streak>0
+  ?' · automatic retry in '+Math.ceil(Math.max(0,runtime.retry_in_seconds))+'s'
+  :'';
+ document.getElementById('runtimeerror').textContent=
+  (runtime.last_error||runtime.log_error||
+   (connected?'No current supervisor error reported':'Waiting for live diagnostics'))
+  +retryText;
+}
+async function tick(){
+ if(fetchPending||document.hidden)return; // never queue overlapping polls
+ fetchPending=true;
+ const ctrl=new AbortController();
+ const deadline=setTimeout(function(){ctrl.abort()},5000);
+ try{
+  const r=await fetch('/api/status',{signal:ctrl.signal,cache:'no-store'});
+  if(!r.ok)throw Error('HTTP '+r.status);
+  const d=await r.json();
+  paint(d);
+  const version=d.runtime&&d.runtime.updated_utc;
+  const now=performance.now();
+  if(typeof version==='number'&&Number.isFinite(version)){
+   if(version!==lastRuntimeVersion){lastRuntimeVersion=version;lastVersionChanged=now}
+   if(now-lastVersionChanged>12000)markStale('no new supervisor checkpoint');
+   else document.getElementById('sub').textContent='live · measured';
+  }else document.getElementById('sub').textContent='glass-box · no runtime heartbeat';
+ }catch(e){
+  markStale(e&&e.name==='AbortError'?'request timed out':'connection unavailable');
+ }finally{
+  clearTimeout(deadline);fetchPending=false;
+ }
+}
+var systemFingerprint=null;
+function renderSystem(d){
+ const el=document.getElementById('systemevidence');
+ const ui=d.ui&&d.ui.version===1?d.ui:null;
+ const safe=v=>typeof v==='string'?v.slice(0,160):'Unavailable';
+ const raw=ui&&Array.isArray(ui.rows)?ui.rows.slice(0,80):[];
+ const rows=raw.filter(row=>row&&typeof row==='object'&&!Array.isArray(row)).map(row=>({
+  label:safe(row.label),value:safe(row.value),source:safe(row.source),
+  state:['fresh','stale','unknown'].includes(row.state)?row.state:'unknown',
+  measured_at:Number.isFinite(row.measured_at)?row.measured_at:null
+ }));
+ const pluginWarning=document.getElementById('plugindiagnostic');
+ const pluginIssue=rows.find(row=>row.label==='Plugin diagnostics');
+ if(pluginWarning)pluginWarning.textContent=pluginIssue?pluginIssue.value+' — System details / local packs CLI':'';
+ const fingerprint=JSON.stringify(rows);
+ if(fingerprint===systemFingerprint)return;
+ systemFingerprint=fingerprint;
+ if(!rows.length){el.textContent='Evidence unavailable';return}
+ const same=el.children.length===rows.length&&rows.every((row,i)=>el.children[i].evidenceLabel===row.label);
+ if(!same){
+  el.replaceChildren();
+  rows.forEach(function(row){
+   const item=document.createElement('details');
+   item.evidenceLabel=row.label;
+   item.appendChild(document.createElement('summary'));
+   item.appendChild(document.createElement('p'));
+   el.appendChild(item);
+  });
+ }
+ rows.forEach(function(row,i){
+  const item=el.children[i];
+  item.children[0].textContent=row.label+' · '+row.value+' · '+row.state;
+  item.children[1].textContent='Source: '+row.source+' · Measured: '+(row.measured_at??'unavailable');
+ });
+}
 function paint(d){
+ renderSystem(d);
+ renderDoctor(d.doctor||null);
+ renderPipeline(d);
+ renderRuntimePanels(d);
  var fe=document.getElementById('face'),nf=d.face||'‹·_·›';
  var base='face'+(d.face_state==='ruffle'?' crit':'')+(d.face_state==='blind'?' blinded':'');
  if(fe.textContent!==nf){fe.textContent=nf;fe.className=base;void fe.offsetWidth;fe.className=base+' pop';}
@@ -189,7 +763,15 @@ function paint(d){
  if(d.position&&d.position.lat!=null){var p=TRACK[TRACK.length-1];
   if(!p||p.lat!==d.position.lat||p.lon!==d.position.lon){TRACK.push({lat:d.position.lat,lon:d.position.lon});if(TRACK.length>400)TRACK.shift()}}
  if(typeof d.sightings==='number'){if(lastSight!==null)SPARK.push(Math.max(0,d.sightings-lastSight));lastSight=d.sightings;if(SPARK.length>120)SPARK.shift()}
- renderMap(d.located||[],d.position||null);renderSpark();renderAirspace(d.airspace||{});renderAPs(d.access_points||[]);
+ const sample=d.runtime&&(typeof d.runtime.visual_revision==='number'
+  ?d.runtime.visual_revision:d.runtime.visual_sampled_utc);
+ const visualFresh=visualFreshness(d);
+ const changed=typeof sample!=='number'||sample!==lastVisualSample;
+ if(changed&&visualFresh){
+  lastVisualSample=typeof sample==='number'?sample:null;
+  renderMap(d.located||[],d.position||null);
+  renderSpark();renderAirspace(d.airspace||{});renderAPs(d.access_points||[]);
+ }
 }
 function _bars(svgId,pairs,W,H,labEvery){const NS='http://www.w3.org/2000/svg',svg=document.getElementById(svgId);
  while(svg.firstChild)svg.removeChild(svg.firstChild);if(!pairs.length)return;
@@ -244,6 +826,7 @@ function renderSpark(){const NS='http://www.w3.org/2000/svg',svg=document.getEle
  var mx=Math.max(1,...SPARK),n=SPARK.length,d='';for(var i=0;i<n;i++){var x=(i/(n-1||1))*400,y=40-(SPARK[i]/mx)*36-2;d+=(i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' '}
  var pl=document.createElementNS(NS,'path');pl.setAttribute('d',d);pl.setAttribute('fill','none');pl.setAttribute('stroke','var(--acc)');pl.setAttribute('stroke-width','1.3');svg.appendChild(pl)}
 tick();setInterval(tick,2000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)tick()});
 </script></body></html>"""
 
 
@@ -290,13 +873,16 @@ def auth_token(bind_scope: str, token: Optional[str] = None) -> Optional[str]:
     return secrets.token_urlsafe(18)
 
 
-def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = None):
+def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = None, *, plugin_runtime=None):
     """Build a request handler for `/` and `/api/status`.
 
     If `token` is set, every route is gated: `/api/status` needs it (401 without),
     and `/` serves the unlock page until the cookie is present. Token travels via
     an `Authorization: Bearer <token>` header or an `augur_token` cookie, compared
     in constant time. `token=None` means open (the localhost default)."""
+    from ..packs.status import configured_provider
+    plugin_provider = configured_provider() if plugin_runtime is None else configured_provider(runtime=plugin_runtime)
+
     def _present(headers) -> Optional[str]:
         auth = headers.get("Authorization", "")
         if auth.startswith("Bearer "):
@@ -330,11 +916,50 @@ def make_handler(status_provider: Callable[[], Dict], token: Optional[str] = Non
 
         def do_GET(self):
             authed = self._authed()
+            from urllib.parse import urlsplit, parse_qs
+            route = urlsplit(self.path).path
             if self.path.rstrip("/") == "/api/status" or self.path == "/api/status":
                 if not authed:
                     self._send(401, b'{"error":"unauthorized"}', "application/json")
                     return
-                self._send(200, json.dumps(status_provider()).encode(), "application/json")
+                from ..display.ui_state import model
+                try:
+                    payload = dict(status_provider())
+                    try:
+                        payload["plugins"] = plugin_provider.summary()
+                    except Exception:
+                        from ..packs.status import unavailable
+                        payload["plugins"] = unavailable()
+                    payload["ui"] = model(payload)
+                    body = json.dumps(payload).encode()
+                except Exception:
+                    self._send(503, b'{"error":"status unavailable"}', "application/json")
+                    return
+                self._send(200, body, "application/json")
+            elif route in ("/plugins", "/api/packs"):
+                if not authed:
+                    self._send(401, b'{"error":"unauthorized"}', "application/json")
+                    return
+                try:
+                    offset = int(parse_qs(urlsplit(self.path).query, max_num_fields=4).get('offset', ['0'])[0])
+                    if not 0 <= offset <= 1000000:
+                        raise ValueError("invalid offset")
+                except ValueError:
+                    self._send(400, b'{"error":"invalid pagination"}', "application/json")
+                    return
+                inventory = plugin_provider(offset)
+                if route == "/api/packs":
+                    self._send(200, json.dumps(inventory).encode(), "application/json")
+                else:
+                    import html
+                    cards = []
+                    for pack in inventory.get("plugins", []):
+                        cards.append('<article><h2>' + html.escape(pack['name']) + '</h2><pre>' + html.escape(json.dumps(pack, indent=2)) + '</pre></article>')
+                    page = '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Plugin Control Center</title><style>body{font:16px sans-serif;background:#111;color:#eee;margin:16px}a{color:#9df;display:block;min-height:44px}pre{white-space:pre-wrap;overflow-wrap:anywhere}article{border:1px solid #777;padding:12px;margin:12px 0}</style><a href="/">Back to dashboard</a><h1>Plugin Control Center</h1><p>Read-only inspection. Requested state is separate from active runtime state. Runtime evidence is valid only for the current owner generation and requested revision.</p><p>Local workflow: redux packs list; redux packs enable NAME; review the preview, then repeat with --confirm REVISION. No service is restarted.</p>' + ''.join(cards) + ('<p>No catalog entries installed.</p>' if not cards and inventory.get('availability') == 'inspected' else '') + '<p>' + html.escape(inventory.get('availability', 'unknown')) + '</p>'
+                    page += '<pre>' + html.escape(json.dumps(inventory.get('errors', []), indent=2)) + '</pre>'
+                    if inventory.get('next_offset') is not None:
+                        page += '<a href="/plugins?offset=' + str(inventory['next_offset']) + '">Next plugins</a>'
+                    self._send(200, page.encode(), "text/html; charset=utf-8")
             elif self.path == "/" or self.path == "":
                 if not authed:
                     self._send(401, LOGIN_PAGE.encode(), "text/html; charset=utf-8")

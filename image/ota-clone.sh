@@ -19,6 +19,11 @@ from ota import patch_cmdline
 p = Path(sys.argv[2]) / 'boot/firmware/cmdline.txt'
 p.write_text(patch_cmdline(p.read_text(), 'B', sys.argv[3]))
 PY
+# Validate both finished boot slots and selector before the inactive slot unmounts.
+ROOT_A_PARTUUID=$(blkid -s PARTUUID -o value "${LOOP_DEV}p4")
+python3 "${STAGE_DIR}/redux-boot-payload.py" --profile ab \
+    --root "$ROOTFS_DIR" --other-root "$other" \
+    --a-root-partuuid "$ROOT_A_PARTUUID" --b-root-partuuid "$ROOT_PARTUUID"
 sync
 unmount "$other"
 trap - EXIT

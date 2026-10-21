@@ -14,8 +14,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install offline release inspection tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rauc mtools e2fsprogs dosfstools squashfs-tools
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,crypto]"
       - name: Compile check
         run: python -m compileall redux
       - name: Tests
@@ -30,8 +32,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install offline release inspection tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rauc mtools e2fsprogs dosfstools squashfs-tools
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,crypto]"
       # shellcheck is preinstalled on the ubuntu-latest runner image.
       - name: Image stage lint + hardware-free checks
         run: bash image/ci.sh

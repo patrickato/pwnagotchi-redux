@@ -2,33 +2,381 @@
 
 `./build.sh` creates a new Pi OS Lite Bookworm arm64 image using pinned official
 pi-gen stages 0–2 and `stage-redux`. It includes bettercap, patched BCM43455c0
-nexmon firmware, nexutil, and `redux.service` (`python -m redux.core.boot`).
-No pwnagotchi image or Python runtime is reused. The service currently logs its
-bootstrap state and waits for shutdown; live integration belongs to the lead.
-The stock bettercap unit is masked so installation cannot start an engine session.
+nexmon firmware, nexutil, the bootstrap `redux.service`, and the standalone
+passive `redux-live.service` with an independent capture-ingest timer.
+No pwnagotchi image or Python runtime is reused. The original Bettercap unit
+is masked so only the Redux-owned supervisor can start the capture engine.
+These services are source/CI integrated; actual boot and capture remain
+physical acceptance gates.
+
+## Signed Debian Bookworm bootstrap (required for new builds)
+
+The 2026-10-15 ASUS WSL field build reported:
+
+```text
+W: Cannot check Release signature; keyring file not available /usr/share/keyrings/debian-archive-keyring.gpg
+```
+
+This is **not** acceptable evidence for a release-quality image. The pinned
+upstream pi-gen bootstrap can continue downloading without a verified Debian
+Release signature in this situation. A completed image SHA256 and successful
+mounted-root checks do **not** retrospectively authenticate those packages.
+**Do not flash the affected image as a trusted release.**
+
+New Redux builds now enforce two independent source/build-host gates:
+
+1. `image/host_preflight.py` refuses the build **before any download** if
+   `/usr/share/keyrings/debian-archive-keyring.gpg` is missing, malformed,
+   writable by group/other, or does not contain the published Debian 12
+   archive and release signing key fingerprints. A packaged one-hop
+   `debian-archive-keyring.gpg -> debian-archive-keyring.pgp` sibling alias
+   is supported. GPG inspection uses a disposable temporary homedir;
+   the operator's keyring is not modified.
+2. `image/pigen_release_auth.py` adapts only the pinned upstream pi-gen
+   `scripts/common` bootstrap anchor to pass `--force-check-gpg`.
+   This prevents debootstrap's missing-keyring/HTTPS fallback from silently
+   weakening signature verification. A drifted upstream script stops staging.
+3. `scripts/qualify-field-image.py` rejects the final artifact if its
+   staged pi-gen bootstrap does not contain this exact mandatory signature
+   policy. A disk checksum alone cannot overrule a missing signing-key warning.
+
+On the **ASUS Ubuntu WSL host**, not the Pi, the normal packaged remedy is:
+
+```sh
+sudo apt-get update
+sudo apt-get install debian-archive-keyring gpgv
+```
+
+Only use your configured trusted Ubuntu package repositories. Do not download
+an unauthenticated keyring from random sites or use
+`--no-check-gpg`, `--allow-unauthenticated`, insecure APT overrides,
+or a skip switch. After provisioning, run a **fresh** image build in a
+new workspace; never restart pi-gen midway through an already bootstrapped
+unsigned root and assume it became trusted. The final build's actual logs
+must show successful `InRelease` authentication and no signature warnings.
+Keyring preflight alone is **not** signature-verification evidence.
+This change cannot modify a build launched from an earlier pinned snapshot.
+
+Debian 12 public fingerprints were cross-checked against the Debian FTP
+team's [archive signing-key registry](https://ftp-master.debian.org/keys.html).
+See [debootstrap's --force-check-gpg behavior](https://manpages.debian.org/bookworm/debootstrap/debootstrap.8.en.html).
+This is a build provenance control, not a Pi firmware or radio acceptance gate.
+
+## Mounted root-system export gate
+
+Before an exported image is unmounted or compressed, pi-gen now runs a
+read-only `image/root_payload.py` contract against the **assembled rootfs**.
+It verifies installed Redux runtime entrypoints, enabled systemd units,
+masks for conflicting legacy services, 0600 capture configs, passive radio
+defaults, capture directories and database paths on `/captures`,
+`overlayroot` policy and the correct Lite fstab or A/B RAUC wiring.
+For A/B, **both** mounted root slots are checked before the clone is closed.
+Service-enable symlinks are resolved **inside the exported guest root**:
+pi-gen/systemctl normally writes absolute `/etc/systemd/system/...` links
+which must not be interpreted against the Linux build host. The gate
+accepts only links back to the exact expected Redux unit and rejects
+redirected/escaping links. Regression tests also invoke real offline
+`systemctl --root` to guard this integration contract.
+
+A missing runtime file, broken unit link, unexpected writable location or
+missing update trust anchor stops export. Example manual read-only check
+against a *mounted* development image filesystem:
+
+```sh
+python3 image/root_payload.py --profile lite --root /path/to/mounted-root
+```
+
+The stage runs this gate alongside the existing boot-payload check. Passing
+either one proves only image **assembly**, not firmware boot, systemd
+execution, radio behavior or physical device acceptance.
+
+## First-boot partition safety (fixed root + REDUXCAP)
+
+The pinned Bookworm pi-gen stage2 adds the stock
+`init=/usr/lib/raspberrypi-sys-mods/firstboot` boot token and
+`resize2fs_once` SysV startup service. They expect the root filesystem
+to grow on first boot, but Redux places REDUXCAP **after** root (p3 in Lite,
+p6 in A/B). Auto-expansion would conflict with that fixed partition map.
+
+The image overlay stage now removes the known firstboot resize kernel
+argument, disables and removes the old init script, and masks the
+`resize2fs_once.service` unit. It deliberately fails if the upstream
+firstboot pattern or script is unfamiliar. During export the mounted
+boot/root gate verifies the resizer is absent and the service is masked
+in every exported slot; neither a Lite nor an A/B image may silently
+ship with auto-resizing enabled. **Do not re-enable stock root expansion**
+after flashing; any storage growth needs a partition-aware procedure.
+
+This intentionally changes the stock Raspberry Pi first-boot experience.
+**Secure headless access is available by opt-in at build time.** Generate
+your own SSH public key on the operator machine, for example:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/redux_dev -C redux-dev
+sudo env REDUX_OPERATOR_PUBKEY_FILE="$HOME/.ssh/redux_dev.pub" \
+  REDUX_BUILD_DIR=/your/ext4/workspace/redux-build ./build.sh
+```
+
+Only the single **public** key is accepted. Redux checks its OpenSSH
+format, rejects symlinks, private keys, malformed or multi-key inputs,
+and safely quotes the key in the generated pi-gen configuration.
+That mode enables SSH **public-key-only**, disables account password
+login, and disables the interactive first-boot user-rename workflow.
+The owner logs in using the configured `FIRST_USER_NAME` (default `field`).
+The private key stays exclusively on the operator's machine.
+
+The pinned pi-gen additionally **requires a nonempty** `FIRST_USER_PASS`
+when interactive user renaming is disabled. Redux now generates a different
+cryptographically random **192-bit local console password per image** and
+stores the credential in the build workspace's `operator-login.txt`,
+readable only by root (mode 0600). Its staging config is also private
+(0600); the password is not printed into logs and the plaintext host
+credential file is not installed into the image. For an optional SSH-key
+build, SSH continues to use public-key-only authentication. For local
+console login, inspect the credential on your own build host using
+`sudo cat /path/to/redux-build/operator-login.txt` and keep it private.
+
+### Disposable hardware-test login
+
+For a **development SD only**, run a fresh build with
+`REDUX_DEV_LOGIN=1`. This explicitly replaces the default long console
+password with the known test credentials **username `pi`, password `redux`**.
+By itself it keeps SSH off. With an explicit operator public key,
+it enables **public-key-only SSH** for convenient Ethernet testing; the
+shared console password is never accepted for SSH. The one-paste laptop
+helper in [FIELD_TEST.md](FIELD_TEST.md) generates the private key locally,
+builds a fresh test image, enables mDNS for `redux.local`, and bakes in
+an automatic, private capture-engine diagnostic report. Because these credentials are public,
+**never use this image on untrusted hardware or as a production deployment**.
+
+The same development build intentionally keeps PID 1's hardware-reset
+watchdog disabled (`RuntimeWatchdogSec=0`, `RebootWatchdogSec=0` and no
+additional `dtparam=watchdog=on`). The `redux.service` process watchdog
+remains enabled, allowing failed services to restart without causing the
+Pi itself to power-cycle. Re-enable the hardware watchdog only after
+recording successful boot and crash-recovery behavior on the actual board.
+
+```bash
+cd ~/redux-workbench-src
+git pull --ff-only
+set -o pipefail
+sudo env REDUX_DEV_LOGIN=1 REDUX_BUILD_DIR="$HOME/redux-image-build-03" \
+  ./build.sh 2>&1 | tee ~/redux-dev-build.log
+```
+
+Always use a **new ext4 workspace**; the source code, disk image and checksum
+from previous successful builds are left untouched. Flash this new
+development image to the **spare** SD, never the working Pwnagotchi card.
+The previous `-02` card's login does not change when a new build completes.
+
+Without `REDUX_OPERATOR_PUBKEY_FILE`, the image still has SSH disabled
+and no universal first-user password. Such a card is not headless-ready
+until some other deliberate, secure operator-specific provisioning route
+is provided. This is intentionally not a usable shared password.
+The hardware boot and actual SSH connection remain physical gates.
 
 ## Linux host
 
+**Pinned exporter compatibility gate.** After checking out the immutable
+`PI_GEN_REV`, `build.sh` now examines the actual fetched pi-gen exporter
+before downloading Nexmon or staging code. It validates the expected
+three-partition Lite exporter, PARTUUID substitution script, finalization
+and compression hooks, and their required ordering. Missing, duplicated
+or changed anchors fail the build with a JSON report identifying the
+incompatible script. This is an upstream source compatibility check,
+not an image build or boot test. It does not replace the later GPT A/B
+conversion, partition signature checks, or mounted boot-file export gate.
+
+To inspect a previously fetched checkout independently (read-only):
+
+```sh
+python3 image/pinned_pigen_contract.py /path/to/pi-gen
+```
 Use root on Debian/Ubuntu with network access, at least 30 GB free, and an ext4
 workspace without spaces. WSL2 can build under ARM emulation; use its persistent
 Linux filesystem, not NTFS or `/tmp`. Host prerequisites:
 
+Before downloading pinned sources or invoking any privileged builder, use:
+
+```sh
+./build.sh --check-host
+```
+
+This read-only preflight prints JSON and exits 0 only when its required
+host prerequisites are observed. It checks privilege, a **fresh** workspace
+path, ext4 filesystem, available scratch space (20 GiB absolute minimum,
+30 GiB recommended), expected tools, and working `arch-test arm64`
+(via binfmt/QEMU on x86_64). It reports each missing command by name.
+`REDUX_BUILD_DIR` selects the workspace to qualify. A warning between
+20 and 30 GiB is not a proven sufficient build size; increase free space
+for large capture partitions or the A/B layout. No network, downloads,
+partition writes, image creation or hardware checks occur in this probe.
+Full `./build.sh` now invokes this gate automatically before cloning upstream
+source trees. `--prepare-only` remains a source-staging operation, not a
+production build, and does not demand chroot or full-build host readiness.
+
+Install the needed host packages when the report identifies blockers.
+Ubuntu 26.04 (`resolute`) replaced the directly installable
+`qemu-user-static` with `qemu-user` and `qemu-user-binfmt`.
+Choose the package set matching your actual build host:
+
+**Ubuntu 26.04 / Resolute under WSL2:**
+
+The pinned pi-gen still checks the obsolete `qemu-arm-static` program
+while building ARM64 images. Redux modifies only the fetched pi-gen
+`depends` manifest to require `qemu-aarch64`, and only after
+`arch-test arm64` succeeds. It never fakes a system package; unexpected
+upstream changes stop the build. Genuine `bsdtar` from `libarchive-tools`
+still must be installed.
+
+
 ```sh
 sudo apt-get update
-sudo apt-get install git quilt parted coreutils qemu-user-static debootstrap \
-  libarchive-tools zerofree zip dosfstools e2fsprogs libcap2-bin grep rsync xz-utils curl xxd \
-  file kmod bc gpg pigz arch-test binfmt-support ca-certificates
+sudo apt-get install -y quilt parted debootstrap dosfstools zip zerofree \
+  arch-test pigz qemu-user qemu-user-binfmt binfmt-support libarchive-tools
+arch-test arm64
+sudo env REDUX_BUILD_DIR="$HOME/redux-image-build" ./build.sh --check-host
+```
+
+**Ubuntu 24.04 / Debian hosts with the older QEMU packaging:**
+
+```sh
+sudo apt-get update
+sudo apt-get install -y git quilt parted coreutils qemu-user-static debootstrap \
+  libarchive-tools zerofree zip dosfstools e2fsprogs libcap2-bin grep rsync \
+  xz-utils curl xxd file kmod bc gpg pigz arch-test binfmt-support ca-certificates
 sudo update-binfmts --enable qemu-aarch64
 arch-test arm64
-sudo ./build.sh
 ```
+
+The host gate now accepts either `qemu-aarch64` or
+`qemu-aarch64-static`, but always still requires **working** ARM64
+execution from `arch-test arm64`. Installing a QEMU executable by itself is
+insufficient. In WSL2, if `arch-test` fails after installing packages,
+check `binfmt_misc` support before running a full image build; do not
+fake the result with a manual symlink. Use a fresh ext4 work directory for each
+real build.
+
+The `REDUXCAP` partition defaults to 512 MiB for compatibility. For sustained
+passive capture on a larger SD card, explicitly choose an image capacity that
+fits both the card and the build host, for example:
+
+```sh
+sudo REDUX_CAPTURES_MIB=8192 REDUX_BUILD_DIR="$PWD/build/image-8g" ./build.sh
+```
+
+The supported build setting is 64–262144 MiB, subject to the underlying image
+size and filesystem capacity. It sizes the third ext4 partition at image-build
+time; it does **not** auto-expand a flashed card, erase existing capture
+data, or affect a running installation. Use a disposable SD card and allow
+sufficient scratch space for the uncompressed image. The original default
+is maintained unless this variable is supplied.
+
+For a second attempt after source staging, choose a **fresh**
+`REDUX_BUILD_DIR` such as `~/redux-image-build-02`. Do not delete or reuse
+an existing build tree if mounted resources may be present.
 
 The wrapper refuses existing build directories. Choose a fresh path for another
 run with `sudo REDUX_BUILD_DIR="$PWD/build/image-next" ./build.sh`. Filesystem
 mounts from a failed pi-gen run must be unmounted before removing any build tree.
 `--prepare-only` stages sources without root or image creation; it is not a build.
 
-Output: `build/image/pi-gen/deploy/image_*-pwnagotchi-redux-pi4-pi5-arm64.img.xz`.
+## Verify a transferred image before flashing
+
+Copy **all three** release files together: the compressed `.img.xz`,
+its `.img.xz.sha256`, and its `.img.xz.release.json` publication marker.
+After downloading or transferring them to a Linux host with Python 3:
+
+```sh
+python3 image/verify_release.py /path/to/pwnagotchi-redux.img.xz \
+  --expected-profile lite --trusted-sha256 TRUSTED_64_CHARACTER_SHA256
+```
+
+Change `lite` to `ab` for the opt-in signed-update partition profile.
+The verifier does not mount anything, require root or access a block device.
+It re-inspects the decompressed partition geometry and filesystem signatures
+and compares the entire observed release record to its manifest and checksum
+sidecar. It rejects stale, incomplete, mismatched, linked or tampered release
+components. Without `--trusted-sha256`, it confirms self-consistency **only**:
+an attacker could replace all three files together. A trusted digest must
+come from a separate authenticated channel; this does not authenticate an
+image cryptographically or prove it will boot.
+
+The removable-disk flasher now **requires this release triplet by default**:
+
+```sh
+sudo python3 image/flash.py /path/to/pwnagotchi-redux.img.xz \
+  --sha256 TRUSTED_64_CHARACTER_SHA256 --expected-profile lite \
+  --device /dev/sdX --dry-run
+```
+
+First inspect the dry-run report and confirm `/dev/sdX` is your **spare**,
+unmounted and genuinely removable development card. For the destructive
+write, omit `--dry-run` and add `--confirm-device /dev/sdX`.
+Flashing checks the release before even querying the target device and
+continues to flush and read back every written byte. `--checksum-only`
+remains an explicit, weaker legacy override for artifacts without the
+published triplet; it still requires an independently trusted SHA256,
+removable whole disk, and explicit erasure confirmation. Do not use this
+override for normal Redux releases. Neither method tests Pi hardware.
+
+Output: `build/image/pi-gen/deploy/*.img.xz` with a matching
+`.img.xz.sha256` checksum and `.img.xz.release.json` provenance manifest.
+The wrapper streams and verifies the complete xz payload without mounting
+the image. **Release publication is fail-closed:** the publisher locks the
+compressed source image while it validates and writes metadata, first
+invalidates sidecars from any previous attempt, and writes the checksum
+before the manifest. The atomically written `.img.xz.release.json` manifest
+is the final *publication completion marker*. An interrupted write before
+that point is not a completed release even if an orphan checksum remains
+after a process crash. Hand-off tooling must require both a valid matching
+`.sha256` and `.release.json`; never treat a checksum alone as an approved
+release. A failed rerun removes old sidecars rather than leaving obsolete
+provenance for a now-invalid image. No file metadata asserts boot or
+hardware validation. The default Lite profile requires three non-overlapping MBR
+partitions with REDUXCAP in p3. The optional A/B profile requires six named
+GPT partitions (REDUXCTRL, REDUXBOOTA, REDUXBOOTB, REDUXROOTA, REDUXROOTB,
+REDUXCAP), valid primary and backup GPT headers/entry arrays and their CRC32
+checksums, consistent disk geometry and REDUXCAP in p6. Both profiles verify
+the capture partition's ext4 superblock magic and `REDUXCAP` filesystem label,
+then record exact Redux, pi-gen and Nexmon source revisions. The release
+manifest identifies the observed partition-table profile. **Publication is
+also bound to the selected build profile.** Standard Lite builds must export
+three-partition MBR images; builds opting into a signed A/B profile must
+export six-partition GPT images. The wrapper passes
+`--expected-profile lite|ab` to `image/release_manifest.py` based on the
+build's selected `REDUX_OTA_CERT` profile. A mismatch terminates before
+writing `.release.json` or `.sha256` companion files.
+
+Standalone inspection without `--expected-profile` still identifies the
+observed layout, but records `profile_match_verified: false` rather than
+claiming a configured-build match. Accepted builds record
+`profile_match_verified: true`, `image_profile`, and `partition_table`.
+This validates the image format, not that OTA updates or firmware boot work. It **explicitly records `hardware_tested: false`**; file-integrity
+verification is not Pi boot verification. A missing, truncated, undersized, or
+ambiguous image causes release publication to fail.
+**Pre-export boot payload gate:** the image builder also inspects the actual
+mounted boot partition before pi-gen unmounts it. A missing or empty
+`kernel8.img` (Pi 4), `kernel_2712.img` (Pi 5), board-specific DTB,
+`start4.elf`/`fixup4.dat`, `config.txt`, or `cmdline.txt` prevents export.
+The gate requires ARM64 configuration and one plausible root selector;
+on A/B exports it validates the control FAT selector, distinct root PARTUUIDs,
+slot A/B cmdlines, and byte-identical shared firmware/kernel files while both
+boot slots are mounted. It is host-side source/export evidence, **not** a
+filesystem fsck or proof that firmware, kernel, initramfs, and radio boot.
+No checker writes to the working Jayofelony SD. The extra checks are enabled
+for both image profiles automatically when running `build.sh`; operators do
+not need to enable a new service on the Pi.
+
+Additional release checks require actual filesystem signature evidence for
+**every** partition: FAT32 boot and ext4 root/captures on Lite MBR, or
+FAT16 selector, FAT32 Boot A/B, and ext4 Root A/B/captures on A/B GPT.
+GPT filesystem labels and partition-unique GUIDs must match the expected
+slot topology. The image manifest records each observed signature and sets
+`filesystem_checked: false` because a boot-sector or superblock signature
+is not a full fsck, proof of kernel files, or evidence that either Pi boots.
+Both hardware and boot qualification remain explicitly false.
+
 Only the redux stage exports an image; there is no desktop stage.
 
 For local login, country, locale or timezone provisioning, pass a private shell
@@ -70,6 +418,148 @@ default. The wrapper fixes the release and stage list; arm64 is fixed by pi-gen.
 
 Pinned upstream references: [pi-gen arm64 Bookworm](https://github.com/RPi-Distro/pi-gen/tree/816f458a9931e216ecf8969e13b4d0ca39947d1f),
 [maintained nexmon](https://github.com/jayofelony/nexmon/tree/1654e1857766df92086dbfbed5ffd288efc9bd8c).
+
+## Optional 480×320 graphical kiosk profile (manual X11)
+
+The separate [display hardware acceptance guide](DISPLAY_ACCEPTANCE.md) now provides
+`redux-display-diag` for read-only framebuffer/input discovery, authenticated
+X11 device evidence, and opt-in ADS7846 raw tap samples. It leaves actual
+pixel visibility, calibration and Pi 4/Pi 5 acceptance explicitly pending.
+
+The base image remains **Pi OS Lite**, not a full desktop. It always ships
+`/usr/local/bin/redux-kiosk`, a Python standard-library preflight/launcher,
+but deliberately does **not** install Chromium/X11 or auto-start a browser.
+This avoids turning every passive capture appliance into a heavy desktop,
+and prevents a guessed framebuffer from blanking a working HDMI console.
+
+To stage the **opt-in** browser stack, build a fresh image with:
+
+```sh
+sudo REDUX_KIOSK_PROFILE=manual-x11 REDUX_BUILD_DIR="$PWD/build/image-kiosk" ./build.sh
+```
+
+`manual-x11` adds Debian Bookworm ARM64 Chromium, Xorg/fbdev,
+xinit, Xauthority, `x11-utils` (`xdpyinfo`) and libinput packages. The profile is recorded in
+`/usr/share/redux/kiosk-profile`; the exact installed package versions
+remain in the image's `/usr/share/redux/packages.tsv`. Chromium is
+substantial (the browser package alone occupies hundreds of MiB, before
+dependencies), so account for the larger root filesystem and RAM use.
+An unsupported profile fails the image build. The profile also installs
+an **inactive user-scoped** `redux-kiosk.service` into
+`/usr/lib/systemd/user/`, plus a deliberately invalid framebuffer template
+in `/usr/share/redux/kiosk.example.env`. Neither a system service nor a
+user service is enabled automatically. Redux's independent capture
+supervisor remains untouched.
+
+**On the separate development SD card, after confirming the actual TFT:**
+
+1. Identify the GPIO SPI framebuffer from
+   `cat /proc/fb`, `cat /sys/class/graphics/fb*/name`, and
+   `cat /sys/class/graphics/fb*/virtual_size`. Do **not** assume fb1.
+   Confirm ILI9486 versus the actual panel board; the existing
+   `REDUX_TFT_PROFILE=mpi3501` is **not** a universal Waveshare/XPT2046
+   driver and does not include proven touch calibration.
+2. Confirm `redux-live.service` is running and
+   `curl --fail http://127.0.0.1:8080/api/status` returns a real
+   Doctor JSON report. The browser does not start the radio.
+3. Start an actual X11 session **locally as a non-root console user**.
+   Configure the Xorg `fbdev` driver for the verified framebuffer;
+   for example, the device section must use your observed
+   `Option "fbdev" "/dev/fbN"`, not a copied `fb1` value.
+   Test Xorg, the framebuffer orientation and the XPT2046 input
+   mapping separately. Session setup and permissions vary by image
+   and must be validated before enabling any boot automation.
+4. Inside that X11 session with a writable `XDG_RUNTIME_DIR`, use
+   `redux-kiosk --check --framebuffer /dev/fbN` (replace fbN with
+   the actual device). This prints a structured JSON report and exits
+   nonzero if the framebuffer, 480×320/320×480 mode, browser, unprivileged
+   graphical environment or local dashboard cannot be verified. The
+   preflight additionally requires an accepting **local X11 UNIX socket**
+   (`DISPLAY=:0`, `:1`, etc.) and invokes `xdpyinfo` through the actual
+   logged-in X11 authorization to confirm the X11 root window itself is
+   480×320 or 320×480. An existing 480×320 framebuffer with a separate
+   1920×1080 HDMI desktop now fails preflight instead of opening the kiosk
+   on the wrong screen.
+5. Only after a passing check, run
+   `redux-kiosk --launch --framebuffer /dev/fbN`.
+   It replaces itself with sandboxed Chromium in kiosk mode at
+   **http://127.0.0.1:8080/**, with a private browser profile under
+   the session's temporary runtime directory. It does not enable
+   `--no-sandbox`, download web assets, open a remote address or
+   start a web server.
+
+### Optional supervised browser after a verified X11 session
+
+`redux-kiosk --supervise --framebuffer /dev/fbN` runs the same preflight as
+`--launch`, then restarts Chromium after an unexpected exit, with at most
+five attempts per supervisor instance and a three-second delay. A normal
+Chromium exit (code 0) stops cleanly. SIGINT/SIGTERM are relayed through a
+bounded child-reaping path: if the browser ignores graceful termination,
+the supervisor escalates to a kill rather than hanging indefinitely.
+The command remains unprivileged, uses the current real X11 session, and
+does **not** create an Xorg server.
+
+Only after the TFT, framebuffer, touch orientation, browser sandbox and
+Xorg session work, an operator may start the *inactive* user service.
+Run the following as the same local, logged-in graphical user (not root):
+
+```sh
+mkdir -p "$HOME/.config/redux"
+chmod 700 "$HOME/.config/redux"
+cp /usr/share/redux/kiosk.example.env "$HOME/.config/redux/kiosk.env"
+chmod 600 "$HOME/.config/redux/kiosk.env"
+# Edit REDUX_FRAMEBUFFER=/dev/fbN to YOUR verified device.
+${EDITOR:-vi} "$HOME/.config/redux/kiosk.env"
+# Ensure the user service manager sees your actual X11 authorization/session.
+systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR
+systemctl --user daemon-reload
+systemctl --user start redux-kiosk.service
+systemctl --user status redux-kiosk.service
+```
+
+The mandatory `~/.config/redux/kiosk.env` must contain
+`REDUX_FRAMEBUFFER=/dev/fb<actual_number>` and
+`REDUX_DASHBOARD_PORT=8080`. The committed example uses **invalid**
+`/dev/fbN` deliberately. A missing or incorrect framebuffer, missing
+dashboard, missing X11 session, or insecure browser profile prevents
+browser launch. The user service performs the same preflight as
+`ExecStartPre` and has a short bounded restart/start-limit policy to avoid
+an endless browser crash loop. Stop it at any time with
+`systemctl --user stop redux-kiosk.service`; if it hits the start limit,
+diagnose the real underlying problem using
+`journalctl --user -u redux-kiosk.service` before using
+`systemctl --user reset-failed redux-kiosk.service`.
+
+Do **not** `enable` this unit for automatic graphical-session startup
+until repeated physical boot/display/touch tests have passed. It is not
+a graphical-session manager: the operator must bring up the correct
+Xorg/fbdev environment first. It runs only in the user's existing
+X11 environment and does not access Bettercap REST or other privileged
+capture controls. The systemd service uses control-group cleanup to
+stop Chromium descendants if normal shutdown cannot reap them.
+
+The preflight intentionally reports `touch_verified: false` and
+`physical_display_verified: false` even when software checks pass. A
+matching X11 root resolution still does **not** prove that Xorg is driving
+the specific SPI framebuffer, or that the touch input device is mapped,
+rotated and calibrated; the operator must confirm those physically.
+The active Xorg seat, framebuffer mapping, SPI performance, touch
+coordinates/rotation, screen visibility, and reboot behavior are
+separate hardware acceptance gates. In particular, Xorg or Chromium
+may fail to use a legacy SPI fbdev node on a given target kernel.
+Do not call this profile plug-and-play or mark the physical TFT tested
+until the actual device proves it.
+
+## Headless first-boot acceptance
+
+The standalone image installs `redux-boot-check` without a graphical
+session, radio test, or automatic boot hook. See
+[BOOT_ACCEPTANCE.md](BOOT_ACCEPTANCE.md) for an explicit operator-invoked,
+read-only evidence workflow. It verifies mounted filesystem types/modes and
+REDUXCAP provenance, systemd unit state, baked manifest presence and the
+local Doctor JSON endpoint, without treating software evidence as physical
+Pi 4/Pi 5 qualification. An absent fact is UNKNOWN, never silently OK.
+The additional `--strict` switch makes unknown evidence a nonzero exit.
 
 ## Verification
 
@@ -116,14 +606,18 @@ No physical success or sub-15-second boot claim is inferred from QEMU tests.
 
 `overlayroot` from Debian is configured as `tmpfs:recurse=0`: the lower root is
 read-only and the upper root is RAM. Recursion is disabled so `/captures` remains
-writable. The export patch adds a third, 512 MiB ext4 partition labeled REDUXCAP
+writable. The export patch adds a third, 512 MiB by default (operator-resizable at build
+time) ext4 partition labeled REDUXCAP
 before loop attachment, formats it, and creates `/captures/redux` owned by the
-service account with mode 0700. Unsupported upstream layout changes fail closed.
+service account with mode 0700. The private live engine later uses this directory; the
+unprivileged watchdog/bootstrap stores its own checkpoint in `/captures/boot`.
+Unsupported upstream layout changes fail closed.
 The root and captures sizes are separate; captures can be recovered independently.
 
 Boot firmware mounts read-only. Swap is masked, the journal is volatile and capped
-at 16 MiB, and redux requires the captures mount before starting. Service state
-belongs in `/captures/redux`, never the ephemeral root. Captures uses ext4's journal;
+at 16 MiB, and redux requires the captures mount before starting. Persistent service state belongs under `/captures` (`/captures/boot` for the
+unprivileged bootstrap and `/captures/redux` for live engine data), never the
+ephemeral root. Captures uses ext4's journal;
 yanking power may still lose unsynced captures or damage an SD controller. This
 protects root writes, not every possible storage failure.
 
@@ -172,12 +666,23 @@ A stalled loop therefore cannot keep itself alive through a separate timer threa
 This checks the bootstrap loop; it does not claim health coverage for RF workers
 that the lead has not connected to this entrypoint.
 
-`/captures/redux/boot.json` records real UTC startup/shutdown times and whether the
-previous shutdown was committed. Replacement syncs the temporary file and parent
-directory. Missing or corrupt records have explicit reasons; unclean restart
-resumes the passive bootstrap and never replays radio actions. Storage failure
-prevents readiness, allowing systemd to restart the process rather than report a
-healthy service with lost state.
+`/captures/boot/boot.json` records real UTC startup/shutdown times, the kernel boot
+ID, the supervised process ID, and whether the previous shutdown was committed.
+Replacement syncs the temporary file and parent directory. Missing or corrupt
+records have explicit reasons; unclean restart resumes the passive bootstrap and
+never replays radio actions. The image entrypoint also requires a writable ext4
+REDUXCAP mount identity before it can send `READY=1`. Storage failure prevents
+readiness, allowing systemd to restart the process rather than report a healthy
+service with lost state.
+
+An A/B candidate is not committed merely because `redux.service` is active. The
+OTA health gate authenticates that checkpoint against the current kernel boot ID
+and the exact stable service PID throughout its observation window. Missing,
+partial, stale, clean-shutdown, oversized, or symlinked checkpoint evidence fails
+closed. If an unhealthy tryboot candidate survives the rollback deadline, the
+deadline service requests a reboot and deliberately fails if the request does not
+complete within 15 seconds; systemd retries every 30 seconds without changing the
+committed firmware selector.
 
 **Hardware gates on Pi 4 and Pi 5:** record `cat /sys/class/watchdog/watchdog0/identity`,
 `systemctl show --property=RuntimeWatchdogUSec --property=RebootWatchdogUSec`,
@@ -400,3 +905,411 @@ call `bash image/ci.sh` from its workflow.
 This CI builds no image and requires no root, ARM emulator, card or radio. Full
 arm64 image export and physical Pi 4/5 boot/storage/watchdog/rollback checks remain
 separate build and hardware gates; a green dry run does not establish boot success.
+
+## Post-build country-bound field image qualification
+
+The country selected at build time is now an export contract, not merely a
+file copied into the staging tree. For a field image built with the explicit
+US country selection, the exporter's mounted root gate requires
+/etc/redux/regulatory-country to contain exactly US on the actual root
+filesystem before any unmount/compression. For A/B exports, this is
+checked independently in both mounted root slots. Missing, invalid, stale,
+or mismatched country files stop export. Generic builds without an explicitly
+selected country retain their fail-closed runtime behavior.
+
+After pi-gen finishes its existing streaming xz/partition/checksum validation,
+the laptop-side field builder now runs scripts/qualify-field-image.py BEFORE
+updating the redux-field-latest symlink or printing SUCCESS. It checks the exact
+compressed artifact's SHA-256 against both producer sidecars, the selected
+disk-layout profile, REDUXCAP partition metadata, Git source revision,
+staged country and passive runtime configuration, and the export script's
+mounted-root country gate. A dirty source checkout is rejected before
+building. The qualifier is read-only and does not decompress, mount,
+reflash, or contact the Pi; it relies on the producer's earlier xz and
+filesystem signature checks. A successful qualification remains NOT
+proof of physical boot or RF capture.
+
+The operator builds from a fresh, clean checkout:
+
+    cd ~/redux-workbench-src && git pull --ff-only && bash scripts/build-field-image.sh
+
+The build still requires a suitable Ubuntu WSL ext4 workspace, available
+build dependencies and sudo for pi-gen. A real compressed disk artifact exists
+ONLY after the operator actually runs the builder; GitHub CI alone
+does not create a hardware-tested distributable SD image.
+
+## Safe publishing of the latest field build
+
+The `build-field-image.sh` wrapper refuses to reuse an occupied
+`~/redux-field-latest` ordinary file/directory. It now creates a replacement
+symlink and atomically swaps that pointer only AFTER the artifact qualifier
+succeeds; a failed build retains the old last-known-good symlink. This
+protects against showing the previous artifact as a successful new image.
+See [FIELD_ACCEPTANCE.md](FIELD_ACCEPTANCE.md) for physical acceptance gates.
+
+## First standalone Redux Pi 4 boot — operator field observation (2026-10-12)
+
+Evidence: operator provided a photograph of `sudo redux-report --full` at
+`2026-10-12T19:33:36+00:00` after flashing and logging into the *separate*
+Redux SD. Build helper previously reported:
+`/home/dad/redux-field-20261012-125118/pi-gen/deploy`, with successful
+image qualification. This report reflects **one on-device snapshot**, not
+a multi-hour stability run. No private capture data or device identifiers
+were copied to the repository.
+
+**Observed on the Pi 4 (pass for these narrow checks):**
+
+- Boot and local login worked; `redux.service`, `redux-live.service` and
+  `redux-capture-ingest.timer` all reported `active`.
+- Runtime reported `live_state: running`, `capture_radio: wlan0`,
+  `dashboard: True`, no displayed `last_error`, `engine_attempts: 2`,
+  `failure_streak: 0`, and no retry delay.
+- Reported dedicated ext4 capture mount: `captures_ext4: True`.
+  The reporter's mount predicate passed, but partition label, inode
+  continuity and reboot persistence were not independently measured.
+- Global cfg80211 country read **US** (DFS-FCC); both displayed Wi-Fi and
+  Bluetooth devices had no software or hardware rfkill block.
+- Actual `iw dev` output showed **wlan0 in monitor mode**, channel 11,
+  2462 MHz, 20 MHz width.
+- Bettercap 2.32.0 output appeared in the sanitized engine log.
+  An unauthenticated loopback REST request returned **HTTP 401**, which
+  confirms a responding, authentication-gated API endpoint, **not** a
+  complete authenticated session or cryptographically valid capture.
+- Runtime counters reported `events_seen: 6` and `handed_off: 0`.
+
+
+### Follow-up after 15 minutes — 2026-10-12T19:48:26Z
+
+A second photograph of `sudo redux-report --full` on the same separate Pi 4
+image showed: `live_state: running`, `wlan0` in monitor mode on channel 11,
+`captures_ext4: True`, all three reported services active, global country US,
+no Wi-Fi rfkill, localhost Bettercap REST returning HTTP 401,
+`failure_streak: 0`, and no current `last_error`. Changes since the earlier
+19:33:36Z report: `engine_attempts: 2 -> 4`, `events_seen: 6 -> 12`,
+`handed_off: 0 -> 0`. This is one more healthy status snapshot, not proof of
+channel hopping, actual frame volume, handshake material or processing.
+
+**Source interpretation:** `engine_attempts` increases whenever a Bettercap
+child launches, including the deliberate five-minute rotation. `events_seen`
+counts Augur bus `Signal.EVENT` emissions, not raw received 802.11 frames.
+The `_handoff` routine refuses absent or zero-byte PCAPs, which can explain
+`handed_off: 0` during otherwise healthy passive observation. It is not
+by itself evidence of a failed rotation. Next check the on-device active/incoming
+capture directory sizes and `handshake_events` (from the private live checkpoint)
+without printing capture contents or REST credentials. Do not force a handshake,
+deauth an AP, reflash, or claim a completed capture solely from event counts.
+
+**Still open:** The six reported events have not been independently tied
+to specific received radio frames. No closed-file handoff has yet been
+observed, and no ingestion/conversion ledger or valid owned-AP handshake
+has been verified. Also pending: clean cold reboot/country persistence,
+time-under-load, full touch/TFT, and the Pi 5 build/boot qualification.
+Do not promote the full image/capture/hardware gates to complete on this
+snapshot alone.
+
+**Immediate next gate:** Keep the Pi running beyond one configured
+capture-rotation interval (nominally five minutes), re-run
+`sudo redux-report --full`, and verify real closed-capture handoff and
+the processor ledger; if `handed_off` remains zero, inspect logs and
+rotation configuration without changing capture files or reflashing.
+Record the exact image SHA-256/source revision from the local build's
+manifest before associating this observation with a release artifact.
+
+### Read-only SSH follow-up — 2026-10-12
+
+After the operator independently verified the host key at the physical Pi,
+strict SSH diagnostics reported 12 field-acceptance passes, no failures,
+and one UNKNOWN (closed capture handoff). The live configuration uses
+`rotation_seconds = 300`. Both `/captures/active` and `/captures/incoming`
+were empty. The worker ledger was available with a fresh completed scan,
+zero examined files, zero artifacts and no scan error. Recent bounded
+service journal samples contained no error/failure/traceback lines.
+
+Two runtime snapshots showed `engine_attempts: 56 -> 57` and
+`events_seen: 168 -> 171`, while `handshake_events` and `handed_off`
+remained zero. The sighting database contained zero rows. This verifies
+worker execution and runtime activity, but **does not verify RF reception**.
+No completed capture was available to test handoff or conversion. The
+reason no RF sightings/captures were recorded remains unestablished;
+zero handoffs alone does not justify a pipeline repair.
+
+The local report source now includes the existing `handshake_events`
+counter, independently of general event activity. This source change was
+not deployed to the Pi. No service, radio, package, capture or installed
+software changes were made on the physical target during these diagnostics.
+
+### Radio-driver investigation — 2026-10-12
+
+Further strict-SSH, read-only diagnostics found `wlan0` in monitor mode on
+channel 7, with zero RX packets/bytes and zero TX packets. Bettercap was
+v2.32.0. The kernel was `6.12.109+rpt-rpi-v8`; the selected module path was
+the installed `updates/brcmfmac.ko`, with matching version metadata.
+Both installed Nexmon firmware and driver checksum manifests passed.
+These checks establish installed-file integrity, not successful frame reception.
+
+The kernel journal contained thousands of repeated
+`brcmf_cfg80211_nexmon_set_channel: Set Channel failed` errors with result
+`-52`. A bounded latest sample repeatedly reported chanspecs 53282,
+53286, 53290 and 53294. No capture processing failure is established by
+these radio errors, and their role in the absence of all received frames
+remains a hardware investigation.
+
+Inspection of the pinned upstream Nexmon source found that its 6.12 monitor
+channel callback logs firmware failure but unconditionally returns zero.
+The local image-build patch now returns the actual firmware result instead.
+The pinned 6.18 implementation already propagates errors and is preserved.
+The patch was exercised against both pinned source files and hardware-free
+regression fixtures. This is a failure-reporting correction, **not** a
+verified RF fix or proof that a new ARM64 module/image has been built.
+No replacement module was loaded and no physical Pi configuration was changed.
+
+Source: [pinned maintained Nexmon 6.12 callback](https://github.com/jayofelony/nexmon/blob/1654e1857766df92086dbfbed5ffd288efc9bd8c/patches/driver/brcmfmac_6.12.y-nexmon/cfg80211.c).
+
+A subsequent read-only check found `/sys/class/net/wlan0/type` equal to
+`1` (Ethernet link type) despite `iw` reporting monitor mode. Installed
+Nexutil help documents `-m, --monitor[=INT]` as Set/Get; querying with
+`sudo -n nexutil -I wlan0 -m` (no value supplied) returned `monitor: 0`.
+This establishes that the reported cfg80211 interface mode and firmware
+monitor setting disagree. Firmware monitor enablement and a native
+radiotap capture interface remain unverified. No `-m2` setter, interface
+creation, service restart or other radio change was performed.
+
+### Approved one-minute firmware monitor test — 2026-10-12
+
+The operator approved a bounded `nexutil -I wlan0 -m2` test followed by
+restoration to `-m0`. Firmware mode 2 was confirmed before sampling.
+Measured RX increments were 418 packets/31,676 bytes after 20 seconds,
+737 packets/63,775 bytes after 40 seconds, and 1,198 packets/101,992 bytes
+after 60 seconds. TX, RX-error and RX-drop counters stayed at zero.
+This demonstrates receive traffic after firmware monitor enablement; it
+does not verify decoded access points, handshake capture or conversion.
+
+The netdev retained Ethernet link type 1 throughout. Runtime event,
+handshake and handoff counters did not increase. The supervisor rotated
+normally during the test (`engine_attempts: 70 -> 71`); the test did not
+request that restart. The journal query returned exit 1, so its reported
+zero channel-error count is **unusable evidence**, not a passing check.
+The final firmware query confirmed restoration to `monitor: 0`.
+No native monitor interface was created and no installed software changed.
+
+The local field report now measures `capture_link_type` for the selected
+interface. Field acceptance requires raw 802.11 (ARPHRD 801) or radiotap
+(803); Ethernet type 1 fails even when `iw` says monitor. An older report
+without this measurement stays UNKNOWN. Log-tail text cannot supply a
+missing header measurement. These reporting changes are not deployed.
+
+### Approved native-interface experiment — 2026-10-12
+
+The operator approved a temporary native radiotap interface, live-service
+stop/start, and restoration afterward. SSH was verified to route over
+Ethernet. NetworkManager and its global supplicant service were active,
+but no supplicant session was attached to `wlan0`. NetworkManager marked
+the primary Wi-Fi interface managed but unavailable. Only test Wi-Fi
+ownership was temporarily released; Ethernet and manager services were
+left running.
+
+The driver created `reduxmon0`, but NetworkManager did not expose that
+temporary device (`nmcli` exit 10). The experiment aborted before interface
+activation or any timed capture sample. Cleanup removed the temporary
+interface and restored firmware mode 0 and the primary's managed setting.
+Returning `wlan0` to monitor mode failed with `Device or resource busy
+(-16)`, including a separate recovery attempt with NetworkManager ownership
+released. The driver logged `iface validation failed: err=-16`.
+`redux-live.service` was active afterward, but runtime was **degraded**,
+with `wlan0` managed. Restoration to the prior running state was **not**
+verified. No new RF reception, decoded sightings or handoff claim follows
+from this aborted test. Reloading the driver requires separate approval.
+
+Pinned Nexmon `core.c` inspection found that `brcmf_net_mon_attach` omits
+the `brcmf_cfg80211_free_netdev` destructor installed by normal netdev
+attachment. That destructor releases the cfg80211 VIF. A stale monitor
+VIF after netdev deletion is a plausible explanation for failed interface
+combination validation; this is source-backed reasoning, not a measured
+dump of the driver's internal VIF list.
+
+The local build patch now installs that destructor after successful
+monitor-netdev registration, preserving existing registration-failure
+cleanup. The adjustment was exercised against both pinned 6.12 and 6.18
+source files and synthetic hardware-free regression tests. No rebuilt
+ARM64 module was produced or deployed during this experiment.
+
+Source: [pinned maintained Nexmon netdev lifecycle](https://github.com/jayofelony/nexmon/blob/1654e1857766df92086dbfbed5ffd288efc9bd8c/patches/driver/brcmfmac_6.12.y-nexmon/core.c).
+
+### Single controlled existing-driver recovery — 2026-10-12
+
+The operator explicitly approved one graceful unload/reload of the existing
+`brcmfmac` driver, with no forced removal, driver rebuild/deployment,
+experimental-interface retry, reflash or reboot. The SSH return route was
+verified as `eth0` before changes. Sanitized before/after output was saved
+on the WSL host at `/tmp/redux-controlled-recovery-sanitized.txt`; no raw
+logs, RF identifiers, credentials or captures were saved in this record.
+
+Before recovery, all three Redux services/timer and NetworkManager were
+active, but runtime was degraded (`failure_streak: 7`), with no engine
+launches in the current supervisor process. `wlan0` was managed, link
+type 1, and firmware monitor mode 0.
+
+`redux-live.service` was stopped and confirmed inactive. Plain
+`modprobe -r brcmfmac` succeeded; `/sys/module/brcmfmac` disappeared.
+Plain `modprobe brcmfmac` succeeded; the module and `wlan0` reappeared.
+The selected module path remained
+`/lib/modules/6.12.109+rpt-rpi-v8/updates/brcmfmac.ko`.
+No replacement driver was built, installed or selected.
+
+After starting `redux-live.service`, a bounded 35-second wait did **not**
+verify a running runtime. The three Redux units and NetworkManager were
+active, and the checkpoint reported dashboard availability, but runtime
+remained degraded (`failure_streak: 3`, `engine_attempts: 0`). The radio
+was still managed, link type 1, with firmware monitor mode 0. The
+unauthenticated Bettercap loopback probe failed with connection refused;
+the subsequent Doctor HTTP check was not reached. Service activity is
+not proof of engine/radio recovery or measured dashboard health.
+
+Recovery stopped on that unexpected error as instructed. No second driver
+reload, further Pi mutation, experimental-interface retry, reboot or
+reflash followed. The existing-driver reload was verified; restoration of
+a running capture engine **failed**. The next recommended investigation is
+read-only classification of the current engine-launch error and recent
+driver/interface-combination diagnostics, alongside NetworkManager's
+ownership state, before approving another physical recovery or test.
+
+### Approved regulatory restoration and automatic retry — 2026-10-12
+
+A subsequent read-only launch-error classification found
+`selected regulatory country is not active`: the image remained configured
+for US, but the kernel global domain was `00` after module reload. Wi-Fi
+rfkill was unblocked. This explains the immediate post-reload launch failure;
+it does not prove the earlier interface-lifetime fault was fixed.
+
+The operator separately approved restarting only `redux-regdom.service`
+to reapply the existing US configuration. Ethernet SSH was verified first.
+The service completed, global country US was confirmed, and the existing
+live supervisor was observed through its automatic backoff without a
+`redux-live` restart or further driver reload. Its next attempt reached
+`running` on `wlan0`, with `engine_attempts: 1`, `failure_streak: 0`,
+and an empty current runtime error. No temporary interface remained.
+
+The original radio limitation remains: `iw` reports monitor mode, while
+the packet link type is Ethernet 1 and Nexutil reports firmware monitor 0.
+No handshake or closed handoff was observed. Regulatory/service recovery
+is verified; native RF capture is **not** verified.
+
+The local monitor-cleanup tests now compile and execute synthetic host C
+fixtures with a modeled reference-counted netdev lifecycle. They cover
+32 repeated success/failure cycles, delayed final-reference release, and
+duplicate-release prevention. An unpatched negative control retains the
+stale VIF. These checks do not compile an ARM64 driver or exercise a real
+kernel's unregister path. The patcher also rejects an existing destructor
+that is unconditional or installed before registration succeeds.
+
+### Read-only summary collector validation — 2026-10-13T02:34:27Z
+
+The new source `redux-report --summary` was streamed over verified strict
+SSH into a temporary Python process, with bytecode writing disabled. It
+was not installed or saved on the Pi. The allowlisted JSON reported all
+three Redux units active, REDUXCAP mounted, global/configured country US,
+unblocked Wi-Fi, and the unauthenticated Bettercap probe returning 401.
+Runtime was running with `engine_attempts: 4`, `events_seen: 12`, zero
+failure streak and no current classified error. The selected `wlan0`
+reported monitor mode on channel 40 but retained Ethernet link type 1.
+Both capture inventories were empty. The worker heartbeat was present
+with zero scanned files/artifacts and no scan-record error. Handshake
+events and handoffs remained zero. These are service/worker observations,
+not successful native RF reception or handshake conversion.
+
+Summary regression tests cover withheld operator-supplied filenames,
+bounded enumeration, missing/malformed telemetry, secret text exclusion,
+and checkpoint refusal of symlinks, FIFOs and oversized/growing files.
+
+Hardware-free image CI now requires a host C compiler (`cc`, or the `CC`
+environment override) and `ld` in addition to Python, Bash and shellcheck.
+They compile/link the synthetic lifecycle fixture only. The preflight checks
+these tools before the test suite starts; neither this host fixture nor a
+passing image CI run builds the target ARM64 Nexmon module.
+
+### Read-only reconnect and image preparation — 2026-10-15
+
+The checkout was clean on `human/redux-workbench` and synchronized to
+`c0cb265`. The prior Pi address accepted strict SSH with the previously
+trusted host key; no discovery scan or key replacement was needed.
+The 13:05:48Z summary reported all three Redux units active, REDUXCAP
+mounted, US selected globally and in config, Wi-Fi unblocked, and Bettercap
+HTTP 401. Runtime was running with no failure streak. The selected
+monitor-labeled `wlan0` had Ethernet link type 1, and both capture directories
+and the artifact ledger were empty. No handshake/handoff was observed.
+
+At 14:33:57Z, the source collector's new freshness measurement observed
+a 1.4-second-old running checkpoint and another fresh empty worker scan.
+The interface still had link type 1, and a separate read-only Nexutil query
+returned monitor 0. Engine/event counters differed between the two
+snapshots (700/2100 versus 18/54); their reset cause was not investigated.
+Do not treat those process-local counts as monotonic RF measurements.
+No service restart, radio setting, driver reload or other Pi mutation was
+performed by this reconnect/diagnostic work.
+
+The local field checker now assesses the checkpoint timestamp independently
+of its saved state: <=12 seconds is fresh, older is stale, future/invalid
+values fail, and absent values remain UNKNOWN. The threshold matches the
+browser's existing stale-runtime indication. Synthetic tests cover stale
+running labels, boundary times, malformed/future timestamps and old helpers.
+
+Fresh image preparation is separately authorized. Read-only host preflight
+confirmed ARM64 userspace execution, all image-build dependencies, ext4 and
+ample scratch space. Local noninteractive sudo failed because interactive
+authentication is required. A private, ignored build launcher and source
+snapshot were staged locally; no new image build or qualification is claimed
+until privileged build execution and the artifact checks actually complete.
+
+### Local ARM64 compilation and trust rejection — 2026-10-15
+
+The operator started the private local launcher from frozen source
+`0403c396fcf932fbfd9b5fe71f9fc9894d76b041`. Its build log records
+successful `brcmfmac.ko` links for both installed targets:
+`6.12.109+rpt-rpi-2712` and `6.12.109+rpt-rpi-v8`. The installer
+advanced through both mandatory vermagic checks, kernel holds and Redux
+service staging into image export. This is actual ARM64 compiler/linker
+evidence for the patched source, unlike the synthetic host lifecycle tests.
+It does not establish driver teardown correctness or RF reception on hardware.
+
+While export was running, the local checkout synchronized to `240c51c`,
+including the lead's signed-bootstrap gates. The local agent independently
+confirmed the exact missing Debian keyring/signature warning in the frozen
+build log. The old workspace and log are preserved, and its private build
+directory is marked `DO-NOT-FLASH.txt`. Any success reported by that old
+snapshot's qualification helper is superseded by the new trust gate; it
+cannot authenticate the earlier bootstrap. No trusted new image is claimed.
+
+The updated host preflight independently reports a missing Debian archive
+keyring plus the expected non-root privilege blocker. Other host prerequisites
+pass. A separate private source snapshot and reviewed launcher at `240c51c`
+are prepared to install the host keyring from configured Ubuntu repositories
+and run a fresh build with mandatory Release signature checks. Specific
+host-package approval and the operator's terminal sudo authentication remain
+pending. The old bootstrapped root will not be reused. Full local regressions
+at `240c51c`: **1,519 passed, 2 skipped**. No Pi changes were made.
+
+The old export subsequently completed: 464796704 compressed bytes, SHA-256
+`935824b7d544224ebcb5236eef998ade142756bd50b5e0eb7bd23db8d6f94b27`. Its old helper reported artifact integrity
+only. A separate local trust-rejection record and an artifact-directory
+DO-NOT-FLASH marker explicitly reject release trust; these bytes are
+preserved solely as untrusted diagnostic output.
+
+### Fresh signed artifact independently verified — 2026-10-15
+
+The approved host-only installation and completely fresh build completed
+from `4f907ff93ce0c6bc0b2c9d4f68025ba7dd1f9a84`. Host preflight passed;
+the log confirms a valid Debian Bookworm Release signature and no earlier
+missing-keyring warning. The operator-readable exported image was rehashed
+and fully decompressed independently; its checksum, release manifest,
+partition layout, sizes and provenance match. Both actual embedded ARM64
+modules were read without mounting the image and matched the build's
+SHA256/vermagic records for `6.12.109+rpt-rpi-v8` and `-2712`.
+
+**READY TO FLASH to a spare US field-test card**, only after separate owner
+approval. Exact image, digest, Windows path, capacity, driver hashes and
+prioritized hardware procedure: [FIELD_RUN_20261015.md](FIELD_RUN_20261015.md).
+The actual image includes measured ARPHRD live/Doctor/TFT telemetry.
+Boot, RF reception, handoff/conversion, TFT and Pi 5 hardware acceptance
+remain open. The old unsigned build and existing Pi card are preserved.
+No physical Pi changes or additional image build were performed during
+this independent verification.

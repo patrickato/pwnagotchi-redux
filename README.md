@@ -15,7 +15,7 @@ doesn't have. Identity, voice, and the creature face: `docs/AUGUR.md`.
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
 > record/ghost, packs, plugin-compat shim, CLI, passive survey, and web dashboard —
-> is built and green under the test suite (807 tests, no hardware required). The **passive
+> is built and green under the test suite (3,300 tests, no hardware required). The **passive
 > detection / capture / survey / framework spine now has a first real-hardware pass on a Pi 4**
 > (via `redux hwtest`: software battery green on-device, radios enumerated, a live passive
 > capture parsing 703 real frames into 2 APs / 3 identities). The rest — live-attack detection,
@@ -107,7 +107,7 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 807 tests) runs green against real logic —
+- **Sandbox-verified:** the whole test suite (`pytest`, 3,300 tests) runs green against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
 - **Hardware-verified (Pi 4, 2026-10-08):** the passive detection/capture/survey/framework spine,
@@ -164,7 +164,7 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 807 tests, no hardware needed
+pytest                 # 3,300 tests, no hardware needed
 
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)

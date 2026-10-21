@@ -2,15 +2,19 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 import fcntl
 import json
 import logging
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
 
 from redux.core.boot import atomic_checkpoint
 
@@ -19,6 +23,8 @@ COMPATIBLE = "pwnagotchi-redux-pi4-pi5-arm64-ab-v1"
 RUNTIME = Path("/run/redux-ota")
 CONTROL = Path("/boot/redux-control/autoboot.txt")
 STATE = Path("/captures/rauc/boot-state.json")
+BOOT_CHECKPOINT = Path("/captures/boot/boot.json")
+BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
 
 
 def command(arguments):
@@ -65,7 +71,8 @@ def validate_topology(parts, current, root_uuid):
                 4: "REDUXROOTA", 5: "REDUXROOTB", 6: "REDUXCAP"}
     uuids = set()
     for number, info in parts.items():
-        if info["label"] != expected[number] or not re.fullmatch(r"[a-fA-F0-9-]{36}", info["uuid"]):
+        if info["label"] != expected[number] or not re.fullmatch(
+                r"[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}", info["uuid"]):
             raise ValueError("unexpected GPT partition label/UUID")
         if info["uuid"].lower() in uuids:
             raise ValueError("partition UUIDs must be unique")
@@ -131,17 +138,105 @@ def initial_state(stable):
             "reason": "factory boot: stable selector is authoritative"}
 
 
+def _read_bounded_state_json(path, *, limit):
+    """Read one stable, singly-linked regular file, not a writable path target.
+
+    Both the OTA ledger and bootstrap checkpoint live on REDUXCAP. Neither
+    may redirect the verifier outside that volume or grow during parsing.
+    """
+    path = Path(path)
+    if path.parent.is_symlink():
+        raise ValueError("OTA state directory must not be a symlink")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+    with os.fdopen(os.open(path, flags), "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ValueError("OTA state must be a private regular file")
+        if before.st_size > limit:
+            raise ValueError("OTA state exceeds permitted length")
+        raw = stream.read(limit + 1)
+        if len(raw) > limit:
+            raise ValueError("OTA state grew beyond permitted length")
+        after = os.fstat(stream.fileno())
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise ValueError("OTA state changed during inspection")
+    def unique(pairs):
+        result = {}
+        for name, value in pairs:
+            if name in result:
+                raise ValueError("duplicate OTA state JSON field")
+            result[name] = value
+        return result
+    def invalid_constant(_):
+        raise ValueError("non-finite OTA state JSON value")
+    return json.loads(raw, object_pairs_hook=unique, parse_constant=invalid_constant)
+
+
 def load_state(path, stable):
-    if not path.exists():
+    if stable not in SLOTS:
+        raise ValueError("unknown stable OTA slot")
+    path = Path(path)
+    try:
+        data = _read_bounded_state_json(path, limit=16384)
+    except FileNotFoundError:
+        # An actually missing factory ledger is initialized from the firmware
+        # selector. An existing/dangling symlink must never look like "missing".
+        if path.is_symlink() or path.parent.is_symlink():
+            raise ValueError("OTA state symlink is forbidden")
         return initial_state(stable)
-    data = json.loads(path.read_text())
     if (not isinstance(data, dict) or type(data.get("schema")) is not int or data["schema"] != 1
             or type(data.get("pending")) not in {str, type(None)} or not isinstance(data.get("states"), dict)
             or data.get("pending") not in {None, "A", "B"}
             or set(data.get("states", {})) != set(SLOTS)
-            or any(v not in {"good", "bad"} for v in data["states"].values())):
+            or any(type(v) is not str or v not in {"good", "bad"} for v in data["states"].values())
+            # A committed firmware selector is the only fallback. A ledger
+            # that calls it bad must never be used to stage or commit another
+            # candidate. Pending candidates are marked good when staged.
+            or data["states"][stable] != "good"
+            or (data["pending"] is not None
+                and data["states"][data["pending"]] != "good")):
         raise ValueError("invalid OTA state; stable firmware selector remains unchanged")
     return data
+
+
+_PARTUUID_PATH = re.compile(
+    r"/dev/disk/by-partuuid/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+
+
+def validate_runtime_context(record, cmdline):
+    """Fail closed on stale or substituted A/B partition identities.
+
+    Generator context is saved in /run, but OTA health and installer must not
+    trust arbitrary contents, a prior boot's slot, or an unexpected root disk.
+    """
+    if (type(record) is not dict or set(record) != {"current", "devices"}
+            or type(record["current"]) is not str
+            or record["current"] not in SLOTS
+            or type(record["devices"]) is not dict
+            or set(record["devices"]) != {str(n) for n in range(1, 7)}
+            or type(cmdline) is not str):
+        raise ValueError("invalid OTA runtime context")
+    devices = record["devices"]
+    if any(type(path) is not str or _PARTUUID_PATH.fullmatch(path) is None
+           for path in devices.values()):
+        raise ValueError("OTA runtime partition path is not canonical")
+    if len(set(devices.values())) != 6:
+        raise ValueError("OTA runtime partition identities are not unique")
+    current = record["current"]
+    roots = [token[5:] for token in cmdline.split() if token.startswith("root=")]
+    expected_root = "PARTUUID=" + devices[str(SLOTS[current]["root"])].rsplit("/", 1)[-1]
+    if (slot_from_cmdline(cmdline) != current or len(roots) != 1
+            or roots[0].lower() != expected_root.lower()):
+        raise ValueError("OTA runtime context does not match the running boot")
+    return record
+
+
+def load_runtime_context(*, runtime=None, cmdline_path=Path("/proc/cmdline")):
+    runtime = RUNTIME if runtime is None else Path(runtime)
+    record = _read_bounded_state_json(runtime / "context.json", limit=8192)
+    return validate_runtime_context(record, Path(cmdline_path).read_text())
 
 
 def transition(state, stable, current, action, slot=None, value=None, trial=False):
@@ -201,22 +296,36 @@ def dt_integer(name):
 
 
 def commit_selector(slot):
+    payload = autoboot(slot)
+    if CONTROL.is_symlink() or CONTROL.parent.is_symlink():
+        raise ValueError("OTA firmware selector path must not be a symlink")
+    # Never reuse a fixed '.new' file left by an interrupted commit. The
+    # exclusive same-directory staging file is fsynced before publication.
+    staged = None
     command(["mount", "-o", "remount,rw", "/boot/redux-control"])
     try:
-        # The selector is authoritative; record commit only after file+directory sync.
-        temporary = CONTROL.with_suffix(".new")
-        with temporary.open("w") as stream:
-            stream.write(autoboot(slot))
+        if CONTROL.is_symlink() or CONTROL.parent.is_symlink():
+            raise ValueError("OTA firmware selector path changed during remount")
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="ascii", dir=CONTROL.parent,
+                prefix=".redux-autoboot-", delete=False) as stream:
+            staged = Path(stream.name)
+            stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, CONTROL)
+        os.replace(staged, CONTROL)
+        staged = None
         descriptor = os.open(CONTROL.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
     finally:
-        command(["mount", "-o", "remount,ro", "/boot/redux-control"])
+        try:
+            if staged is not None:
+                staged.unlink(missing_ok=True)
+        finally:
+            command(["mount", "-o", "remount,ro", "/boot/redux-control"])
 
 
 def backend(arguments):
@@ -252,32 +361,97 @@ def backend(arguments):
         logging.info(state["reason"])
 
 
-def check_health(context):
+def _valid_checkpoint_started(value, *, now=None):
+    if type(value) is not str or not 1 <= len(value) <= 64:
+        return False
+    try:
+        observed = datetime.fromisoformat(value)
+        if observed.tzinfo is None or observed.utcoffset() is None:
+            return False
+        current = datetime.now(timezone.utc) if now is None else now
+        return observed <= current + timedelta(seconds=60)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _valid_kernel_boot_id(value):
+    if type(value) is not str:
+        return False
+    try:
+        return str(uuid.UUID(value)) == value.lower()
+    except (ValueError, AttributeError):
+        return False
+
+
+def validate_boot_checkpoint(expected_pid, *, checkpoint=BOOT_CHECKPOINT, boot_id=BOOT_ID):
+    """Authenticate bootstrap initialization to this process and kernel boot."""
+    try:
+        record = _read_bounded_state_json(checkpoint, limit=65536)
+    except OSError as error:
+        raise ValueError("bootstrap initialization checkpoint is unavailable") from error
+    except ValueError as error:
+        if "permitted length" in str(error):
+            raise ValueError("bootstrap initialization checkpoint is oversized") from error
+        raise
+    current_boot = Path(boot_id).read_text(encoding="ascii").strip()
+    if (not isinstance(record, dict) or type(record.get("schema")) is not int
+            or record["schema"] != 1 or record.get("clean_shutdown") is not False
+            or type(record.get("pid")) is not int or record["pid"] != int(expected_pid)
+            or not _valid_checkpoint_started(record.get("started_utc"))
+            or not _valid_kernel_boot_id(current_boot)
+            or record.get("boot_id") != current_boot):
+        raise ValueError("bootstrap initialization checkpoint is stale or incomplete")
+    return record
+
+
+def _require_partition_mount(context, point, partition, filesystem, mode):
+    """Require a mounted slot to be the intended filesystem and block device.
+
+    An unrelated read-only FAT partition or a writable ext4 substitute is not
+    evidence that the candidate has booted with its expected A/B volumes.
+    """
+    kind = command(["findmnt", "-n", "-o", "FSTYPE", point])
+    if kind != filesystem:
+        raise ValueError(f"{point} has an unexpected filesystem")
+    options = command(["findmnt", "-n", "-o", "OPTIONS", point]).split(",")
+    if mode not in options:
+        raise ValueError(f"{point} is not mounted {mode}")
+    actual = command(["findmnt", "-n", "-o", "SOURCE", point])
+    expected = context["devices"][str(partition)]
+    if Path(actual).resolve(strict=True) != Path(expected).resolve(strict=True):
+        raise ValueError(f"{point} is mounted from an unexpected partition")
+
+
+def check_health(context, expected_pid=None):
     current = context["current"]
     if dt_integer("partition") != SLOTS[current]["boot"]:
         raise ValueError("firmware boot partition disagrees with kernel slot")
     if command(["systemctl", "is-active", "redux.service"]) != "active":
         raise ValueError("redux is not active")
+    pid = expected_pid
+    if pid is None:
+        pid = command(["systemctl", "show", "-p", "MainPID", "--value", "redux.service"])
+    if not str(pid).isdigit() or int(pid) <= 0:
+        raise ValueError("redux has no running process")
+    validate_boot_checkpoint(int(pid))
     if command(["findmnt", "-n", "-o", "FSTYPE", "/"]) != "overlay":
         raise ValueError("root is not protected by overlay")
-    if "ro" not in command(["findmnt", "-n", "-o", "OPTIONS", "/media/root-ro"]).split(","):
-        raise ValueError("lower root is writable")
-    for point in ("/boot/firmware", "/boot/redux-control"):
-        if "ro" not in command(["findmnt", "-n", "-o", "OPTIONS", point]).split(","):
-            raise ValueError(f"{point} is writable")
-    if "rw" not in command(["findmnt", "-n", "-o", "OPTIONS", "/captures"]).split(","):
-        raise ValueError("captures is not writable")
+    _require_partition_mount(context, "/media/root-ro",
+                             SLOTS[current]["root"], "ext4", "ro")
+    _require_partition_mount(context, "/boot/firmware",
+                             SLOTS[current]["boot"], "vfat", "ro")
+    _require_partition_mount(context, "/boot/redux-control",
+                             1, "vfat", "ro")
+    _require_partition_mount(context, "/captures",
+                             6, "ext4", "rw")
     if command(["systemctl", "show", "-p", "RuntimeWatchdogUSec", "--value"]) in {"0", "0s", "infinity", ""}:
         raise ValueError("PID 1 hardware watchdog is disabled")
     if Path("/sys/class/watchdog/watchdog0/state").read_text().strip() != "active":
         raise ValueError("hardware watchdog is not active")
-    capture = command(["findmnt", "-n", "-o", "SOURCE", "/captures"])
-    if Path(capture).resolve() != Path(context["devices"]["6"]).resolve():
-        raise ValueError("captures mount belongs to another disk")
 
 
 def health():
-    context = json.loads((RUNTIME / "context.json").read_text())
+    context = load_runtime_context()
     current = context["current"]
     try:
         # Sixty real seconds of stable service PID, not a simulated success timer.
@@ -285,7 +459,7 @@ def health():
         if not pid.isdigit() or int(pid) <= 0:
             raise ValueError("redux has no running process")
         for _ in range(12):
-            check_health(context)
+            check_health(context, int(pid))
             if command(["systemctl", "show", "-p", "MainPID", "--value", "redux.service"]) != pid:
                 raise ValueError("redux restarted during candidate validation")
             time.sleep(5)
@@ -302,7 +476,7 @@ def install(bundle):
     if "://" in bundle and not bundle.startswith("https://"):
         raise ValueError("remote updates require HTTPS and RAUC signature verification")
     preflight()
-    context = json.loads((RUNTIME / "context.json").read_text())
+    context = load_runtime_context()
     subprocess.run(["rauc", "install", bundle], check=True)
     state = load_state(STATE, stable_from_autoboot(CONTROL.read_text()))
     if state["pending"] is None or state["pending"] == context["current"]:
@@ -316,7 +490,7 @@ def preflight():
     timeout = re.search(r"^BOOT_WATCHDOG_TIMEOUT=(\d+)$", firmware, re.M)
     if not timeout or not 15 <= int(timeout[1]) <= 300:
         raise ValueError("provision/test BOOT_WATCHDOG_TIMEOUT=15..300 before unattended OTA")
-    context = json.loads((RUNTIME / "context.json").read_text())
+    context = load_runtime_context()
     check_health(context)
     stable = stable_from_autoboot(CONTROL.read_text())
     if context["current"] != stable or load_state(STATE, stable)["pending"] is not None:
@@ -324,17 +498,43 @@ def preflight():
 
 
 def validate_manifest(text):
+    """Strict standard bundle policy, shared by preinstall and offline gates."""
     import configparser
-    manifest = configparser.ConfigParser()
-    manifest.read_string(text)
-    if manifest.get("update", "compatible") != COMPATIBLE:
-        raise ValueError("bundle targets another image profile")
-    if {s for s in manifest.sections() if s.startswith("image.")} != {"image.boot", "image.rootfs"}:
-        raise ValueError("signed update must contain both boot and rootfs, and no data slot")
-    if "handler" in manifest or manifest.get("bundle", "format") != "verity":
-        raise ValueError("only the verified standard verity install path is allowed")
-    if "post-install" not in manifest.get("image.boot", "hooks", fallback="").split(";"):
-        raise ValueError("boot image must have the slot cmdline post-install hook")
+    if type(text) is not str or len(text)>65536 or "\x00" in text:
+        raise ValueError("signed manifest is oversized or invalid")
+    manifest = configparser.ConfigParser(interpolation=None, strict=True)
+    try:
+        manifest.read_string(text)
+        if manifest.defaults():
+            raise ValueError("bundle DEFAULT inheritance is forbidden")
+        if (not re.fullmatch(r"[0-9a-f]{40}", manifest.get("update","build",fallback=""))
+                or not re.fullmatch(r"[A-Za-z0-9._+-]{1,128}", manifest.get("update","version",fallback=""))):
+            raise ValueError("signed update requires a canonical build revision and release version")
+        allowed = {"update", "bundle", "hooks", "image.boot", "image.rootfs"}
+        if set(manifest.sections()) != allowed:
+            raise ValueError("signed update requires boot/rootfs and only the standard hook")
+        if manifest.get("update", "compatible") != COMPATIBLE:
+            raise ValueError("bundle targets another image profile")
+        if manifest.get("bundle", "format") != "verity":
+            raise ValueError("only the verified standard verity install path is allowed")
+        for section, filename in (("image.boot", "boot.tar"), ("image.rootfs", "rootfs.tar"),
+                                  ("hooks", "hook.sh")):
+            if manifest.get(section,"filename") != filename:
+                raise ValueError("bundle uses an unsupported filename or path")
+        if manifest.get("image.boot", "hooks", fallback="").removesuffix(";") != "post-install":
+            raise ValueError("boot image must have only the slot cmdline post-install hook")
+        if manifest.get("image.rootfs", "hooks", fallback=""):
+            raise ValueError("rootfs hooks are forbidden")
+        options = {"update": {"compatible","version","build","description"},
+                   "bundle": {"format","verity-hash","verity-salt","verity-size"},
+                   "hooks": {"filename"},
+                   "image.boot": {"filename","hooks","sha256","size"},
+                   "image.rootfs": {"filename","sha256","size"}}
+        if any(set(manifest[section]) - keys for section,keys in options.items()):
+            raise ValueError("unsupported install options in signed bundle")
+    except configparser.Error as exc:
+        raise ValueError("malformed signed bundle manifest") from exc
+    return manifest
 
 
 def preinstall():
@@ -348,6 +548,11 @@ def deadline():
     if dt_integer("tryboot") == 1 and current != stable:
         logging.error("candidate missed 120-second health deadline; rebooting committed %s", stable)
         command(["systemctl", "reboot", "--no-block"])
+        # A successful systemctl request is not evidence that firmware handoff
+        # completed. Stay alive briefly; if this process survives, fail so the
+        # unit's bounded restart policy requests rollback again.
+        time.sleep(15)
+        raise ValueError("rollback reboot request did not complete")
 
 
 def hook():
@@ -356,7 +561,7 @@ def hook():
     if os.environ.get("RAUC_SLOT_CLASS") != "boot":
         raise ValueError("hook must apply to a boot slot")
     slot = os.environ["RAUC_SLOT_BOOTNAME"]
-    context = json.loads((RUNTIME / "context.json").read_text())
+    context = load_runtime_context()
     if slot not in SLOTS or slot == context["current"]:
         raise ValueError("refusing to patch the running slot")
     root_uuid = Path(context["devices"][str(SLOTS[slot]["root"])]).name

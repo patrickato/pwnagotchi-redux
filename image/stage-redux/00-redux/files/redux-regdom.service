@@ -1,0 +1,28 @@
+[Unit]
+Description=Redux operator-selected Wi-Fi regulatory domain before live radio
+Documentation=man:iw(8)
+After=systemd-udev-settle.service local-fs.target
+Wants=systemd-udev-settle.service
+Before=redux-live.service
+ConditionPathExists=/etc/redux/regulatory-country
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=PYTHONPATH=/opt/redux
+ExecStart=/usr/bin/python3 -m redux.core.regulatory
+TimeoutStartSec=20s
+RemainAfterExit=yes
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=false
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+LockPersonality=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

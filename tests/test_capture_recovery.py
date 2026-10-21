@@ -1,0 +1,285 @@
+"""Targeted recovery of previously recorded capture conversion failures.
+
+All source captures and candidate hashes are synthetic test material; no RF.
+"""
+import os
+from pathlib import Path
+import subprocess
+import time
+
+import pytest
+
+from redux.crack.ingest import CaptureIngestor, Settings
+from redux.crack.recovery import recovery_report
+
+REC = "WPA*01*" + "00" * 16 + "*aabbccddeeff*112233445566*74657374***\n"
+
+
+def settings(tmp_path):
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    return Settings((incoming,), tmp_path / "ready",
+                    tmp_path / "state" / "jobs.db", settle_seconds=0)
+
+
+def fixture_source(path, content=b"synthetic-capture-input"):
+    path.write_bytes(content)
+    past = time.time() - 120
+    os.utime(path, (past, past))
+    return path
+
+
+def fake_success(argv, **kwargs):
+    assert argv[-1].startswith("/proc/self/fd/")
+    assert kwargs["pass_fds"] == (int(argv[-1].rsplit("/", 1)[1]),)
+    Path(argv[2]).write_text(REC)
+    return subprocess.CompletedProcess(argv, 0)
+
+
+def fake_failure(argv, **kwargs):
+    return subprocess.CompletedProcess(argv, 2)
+
+
+def test_recovery_dry_run_does_not_modify_failed_ledger_or_files(tmp_path):
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "failed.pcap")
+    with CaptureIngestor(cfg, runner=fake_failure) as worker:
+        assert worker.ingest_file(source) == "error"
+        prior_rows = worker.rows()
+    modified = cfg.database.stat().st_mtime_ns
+    dry = recovery_report(cfg)
+    assert dry["mode"] == "dry_run"
+    assert dry["ledger_available"] and dry["retryable"] == 1
+    assert dry["recorded_errors"] == 1 and dry["missing_outputs"] == 0
+    assert dry["attempted"] == 0 and dry["outcomes"] == {}
+    assert cfg.database.stat().st_mtime_ns == modified
+    assert source.is_file()
+    with CaptureIngestor(cfg) as worker:
+        assert worker.rows() == prior_rows
+
+
+def test_operator_retries_failed_conversion_and_preserves_raw_capture(tmp_path):
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "retry.pcapng")
+    original = source.read_bytes()
+    with CaptureIngestor(cfg, runner=fake_failure) as worker:
+        assert worker.ingest_file(source) == "error"
+    report = recovery_report(cfg, apply=True, runner=fake_success)
+    assert report["attempted"] == 1
+    assert report["outcomes"] == {"ready": 1}
+    assert source.read_bytes() == original
+    with CaptureIngestor(cfg) as worker:
+        assert worker.rows()[0]["status"] == "ready"
+        assert worker.summary()["hash_records"] == 1
+    assert recovery_report(cfg)["retryable"] == 0
+
+
+def test_missing_prepared_output_rebuilt_only_on_explicit_apply(tmp_path):
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "recover.hc22000", REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        artifact = Path(worker.rows()[0]["output_path"])
+    artifact.unlink()
+    dry = recovery_report(cfg)
+    assert dry["missing_outputs"] == dry["retryable"] == 1
+    assert not artifact.exists()
+    report = recovery_report(cfg, apply=True)
+    assert report["outcomes"] == {"ready": 1}
+    assert artifact.read_text() == REC
+    assert source.is_file()
+    assert recovery_report(cfg)["retryable"] == 0
+
+
+def test_missing_ledger_does_not_create_state_even_on_apply(tmp_path):
+    cfg = settings(tmp_path)
+    assert not cfg.database.exists()
+    assert recovery_report(cfg)["ledger_available"] is False
+    assert recovery_report(cfg, apply=True)["ledger_available"] is False
+    assert not cfg.output_dir.exists()
+    assert not cfg.database.parent.exists()
+
+
+def test_recovery_never_chases_symlinked_source(tmp_path):
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "link.pcap")
+    private = tmp_path / "outside"
+    private.write_bytes(b"must remain untouched")
+    with CaptureIngestor(cfg, runner=fake_failure) as worker:
+        assert worker.ingest_file(source) == "error"
+    source.unlink()
+    source.symlink_to(private)
+    report = recovery_report(cfg, apply=True, runner=lambda *a, **k: pytest.fail(
+        "converter should never be called"))
+    assert report["retryable"] == report["attempted"] == 0
+    assert report["blocked"] >= 1
+    assert private.read_bytes() == b"must remain untouched"
+
+
+def test_recovery_bounded_to_max_files(tmp_path):
+    cfg = settings(tmp_path)
+    for i in range(5):
+        source = fixture_source(cfg.inputs[0] / f"failed-{i}.pcap", f"raw-{i}".encode())
+        with CaptureIngestor(cfg, runner=fake_failure) as worker:
+            assert worker.ingest_file(source) == "error"
+    dry = recovery_report(cfg, max_files=2)
+    assert dry["retryable"] == 2
+    assert dry["truncated"] is True
+    result = recovery_report(cfg, apply=True, max_files=2, runner=fake_success)
+    assert result["attempted"] == 2
+    assert sum(result["outcomes"].values()) == 2
+    assert set(result["outcomes"]) <= {"ready", "duplicate"}
+    assert recovery_report(cfg)["retryable"] == 3
+    with pytest.raises(ValueError, match="between 1"):
+        recovery_report(cfg, max_files=0)
+
+
+def test_dry_run_refuses_symlinked_ledger(tmp_path):
+    cfg = settings(tmp_path)
+    ledger = cfg.database
+    ledger.parent.mkdir(parents=True)
+    private = tmp_path / "private"
+    private.write_bytes(b"secret")
+    ledger.symlink_to(private)
+    with pytest.raises(ValueError, match="symlinked ledger"):
+        recovery_report(cfg)
+    assert private.read_bytes() == b"secret"
+
+
+def test_recovery_refuses_tampered_output_location(tmp_path):
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "record.hc22000", REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        worker.db.execute(
+            "UPDATE artifacts SET output_sha=?, output_path=?",
+            ("../" + "a" * 61, str(tmp_path / "outside")),
+        )
+        worker.db.commit()
+    result = recovery_report(cfg, apply=True)
+    assert result["attempted"] == result["retryable"] == 0
+    assert result["blocked"] == 1
+    assert source.exists()
+
+
+def test_pipeline_recovery_cli_reports_and_applies_safely(tmp_path, capsys):
+    import json
+    from redux.cli import main
+
+    cfg = settings(tmp_path)
+    config = tmp_path / "pipeline.toml"
+    config.write_text(
+        "[pipeline]\n"
+        f'inputs = ["{cfg.inputs[0]}"]\n'
+        f'output_dir = "{cfg.output_dir}"\n'
+        f'database = "{cfg.database}"\n'
+        "settle_seconds = 0\n"
+    )
+    source = fixture_source(cfg.inputs[0] / "record.hc22000", REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        Path(worker.rows()[0]["output_path"]).unlink()
+
+    argv = ["pipeline", "--config", str(config), "recover"]
+    assert main(argv) == 0
+    dry = json.loads(capsys.readouterr().out)
+    assert dry["mode"] == "dry_run" and dry["retryable"] == 1
+    assert source.exists()
+    assert main(argv + ["--apply"]) == 0
+    applied = json.loads(capsys.readouterr().out)
+    assert applied["mode"] == "apply"
+    assert applied["attempted"] == 1 and applied["outcomes"] == {"ready": 1}
+    assert source.exists()
+
+
+def test_mount_is_revalidated_before_recovery_apply(tmp_path, monkeypatch):
+    import redux.crack.recovery as recovery
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "failed.pcap")
+    with CaptureIngestor(cfg, runner=fake_failure) as worker:
+        assert worker.ingest_file(source) == "error"
+    previous = [("mount", 10)]
+    monkeypatch.setattr(recovery, "requires_capture_mount", lambda _settings: True)
+    monkeypatch.setattr(recovery, "capture_mount_snapshot", lambda: previous[0])
+    first = recovery.recovery_report(cfg)
+    assert first["retryable"] == 1
+
+    def change_at_check():
+        old = previous[0]
+        previous[0] = ("other", 20)
+        return old
+
+    # A substituted mount between inspection and processing cannot count
+    # as a verified recovery. Actual Pi hot-unmount remains a field gate.
+    monkeypatch.setattr(recovery, "capture_mount_snapshot", change_at_check)
+    with pytest.raises(recovery.CaptureMountLost, match="changed"):
+        recovery.recovery_report(cfg)
+
+
+def test_recovery_detects_altered_prepared_bytes_without_retry_or_overwrite(tmp_path):
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "changed-output.hc22000",
+                            REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        prepared = Path(worker.rows()[0]["output_path"])
+    corrupted = b"altered prepared output - must not overwrite"
+    prepared.write_bytes(corrupted)
+    before = cfg.database.stat().st_mtime_ns
+    dry = recovery_report(cfg)
+    assert dry["altered_outputs"] == 1
+    assert dry["missing_outputs"] == 0
+    assert dry["retryable"] == 0
+    assert dry["blocked"] == 1
+    assert dry["attempted"] == 0
+    assert cfg.database.stat().st_mtime_ns == before
+    applied = recovery_report(cfg, apply=True)
+    assert applied["altered_outputs"] == 1
+    assert applied["attempted"] == 0 and applied["outcomes"] == {}
+    assert prepared.read_bytes() == corrupted
+    assert source.read_bytes() == REC.encode()
+
+
+def test_recovery_blocks_oversized_prepared_artifact_without_digesting(tmp_path,
+                                                                      monkeypatch):
+    import redux.crack.recovery as recovery
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "oversize.hc22000",
+                            REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        prepared = Path(worker.rows()[0]["output_path"])
+    with prepared.open("r+b") as stream:
+        stream.truncate(recovery._MAX_PREPARED_BYTES + 1)
+    status = recovery_report(cfg, apply=True)
+    assert status["altered_outputs"] == status["blocked"] == 1
+    assert status["attempted"] == status["retryable"] == 0
+    assert prepared.stat().st_size == recovery._MAX_PREPARED_BYTES + 1
+    assert source.exists()
+
+
+def test_recovery_refuses_prepared_symlink_without_touching_target(tmp_path):
+    cfg = settings(tmp_path)
+    source = fixture_source(cfg.inputs[0] / "symlink.hc22000", REC.encode())
+    with CaptureIngestor(cfg) as worker:
+        assert worker.ingest_file(source) == "ready"
+        prepared = Path(worker.rows()[0]["output_path"])
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"do not alter")
+    prepared.unlink()
+    prepared.symlink_to(outside)
+    status = recovery_report(cfg, apply=True)
+    assert status["blocked"] == 1
+    assert status["retryable"] == status["attempted"] == 0
+    assert status["altered_outputs"] == 0
+    assert prepared.is_symlink() and outside.read_bytes() == b"do not alter"
+    assert source.exists()
+
+
+def test_bounded_digest_refuses_file_growth(tmp_path, monkeypatch):
+    from redux.crack.ingest import _digest_file
+    target = tmp_path / "bounded.bin"
+    target.write_bytes(b"data")
+    with pytest.raises(ValueError, match="exceeds read limit"):
+        _digest_file(target, max_bytes=3)
+    assert _digest_file(target, max_bytes=4)

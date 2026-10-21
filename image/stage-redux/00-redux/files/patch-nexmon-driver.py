@@ -64,18 +64,101 @@ def adapt_sdio_id(header, source):
     return source.replace(anchor, anchor + "\n\n" + alias, 1), "SDIO ID adapted: use renamed header identifier via nexmon 6.18 compatibility alias"
 
 
+def propagate_monitor_error(source):
+    """Do not report a successful channel change when firmware rejected it.
+
+    The pinned Nexmon callback logs its firmware error but returns zero.
+    Restrict this adjustment to that known callback and reject unfamiliar
+    bodies rather than guessing which return value is safe to substitute.
+    """
+    pattern = r"\bbrcmf_cfg80211_nexmon_set_channel\s*\([^)]*\)\s*\{(.*?)^\}"
+    callbacks = list(re.finditer(pattern, source, re.S | re.M))
+    if len(callbacks) != 1:
+        raise ValueError("cannot locate a unique nexmon channel callback body")
+    callback = callbacks[0]
+    body = callback.group(1)
+    code = re.sub(r"/\*.*?\*/|//[^\n]*", "", body, flags=re.S)
+    if (len(re.findall(r"\bs32\s+err\s*=\s*0\s*;", code)) != 1
+            or len(re.findall(
+                r'\berr\s*=\s*brcmf_fil_iovar_int_set\(ifp,\s*"chanspec",\s*chanspec\)\s*;',
+                code)) != 1):
+        raise ValueError("unsupported nexmon channel error handling")
+    terminal = re.search(r"\breturn\s+(0|err)\s*;\s*$", body)
+    if terminal is None:
+        raise ValueError("unsupported nexmon channel callback return")
+    if terminal.group(1) == "err":
+        # The pinned 6.18 callback already propagates errors and has an
+        # early unsupported-band rejection. Preserve that implementation.
+        returns = re.findall(r"\breturn\s+([^;]+);", code)
+        if any(value.strip() not in ("err", "-EINVAL") for value in returns):
+            raise ValueError("unsupported nexmon channel error handling")
+        return source, "channel callback unchanged: firmware errors already propagated"
+    if len(re.findall(r"\breturn\b", code)) != 1:
+        raise ValueError("unsupported nexmon channel error handling")
+    updated = body[:terminal.start(1)] + "err" + body[terminal.end(1):]
+    source = source[:callback.start(1)] + updated + source[callback.end(1):]
+    return source, "channel callback corrected: propagate firmware error instead of reporting success"
+
+
+def adapt_monitor_cleanup(source):
+    """Release the monitor's cfg80211 VIF when its netdev is destroyed.
+
+    Match the normal brcmf_net_attach lifecycle: install the destructor
+    only after registration succeeds, so failed registration still uses
+    brcmf_mon_add_vif's existing failure cleanup.
+    """
+    pattern = r"\bbrcmf_net_mon_attach\s*\(struct brcmf_if \*ifp\)\s*\{(.*?)^\}"
+    matches = list(re.finditer(pattern, source, re.S | re.M))
+    if len(matches) != 1:
+        raise ValueError("cannot locate a unique nexmon monitor attach body")
+    match = matches[0]
+    body = match.group(1)
+    code = re.sub(r"/\*.*?\*/|//[^\n]*", "", body, flags=re.S)
+    if (code.count("ndev->netdev_ops = &brcmf_netdev_ops_mon;") != 1
+            or code.count("err = cfg80211_register_netdevice(ndev);") != 1
+            or len(re.findall(r"\breturn\b", code)) != 1):
+        raise ValueError("unsupported nexmon monitor registration lifecycle")
+    terminal = re.search(r"(?m)^([ \t]*)return err;\s*$", body)
+    if terminal is None:
+        raise ValueError("unsupported nexmon monitor attach return")
+    expected = "ndev->priv_destructor = brcmf_cfg80211_free_netdev;"
+    if "priv_destructor" in code:
+        guarded = re.search(
+            r"\bif\s*\(\s*!err\s*\)\s*ndev->priv_destructor\s*=\s*"
+            r"brcmf_cfg80211_free_netdev\s*;", code)
+        registration = code.index("err = cfg80211_register_netdevice(ndev);")
+        if (guarded is None or code.count("priv_destructor") != 1
+                or guarded.start() < registration
+                or not re.fullmatch(r"\s*return err;\s*", code[guarded.end():])):
+            raise ValueError("unsupported nexmon monitor destructor lifecycle")
+        return source, "monitor cleanup unchanged: cfg80211 destructor already installed"
+    indent = terminal.group(1)
+    addition = (indent + "if (!err)\n" + indent + "\t" + expected + "\n\n")
+    updated = body[:terminal.start()] + addition + body[terminal.start():]
+    return (source[:match.start(1)] + updated + source[match.end(1):],
+            "monitor cleanup corrected: release cfg80211 VIF after successful netdev registration")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("header", type=Path)
     parser.add_argument("source", type=Path)
     parser.add_argument("--sdio-header", type=Path)
+    parser.add_argument("--core-source", type=Path)
     args = parser.parse_args()
     try:
         original = args.source.read_text()
         updated, reason = adapt_driver(args.header.read_text(), original)
+        updated, channel_reason = propagate_monitor_error(updated)
         if updated != original:
             args.source.write_text(updated)
-        reasons = [reason]
+        reasons = [reason, channel_reason]
+        if args.core_source:
+            original = args.core_source.read_text()
+            updated, reason = adapt_monitor_cleanup(original)
+            if updated != original:
+                args.core_source.write_text(updated)
+            reasons.append(reason)
         if args.sdio_header:
             sdio_header = args.sdio_header.read_text()
             for name in ("sdio.c", "bcmsdh.c"):

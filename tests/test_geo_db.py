@@ -174,3 +174,36 @@ def test_stats_reports_count_kind_and_span():
     s = st.stats()
     assert s["count"] == 2 and s["by_kind"]["wifi"] == 1 and s["by_kind"]["ble"] == 1
     assert s["oldest_ts"] == 100.0 and s["newest_ts"] == 300.0
+
+def test_prune_rejects_unsafe_negative_or_invalid_limits():
+    with SightingStore(":memory:") as db:
+        db.insert(_s())
+        for kwargs in ({"older_than": -1}, {"older_than": float("nan")},
+                       {"older_than": float("inf")}, {"max_rows": -1},
+                       {"max_rows": 3.5}):
+            with pytest.raises(ValueError):
+                db.prune(**kwargs)
+        assert db.count() == 1
+
+
+def test_prune_rolls_back_first_delete_if_second_delete_fails():
+    import sqlite3
+    with SightingStore(":memory:") as db:
+        for i, ts in enumerate((10.0, 20.0, 30.0)):
+            db.insert(_s(mac=f"de:ad:be:ef:00:0{i}", ts=ts))
+        # First retention filter removes ts=10. The second would remove ts=20,
+        # but a synthetic SQLite trigger aborts that deletion. All three rows
+        # must remain, including the one the first filter would have removed.
+        db._conn.execute("""
+            CREATE TRIGGER deny_test_delete BEFORE DELETE ON sightings
+            WHEN OLD.ts = 20
+            BEGIN SELECT RAISE(ABORT, 'synthetic retention IO failure'); END
+        """)
+        db._conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            db.prune(older_than=15, max_rows=1, now=30)
+        assert db.count() == 3
+        db._conn.execute("DROP TRIGGER deny_test_delete")
+        db._conn.commit()
+        assert db.prune(older_than=15, max_rows=1, now=30) == 2
+        assert [row.ts for row in db.query()] == [30.0]

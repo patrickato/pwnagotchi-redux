@@ -19,7 +19,6 @@ fires; any deauth stays behind the driver's empty-by-default allowlist.
 """
 from __future__ import annotations
 
-import time
 from typing import Callable, List, Optional
 
 from ..radio import Intent
@@ -30,6 +29,7 @@ from .supervisor import Supervisor
 from .narrator import Narrator
 from .brain import Brain
 from .governor import Governor, Reading, GovDecision
+from .telemetry import ResourceMonitor
 from .capabilities import Cap, Provider, CapabilityGraph
 from .scope import Scope
 from .doctor import Doctor, DoctorInputs
@@ -57,6 +57,8 @@ class Augur:
         position_provider: Optional[Callable[[], Optional[tuple]]] = None,
         governor: Optional[Governor] = None,
         scope: Optional[Scope] = None,
+        resource_collector=None,
+        resource_monitor=None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
@@ -64,14 +66,18 @@ class Augur:
         self.engine = detect_engine or DetectEngine()
         self.store = store if store is not None else SightingStore()
         self._position = position_provider
-        self.governor = governor or Governor()
-        self._gov: Optional[GovDecision] = None
+        self.resources = resource_monitor if resource_monitor is not None else ResourceMonitor(
+            resource_collector, governor)
+        self.governor = self.resources.governor
+        self.resource_collector = self.resources.collector
         self.scope = scope if scope is not None else Scope()
         # SD-wear: buffer geo-tags and flush once per pump cycle (one batched
         # commit) instead of an fsync per RF event. _flush_cap bounds memory if a
         # single cycle sees a flood.
         self._sighting_buffer: List[Sighting] = []
         self._flush_cap = 512
+        self._sighting_flush_error = ""
+        self._sighting_flush_failures = 0
 
         # consumers subscribe to the hub
         connect_narrator(self.bus, self.narrator)
@@ -119,8 +125,19 @@ class Augur:
         Called once per pump cycle (and on checkpoint); returns rows flushed."""
         if not self._sighting_buffer:
             return 0
-        batch, self._sighting_buffer = self._sighting_buffer, []
-        self.store.insert_many(batch)
+        # The bus and the store share the pump thread. Keep ownership of the
+        # buffer until SQLite confirms the entire transaction committed.
+        # A transient disk/database error is retryable; never silently discard
+        # sightings that Bettercap has already delivered to the event bus.
+        batch = self._sighting_buffer
+        try:
+            self.store.insert_many(batch)
+        except Exception as error:
+            self._sighting_flush_error = f"{type(error).__name__}: {str(error)[:160]}"
+            self._sighting_flush_failures += 1
+            raise
+        self._sighting_buffer = []
+        self._sighting_flush_error = ""
         return len(batch)
 
     # --- drive ------------------------------------------------------------- #
@@ -137,6 +154,7 @@ class Augur:
     def pump(self) -> list:
         """One cycle: drain driver events → detect + geo-tag + narrate + advise,
         then flush the cycle's sightings to the store in one batched write."""
+        self.resources.sample()
         alerts = self.supervisor.pump()
         self.flush_sightings()
         sentinel = getattr(self, "_sentinel", None)
@@ -151,10 +169,23 @@ class Augur:
 
     def observe_resources(self, reading: Reading, now: Optional[float] = None) -> GovDecision:
         """Feed real thermal/power/load readings to the Governor; returns its
-        glass-box decision. A hardware collector calls this; the interval_scale
-        it yields stretches periodic work (pump/sample/flush cadence) under load."""
-        self._gov = self.governor.evaluate(reading, now if now is not None else time.time())
-        return self._gov
+        glass-box decision. Sampling itself never changes capture scheduling."""
+        return self.resources.observe(reading, now)
+
+    @property
+    def _gov(self):
+        return self.resources.decision
+
+    @_gov.setter
+    def _gov(self, value):
+        self.resources.decision = value
+
+    def telemetry_status(self):
+        """Inspect the latest observation without sampling or writing."""
+        return self.resources.status()
+
+    def governor_status(self):
+        return self.resources.governor_status()
 
     def govern_scale(self) -> float:
         """Current cadence multiplier (1.0 until real readings say to shed)."""
@@ -204,6 +235,7 @@ class Augur:
         return DoctorInputs(
             graph=self.capability_graph(),
             governor=self._gov,
+            telemetry=self.telemetry_status(),
             scope=self.scope,
             detector_count=getattr(self.engine, "detector_count", None),
             sightings=self.store.count() if hasattr(self.store, "count") else None,
@@ -492,8 +524,12 @@ class Augur:
             })
         return out
 
-    def status(self) -> dict:
-        """A glass-box snapshot for a TFT / web view / log."""
+    def status(self, *, processing_report=None) -> dict:
+        """A glass-box snapshot for a TFT / web view / log.
+
+        The live supervisor can inject its one read-only pipeline snapshot
+        instead of querying SQLite a second time on every status tick.
+        """
         rec = self.recommend()
         p = self.persona()
         status = {
@@ -507,18 +543,24 @@ class Augur:
             "recommendation": {"intent": rec.intent.value if rec.intent else None,
                                "reason": rec.reason, "confidence": rec.confidence},
             "sightings": self.store.count() if hasattr(self.store, "count") else None,
-            "recent_alerts": len(self.bus.history(Signal.ALERT)),
-            "governor": {
-                "mode": self._gov.mode.value if self._gov else "full",
-                "interval_scale": self.govern_scale(),
-                "reason": self._gov.reason if self._gov else "FULL — no readings yet",
+            "sighting_queue": {
+                "pending": len(self._sighting_buffer),
+                "write_error": self._sighting_flush_error,
+                "write_failures": self._sighting_flush_failures,
             },
+            "recent_alerts": len(self.bus.history(Signal.ALERT)),
+            "telemetry": self.telemetry_status(),
+            "governor": self.governor_status(),
         }
         if self.sense() is not None:
             status["sense"] = self.sense_status()
         if self.sentinel() is not None:
             status["sentinel"] = self.sentinel_status()
         status["capture_engine"] = self.capture_plan().get("selected_engine")
+        if processing_report is None:
+            from ..crack.ingest import read_summary
+            processing_report = read_summary()
+        status["capture_processing"] = processing_report
         # Augur's face: derived from the snapshot above, so the expression always
         # traces to real state (glass-box). Both glyph sets travel so the TFT can
         # pick ascii and the web can show the nice one.

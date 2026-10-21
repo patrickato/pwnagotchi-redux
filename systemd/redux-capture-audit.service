@@ -1,0 +1,14 @@
+[Unit]
+Description=Opt-in Redux Pi-local authorized capture audit
+After=redux-capture-ingest.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 -m redux.crack.audit --config /etc/redux/pipeline.toml
+Nice=15
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true

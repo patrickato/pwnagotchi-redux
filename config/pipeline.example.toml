@@ -1,0 +1,20 @@
+# Copy to /etc/redux/pipeline.toml only after verifying input directories.
+[pipeline]
+inputs = ["/captures/incoming"]
+output_dir = "/captures/ready"
+database = "/captures/jobs.db"
+settle_seconds = 4.0
+max_capture_bytes = 134217728
+max_files_per_pass = 100
+converter = "hcxpcapngtool"
+convert_timeout_seconds = 90
+min_free_bytes = 67108864 # Keep reserve for runtime/SQLite; report pause when low
+
+# Disabled until owner provides controlled test scope, wordlist and a working backend.
+[audit]
+enabled = false
+wordlist = ""
+scope_file = "/etc/pwnagotchi/scope.json"
+results_dir = "/captures/audits"
+binary = "hashcat"
+max_runtime_seconds = 600

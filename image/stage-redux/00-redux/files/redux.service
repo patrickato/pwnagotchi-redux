@@ -1,12 +1,15 @@
 [Unit]
-Description=redux image bootstrap (live supervisor wiring pending)
+Description=Redux passive bootstrap and persistent watchdog checkpoint
 After=local-fs.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+WatchdogSec=15s
 User=redux
 Group=redux
 WorkingDirectory=/opt/redux
+ExecStartPre=+/usr/bin/install -d -o redux -g redux -m 0700 /captures/boot
 ExecStart=/usr/bin/python3 -m redux.core.boot
 Environment=PYTHONUNBUFFERED=1
 Restart=on-failure

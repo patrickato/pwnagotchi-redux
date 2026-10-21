@@ -1,0 +1,313 @@
+"""Tie the existing Doctor's diagnosis to measured live supervisor state.
+
+This adapter observes only; it does not restart services, change radio settings
+or guess about unobserved hardware. Every finding has an operator-facing reason.
+"""
+from __future__ import annotations
+
+import math
+import time
+
+from .doctor import Doctor, DoctorInputs, Status
+from .processing_evidence import scan_record_valid, status_counts_valid
+
+_RANK = {"ok": 0, "attention": 1, "degraded": 2, "action": 3}
+_LABEL = {
+    "ok": "OK", "attention": "ATTENTION", "degraded": "DEGRADED",
+    "action": "ACTION REQUIRED", "unknown": "UNKNOWN",
+}
+
+
+def _finding(area, status, summary, reason="", remediation=""):
+    return {
+        "area": area, "status": status, "summary": summary,
+        "reason": reason, "remediation": remediation, "detail": {},
+    }
+
+
+def describe_live_health(state, *, iface="", capture_link_type=None,
+                         free_bytes=None, reserve_bytes=0,
+                         handoffs=0, last_error="", handoff_error="",
+                         doctor_report=None, dashboard_enabled=False,
+                         dashboard_active=False, dashboard_error="",
+                         sighting_pending=None, sighting_write_error="",
+                         sighting_lost=0, engine_log_error="",
+                         capture_mount_ok=None, processing_report=None,
+                         processing_now_utc=None, processing_stale_seconds=180,
+                         failure_streak=0, retry_in_seconds=0,
+                         observer_errors=None, persistence_error="",
+                         artifact_integrity=None):
+    """Combine Augur's real Doctor report with physical supervisor observations.
+
+    Without Augur the Doctor's normal probes are UNKNOWN, *never* silently OK.
+    A healthy parent daemon alone does not prove a successful capture or a
+    working converter. Hand-off verification is similarly unknown until one
+    closed PCAP was actually published.
+    """
+    if doctor_report is None:
+        doctor_report = Doctor().report(DoctorInputs())
+    raw_findings = doctor_report.get("findings") if isinstance(doctor_report, dict) else None
+    if not isinstance(raw_findings, list) or any(not isinstance(f, dict) or f.get("status") not in (*_RANK, "unknown") for f in raw_findings[:64]):
+        raw_findings = Doctor().report(DoctorInputs())["findings"]
+    findings = [dict(f) for f in raw_findings[:64]]
+    retry_note = (
+        f" Automatic retry in {math.ceil(max(0, retry_in_seconds))}s "
+        f"after {failure_streak} consecutive failure(s)."
+        if state == "degraded" and failure_streak > 0 else ""
+    )
+    if state == "running" and iface:
+        findings.append(_finding("live engine", "ok",
+                                 "Passive capture supervisor is running.",
+                                 f"Bettercap owner is active on {iface}."))
+    elif state in {"starting", "starting_engine", "rotating"}:
+        findings.append(_finding("live engine", "attention",
+                                 "Capture engine is not yet ready.",
+                                 last_error or f"Live runtime state: {state}.",
+                                 "Inspect engine startup if it does not progress."))
+    elif state in {"lease_blocked", "termination_pending"}:
+        findings.append(_finding("live engine", "action",
+            "Capture ownership safety gate requires attention.",
+            last_error or "Capture ownership cannot be safely established.",
+            "Inspect the lease interlock or pending child termination; do not bypass the ownership gate."))
+    elif state == "storage_paused":
+        findings.append(_finding("live engine", "action",
+                                 "Capture paused to protect the storage reserve.",
+                                 last_error or "Capture storage is low.",
+                                 "Free storage or move old captures to another device."))
+    elif state == "stopped":
+        findings.append(_finding("live engine", "attention",
+                                 "Live runtime is stopped, not capturing.",
+                                 "No running engine exists to assess.",
+                                 "Start redux-live.service when passive capture is wanted."))
+    else:
+        findings.append(_finding("live engine", "degraded",
+                                 "Capture engine is not operational.",
+                                 (last_error or f"Live runtime state: {state}.")
+                                 + retry_note,
+                                 "Review redux-live.service and the read-only device preflight."))
+
+    # This is a measured kernel packet-header contract, not an inferred
+    # packet counter. A running engine with an Ethernet ARPHRD interface
+    # has NOT shown a native 802.11/radiotap interface.
+    if iface and state == "running":
+        if type(capture_link_type) is int and capture_link_type == 1:
+            findings.append(_finding(
+                "native RF link type", "degraded",
+                "Capture radio still exposes Ethernet frames, not native 802.11.",
+                "Kernel ARPHRD type 1 on the selected capture interface.",
+                "Verify Nexmon driver, monitor virtual interface and actual "
+                "link-layer type before claiming native RF reception."))
+        elif type(capture_link_type) is int and capture_link_type in (801, 803):
+            findings.append(_finding(
+                "native RF link type", "ok",
+                "802.11-capable link-layer header observed.",
+                f"Kernel ARPHRD type {capture_link_type}; this does not prove "
+                "that any packets were actually received."))
+        elif type(capture_link_type) is int and 0 <= capture_link_type <= 65535:
+            findings.append(_finding(
+                "native RF link type", "attention",
+                "Unexpected capture interface link-layer type.",
+                f"Kernel ARPHRD type {capture_link_type}; 801 or 803 required "
+                "for native IEEE80211/radiotap header evidence.",
+                "Inspect the selected radio and driver; avoid assuming native capture works."))
+        else:
+            findings.append(_finding(
+                "native RF link type", "unknown",
+                "Capture interface packet framing has not been measured.",
+                "No valid kernel ARPHRD measurement is available for the selected interface.",
+                "Read the selected interface's sysfs type before assessing native RF framing."))
+
+    if capture_mount_ok is False:
+        findings.append(_finding("capture storage", "action",
+                                 "Writable REDUXCAP capture partition is unavailable.",
+                                 "/captures is not mounted, or the mount was lost during this run.",
+                                 "Check the capture mount and restart redux-live.service "
+                                 "after recovery to reacquire its ownership lock."))
+    elif free_bytes is None:
+        findings.append(_finding("capture storage", "unknown",
+                                 "Capture storage space could not be measured.",
+                                 "The filesystem free-space probe was unavailable.",
+                                 "Check whether /captures is mounted and writable."))
+    elif free_bytes < reserve_bytes:
+        findings.append(_finding("capture storage", "action",
+                                 "Capture storage reserve is exhausted.",
+                                 f"{free_bytes} bytes free; configured minimum is {reserve_bytes}.",
+                                 "Review the retention dry run or expand capture storage."))
+    else:
+        findings.append(_finding("capture storage", "ok",
+                                 "Capture storage has room.",
+                                 f"{free_bytes} bytes free; reserve is {reserve_bytes}."))
+
+    if handoff_error:
+        findings.append(_finding("capture handoff", "degraded",
+                                 "A completed capture could not be delivered.",
+                                 handoff_error,
+                                 "Check /captures/active, /captures/incoming and filesystem health."))
+    elif handoffs > 0:
+        findings.append(_finding("capture handoff", "ok",
+                                 "A completed capture reached the processing queue.",
+                                 f"{handoffs} closed capture session(s) handed off."))
+    else:
+        findings.append(_finding("capture handoff", "unknown",
+                                 "No completed capture handoff observed yet.",
+                                 "The engine may still be on its first capture session."))
+
+    # Persistence is assessed separately from a healthy engine process:
+    # being online is not proof the sightings were committed.
+    if sighting_lost > 0:
+        findings.append(_finding("sighting persistence", "action",
+                                 "Uncommitted observations were lost during a restart.",
+                                 f"{sighting_lost} observed record(s) could not be committed.",
+                                 "Inspect SQLite/storage faults; retain source captures for analysis."))
+    elif sighting_write_error:
+        findings.append(_finding("sighting persistence", "degraded",
+                                 "Sighting database writes are failing; retry pending.",
+                                 sighting_write_error,
+                                 "Check /captures free space and SQLite database health."))
+    elif sighting_pending is None:
+        findings.append(_finding("sighting persistence", "unknown",
+                                 "No sighting persistence measurements available.",
+                                 "Live Augur has not connected to its database yet."))
+    elif sighting_pending > 0:
+        findings.append(_finding("sighting persistence", "attention",
+                                 "Observed sightings are waiting for commit.",
+                                 f"{sighting_pending} record(s) buffered in memory."))
+    else:
+        findings.append(_finding("sighting persistence", "ok",
+                                 "Sighting persistence queue is clear.",
+                                 "No unsaved sightings remain in the in-memory queue."))
+
+    if engine_log_error:
+        findings.append(_finding("engine logging", "degraded",
+                                 "Engine diagnostic logging cannot be bounded.",
+                                 engine_log_error,
+                                 "Inspect capture storage permissions and free space."))
+
+    # Ingest results from the worker's own durable SQLite ledger, not from
+    # radio activity or a fabricated "conversion OK" sample. A recent empty
+    # scan proves the worker ran, but does not prove a handshake was collected.
+    processing = processing_report if isinstance(processing_report, dict) else {"available": False,
+                                       "reason": "processing not yet observed"}
+    if processing.get("available") is not True:
+        reason = str(processing.get("reason", "processing unavailable"))[:180]
+        unhealthy = "not present" not in reason and "not yet" not in reason
+        findings.append(_finding("capture processing",
+                                 "degraded" if unhealthy else "unknown",
+                                 "Capture worker is unavailable." if unhealthy
+                                 else "Capture worker has not been observed yet.",
+                                 reason, "Inspect redux-capture-ingest.timer and jobs.db."))
+    elif processing.get("scan_error") or not status_counts_valid(processing) or (isinstance(processing.get("last_scan"), dict) and not scan_record_valid(processing["last_scan"])):
+        findings.append(_finding("capture processing", "degraded",
+                                 "Capture worker heartbeat is invalid.",
+                                 str(processing.get("scan_error") or "contradictory worker scan counters")[:180],
+                                 "Inspect capture ledger integrity and timer logs."))
+    elif not isinstance(processing.get("last_scan"), dict):
+        findings.append(_finding("capture processing", "unknown",
+                                 "No completed capture-processing pass recorded.",
+                                 "The ledger may predate scan tracking or the worker has not run.",
+                                 "Check redux-capture-ingest.timer and the /captures mount."))
+    else:
+        recent = processing["last_scan"]
+        finished = recent.get("completed_utc")
+        scanned = recent.get("scanned")
+        outcomes = recent.get("outcomes")
+        now = time.time() if processing_now_utc is None else processing_now_utc
+        valid = (type(finished) in (int, float) and math.isfinite(finished)
+                 and type(now) in (int, float) and math.isfinite(now)
+                 and type(scanned) is int and scanned >= 0
+                 and isinstance(outcomes, dict))
+        if not valid or finished > now + 30:
+            findings.append(_finding("capture processing", "attention",
+                                     "Capture worker timing cannot be verified.",
+                                     "The scan timestamp is invalid or ahead of the device clock.",
+                                     "Check system time and the ingestion worker."))
+        elif now - finished > processing_stale_seconds:
+            findings.append(_finding("capture processing", "degraded",
+                                     "Capture-processing worker is overdue.",
+                                     f"No completed scan for {int(now-finished)} seconds; "
+                                     f"limit is {processing_stale_seconds} seconds.",
+                                     "Check redux-capture-ingest.timer, service logs and disk health."))
+        elif outcomes.get("paused_low_storage", 0):
+            findings.append(_finding("capture processing", "action",
+                                     "Capture conversion paused for low storage.",
+                                     "The last completed worker pass reported its storage reserve.",
+                                     "Free or expand /captures before retrying ingestion."))
+        elif outcomes.get("error", 0) or outcomes.get("storage_error", 0):
+            findings.append(_finding("capture processing", "degraded",
+                                     "Recent capture conversion reported errors.",
+                                     f"Last scan outcomes: {str(outcomes)[:160]}.",
+                                     "Inspect converter logs, then run redux pipeline recover (dry-run); use --apply for deliberate retries."))
+        elif isinstance(processing.get("by_status"), dict) and processing["by_status"].get("error", 0):
+            findings.append(_finding("capture processing", "attention",
+                                     "Capture-processing ledger contains earlier errors.",
+                                     f"{processing['by_status']['error']} artifact(s) "
+                                     "still marked error; last scan completed.",
+                                     "Run redux pipeline recover to inspect failed jobs; use --apply to retry verified candidates."))
+        else:
+            findings.append(_finding("capture processing", "ok",
+                                     "Capture-processing worker recently completed a scan.",
+                                     f"Last scan examined {scanned} file(s); "
+                                     "this does not prove conversion or handshake validity."))
+
+    # Only a separately completed, timestamp-validated audit can assess the
+    # integrity of prepared artifacts. Never hash captures in a live heartbeat.
+    if isinstance(artifact_integrity, dict):
+        integrity_state = artifact_integrity.get("status")
+        integrity_reason = artifact_integrity.get("reason")
+        if integrity_state == "ok" and integrity_reason == "verified_ready_artifacts":
+            findings.append(_finding(
+                "capture artifact integrity", "ok",
+                "Previously prepared capture artifacts passed their integrity audit.",
+                "A recent independent SHA-256 audit verified all recorded ready artifacts; "
+                "this is not evidence that a wireless handshake is authentic."))
+        elif integrity_state == "attention" and integrity_reason == "integrity_discrepancies":
+            findings.append(_finding(
+                "capture artifact integrity", "action",
+                "A prepared capture artifact failed an integrity audit.",
+                "A recent audit recorded missing, altered, or unsafe prepared artifacts.",
+                "Inspect the separate read-only artifact audit; preserve source captures."))
+        else:
+            findings.append(_finding(
+                "capture artifact integrity", "unknown",
+                "Prepared capture integrity has not been verified recently.",
+                "No valid, recent, complete artifact audit receipt is available.",
+                "Run an explicitly authorized offline integrity audit."))
+
+    if dashboard_enabled:
+        if dashboard_active:
+            findings.append(_finding("local dashboard", "ok",
+                                     "Local diagnostic dashboard is available.",
+                                     "The HTTP server is bound to loopback."))
+        elif dashboard_error:
+            findings.append(_finding("local dashboard", "degraded",
+                                     "Local diagnostic dashboard is unavailable.",
+                                     dashboard_error,
+                                     "Check port conflicts and the redux-live service logs."))
+        else:
+            findings.append(_finding("local dashboard", "attention",
+                                     "Local dashboard has not started yet.",
+                                     "No HTTP listener is currently active."))
+
+    if persistence_error:
+        findings.append(_finding("runtime checkpoint", "degraded",
+            "Runtime checkpoint cannot be persisted.", persistence_error,
+            "Inspect state storage; live observations remain available in memory."))
+    for name, error in sorted((observer_errors or {}).items())[:8]:
+        findings.append(_finding("observer " + str(name)[:24], "unknown",
+            "Diagnostic producer is unavailable.", str(error)[:80],
+            "Inspect the producer; engine ownership and capture counts are independent."))
+
+    assessed = [f["area"] for f in findings if f["status"] != "unknown"]
+    gaps = [f["area"] for f in findings if f["status"] == "unknown"]
+    known = [f["status"] for f in findings if f["status"] in _RANK]
+    worst = max(known, key=lambda status: _RANK[status]) if known else "unknown"
+    return {
+        "overall": worst,
+        "label": _LABEL[worst],
+        "findings": findings,
+        "coverage": {
+            "assessed": assessed, "not_assessed": gaps,
+            "reason": (f"{len(gaps)} area(s) could not be assessed: "
+                       + ", ".join(gaps) if gaps else "all probed areas were assessed"),
+        },
+    }

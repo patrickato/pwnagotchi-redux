@@ -11,9 +11,19 @@ dependencies = []
 
 [project.scripts]
 redux = "redux.cli:main"
+redux-display-diag = "redux.display.acceptance:main"
+redux-fbui = "redux.display.fbui:main"
+redux-ui-preview = "redux.display.preview:main"
+redux-touch-calibrate = "redux.display.calibration_wizard:main"
+redux-usb-qualify = "redux.radio.awus036acm:main"
+redux-acceptance = "redux.acceptance:main"
+redux-phone = "redux.connectivity.bluez_executor:main"
+redux-boot-check = "redux.boot_readiness:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "Pillow>=9.4", "dbus-next==0.2.3"]
+display = ["Pillow>=9.4"]
+bluetooth = ["dbus-next==0.2.3"]
 # At-rest encryption (redux.vault). Optional on purpose: the core stays
 # dependency-free, and the vault reports itself unavailable (honest, fail-closed)
 # rather than storing plaintext when this isn't installed.
