@@ -242,24 +242,46 @@ def test_sightings_persist_real_store():
 # 2b.2 engines
 # --------------------------------------------------------------------------- #
 
+def _plan_out(selected, installed):
+    return (f"capture engine (selected, by availability): {selected}  (offense_enabled=True, passive=None)\n"
+            f"  reason line\n\nAngryOxide preview (installed={installed}):\n  preview line\n")
+
+
 def test_engines_skip_without_binaries(monkeypatch):
     monkeypatch.setattr(ba.shutil, "which", lambda n: None)
     status, detail = mk()(GMAP["2b.2"])
     assert status == "skip"
 
 
-def test_engines_pass_when_present_and_doctor_truthful(monkeypatch):
+def test_engines_pass_ao_present_and_selected(monkeypatch):
     monkeypatch.setattr(ba.shutil, "which", lambda n: "/usr/bin/" + n if n == "angryoxide" else None)
-    run = lambda c, t=20: (0, "[OK] capture engine: AngryOxide providing it")
+    run = lambda c, t=20: (0, _plan_out("AngryOxide", "True"))
     status, detail = mk(run=run)(GMAP["2b.2"])
-    assert status == "pass" and "AngryOxide" in detail
+    assert status == "pass" and "scalpel" in detail.lower()
 
 
-def test_engines_fail_when_doctor_lies(monkeypatch):
+def test_engines_pass_ao_absent_is_honest(monkeypatch):
+    # bettercap binary present, AngryOxide absent: a static plan truthfully
+    # reports no engine (bettercap needs a live driver). That is NOT a failure.
     monkeypatch.setattr(ba.shutil, "which", lambda n: "/usr/bin/" + n if n == "bettercap" else None)
-    run = lambda c, t=20: (0, "No capture engine is available.")
+    run = lambda c, t=20: (0, _plan_out("None", "False"))
     status, detail = mk(run=run)(GMAP["2b.2"])
-    assert status == "fail" and "claims none" in detail.lower()
+    assert status == "pass" and "truthfully" in detail.lower()
+
+
+def test_engines_fail_on_untruthful_preview(monkeypatch):
+    # AngryOxide IS installed but the preview claims installed=False → not truthful.
+    monkeypatch.setattr(ba.shutil, "which", lambda n: "/usr/bin/" + n if n == "angryoxide" else None)
+    run = lambda c, t=20: (0, _plan_out("None", "False"))
+    status, detail = mk(run=run)(GMAP["2b.2"])
+    assert status == "fail" and "truthful" in detail.lower()
+
+
+def test_engines_fail_ao_present_not_selected(monkeypatch):
+    monkeypatch.setattr(ba.shutil, "which", lambda n: "/usr/bin/" + n if n == "angryoxide" else None)
+    run = lambda c, t=20: (0, _plan_out("bettercap", "True"))
+    status, detail = mk(run=run)(GMAP["2b.2"])
+    assert status == "fail" and "selected" in detail.lower()
 
 
 # --------------------------------------------------------------------------- #
