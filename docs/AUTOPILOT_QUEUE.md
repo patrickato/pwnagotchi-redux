@@ -36,9 +36,12 @@ dependency and actual source state. Keep already-completed evidence intact.
   Thus an actual automated read-only metadata snapshot succeeded (but
   **not** RF decoding, handshake authentication, TFT validation or
   hardware release acceptance). The source-only feedback filter rejects
-  reports older than two hours. Next: separately opt in to sending only
-  fixed-schema category summaries to local Codex, never raw private
-  reports, SSH credentials or Pi commands.
+  reports older than two hours. A consent-gated, user-service-only
+  feedback toggle now exists in `scripts/configure-redux-codex-feedback.py`.
+  It is disabled by default and needs a distinct operator decision on
+  sanitized category transfer to the Codex cloud model. CI qualification
+  and local activation remain separate. Never share raw private reports,
+  SSH credentials, identifying network data or Pi commands.
 - [x] **P0 — Hardware bridge initial offline qualification:** The owner
   reported **29 passing** field bridge tests and successful explicit
   recurring read-only enrollment plus separate user-timer installation on
@@ -74,15 +77,16 @@ work: dedicated unprivileged OS account with Pi forced-command boundary,
 safe redacted evidence-return channel, CI/hardware contract tests, and
 separately approved physical experiment manifests and rollback procedures.
 
-- [ ] **P0 — Prepared artifact-integrity readiness:** Review the existing
-  `scripts/capture-artifact-audit.py` and `redux.crack.integrity_receipt`.
-  Improve offline tests and read-only permission/race handling for the
-  *single ready* ledger row observed on the Pi 4. A bounded no-I/O `--plan`
-  with synthetic tests was committed to `capture-artifact-audit.py` on
-  October 21; do not duplicate that completed subtask. Verify remaining
-  ledger, file replacement, and concurrency edge cases source-only.
-  **Do not read the real Pi ledger, open captures or run SSH.**
-  A physical audit requires its own owner-approved read-only execution.
+- [x] **P0 — Prepared artifact audit source hardening:** The existing
+  `scripts/capture-artifact-audit.py` rechecks the SQLite ledger inode
+  immediately after DB open, after ready-row selection and after hashing,
+  with synthetic swap tests. An operator can select `--max-ready-rows 1`
+  and refuse a larger ledger **before hashing** any prepared output; the
+  offline `--plan` states that limit. GitHub Python and image CI have
+  passed these additions. This is **software-ready, not field-verified**.
+  Real prepared `.hc22000` content requires a separately approved,
+  read-only, owner-bound capture integrity audit. Do not treat the hourly
+  metadata observer's approval as permission to read prepared captures.
 - [ ] **P0 — Native monitor-VIF NetworkManager evidence:** Investigate source-only
   alternatives to NM's missing netdev enumeration, without assuming
   `not enumerated = unmanaged`. Build only parsers, independent evidence
