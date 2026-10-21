@@ -38,10 +38,12 @@ dependency and actual source state. Keep already-completed evidence intact.
   hardware release acceptance). The source-only feedback filter rejects
   reports older than two hours. A consent-gated, user-service-only
   feedback toggle now exists in `scripts/configure-redux-codex-feedback.py`.
-  It is disabled by default and needs a distinct operator decision on
-  sanitized category transfer to the Codex cloud model. CI qualification
-  and local activation remain separate. Never share raw private reports,
-  SSH credentials, identifying network data or Pi commands.
+  It remains disabled on WSL, but **the owner explicitly approved**
+  sanitized category transfer to the Codex cloud model on October 21,
+  independently of metadata observation. The one-time service toggle and
+  its consent flag are ready for controlled WSL activation after CI.
+  Never share raw private reports, SSH credentials, identifying network
+  data or Pi commands.
 - [x] **P0 — Hardware bridge initial offline qualification:** The owner
   reported **29 passing** field bridge tests and successful explicit
   recurring read-only enrollment plus separate user-timer installation on
@@ -84,9 +86,15 @@ separately approved physical experiment manifests and rollback procedures.
   and refuse a larger ledger **before hashing** any prepared output; the
   offline `--plan` states that limit. GitHub Python and image CI have
   passed these additions. This is **software-ready, not field-verified**.
-  Real prepared `.hc22000` content requires a separately approved,
-  read-only, owner-bound capture integrity audit. Do not treat the hourly
-  metadata observer's approval as permission to read prepared captures.
+  The owner separately approved **one** non-root read-only integrity
+  audit of at most one prepared `.hc22000` file on October 21. A one-shot
+  strict-SSH launcher, in-memory remote audit, REDUXCAP mount identity
+  checks and consumed-before-contact local marker are implemented in
+  `scripts/redux-one-artifact-field-audit.py` with offline synthetic
+  tests. After the final CI run passes, execute exactly once from WSL,
+  inspect only sanitized aggregate results, and stop on UNKNOWN/ATTENTION.
+  No PI-side run has occurred yet; SHA file-integrity evidence will NOT
+  prove handshake authenticity, received 802.11 frames, or release PASS.
 - [ ] **P0 — Native monitor-VIF NetworkManager evidence:** Investigate source-only
   alternatives to NM's missing netdev enumeration, without assuming
   `not enumerated = unmanaged`. Build only parsers, independent evidence
