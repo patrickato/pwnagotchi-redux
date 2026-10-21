@@ -248,3 +248,17 @@ def test_nonstring_target_or_ssh_key_path_fails_closed(tmp_path, monkeypatch):
         mod.private_ip(3232235521)
     with pytest.raises(ValueError, match="invalid_key_path_type"):
         mod.key_path(1)
+
+
+def test_changed_checkout_revision_cannot_inherit_old_pi_approval(tmp_path, monkeypatch):
+    mod, key = setup_private(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod, "source_revision", lambda: "a" * 40)
+    monkeypatch.setattr(mod, "source_hashes", lambda: ("1" * 64, "2" * 64))
+    mod.enroll("192.168.56.24", key, interval_hours=4, days=2,
+               sessions=3, approve=True, now=100)
+    assert mod.load_policy()["source_revision"] == "a" * 40
+    monkeypatch.setattr(mod, "source_revision", lambda: "b" * 40)
+    result = mod.run_once(now=110, runner=lambda *args, **kwargs:
+                          pytest.fail("old approval used for new checkout"))
+    assert result["status"] == "source_changed"
+    assert mod.load_policy()["used"] == 0
