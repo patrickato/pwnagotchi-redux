@@ -163,3 +163,14 @@ def test_extra_duplicate_service_command_or_timer_schedule_is_not_trusted(tmp_pa
     assert obj.trusted_unit(service, obj.EXPECTED_SERVICE) == "unrecognized"
     timer.write_text(timer.read_text() + "OnCalendar=*-*-* *:00:00\n")
     assert obj.trusted_unit(timer, obj.EXPECTED_TIMER) == "unrecognized"
+
+
+
+def test_hourly_timer_must_point_to_exact_readonly_service(tmp_path, monkeypatch):
+    obj, state, policy, service, timer = fixture(tmp_path, monkeypatch)
+    source = timer.read_text()
+    timer.write_text(source.replace("Unit=redux-field-bridge.service",
+                                    "Unit=untrusted.service"))
+    assert obj.trusted_unit(timer, obj.EXPECTED_TIMER) == "unrecognized"
+    timer.write_text(source + "Unit=untrusted.service\n")
+    assert obj.trusted_unit(timer, obj.EXPECTED_TIMER) == "unrecognized"
