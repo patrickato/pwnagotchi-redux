@@ -38,6 +38,11 @@ PROTECTED = {
     "scripts/redux-field-bridge.py",
     "scripts/install-redux-field-bridge.sh",
     "docs/REMOTE_HARDWARE_AUTOMATION.md",
+    # The private-report privacy boundary must never be rewritten by the
+    # model that will later consume its filtered output.
+    "redux/field_feedback.py",
+    "scripts/redux-field-feedback.py",
+    "docs/FIELD_FEEDBACK.md",
 }
 MAX_CHANGED = 35
 MAX_SINGLE_BYTES = 512 * 1024
