@@ -25,9 +25,10 @@ def test_run_realizes_full_assignment_from_injected_probe():
                           applier=rec.append,
                           env={"REDUX_INTENT": "hunt"})
     modes = {a.iface: a.mode for a in actions}
-    # hunt: Alfa (injector, 5GHz) -> capture/monitor; onboard -> uplink/managed
+    # hunt: Alfa (injector, 5GHz) -> primary active capture; onboard joins as a
+    # tandem passive radio -> both end up in monitor (capability scaling).
     assert modes["wlan1"] is Mode.MONITOR
-    assert modes["wlan0"] is Mode.MANAGED
+    assert modes["wlan0"] is Mode.MONITOR
     assert [a.iface for a in rec] == [a.iface for a in actions]
 
 
