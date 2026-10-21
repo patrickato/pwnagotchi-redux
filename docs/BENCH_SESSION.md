@@ -1,15 +1,15 @@
 # The bench session — all hardware validation in one sitting
 
-This is the page to read when you're home with the Pi and the gear. Everything
-that needs real hardware is batched into one resumable pass driven by
-`redux benchpass`, so you walk every gate once, in order, and get a single
-consolidated result. The full per-gate detail lives in
+This is the page to read when you're home with the Pi and the gear. Hardware
+gates are organized into a resumable, **operator-recorded** session driven by
+`redux benchpass`. Operator status entries are not independent release evidence. The full per-gate detail lives in
 [`HARDWARE_VALIDATION.md`](HARDWARE_VALIDATION.md); this page is the flow.
 
 The pass judgment is always yours — hardware gates need a human to attest.
-`benchpass` sequences the gates, runs/shows the command for each, records your
-`pass`/`fail`/`skip` to a resumable ledger, and prints one report. It never
-transmits and never fabricates a result.
+`benchpass` shows commands (it does NOT execute them), records your
+`pass`/`fail`/`skip` to a resumable ledger, and prints one report. A typed PASS
+is not a measured hardware result. SKIP does not count as clean. It never
+transmits or fabricates hardware verification.
 
 ## 1. Before you travel home — plan it (no hardware)
 
@@ -22,7 +22,7 @@ adapter, optional TFT/GPS/LoRa nodes, etc.).
 
 Dry-run the headline flow anywhere to see it reason, with no hardware:
 ```sh
-redux demo --intent hunt        # sample inventory; prints the arrange→capture plan + why
+redux demo --intent hunt        # synthetic PLAN ONLY: no device access or capture
 ```
 
 ## 2. At the bench — arm your scope, then preflight
@@ -48,7 +48,7 @@ redux benchpass run --board pi4     # walks every gate; record pass/fail/skip ea
 - Focus on a subset with `--only 1.6 2b.6`.
 - `--board` keeps a separate ledger per board (`benchpass-pi4.json`, `benchpass-pi5.json`). A gate
   is only truly `done` when it passes on **both** — run the pass once per board.
-- The headline (gate 1.6) is just: `redux demo --live --intent hunt --offense` on your own armed AP — flash → boot → plug → auto-arrange → capture, hands-off. Record a short clip.
+- **Gate 1.6 remains unverified.** `redux demo --live --intent hunt` only probes radio availability and previews orchestration. It does NOT apply roles, repoint bettercap, start a capture or transmit. A separately reviewed and authorized live execution path must exist before recording this gate as a physical PASS.
 
 ## 4. Read the result, record it
 
@@ -60,8 +60,10 @@ redux benchpass report --board pi4 --markdown --model "Pi 4 Model B" --image-sha
 The `--markdown` form prints a dated block ready to paste straight into
 `IMAGE_BUILD.md`'s hardware-gate record. Then, per
 [`HARDWARE_VALIDATION.md` §3](HARDWARE_VALIDATION.md), flip the matching `TASKS.md`
-rows — `done` only when the `matrix` shows ✓ (pass on **both** Pi 4 and Pi 5);
-otherwise leave `done (sandbox)` with a note on exactly what failed and on which board.
+rows only after separately reviewing actual device/run evidence, image hashes,
+and required results on **both** Pi 4 and Pi 5. A matrix ✓ means both boards
+have operator-recorded PASS, not independently verified acceptance. Otherwise
+leave `done (sandbox)` with the outstanding hardware gates clearly documented.
 
 ## Scope reminder
 
