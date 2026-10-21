@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Optional user-owned 6-hour timer for source-only local Codex engineering.
+# Optional user-owned 2-hour timer for source-only local Codex engineering.
 # Does not use sudo, touch Pi/SD/network configurations, or add credentials.
 set -euo pipefail
 BASE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -7,12 +7,12 @@ UNIT_DIR="${HOME}/.config/systemd/user"
 NAME="redux-autopilot"
 
 usage() {
-  printf 'Usage: bash scripts/install-redux-autopilot.sh --plan|--install|--status|--disable\n'
+  printf 'Usage: bash scripts/install-redux-autopilot.sh --plan|--install|--retime|--status|--disable\n'
 }
 
 case "${1:---plan}" in
   --plan)
-    printf 'No changes. Optional Codex source-only user timer, every 6 hours.\n'
+    printf 'No changes. Optional Codex source-only user timer, every 2 hours.\n'
     printf 'No Pi SSH, sudo, device controls or releases.\n'
     printf 'WSL and its user systemd manager must be running for scheduled jobs.\n'
     printf 'First run: python3 scripts/redux-autopilot.py plan\n'
@@ -67,10 +67,10 @@ UNIT
     printf 'Environment=PATH=%s:%%h/.local/bin:/usr/local/bin:/usr/bin:/bin\n' "${CODEX_DIR}" >> "${UNIT_DIR}/${NAME}.service"
     cat > "${UNIT_DIR}/${NAME}.timer" <<'UNIT'
 [Unit]
-Description=Run Redux source-only Codex cycle every six hours
+Description=Run Redux source-only Codex cycle every two hours
 
 [Timer]
-OnCalendar=*-*-* 01,07,13,19:00:00
+OnCalendar=*-*-* 00,02,04,06,08,10,12,14,16,18,20,22:00:00
 Persistent=true
 RandomizedDelaySec=5min
 Unit=redux-autopilot.service
@@ -83,6 +83,49 @@ UNIT
     printf 'Enabled; source-only Codex runs while Ubuntu WSL + user systemd run.\n'
     printf 'Status: systemctl --user list-timers redux-autopilot.timer\n'
     printf 'Disable: bash scripts/install-redux-autopilot.sh --disable\n'
+    ;;
+  --retime)
+    # Modify only the user-owned original Redux timer, never arbitrary units.
+    TIMER="${UNIT_DIR}/${NAME}.timer"
+    [[ "${BASE}" == "${HOME}/redux-workbench-src" ]] || {
+      printf 'Refusing: unknown checkout path\n' >&2; exit 2;
+    }
+    [[ -f "${TIMER}" && ! -L "${TIMER}" ]] || {
+      printf 'Refusing: existing regular timer missing\n' >&2; exit 2;
+    }
+    [[ "$(stat -c %u -- "${TIMER}")" == "$(id -u)" ]] || {
+      printf 'Refusing: timer not owned by current user\n' >&2; exit 2;
+    }
+    OLD='OnCalendar=*-*-* 01,07,13,19:00:00'
+    NEW='OnCalendar=*-*-* 00,02,04,06,08,10,12,14,16,18,20,22:00:00'
+    if grep -Fxq -- "${NEW}" "${TIMER}"; then
+      printf 'Two-hour cadence already installed.\n'
+      exit 0
+    fi
+    [[ "$(grep -Fxc -- "${OLD}" "${TIMER}")" == "1" ]] || {
+      printf 'Refusing: existing calendar does not match trusted original\n' >&2; exit 2;
+    }
+    command -v systemd-analyze >/dev/null && \
+      systemd-analyze calendar "${NEW#OnCalendar=}" >/dev/null || {
+      printf 'Refusing: new systemd calendar did not validate\n' >&2; exit 2;
+    }
+    systemctl --user show-environment >/dev/null 2>&1 || {
+      printf 'Refusing: user systemd manager unavailable\n' >&2; exit 2;
+    }
+    umask 077
+    TMP="${UNIT_DIR}/.${NAME}.timer.$D__"
+    TMP="${TMP}$"
+    # Use mktemp rather than a predictable temporary filename.
+    TMP="$(mktemp "${UNIT_DIR}/.${NAME}.timer.XXXXXXXX")"
+    trap 'rm -f -- "${TMP}"' EXIT
+    sed "s|^${OLD}$|${NEW}|" "${TIMER}" > "${TMP}"
+    [[ "$(grep -Fxc -- "${NEW}" "${TMP}")" == "1" ]] || exit 2
+    chmod 0600 "${TMP}"
+    mv -T -- "${TMP}" "${TIMER}"
+    trap - EXIT
+    systemctl --user daemon-reload
+    systemctl --user restart "${NAME}.timer"
+    printf 'Updated Redux Codex timer to every two hours; current Pi unchanged.\n'
     ;;
   --status)
     systemctl --user list-timers "${NAME}.timer" || true
