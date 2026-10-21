@@ -576,6 +576,48 @@ def cmd_campaign(args) -> int:
     return 0
 
 
+def cmd_portal(args) -> int:
+    """Captive / evil-portal for AUTHORIZED client testing. `plan` previews what
+    would be served (no server runs). `serve` actually stands it up — and ONLY
+    with --authorized — binding least-exposed with the URL logged. For a real
+    engagement you supply your own page; the built-in template imitates no brand."""
+    from .portal import CaptivePortal, serve
+    template = None
+    if getattr(args, "template", None):
+        try:
+            with open(args.template, encoding="utf-8") as f:
+                template = f.read()
+        except OSError as e:
+            print(f"template: {e}")
+            return 2
+    portal = CaptivePortal(engagement=args.engagement,
+                           **({"template": template} if template else {}))
+    if args.portal_cmd == "plan":
+        print(f"captive portal (engagement={args.engagement}):")
+        print(f"  bind_scope: {args.bind_scope}   port: {args.port}")
+        print(f"  template:   {'custom (' + args.template + ')' if template else 'built-in generic (imitates no brand)'}")
+        print(f"  page bytes: {len(portal.page())}")
+        print("  NOT serving (plan only) — add `serve --authorized` to run an authorized engagement.")
+        return 0
+    # serve: refuse unless explicitly authorized
+    if not getattr(args, "authorized", False):
+        print("refused: `serve` requires --authorized (authorized client testing only)")
+        return 3
+    try:
+        httpd = serve(portal, authorized=True, port=args.port,
+                      bind_scope=args.bind_scope, _serve=False)
+    except ValueError as e:
+        print(f"refused: {e}")
+        return 3
+    try:
+        httpd.serve_forever()           # blocks until Ctrl-C
+    except KeyboardInterrupt:
+        print(f"\nportal stopped — {len(portal.submissions)} submission(s) recorded.")
+    finally:
+        httpd.shutdown()
+    return 0
+
+
 def cmd_captap(args) -> int:
     if getattr(args, "captap_cmd", "demo") == "live":
         return _captap_live(args)
@@ -1742,6 +1784,19 @@ def build_parser() -> argparse.ArgumentParser:
     cad_ = casub.add_parser("demo", help="run the chain with fake executors + render the report")
     cad_.add_argument("--targets", nargs="*", help="targets to run the chain against")
     ca.set_defaults(func=cmd_campaign)
+
+    po = sub.add_parser("portal", help="captive/evil-portal for AUTHORIZED client testing")
+    po.add_argument("--engagement", required=True, help="named engagement you are authorized to run")
+    po.add_argument("--template", help="path to your own portal page (imitates no real brand)")
+    po.add_argument("--port", type=int, default=8088)
+    po.add_argument("--bind-scope", default="localhost",
+                    choices=["localhost", "lan", "tailscale", "auto"])
+    posub = po.add_subparsers(dest="portal_cmd", required=True)
+    posub.add_parser("plan", help="preview what would be served (no server runs)")
+    pos = posub.add_parser("serve", help="stand up the portal (requires --authorized)")
+    pos.add_argument("--authorized", action="store_true",
+                     help="confirm this is an engagement you are permitted to run")
+    po.set_defaults(func=cmd_portal)
 
     dm = sub.add_parser("demo", help="hands-off pass (gate 1.6): arrange radios → capture, one command")
     dm.add_argument("--intent", default="recon", choices=[i.value for i in Intent],
