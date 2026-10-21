@@ -46,17 +46,17 @@ def test_plan_is_strictly_offline(tmp_path, monkeypatch, capsys):
 def test_approval_required_and_private_policy(tmp_path, monkeypatch):
     mod, key = setup_private(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="explicit_recurring_approval_required"):
-        mod.enroll("192.168.12.115", key, interval_hours=6, days=14,
+        mod.enroll("192.168.56.24", key, interval_hours=6, days=14,
                    sessions=30, approve=False, now=100)
     assert not mod.STATE.exists()
-    value = mod.enroll("192.168.12.115", key, interval_hours=6, days=14,
+    value = mod.enroll("192.168.56.24", key, interval_hours=6, days=14,
                        sessions=30, approve=True, now=100)
     assert value["hardware_action_performed"] is False
     policy = mod.STATE / mod.POLICY_FILE
     assert stat.S_IMODE(policy.stat().st_mode) == 0o600
     assert stat.S_IMODE(mod.STATE.stat().st_mode) == 0o700
     assert mod.load_policy()["max_sessions"] == 30
-    assert "192.168.12.115" not in json.dumps(value)
+    assert "192.168.56.24" not in json.dumps(value)
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "8.8.8.8", "0.0.0.0",
@@ -73,13 +73,13 @@ def test_only_private_lan_ipv4_allowed(tmp_path, monkeypatch, host):
 def test_recurring_scope_limits_are_enforced(tmp_path, monkeypatch, hours, days, count):
     mod, key = setup_private(tmp_path, monkeypatch)
     with pytest.raises(ValueError):
-        mod.enroll("192.168.12.115", key, interval_hours=hours,
+        mod.enroll("192.168.56.24", key, interval_hours=hours,
                    days=days, sessions=count, approve=True, now=100)
 
 
 def test_observe_consumes_approval_before_single_ssh(tmp_path, monkeypatch):
     mod, key = setup_private(tmp_path, monkeypatch)
-    mod.enroll("192.168.12.115", key, interval_hours=4, days=3,
+    mod.enroll("192.168.56.24", key, interval_hours=4, days=3,
                sessions=2, approve=True, now=100)
     calls = []
 
@@ -115,7 +115,7 @@ def test_observe_consumes_approval_before_single_ssh(tmp_path, monkeypatch):
 
 def test_recurring_permission_expires_and_can_be_revoked(tmp_path, monkeypatch):
     mod, key = setup_private(tmp_path, monkeypatch)
-    mod.enroll("192.168.12.115", key, interval_hours=4, days=1,
+    mod.enroll("192.168.56.24", key, interval_hours=4, days=1,
                sessions=10, approve=True, now=100)
     runner = lambda *args, **kwargs: pytest.fail("forbidden collector attempt")
     assert mod.run_once(now=100 + 86400, runner=runner)["status"] == "expired"
@@ -125,7 +125,7 @@ def test_recurring_permission_expires_and_can_be_revoked(tmp_path, monkeypatch):
 
 def test_unavailable_session_does_not_retry(tmp_path, monkeypatch):
     mod, key = setup_private(tmp_path, monkeypatch)
-    mod.enroll("192.168.12.115", key, interval_hours=4, days=1,
+    mod.enroll("192.168.56.24", key, interval_hours=4, days=1,
                sessions=10, approve=True, now=100)
     calls = []
 
@@ -142,7 +142,7 @@ def test_unavailable_session_does_not_retry(tmp_path, monkeypatch):
 
 def test_policy_path_is_private_and_cannot_be_symlink(tmp_path, monkeypatch):
     mod, key = setup_private(tmp_path, monkeypatch)
-    mod.enroll("192.168.12.115", key, interval_hours=4, days=1,
+    mod.enroll("192.168.56.24", key, interval_hours=4, days=1,
                sessions=5, approve=True, now=100)
     policy = mod.STATE / mod.POLICY_FILE
     policy.unlink()
@@ -163,3 +163,41 @@ def test_plan_cli_no_permissions_needed(tmp_path):
         cwd=tmp_path, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0
     assert json.loads(result.stdout)["default_network_action"] is False
+
+
+def test_collector_source_change_blocks_without_ssh(tmp_path, monkeypatch):
+    mod, key = setup_private(tmp_path, monkeypatch)
+    approved = ("1" * 64, "2" * 64)
+    monkeypatch.setattr(mod, "source_hashes", lambda: approved)
+    mod.enroll("192.168.56.24", key, interval_hours=4, days=3,
+               sessions=3, approve=True, now=100)
+    assert mod.load_policy()["remote_bundle_sha256"] == "2" * 64
+    monkeypatch.setattr(mod, "source_hashes",
+                        lambda: ("1" * 64, "3" * 64))
+    verdict = mod.run_once(now=105, runner=lambda *args, **kwargs:
+                           pytest.fail("collector changed without approval"))
+    assert verdict["status"] == "source_changed"
+    assert mod.load_policy()["used"] == 0
+
+
+def test_symlinked_local_lock_refuses_session(tmp_path, monkeypatch):
+    mod, key = setup_private(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod, "source_hashes", lambda: ("1" * 64, "2" * 64))
+    mod.enroll("192.168.56.24", key, interval_hours=4, days=3,
+               sessions=3, approve=True, now=100)
+    (mod.STATE / "collector.lock").symlink_to(key)
+    with pytest.raises(OSError):
+        mod.run_once(now=105, runner=lambda *a, **kw:
+                     pytest.fail("unsafe lock should stop first"))
+
+
+def test_approval_has_independent_hash_pins(tmp_path, monkeypatch):
+    mod, key = setup_private(tmp_path, monkeypatch)
+    values = ("a" * 64, "b" * 64)
+    monkeypatch.setattr(mod, "source_hashes", lambda: values)
+    mod.enroll("192.168.56.24", key, interval_hours=6, days=14,
+               sessions=10, approve=True, now=100)
+    pol = mod.load_policy()
+    assert pol["launcher_sha256"] == values[0]
+    assert pol["remote_bundle_sha256"] == values[1]
+    assert "a" * 64 not in json.dumps(mod.plan())
