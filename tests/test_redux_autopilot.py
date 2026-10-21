@@ -110,3 +110,24 @@ def test_codex_approval_flags_are_top_level_not_exec_options():
                     "--ask-for-approval", "never", "exec", "-")
     assert argv.index("--ask-for-approval") < argv.index("exec")
     assert "dangerously-bypass-approvals-and-sandbox" not in argv
+
+
+def test_cloned_policy_is_fresh_bounded_and_no_symlink(tmp_path):
+    instance = module()
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    policy = docs / "AUTOPILOT_AGENT.md"
+    policy.write_text("PICK P0 FROM FRESH GITHUB QUEUE\n")
+    assert instance.cloned_policy(tmp_path).startswith("PICK P0")
+    policy.write_bytes(b"x" * (16 * 1024 + 1))
+    with pytest.raises(ValueError, match="remote_agent_policy_invalid"):
+        instance.cloned_policy(tmp_path)
+    policy.unlink()
+    policy.symlink_to(ROOT / "docs" / "AUTOPILOT_AGENT.md")
+    with pytest.raises(ValueError, match="remote_agent_policy_invalid"):
+        instance.cloned_policy(tmp_path)
+    policy.unlink()
+    docs.rmdir()
+    docs.symlink_to(ROOT / "docs", target_is_directory=True)
+    with pytest.raises(ValueError, match="remote_agent_policy_invalid"):
+        instance.cloned_policy(tmp_path)
