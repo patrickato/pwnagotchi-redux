@@ -72,7 +72,8 @@ everything above them:
 | Web | `redux/web/` | glass-box dashboard — **live moving map** (own track + colored AP pins + radar marker), activity sparkline, plain/rich skin toggle; rendered client-side (no Pi cost), self-contained, offline |
 | Personas | `redux/core/persona.py` | one box, pick your hat (red/blue/purple/recon/mesh/sigint) — a declarative capability+posture set; posture is an *extra* gate that can only tighten firing, never widen it |
 | Capture tap | `redux/captap/` | raw 802.11 parser (deauth/disassoc + probe-request **IE fingerprint**) feeding the Dex (real cross-MAC re-id) + flood detectors — the P0 gap, producer side done |
-| CLI | `redux/cli.py` | `redux status / run / web / tft / captap / packs / doctor / post / persona / sense / sentinel / mesh / campaign / hunt / capture / eap / range / report / scope / dex / expedition / ghost` |
+| CLI | `redux/cli.py` | `redux status / run / web / tft / captap / packs / doctor / post / persona / sense / sentinel / mesh / campaign / demo / benchpass / hunt / capture / eap / range / report / scope / dex / expedition / ghost` |
+| Acceptance tooling | `redux/capstone.py`, `redux/benchpass.py` | `redux demo` — the one-command hands-off pass (gate 1.6: arrange radios → capture, glass-box, posture-gated); `redux benchpass` — the whole hardware validation batched into one resumable, per-board session (`prep`/`preflight`/`run`/`report`/`matrix`), see `docs/BENCH_SESSION.md` |
 
 Everything assembles on one bus through `Augur` and runs as a single system. Offensive
 capabilities are full-power but consult the central Scope for aiming (see below).
