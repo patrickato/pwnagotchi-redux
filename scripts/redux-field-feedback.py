@@ -16,6 +16,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 STATE = Path.home() / '.local' / 'state' / 'redux-field-bridge'
 MAX_REPORT = 128 * 1024
 PATTERN = re.compile(r'session-[a-f0-9]{32}\.json\Z')
