@@ -6,6 +6,8 @@
     redux survey   --iface wlan1mon [--demo]                    passive AP situational-awareness sweep (read-only)
     redux selftest                                             on-device software battery (paste the report back)
     redux hwtest   --iface wlan1mon [--out FILE]                validation battery: software + synthetic detection + live passive
+    redux demo     [--intent I] [--live] [--json]               inspect orchestrator capture plan (no execution)
+    redux benchpass prep | run | report | matrix                 guided release qualification ledger
 
 The hardware paths (live probe, a real BettercapDriver) are used when asked; the
 default/testable paths (stub radios, a replay driver) need no Pi. Everything it
@@ -578,6 +580,233 @@ def cmd_captap(args) -> int:
     if getattr(args, "captap_cmd", "demo") == "live":
         return _captap_live(args)
     return _captap_demo(args)
+
+
+def cmd_demo(args) -> int:
+    """The hands-off pass (Phase-1 gate 1.6) in one command: arrange radios by
+    intent → repoint the capture engine → bounded capture, every step glass-box.
+    Default is a dry run on a sample inventory (no hardware). `--live` probes the
+    real radios on the Pi; it is honest when none are present and never fabricates.
+    Nothing transmits unless posture + Scope allow it."""
+    import shutil
+    from .capstone import plan_capstone, sample_inventory
+    from .core import persona as _persona
+
+    scope = Scope.load(args.scope_file)
+    if args.persona:
+        offense = _persona.get(args.persona).offense_available
+    else:
+        offense = bool(args.offense)
+
+    if args.live:
+        from .radio.probe import probe
+        radios = probe()
+        engine = shutil.which("bettercap") is not None or shutil.which("angryoxide") is not None
+        source = "live probe"
+    else:
+        radios = sample_inventory()
+        engine = not args.no_engine
+        source = "sample inventory (dry run)"
+
+    cap = plan_capstone(radios, args.intent, scope, offense_enabled=offense,
+                        seconds=int(args.seconds), engine_available=engine)
+
+    if getattr(args, "json", False):
+        print(json.dumps(cap.as_dict(), indent=2))
+        return 0 if cap.ok else 1
+
+    print(f"=== redux demo — hands-off pass ({source}; intent={cap.intent}, "
+          f"offense={'on' if offense else 'off'}) ===")
+    for s in cap.steps:
+        print(f"  [{'ok  ' if s.ok else 'STOP'}] {s.step:13} {s.detail}")
+        print(f"         └─ {s.reason}")
+    for w in cap.warnings:
+        print(f"  [warn] {w}")
+    print(f"summary: {cap.summary}")
+    if not args.live and cap.ok:
+        print("next:    run it for real on the Pi →  redux demo --live --intent "
+              f"{cap.intent}" + (" --offense" if offense else ""))
+    return 0 if cap.ok else 1
+
+
+def cmd_benchpass(args) -> int:
+    """The one lump-sum hardware session. `prep` (no hardware) prints the gear to
+    stage, which gates are software-ready, and the exact command sequence. `run`
+    walks every gate on the Pi, recording pass/fail/skip to a resumable ledger.
+    `report` renders the consolidated result. The pass call is always yours."""
+    from . import benchpass as bp
+
+    sub = getattr(args, "benchpass_cmd", None) or "prep"
+    board = getattr(args, "board", "") or ""
+    ledger_path = getattr(args, "ledger", "") or ""
+    if not ledger_path:
+        ledger_path = f"benchpass-{board}.json" if board else "benchpass-ledger.json"
+    phases = {"phase1": "Phase 1 — flashable MVP", "platform": "Platform surfaces",
+              "subsystem": "Subsystem battery"}
+
+    if sub == "prep":
+        gear = bp.gear_checklist()
+        by_phase = bp.gates_by_phase()
+        if getattr(args, "json", False):
+            print(json.dumps({"gear": gear,
+                              "gates": [g.as_dict() for g in bp.GATES]}, indent=2))
+            return 0
+        print("=== redux benchpass — prep (run this at home, no hardware needed) ===")
+        print(f"\nGear to stage ({len(gear)} items):")
+        for item in gear:
+            print(f"  - {item}")
+        print(f"\nGates to walk ({len(bp.GATES)} total), in order:")
+        for ph, label in phases.items():
+            gs = by_phase.get(ph, [])
+            if not gs:
+                continue
+            print(f"\n  {label}:")
+            for g in gs:
+                flag = " (physical)" if g.manual else ""
+                print(f"    [{g.id}] {g.title}{flag}")
+                print(f"          run:  {g.live}")
+                print(f"          pass: {g.passes}")
+        print("\nWhen you're at the bench:  redux benchpass run   (resumable; pass/fail/skip each)")
+        return 0
+
+    if sub == "preflight":
+        import shutil
+        facts = {}
+        try:
+            from .radio.probe import probe
+            radios = probe()
+        except Exception:
+            radios = []
+        facts["radios"] = len(radios) > 0
+        facts["radios_detail"] = (f"{len(radios)} enumerated" if radios
+                                  else "none enumerated (plug a radio / run on the Pi)")
+        mons = [getattr(r, "iface", "?") for r in radios if getattr(r, "monitor", False)]
+        facts["monitor_radio"] = bool(mons)
+        facts["monitor_radio_detail"] = (", ".join(mons) if mons else "no monitor-capable adapter")
+        eng = [e for e in ("bettercap", "angryoxide") if shutil.which(e)]
+        facts["capture_engine"] = bool(eng)
+        facts["capture_engine_detail"] = ", ".join(eng) if eng else "none on PATH"
+        facts["captures_mount"] = os.path.ismount("/captures") and os.access("/captures", os.W_OK)
+        facts["captures_mount_detail"] = ("mounted rw" if facts["captures_mount"]
+                                          else "/captures not a writable mount")
+        try:
+            from .selftest import run_selftest
+            checks = run_selftest()
+            failed = [c for c in checks if getattr(c, "status", "") == "FAIL"]
+            facts["software_battery"] = not failed
+            facts["software_battery_detail"] = ("green" if not failed
+                                                else f"{len(failed)} failing check(s)")
+        except Exception as e:
+            facts["software_battery"] = False
+            facts["software_battery_detail"] = f"selftest error: {e}"
+        try:
+            import cryptography  # noqa: F401
+            facts["crypto"] = True
+        except Exception:
+            facts["crypto"] = False
+        board = bp.preflight(facts)
+        ready = bp.preflight_ready(board)
+        if getattr(args, "json", False):
+            print(json.dumps({"board": board, "ready": ready}, indent=2))
+            return 0 if ready else 1
+        print("=== redux benchpass — preflight (run on the Pi before the session) ===")
+        for key, label, _ in bp.PREREQS:
+            v = board[key]
+            mark = "OK  " if v["ok"] else ("----" if key == "crypto" else "MISS")
+            print(f"  [{mark}] {v['label']}")
+            print(f"         {v['detail']}  → unblocks {', '.join(v['unblocks'])}")
+        print(f"\n{'READY' if ready else 'NOT READY'} — "
+              + ("all required prerequisites present; start:  redux benchpass run"
+                 if ready else "resolve the MISS rows above, then re-run preflight"))
+        return 0 if ready else 1
+
+    if sub == "matrix":
+        boards = args.boards or ["pi4", "pi5"]
+        ledgers = {b: bp.Ledger.load(f"benchpass-{b}.json") for b in boards}
+        matrix = bp.board_matrix(bp.GATES, ledgers)
+        if getattr(args, "json", False):
+            print(json.dumps({"boards": boards, "matrix": matrix,
+                              "all_done": bp.all_boards_done(matrix)}, indent=2))
+            return 0 if bp.all_boards_done(matrix) else 1
+        print("=== redux benchpass — cross-board matrix (done = every board passes) ===")
+        print(f"  {'gate':8} " + " ".join(f"{b:>6}" for b in boards) + "  done")
+        for r in matrix:
+            cells = " ".join(f"{r['per_board'][b]:>6}" for b in boards)
+            print(f"  {r['id']:8} {cells}  {'✓' if r['done'] else ''}")
+        done = bp.all_boards_done(matrix)
+        print(f"\n{'ALL BOARDS DONE' if done else 'not done on every board yet'}")
+        return 0 if done else 1
+
+    if sub == "report":
+        led = bp.Ledger.load(ledger_path)
+        rep = bp.build_report(bp.GATES, led)
+        if getattr(args, "markdown", False):
+            print(bp.report_markdown(rep, board=(board or led.board),
+                                     image_sha=getattr(args, "image_sha", ""),
+                                     model=getattr(args, "model", "")), end="")
+            return 0 if rep.clean else 1
+        if getattr(args, "json", False):
+            print(json.dumps(rep.as_dict(), indent=2))
+            return 0 if rep.clean else 1
+        _render_benchpass_report(rep)
+        return 0 if rep.clean else 1
+
+    # run: guided walk, resumable ledger
+    led = bp.Ledger.load(ledger_path)
+    if board:
+        led.board = board
+    only = getattr(args, "only", None) or None
+
+    def executor(g):
+        print(f"\n[{g.id}] {g.title}" + ("  (physical step)" if g.manual else ""))
+        if g.needs:
+            print(f"  needs: {', '.join(g.needs)}")
+        print(f"  run:   {g.live}")
+        print(f"  pass:  {g.passes}")
+        try:
+            ans = input("  result [pass/fail/skip/quit]: ").strip().lower()
+        except EOFError:
+            return "pending", "no input (non-interactive)"
+        if ans in ("q", "quit"):
+            raise KeyboardInterrupt
+        detail = ""
+        if ans in ("f", "fail", "s", "skip"):
+            try:
+                detail = input("  note (what happened): ").strip()
+            except EOFError:
+                detail = ""
+        return {"p": "pass", "pass": "pass", "f": "fail", "fail": "fail",
+                "s": "skip", "skip": "skip"}.get(ans, "skip"), detail
+
+    try:
+        rep = bp.run_benchpass(bp.GATES, executor, led, resume=getattr(args,"resume",False), only=only)
+    except KeyboardInterrupt:
+        led.save()
+        print("\n(paused — progress saved; resume with:  redux benchpass run --resume)")
+        return 2
+    print()
+    _render_benchpass_report(rep)
+    print(f"\nledger: {ledger_path}")
+    return 0 if rep.clean else 1
+
+
+def _render_benchpass_report(rep) -> None:
+    print("=== redux benchpass — consolidated result ===")
+    for r in rep.rows:
+        mark = {"pass": "PASS", "fail": "FAIL", "skip": "skip", "pending": "····"}.get(r["status"], "····")
+        line = f"  [{mark}] {r['id']:6} {r['title']}"
+        print(line)
+        if r["detail"]:
+            print(f"         └─ {r['detail']}")
+    c = rep.counts
+    print(f"\n{c.get('pass',0)} pass · {c.get('fail',0)} fail · {c.get('skip',0)} skip · "
+          f"{c.get('pending',0)} pending")
+    if rep.clean:
+        print("CLEAN — every gate walked, no failures.")
+    elif rep.complete:
+        print("complete, but with failures — see the FAIL rows above.")
+    else:
+        print("incomplete — pending gates remain; resume with:  redux benchpass run --resume")
 
 
 def _captap_live(args) -> int:
@@ -1513,6 +1742,41 @@ def build_parser() -> argparse.ArgumentParser:
     cad_ = casub.add_parser("demo", help="run the chain with fake executors + render the report")
     cad_.add_argument("--targets", nargs="*", help="targets to run the chain against")
     ca.set_defaults(func=cmd_campaign)
+
+    dm = sub.add_parser("demo", help="hands-off pass (gate 1.6): arrange radios → capture, one command")
+    dm.add_argument("--intent", default="recon", choices=[i.value for i in Intent],
+                    help="declared intent (default recon; hunt = active capture)")
+    dm.add_argument("--live", action="store_true", help="probe the real radios on the Pi (default: dry run)")
+    dm.add_argument("--persona", help="posture (red/purple = offense; blue/recon = detection-only)")
+    dm.add_argument("--offense", action="store_true", help="enable offense without a persona (still Scope-gated)")
+    dm.add_argument("--seconds", type=float, default=30.0, help="capture duration (default 30)")
+    dm.add_argument("--no-engine", action="store_true", help="dry-run as if no capture engine present")
+    dm.add_argument("--json", action="store_true", help="emit the structured plan as JSON")
+    dm.add_argument("--scope-file", default=_DEFAULT_SCOPE_PATH)
+    dm.set_defaults(func=cmd_demo)
+
+    bp_ = sub.add_parser("benchpass", help="the one lump-sum hardware session (prep/run/report)")
+    bpsub = bp_.add_subparsers(dest="benchpass_cmd", required=False)
+    bpp = bpsub.add_parser("prep", help="no hardware: gear list + ready gates + command sequence")
+    bpp.add_argument("--json", action="store_true")
+    bpf = bpsub.add_parser("preflight", help="on the Pi: check prerequisites before starting")
+    bpf.add_argument("--json", action="store_true")
+    bpr = bpsub.add_parser("run", help="walk every gate on the Pi; record pass/fail/skip (resumable)")
+    bpr.add_argument("--ledger", default="", help="resumable progress file (default benchpass-<board>.json)")
+    bpr.add_argument("--board", default="", help="board under test, e.g. pi4 / pi5 (done = both pass)")
+    bpr.add_argument("--resume", action="store_true", help="skip gates already recorded")
+    bpr.add_argument("--only", nargs="*", help="limit to these gate ids (e.g. 1.6 2b.6)")
+    bprep = bpsub.add_parser("report", help="render the consolidated result from the ledger")
+    bprep.add_argument("--ledger", default="", help="progress file (default benchpass-<board>.json)")
+    bprep.add_argument("--board", default="", help="board name (selects the default ledger)")
+    bprep.add_argument("--markdown", action="store_true", help="emit a paste-ready results block for IMAGE_BUILD.md")
+    bprep.add_argument("--image-sha", default="", help="image SHA256 to record in the markdown block")
+    bprep.add_argument("--model", default="", help="board model label for the markdown heading")
+    bprep.add_argument("--json", action="store_true")
+    bpm = bpsub.add_parser("matrix", help="cross-board view: done only when every board passes")
+    bpm.add_argument("--boards", nargs="*", default=["pi4", "pi5"], help="boards to combine (default pi4 pi5)")
+    bpm.add_argument("--json", action="store_true")
+    bp_.set_defaults(func=cmd_benchpass)
 
     ct = sub.add_parser("captap", help="raw 802.11 tap — probe/deauth parsing + cross-MAC re-id")
     ctsub = ct.add_subparsers(dest="captap_cmd", required=True)
