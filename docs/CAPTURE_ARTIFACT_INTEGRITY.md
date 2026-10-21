@@ -360,3 +360,32 @@ SQLite runtime, these specific low-level behaviors reproduced as
 `DataError: string or blob too big`, `OperationalError: interrupted`,
 and successful retrieval of an ordinary ready row. Full checkout
 qualification remains necessary after these commits.
+
+## Autonomous bring-up: fixed-scope offline plan (October 21)
+
+The current disposable Pi 4's *historical* read-only session reported five
+processing-ledger rows (one marked ready, four invalid). The pipeline's last
+reported scan counted five duplicates. None of those counts independently
+verify the ready file's bytes or prove a genuine wireless handshake.
+
+Before any new physical access, review the auditor's immutable source scope:
+
+```sh
+python3 scripts/capture-artifact-audit.py --plan
+```
+
+The offline plan returns exit **3** intentionally and contains only fixed
+JSON: maximum 10,000 ready rows, at most 33 MiB per prepared artifact,
+512 MiB aggregate hashing, an 8 KiB SQLite cell bound and a 10-second query
+deadline. It does not touch `/captures`, open SQLite, hash files, perform
+SSH, or write a receipt. It refuses mixing `--plan` with receipt access or
+publication. New source-only tests enforce these properties.
+
+The actual audit requires separate operator authorization covering access
+to the live capture ledger/prepared files or a verified offline copy.
+Run it only on the disposable Redux card after independently verifying the
+storage mount and target. Prefer *no* `--receipt` for the first investigation.
+Even a passing SHA-256 audit proves file integrity at audit time, not packet
+origin, valid RF monitor framing, successful over-the-air reception, or
+handshake authenticity. The old Oct 20 field report is already stale; do not
+convert its historical counts into present-time PASS.
