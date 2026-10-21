@@ -113,12 +113,10 @@ UNIT
       printf 'Refusing: user systemd manager unavailable\n' >&2; exit 2;
     }
     umask 077
-    TMP="${UNIT_DIR}/.${NAME}.timer.$D__"
-    TMP="${TMP}$"
     # Use mktemp rather than a predictable temporary filename.
     TMP="$(mktemp "${UNIT_DIR}/.${NAME}.timer.XXXXXXXX")"
     trap 'rm -f -- "${TMP}"' EXIT
-    sed "s|^${OLD}$|${NEW}|" "${TIMER}" > "${TMP}"
+    awk -v old="${OLD}" -v newer="${NEW}" '{ if ($0 == old) print newer; else print }' "${TIMER}" > "${TMP}"
     [[ "$(grep -Fxc -- "${NEW}" "${TMP}")" == "1" ]] || exit 2
     chmod 0600 "${TMP}"
     mv -T -- "${TMP}" "${TIMER}"
