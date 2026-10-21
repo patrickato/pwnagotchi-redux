@@ -52,6 +52,8 @@ def test_source_path_allowlist_is_strict(tmp_path):
     assert not instance.allowable(tmp_path, ["scripts/redux-field-feedback.py"])[0]
     assert not instance.allowable(tmp_path, ["scripts/redux-field-doctor.py"])[0]
     assert not instance.allowable(tmp_path, ["scripts/configure-redux-codex-feedback.py"])[0]
+    assert not instance.allowable(tmp_path, ["scripts/redux-one-artifact-field-audit.py"])[0]
+    assert not instance.allowable(tmp_path, ["scripts/capture-artifact-audit.py"])[0]
     assert not instance.allowable(tmp_path, ["redux/field_feedback.py"])[0]
     assert not instance.allowable(tmp_path, ["redux/field_feedback_contract.py"])[0]
     assert not instance.allowable(tmp_path, ["docs/FIELD_FEEDBACK.md"])[0]
