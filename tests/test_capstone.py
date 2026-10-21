@@ -102,7 +102,6 @@ def test_live_cli_only_reads_inventory_never_runs_capture(monkeypatch, capsys):
     import json
     from types import SimpleNamespace
     from redux import cli
-    from redux.radio import probe as probe_module
 
     events = []
     def sample_probe():
@@ -110,7 +109,8 @@ def test_live_cli_only_reads_inventory_never_runs_capture(monkeypatch, capsys):
         return sample_inventory()
 
     # No real hardware access in this test; all live inventory is synthetic.
-    import redux.radio.probe as probe_file
+    import importlib
+    probe_file = importlib.import_module("redux.radio.probe")
     monkeypatch.setattr(probe_file, "probe", sample_probe)
     monkeypatch.setattr(cli.Scope, "load", lambda path: Scope())
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
