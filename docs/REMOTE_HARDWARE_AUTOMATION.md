@@ -59,8 +59,8 @@ The new bridge separates two decisions:
    ~/.local/state/redux-field-bridge/recurring-approval.json, file mode 0600
    inside a 0700 directory.
 2. **Scheduled execution:** only an enabled, unexpired approval permits one
-   read-only collection. Minimum interval: 4 hours. Maximum approval: 14
-   days and 84 total attempts. The controller consumes each attempt before
+   read-only collection. Minimum interval: 1 hour. Maximum approval: 14
+   days and 40 total attempts. The controller consumes each attempt before
    SSH, uses a one-instance lock and saves any full report privately. A
    changed collector-source fingerprint blocks further SSH. The output
    status never contains a private IP, SSH identity, raw capture, or SSID.
@@ -68,7 +68,7 @@ The new bridge separates two decisions:
 The source includes scripts/redux-field-bridge.py,
 tests/test_redux_field_bridge.py, and
 scripts/install-redux-field-bridge.sh. The independent user-systemd timer
-fires near 00:20/06:20/12:20/18:20 local time while WSL is running, and
+fires hourly near minute 20 local time while WSL is running, and
 its rate policy can further restrict it. The existing source-only Codex
 autopilot timer is separate. Nothing has been enabled on WSL or the Pi by
 merely committing this software.
@@ -87,7 +87,7 @@ the operator approve recurrent read-only observations. Command **syntax**
     python3 scripts/redux-field-bridge.py enroll \
       --host VERIFIED_PRIVATE_PI_IPV4 \
       --key ~/.ssh/redux_field_ed25519 \
-      --interval-hours 6 --days 14 --max-sessions 40 \
+      --interval-hours 1 --days 14 --max-sessions 40 \
       --approve-recurring-read-only
 
 Then separately install the schedule:
@@ -98,6 +98,21 @@ Enrollment alone does not connect to the Pi. It creates only private host
 approval data. The installer modifies only the user-owned WSL timer. Revoke:
 
     bash scripts/install-redux-field-bridge.sh --disable
+
+### Operator-approved October 21 cadence
+
+The operator explicitly approved recurring read-only measurements and asked
+for a shorter interval than six hours. The controller and separate local timer
+now support **one collection per hour**. Keep the original maximum of **40
+total attempted sessions** and the **14-day expiration**, whichever comes
+first. Under continuous one-hour scheduling this reaches the attempt cap
+after roughly 40 hours. Failed SSH sessions consume an attempt; no automatic
+retry or scope extension is allowed.
+
+Faster 15–30-minute monitoring is technically possible after a separately
+reviewed rate adjustment, but it will not resolve 802.11 decode or touchscreen
+acceptance on its own. Keep the source-only Codex runner's schedule separate
+from the hardware observer.
 
 After expiry, source revision/bundle change, or session exhaustion, the
 controller stops rather than auto-renewing permission. The source-only Codex
