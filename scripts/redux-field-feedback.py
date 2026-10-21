@@ -18,7 +18,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path.home() / '.local' / 'state' / 'redux-field-bridge'
 MAX_REPORT = 128 * 1024
-PATTERN = re.compile(r'session-[a-f0-9]{32}\\.json\\Z')
+PATTERN = re.compile(r'session-[a-f0-9]{32}\.json\Z')
 
 
 def private_report(source):
