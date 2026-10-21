@@ -68,8 +68,8 @@ def test_only_private_lan_ipv4_allowed(tmp_path, monkeypatch, host):
                    approve=True, now=100)
 
 
-@pytest.mark.parametrize("hours,days,count", [(3, 14, 20), (6, 15, 20),
-                                               (6, 14, 85), (6, 0, 2)])
+@pytest.mark.parametrize("hours,days,count", [(0, 14, 20), (6, 15, 20),
+                                               (6, 14, 41), (6, 0, 2)])
 def test_recurring_scope_limits_are_enforced(tmp_path, monkeypatch, hours, days, count):
     mod, key = setup_private(tmp_path, monkeypatch)
     with pytest.raises(ValueError):
@@ -282,3 +282,46 @@ def test_renewal_requires_expiry_or_revocation_and_fresh_permission(tmp_path, mo
     assert value["status"] == "enrolled"
     assert mod.load_policy()["used"] == 0
     assert mod.load_policy()["interval_seconds"] == 6 * 3600
+
+
+def test_hourly_read_only_scope_consumes_no_more_than_forty_attempts(tmp_path, monkeypatch):
+    mod, key = setup_private(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod, "source_revision", lambda: "a" * 40)
+    monkeypatch.setattr(mod, "source_hashes",
+                        lambda: ("b" * 64, "c" * 64))
+    value = mod.enroll("192.168.56.24", key, interval_hours=1,
+                       days=14, sessions=40, approve=True, now=100)
+    assert value["interval_hours"] == 1
+    assert value["max_sessions"] == 40
+    assert mod.plan()["minimum_interval_hours"] == 1
+    assert mod.plan()["maximum_sessions"] == 40
+    calls = []
+
+    def observe_once(argv, **kwargs):
+        calls.append(tuple(argv))
+        # This is an offline test; fail to collect without ever invoking SSH.
+        return SimpleNamespace(returncode=3, stdout=json.dumps({
+            "session_report_saved": False, "physical_acceptance": "UNKNOWN",
+            "network_actions_performed": True,
+        }), stderr="")
+
+    assert mod.run_once(now=100, runner=observe_once)["status"] == "unavailable"
+    assert mod.run_once(now=100+3599, runner=observe_once)["status"] == "rate_limited"
+    assert mod.run_once(now=100+3600, runner=observe_once)["status"] == "unavailable"
+    assert len(calls) == 2
+    for k in range(2, 40):
+        result = mod.run_once(now=100+3600*k, runner=observe_once)
+        assert result["status"] == "unavailable"
+    assert len(calls) == 40
+    assert mod.run_once(now=100+3600*40, runner=observe_once)["status"] == "exhausted"
+    assert len(calls) == 40
+    assert mod.load_policy()["used"] == 40
+
+
+def test_systemd_field_schedule_is_hourly_not_continuous():
+    path = ROOT / "scripts" / "install-redux-field-bridge.sh"
+    source = path.read_text()
+    assert "OnCalendar=*-*-* *:20:00" in source
+    assert "RandomizedDelaySec=5min" in source
+    assert "00,06,12,18:20:00" not in source
+    assert "redux-autopilot.timer" not in source
