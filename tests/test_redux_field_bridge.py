@@ -226,3 +226,25 @@ def test_policy_rejects_forged_source_pins(tmp_path, monkeypatch):
     value["remote_bundle_sha256"] = "UNTRUSTED"
     with pytest.raises(ValueError, match="invalid_source_pins"):
         mod.validate_policy(value)
+
+
+def test_duplicate_json_policy_key_fails_closed(tmp_path, monkeypatch):
+    mod, key = setup_private(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod, "source_hashes", lambda: ("a" * 64, "b" * 64))
+    mod.enroll("192.168.56.24", key, interval_hours=4, days=2,
+               sessions=6, approve=True, now=100)
+    target = mod.STATE / mod.POLICY_FILE
+    original = target.read_text()
+    target.write_text(original.replace('"enabled": true',
+                                       '"enabled": true, "enabled": false'))
+    target.chmod(0o600)
+    with pytest.raises(ValueError, match="duplicate_policy_field"):
+        mod.load_policy()
+
+
+def test_nonstring_target_or_ssh_key_path_fails_closed(tmp_path, monkeypatch):
+    mod, key = setup_private(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="invalid_ip_type"):
+        mod.private_ip(3232235521)
+    with pytest.raises(ValueError, match="invalid_key_path_type"):
+        mod.key_path(1)
