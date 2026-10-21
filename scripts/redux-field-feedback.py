@@ -14,11 +14,14 @@ import re
 import stat
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 STATE = Path.home() / '.local' / 'state' / 'redux-field-bridge'
 MAX_REPORT = 128 * 1024
+MAX_AGE_SECONDS = 2 * 3600
+MAX_CLOCK_SKEW_SECONDS = 5 * 60
 PATTERN = re.compile(r'session-[a-f0-9]{32}\.json\Z')
 
 
@@ -31,8 +34,9 @@ def private_report(source):
     return source
 
 
-def newest_private(state=None):
+def newest_private(state=None, *, now=None):
     base = STATE if state is None else Path(state)
+    clock = time.time() if now is None else float(now)
     info = base.lstat()
     if (not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700
             or info.st_uid != os.getuid()):
@@ -44,6 +48,11 @@ def newest_private(state=None):
         try:
             path = private_report(entry)
             meta = path.lstat()
+            age = clock - meta.st_mtime
+            # Read-only observer data older than two hours cannot be fed
+            # to an AI as if it describes today's running Pi.
+            if age > MAX_AGE_SECONDS or age < -MAX_CLOCK_SKEW_SECONDS:
+                continue
         except (OSError, ValueError):
             continue
         item = (meta.st_mtime_ns, entry.name, path)
