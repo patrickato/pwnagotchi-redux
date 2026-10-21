@@ -414,3 +414,29 @@ ledger, read any capture data, altered the deployed image, or reset the
 separate hourly metadata observer's authorization. A future live integrity
 audit requires the owner's separately scoped read-only permission, including
 preflight verification of REDUXCAP and strict evidence-bounded output.
+
+## Minimal one-ready-row audit profile
+
+To prepare a future **separately authorized** examination of the single
+historical `ready` ledger row, the CLI now accepts a stricter bound:
+
+```sh
+python3 scripts/capture-artifact-audit.py --plan --max-ready-rows 1
+```
+
+This is an **offline plan only**, with no database, storage or Pi access.
+The actual read-only audit could later use `--max-ready-rows 1` with
+explicit `--db` and `--output` paths on the verified disposable
+REDUXCAP filesystem, once the owner approves that distinct operation.
+If the ledger has since accumulated two or more `ready` rows, it returns
+`row_limit_exceeded` **before hashing any prepared file**, instead of
+silently broadening its scope. It does not inspect invalid-row contents,
+raw PCAP, decode authenticity, transmit frames, write a receipt or alter
+the hourly observer. Invalid caps (0 or greater than 10000) are refused.
+
+The bound is a containment mechanism, not a substitute for physically
+verifying the target SD card, filesystem mount, operator ownership of
+captured material, or SSH host identity. Prepared `.hc22000` bytes may
+contain sensitive authentication material: even a read-only hash operation
+needs its own affirmative permission. Only aggregate issue counts should
+be shared, not file content or filenames.
