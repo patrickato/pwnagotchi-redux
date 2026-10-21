@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta, timezone
 import fcntl
+import hashlib
+import importlib.util
 import ipaddress
 import json
 import os
@@ -29,7 +31,8 @@ MIN_INTERVAL = 4 * 3600
 MAX_DURATION_DAYS = 14
 MAX_SESSIONS = 84
 ALLOWED_STATES = ("observed", "unknown", "expired", "rate_limited",
-                  "exhausted", "unavailable", "revoked", "not_enrolled")
+                  "exhausted", "unavailable", "revoked", "not_enrolled",
+                  "source_changed")
 POLICY_FILE = "recurring-approval.json"
 
 
@@ -52,6 +55,20 @@ def plan():
         "publish_private_evidence_to_github": False,
         "physical_acceptance": "UNKNOWN",
     }
+
+
+def source_hashes():
+    """Pin the reviewed launcher and exact remote in-memory module bundle."""
+    script = ROOT / "scripts" / "redux-acceptance.py"
+    if script.is_symlink() or not script.is_file() or script.stat().st_size > 128 * 1024:
+        raise ValueError("unsafe_collector_source")
+    digest = hashlib.sha256(script.read_bytes()).hexdigest()
+    spec = importlib.util.spec_from_file_location("bridge_acceptance", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    import hashlib as _hashlib
+    _pi, _field, remote_bundle = module.session_support()
+    return digest, _hashlib.sha256(remote_bundle.encode()).hexdigest()
 
 
 def private_state():
@@ -121,11 +138,17 @@ def key_path(value):
 def validate_policy(value):
     if not isinstance(value, dict) or set(value) != {
         "schema", "host", "key_path", "created", "expires",
-        "interval_seconds", "max_sessions", "used", "last_attempt", "enabled"
+        "interval_seconds", "max_sessions", "used", "last_attempt", "enabled",
+        "launcher_sha256", "remote_bundle_sha256"
     } or value["schema"] != SCHEMA:
         raise ValueError("invalid_approval_schema")
     private_ip(value["host"])
     key_path(value["key_path"])
+    if (not isinstance(value["launcher_sha256"], str)
+            or not re.fullmatch(r"[a-f0-9]{64}", value["launcher_sha256"])
+            or not isinstance(value["remote_bundle_sha256"], str)
+            or not re.fullmatch(r"[a-f0-9]{64}", value["remote_bundle_sha256"])):
+        raise ValueError("invalid_source_pins")
     if (type(value["created"]) is not int or type(value["expires"]) is not int
             or not 0 < value["created"] < value["expires"]
             or value["expires"] - value["created"] > MAX_DURATION_DAYS * 86400
@@ -161,11 +184,14 @@ def enroll(host, key, *, interval_hours, days, sessions, approve, now=None):
             or type(sessions) is not int or not 1 <= sessions <= MAX_SESSIONS):
         raise ValueError("unsafe_recurring_scope")
     now = int(time.time()) if now is None else int(now)
+    launcher_digest, remote_digest = source_hashes()
     policy = {
         "schema": SCHEMA, "host": private_ip(host),
         "key_path": key_path(key),
         "created": now, "expires": now + days * 86400,
         "interval_seconds": interval_hours * 3600,
+        "launcher_sha256": launcher_digest,
+        "remote_bundle_sha256": remote_digest,
         "max_sessions": sessions, "used": 0,
         "last_attempt": None, "enabled": True,
     }
@@ -209,7 +235,15 @@ def invoke_collector(policy, evidence, *, runner=subprocess.run):
 
 def run_once(*, now=None, runner=subprocess.run):
     root = private_state()
-    with (root / "collector.lock").open("a+b") as lock:
+    lock_fd = os.open(root / "collector.lock",
+                      os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                      0o600)
+    with os.fdopen(lock_fd, "a+b") as lock:
+        fd_info = os.fstat(lock.fileno())
+        if (not stat.S_ISREG(fd_info.st_mode)
+                or stat.S_IMODE(fd_info.st_mode) != 0o600
+                or fd_info.st_uid != os.getuid()):
+            raise ValueError("untrusted_local_lock")
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -223,6 +257,10 @@ def run_once(*, now=None, runner=subprocess.run):
             status = "revoked"
         elif clock >= policy["expires"] or clock < policy["created"]:
             status = "expired"
+        elif source_hashes() != (
+            policy["launcher_sha256"], policy["remote_bundle_sha256"]
+        ):
+            status = "source_changed"
         elif policy["used"] >= policy["max_sessions"]:
             status = "exhausted"
         elif (policy["last_attempt"] is not None and
