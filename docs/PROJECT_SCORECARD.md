@@ -169,3 +169,42 @@ redux pipeline --config /etc/redux/pipeline.toml prune --older-than-days 30 --ap
 
 It requires both source and prepared artifact hashes to match and leaves
 converted records intact. Deletion is **never automatic** on image boot.
+
+## October 21 read-only Pi 4 session: capture-processing clarification
+
+The owner's WSL checkout at `c1162ab` passed all **38**
+`tests/test_acceptance_session.py` tests. The previously saved Oct 20
+session at embedded revision
+`4f907ff93ce0c6bc0b2c9d4f68025ba7dd1f9a84` was re-inspected
+**offline**, with no new SSH or Pi writes. Its saved ledger counts were:
+
+- **5** total capture-processing records: **1 ready, 4 invalid**.
+- Last completed scan: **5 scanned, 5 duplicate**. These are scan outcomes
+  for the same previously encountered candidates, not additional artifacts.
+- Capture worker available; last-scan freshness was true *at collection*.
+  An offline reinspection later correctly marks overall report freshness
+  UNKNOWN rather than manufacturing a current Doctor PASS.
+- Existing REDUXCAP ext4 rw mount remained OK with **449 MiB** free during
+  that field snapshot.
+
+A ledger status `ready` is **not** proof that its prepared output file
+exists, has an intact SHA-256, or represents an authentic wireless handshake.
+The existing `scripts/capture-artifact-audit.py` can independently check
+ready output inode/path/hash consistency, but it has **not** been run on the
+physical Pi or its capture partition for this session. The four invalid
+rows' reasons are not present in the redacted session report; do not infer
+malformed RF captures or hardware fault. An integrity audit of Pi data needs
+its own reviewed read-only scope or an approved offline copy, not an implicit
+extension of the finished collector authorization.
+
+The same saved snapshot measured the onboard radio as monitor-labeled
+ARPHRD **1**, USB radio as monitor-labeled ARPHRD **803**, both NM managed,
+zero sysfs RX/TX deltas during the one-second sample, a single potential
+process conflict, and no independently decoded frames. The TFT blockers
+were missing 480x320 framebuffer, missing ILI9486 candidate and missing
+touch input candidate; the only framebuffer described by this report was
+1920x1080 at 16-bpp.
+
+**Score estimate unchanged (~60–65%)**: the successful retrospective report
+improves diagnostic confidence, not physical RF, capture, UI, rollback or
+release qualification. No fresh image was built, installed or booted.
