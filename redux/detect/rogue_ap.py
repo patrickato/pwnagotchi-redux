@@ -118,3 +118,36 @@ class RogueAPDetector:
             if a is not None:
                 out.append(a)
         return out
+
+
+def parse_trusted_networks(entries) -> List[TrustedNetwork]:
+    """Build a trusted-network list from config entries (the `[detect]`
+    trusted_networks array): [{ssid, bssids, channels, security}]. The rogue-AP
+    detector stays quiet until this is populated, so this is what makes the
+    headline evil-twin detector actually fire against your declared networks.
+    """
+    def _ints(xs):
+        out = set()
+        for x in xs or ():
+            if isinstance(x, bool):
+                continue
+            if isinstance(x, int):
+                out.add(x)
+            elif isinstance(x, str) and x.isdigit():
+                out.add(int(x))
+        return frozenset(out)
+
+    nets: List[TrustedNetwork] = []
+    for e in entries or ():
+        if not isinstance(e, dict):
+            continue
+        ssid = e.get("ssid")
+        if not isinstance(ssid, str) or not ssid:
+            continue
+        nets.append(TrustedNetwork(
+            ssid=ssid,
+            bssids=frozenset(str(b) for b in (e.get("bssids") or ()) if isinstance(b, str)),
+            channels=_ints(e.get("channels")),
+            security=frozenset(str(s) for s in (e.get("security") or ()) if isinstance(s, str)),
+        ))
+    return nets

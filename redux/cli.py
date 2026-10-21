@@ -55,7 +55,15 @@ def _radios(args) -> List[Radio]:
 
 
 def _build(args, driver=None) -> Augur:
-    return Augur(radios=_radios(args), intent=Intent(args.intent), driver=driver)
+    # Populate the rogue-AP/evil-twin detector's trusted set from the config's
+    # [detect] trusted_networks (only when --config is passed; empty otherwise).
+    trusted = None
+    cfg = _cfg(args)
+    if cfg is not None:
+        from .detect.rogue_ap import parse_trusted_networks
+        trusted = parse_trusted_networks(getattr(cfg.detect, "trusted_networks", []))
+    return Augur(radios=_radios(args), intent=Intent(args.intent), driver=driver,
+                 trusted=trusted)
 
 
 # --- subcommands ------------------------------------------------------------- #
