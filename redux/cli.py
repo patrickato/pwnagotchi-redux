@@ -938,7 +938,10 @@ def cmd_benchpass(args) -> int:
             return {"p": "pass", "pass": "pass", "f": "fail", "fail": "fail",
                     "s": "skip", "skip": "skip"}.get(a, "skip"), note
 
-        ax = AutoExecutor(confirm=_confirm, ask=_ask)
+        # Pin sub-calls to the SAME codebase we're running, so `auto` never
+        # silently drives a stale `redux` already installed on the image.
+        ax = AutoExecutor(confirm=_confirm, ask=_ask,
+                          redux_prefix=[sys.executable, "-m", "redux.cli"])
         try:
             rep = bp.run_benchpass(bp.GATES, ax, led,
                                    resume=getattr(args, "resume", False), only=only)
