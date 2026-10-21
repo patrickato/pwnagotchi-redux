@@ -49,6 +49,8 @@ PROTECTED = {
     "scripts/redux-field-feedback.py",
     "scripts/redux-field-doctor.py",
     "scripts/configure-redux-codex-feedback.py",
+    "scripts/redux-one-artifact-field-audit.py",
+    "scripts/capture-artifact-audit.py",
     "docs/FIELD_FEEDBACK.md",
 }
 MAX_CHANGED = 35
