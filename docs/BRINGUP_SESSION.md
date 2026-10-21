@@ -265,3 +265,43 @@ Old observations can become stale when inspected later; historical saved
 metadata is still useful for identifying hardware blockers but must not
 be relabeled current acceptance. The full private session must remain
 on the owner's workstation and out of GitHub.
+
+## October 21: interpretation of the saved Oct 20 hardware observation
+
+After offline reinspection of the saved unsigned session, the following are
+**historical observations from the Oct 20 sample**, not refreshed hardware
+measurements or acceptance:
+
+| Subsystem | Recorded observation | What it does *not* prove |
+| --- | --- | --- |
+| Pi/revision | Pi 4, ARM64, kernel 6.12.109+rpt-rpi-v8, embedded `4f907ff93ce0c6bc0b2c9d4f68025ba7dd1f9a84` | Latest host source is installed |
+| Root/boot | Overlay rw, lower ext4 ro, boot vfat ro; checks OK | Successful reboot/recovery |
+| Captures | Verified REDUXCAP ext4 rw with 449 MiB available | Adequate capacity for all future workloads |
+| Primary onboard radio | Monitor-labeled, ARPHRD 1, NetworkManager managed/state 20 | Native 802.11 reception |
+| USB radio | Monitor-labeled, ARPHRD 803, NetworkManager managed/state 20 | Packet decode, exclusive capture ownership or safe passive sampling |
+| RX/TX | Zero deltas for both radios during one-second sysfs counter sample | Permanent inactivity; failed RF hardware |
+| Runtime | Cached state running, 15,611 events seen, checkpoint fresh at collection | Valid decoded captures or fresh condition at later inspection |
+| Capture pipeline | Five *ledger rows*, processing available, last scan fresh at collection | Five valid handshake artifacts; output-file integrity |
+| TFT | A 1920×1080, 16-bpp framebuffer; no matching 480×320 framebuffer, ILI9486 or touch candidate | Any real TFT pixels or touch operation |
+| Native packs | Inventory unavailable on older installed image | Sprint 10 plugin failure |
+
+The read-only report marks a single potentially conflicting capture process;
+its count does not identify exclusive interface/socket ownership. NetworkManager
+reports both radios managed, so an ARPHRD 803 USB interface is **not authorization
+to start passive reception**. The earlier temporary onboard VIF was removed by
+the reviewed rollback; it must not be confused with the current USB interface.
+
+A small offline `session-inspect` improvement now projects the already-saved
+`processing.by_status` and last scan outcomes as fixed-key aggregate counts,
+only if schema and totals agree. A `ready` row remains a ledger classification:
+only the separate read-only inode/SHA audit can support artifact-byte integrity,
+and even that does not prove 802.11 capture authenticity. To inspect the old
+session, pull the host branch and run `tests/test_acceptance_session.py` and
+then `session-inspect --session-file "$HOME/redux-bringup-20261020-d.json"`.
+No second SSH run, interface operation or Pi file access is needed.
+
+Next decisions should be separated: confirm the ledger status breakdown; plan
+screen overlay/binding with its own reversible authorization; and independently
+review USB ownership/reception and onboard native-VIF evidence before any RF
+change. A genuine new image build can proceed on an appropriately authorized
+host, but does not erase open hardware gates.
