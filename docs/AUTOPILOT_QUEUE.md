@@ -27,21 +27,34 @@ dependency and actual source state. Keep already-completed evidence intact.
   The owner ran the migration in WSL on October 21: **8 tests passed**
   and the tool returned `result=frozen`, `observer_service_updated=true`,
   unchanged approval, timer and consumed-session budget. The timer showed a
-  prior 11:24 EDT trigger but no last collection-status JSON. It is therefore
-  NOT proven that SSH collection succeeded. A local no-SSH field doctor now
-  classifies approval, service, timer, recent attempts and last recorded
-  outcome without exposing Pi/private network details. New source-only
-  hardware feedback rejects stale observations older than two hours.
-  Next: read the local doctor and Codex status after CI is green, repair any
-  actual scheduled collection blocker, then independently verify one saved
-  read-only report. Never publish raw private reports to GitHub or grant Codex
-  arbitrary SSH.
+  prior 11:24 EDT trigger with no result. A subsequent **local offline
+  doctor report supplied by the owner on October 21** verified:
+  `last_recorded_collection.status=observed`,
+  `private_report_saved=true`, `sessions_used=4`,
+  `sessions_remaining=36`, systemd `exit_code=0`,
+  `last_result=success`, and expected frozen service/timer identity.
+  Thus an actual automated read-only metadata snapshot succeeded (but
+  **not** RF decoding, handshake authentication, TFT validation or
+  hardware release acceptance). The source-only feedback filter rejects
+  reports older than two hours. Next: separately opt in to sending only
+  fixed-schema category summaries to local Codex, never raw private
+  reports, SSH credentials or Pi commands.
 - [x] **P0 — Hardware bridge initial offline qualification:** The owner
   reported **29 passing** field bridge tests and successful explicit
   recurring read-only enrollment plus separate user-timer installation on
   October 21. The collector was not modified; tests do not attest actual
   hourly SSH success. Real reports stay private in the WSL environment.
   No extra RF, Pi-write, reboot or capture-audit permissions were granted.
+- [ ] **P0 — Codex source-cycle reliability:** One real unattended
+  WSL Codex attempt on October 21 reported `status=blocked`,
+  `reason=python_tests_failed`, `changed_count=3`, with no pushed
+  changes. CI remained green on the accepted workbench. A bounded
+  one-time sandboxed Codex repair, independent retest and no-push on
+  repeated failure is now implemented in `scripts/redux-autopilot.py`.
+  Do not claim this self-repair is proven until its CI passes and a
+  subsequent WSL cycle publishes successfully. Codex never receives raw
+  pytest logs from the trusted wrapper.
+
 ## Hardware-automation safety milestone (source-only)
 
 A separate private, time-limited read-only Pi controller and **hourly**
