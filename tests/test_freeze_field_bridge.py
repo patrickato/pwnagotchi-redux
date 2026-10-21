@@ -30,7 +30,8 @@ def synthetic(monkeypatch, tmp_path):
     units.mkdir(parents=True)
     service = units / "redux-field-bridge.service"
     service.write_text("[Unit]\nDescription=Redux immutable Pi reader\n[Service]\n"
-                       + mod.OLD_EXEC + "\nNoNewPrivileges=yes\n")
+                       + mod.OLD_WORKDIR + "\n" + mod.OLD_EXEC
+                       + "\nNoNewPrivileges=yes\n")
     service.chmod(0o600)
     timer = units / "redux-field-bridge.timer"
     timer.write_text("[Timer]\nOnCalendar=*-*-* *:20:00\n"
@@ -62,6 +63,7 @@ def test_unit_template_refuses_missing_or_repeated_execstart(tmp_path, monkeypat
     expected, replaced = mod.unit_text()
     assert mod.OLD_EXEC in expected
     assert mod.NEW_EXEC in replaced and mod.OLD_EXEC not in replaced
+    assert mod.NEW_WORKDIR in replaced and mod.OLD_WORKDIR not in replaced
     service.write_text("[Service]\nExecStart=/bin/sh -c 'unapproved'\n")
     with pytest.raises(ValueError, match="unrecognized_field_service"):
         mod.unit_text()
@@ -105,7 +107,9 @@ def test_pins_approved_commit_and_rebinds_only_local_systemd_service(tmp_path, m
     assert result["read_only_approval_changed"] is False
     assert result["session_budget_reset"] is False
     assert mod.NEW_EXEC in service.read_text()
+    assert mod.NEW_WORKDIR in service.read_text()
     assert mod.OLD_EXEC not in service.read_text()
+    assert mod.OLD_WORKDIR not in service.read_text()
     assert timer.read_bytes() == before_timer
     assert len([x for x in calls if x[:3] == ["git", "worktree", "add"]]) == 1
 
