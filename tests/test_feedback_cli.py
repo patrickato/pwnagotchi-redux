@@ -94,3 +94,26 @@ def test_offline_publisher_rejects_invalid_filtered_schema(tmp_path, monkeypatch
     with pytest.raises(ValueError, match="invalid_feedback_shape"):
         app.collect_feedback(source, runner=lambda *args, **kwargs:
             SimpleNamespace(returncode=3, stdout=json.dumps(projected())))
+
+
+
+def test_feedback_refuses_stale_or_future_dated_private_reports(tmp_path):
+    import os
+    state, file = private(tmp_path)
+    os.utime(file, (1000.0, 1000.0))
+    with pytest.raises(ValueError, match="no_private_reports"):
+        app.newest_private(state, now=1000.0 + 2 * 3600 + 1)
+    with pytest.raises(ValueError, match="no_private_reports"):
+        app.newest_private(state, now=1000.0 - 5 * 60 - 1)
+    assert app.newest_private(state, now=1000.0 + 2 * 3600) == file
+
+
+def test_feedback_prefers_newest_nonstale_private_report(tmp_path):
+    import os
+    state, old_file = private(tmp_path)
+    new_file = state / ("session-" + "b" * 32 + ".json")
+    new_file.write_text("{}")
+    new_file.chmod(0o600)
+    os.utime(old_file, (1000.0, 1000.0))
+    os.utime(new_file, (8000.0, 8000.0))
+    assert app.newest_private(state, now=8500.0) == new_file
