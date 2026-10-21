@@ -187,6 +187,27 @@ def test_timing_migration_refuses_unrecognized_timer(tmp_path):
     assert timer.read_bytes() == before
 
 
+def valid_feedback():
+    """A complete field schema with no real Pi data."""
+    return {
+        "schema": 1, "format": "redux-field-feedback-v1",
+        "provenance": "saved_unsigned_read_only_observation",
+        "snapshot_freshness": "UNKNOWN",
+        "physical_acceptance": "UNKNOWN", "release_qualification": "UNKNOWN",
+        "radios": [],
+        "display": {"state": None, "blockers": []},
+        "processing": {"worker_available": None,
+                       "worker_fresh_at_collection": None,
+                       "ledger_total": None, "by_status": None,
+                       "last_scan": None},
+        "storage_free_band": None, "runtime_state_at_collection": None,
+        "signals": [],
+        "does_not_prove": ["native_wifi_reception",
+                           "handshake_authenticity",
+                           "physical_touch", "rollback_recovery"],
+    }
+
+
 def test_opt_in_private_hardware_summary_is_strictly_offline():
     instance = module()
     from types import SimpleNamespace
@@ -196,15 +217,10 @@ def test_opt_in_private_hardware_summary_is_strictly_offline():
         assert "ssh" not in argv
         assert argv[-1] == "--latest-private"
         assert kwargs["timeout"] == 30
-        return SimpleNamespace(returncode=0, stdout=json.dumps({
-            "schema": 1,
-            "format": "redux-field-feedback-v1",
-            "provenance": "saved_unsigned_read_only_observation",
-            "physical_acceptance": "UNKNOWN",
-            "release_qualification": "UNKNOWN",
-        }))
+        return SimpleNamespace(returncode=0, stdout=json.dumps(valid_feedback()))
     encoded = instance.local_sanitized_hardware_feedback(runner=fake_runner)
     assert len(received) == 1
+    assert json.loads(encoded) == valid_feedback()
     assert json.loads(encoded)["release_qualification"] == "UNKNOWN"
 
 
@@ -230,3 +246,37 @@ def test_codex_feedback_rejects_hardware_pass_and_invalid_schema(payload):
 def test_feedback_remains_explicit_opt_in_by_default():
     instance = module()
     assert instance.cycle.__kwdefaults__["with_sanitized_field_feedback"] is False
+
+
+def test_feedback_filter_rejects_extra_raw_private_data_and_nested_commands():
+    from types import SimpleNamespace
+    instance = module()
+    payload = valid_feedback()
+    payload["raw_lan_ip"] = "SECRET_PRIVATE_ADDRESS"
+    result = instance.local_sanitized_hardware_feedback(runner=lambda *a, **kw:
+                SimpleNamespace(returncode=0, stdout=json.dumps(payload)))
+    assert result is None
+    payload = valid_feedback()
+    payload["radios"] = [{"device_name": "SECRET_INTERFACE"}]
+    assert instance.local_sanitized_hardware_feedback(runner=lambda *a, **kw:
+           SimpleNamespace(returncode=0, stdout=json.dumps(payload))) is None
+
+
+def test_feedback_filter_rejects_duplicate_fields_and_nonfinite_constants():
+    from types import SimpleNamespace
+    instance = module()
+    base = json.dumps(valid_feedback())
+    duplicate = base.replace('"schema": 1', '"schema": 1, "schema": 1', 1)
+    malformed = [duplicate, base.replace('"schema": 1', '"schema": NaN', 1)]
+    for stdout in malformed:
+        assert instance.local_sanitized_hardware_feedback(runner=lambda *a, **kw:
+            SimpleNamespace(returncode=0, stdout=stdout)) is None
+
+
+def test_feedback_filter_rejects_inconsistent_metadata_signals():
+    from types import SimpleNamespace
+    instance = module()
+    payload = valid_feedback()
+    payload["signals"] = ["usb_radiotap_not_reception_proof"]
+    assert instance.local_sanitized_hardware_feedback(runner=lambda *a, **kw:
+           SimpleNamespace(returncode=0, stdout=json.dumps(payload))) is None
