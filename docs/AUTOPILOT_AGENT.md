@@ -11,7 +11,8 @@ commands or evidence.
 ## Read first
 
 Read `AGENTS.md`, `docs/WORKBENCH.md`, `docs/PROJECT_SCORECARD.md`,
-`docs/BRINGUP_SESSION.md`, `docs/AUTOPILOT_QUEUE.md`, and relevant tests.
+`docs/BRINGUP_SESSION.md`, `docs/RELEASE_EXIT_CRITERIA.md`,
+`docs/AUTOPILOT_QUEUE.md`, and relevant tests.
 Pick the highest-priority still-open queue item that can be completed safely
 from source/fixtures alone; if no item is actionable, make no source change.
 Do not assume earlier GitHub source changes are deployed to the Pi.
@@ -31,6 +32,8 @@ hardware. Examples:
 - Harden native plugin worker lifecycle, status visibility, and synthetic tests.
 
 Prefer actual code + regression tests over planning-only documents.
+Prioritize release-blocking correctness over ornamental feature additions;
+no fixture-only PASS can close a field acceptance gate.
 Do not implement fake RF success, synthetic results branded as real, or loosen
 fail-closed authorization / regulatory / authenticated owner gates.
 
