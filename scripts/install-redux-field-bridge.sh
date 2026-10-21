@@ -82,10 +82,9 @@ UNIT
     printf 'Revoke/disable: bash scripts/install-redux-field-bridge.sh --disable\n'
     ;;
   --status)
-    systemctl --user list-timers "${NAME}.timer" || true
-    if [[ -f "${HOME}/.local/state/redux-field-bridge/last-status.json" ]]; then
-      cat "${HOME}/.local/state/redux-field-bridge/last-status.json"
-    fi
+    # No SSH, no private policy disclosure, and no stale report promoted
+    # to live physical acceptance. This inspects only local metadata.
+    python3 "${BASE}/scripts/redux-field-doctor.py" --json
     ;;
   --disable)
     systemctl --user disable --now "${NAME}.timer" 2>/dev/null || true
