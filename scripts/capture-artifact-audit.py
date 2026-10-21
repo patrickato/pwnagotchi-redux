@@ -236,6 +236,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--plan", action="store_true",
                    help="Print bounded audit scope offline; do not read files")
+    p.add_argument("--max-ready-rows", type=int, default=10000,
+                   help="Fail closed when the ready-row ledger exceeds this cap (1..10000)")
     p.add_argument("--db", type=Path, default=Path("/captures/jobs.db"))
     p.add_argument("--output", type=Path, default=Path("/captures/ready"))
     p.add_argument("--receipt", type=Path,
@@ -243,6 +245,8 @@ def main(argv=None):
     p.add_argument("--inspect-receipt", type=Path,
                    help="Read and classify existing receipt; never scan captures")
     args = p.parse_args(argv)
+    if not 1 <= args.max_ready_rows <= 10000:
+        p.error("--max-ready-rows must be between 1 and 10000")
     if args.plan:
         if args.receipt is not None or args.inspect_receipt is not None:
             p.error("--plan must not combine with receipt read or publication")
@@ -313,7 +317,7 @@ def main(argv=None):
             print(json.dumps({"result": "attention",
                               "reason": "capture_mount_unverified"}, sort_keys=True))
             return 2
-    report = audit(args.db, args.output)
+    report = audit(args.db, args.output, max_rows=args.max_ready_rows)
     if requires_mount and capture_mount_snapshot() != mount_identity:
         print(json.dumps({"result": "attention",
                           "reason": "capture_mount_changed"}, sort_keys=True))
