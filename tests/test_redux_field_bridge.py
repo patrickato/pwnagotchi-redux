@@ -262,3 +262,23 @@ def test_changed_checkout_revision_cannot_inherit_old_pi_approval(tmp_path, monk
                           pytest.fail("old approval used for new checkout"))
     assert result["status"] == "source_changed"
     assert mod.load_policy()["used"] == 0
+
+
+def test_renewal_requires_expiry_or_revocation_and_fresh_permission(tmp_path, monkeypatch):
+    mod, key = setup_private(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod, "source_revision", lambda: "a" * 40)
+    monkeypatch.setattr(mod, "source_hashes", lambda: ("1" * 64, "2" * 64))
+    mod.enroll("192.168.56.24", key, interval_hours=4, days=3,
+               sessions=4, approve=True, now=100)
+    with pytest.raises(ValueError, match="active_approval_must_be_revoked_first"):
+        mod.enroll("192.168.56.24", key, interval_hours=4, days=3,
+                   sessions=4, approve=True, now=110, renewal=True)
+    mod.revoke()
+    with pytest.raises(ValueError, match="explicit_recurring_approval_required"):
+        mod.enroll("192.168.56.24", key, interval_hours=4, days=3,
+                   sessions=4, approve=False, now=110, renewal=True)
+    value = mod.enroll("192.168.56.24", key, interval_hours=6, days=2,
+                       sessions=3, approve=True, now=110, renewal=True)
+    assert value["status"] == "enrolled"
+    assert mod.load_policy()["used"] == 0
+    assert mod.load_policy()["interval_seconds"] == 6 * 3600
