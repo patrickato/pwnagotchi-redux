@@ -133,31 +133,31 @@ def model(report, *, now=None):
                                               runtime_age=runtime_age,
                                               inventory_age=inventory_age)}
     radios = inventory.get("radios")
-    if not isinstance(radios, list) or not 1 <= len(radios) <= 4:
-        return {"capture": capture, "onboard": onboard, "usb": usb,
+    if not isinstance(radios, list) or not 1 <= len(radios) <= 32:
+        return {"capture": capture, "onboard": onboard, "usb": usb, "externals": [],
                 "inventory": "INVALID",
                 "readiness": _base_readiness("BLOCKED", "INVENTORY INVALID",
                                               runtime_age=runtime_age,
                                               inventory_age=inventory_age)}
-    seen = set()
     seen_ifaces = set()
-    selected = {}
+    onboard_row = None
+    externals = []            # every non-onboard radio, in inventory order
     for entry in radios:
         if not isinstance(entry, dict):
-            return {"capture": capture, "onboard": onboard, "usb": usb,
+            return {"capture": capture, "onboard": onboard, "usb": usb, "externals": [],
                     "inventory": "INVALID",
                     "readiness": _base_readiness("BLOCKED", "INVENTORY INVALID",
                                                   runtime_age=runtime_age,
                                                   inventory_age=inventory_age)}
         transport = entry.get("transport")
-        if (transport not in ("onboard", "usb") or transport in seen
+        if (transport not in ("onboard", "usb")
+                or (transport == "onboard" and onboard_row is not None)
                 or entry.get("identity_stable") is not True):
-            return {"capture": capture, "onboard": onboard, "usb": usb,
+            return {"capture": capture, "onboard": onboard, "usb": usb, "externals": [],
                     "inventory": "INVALID",
                     "readiness": _base_readiness("BLOCKED", "IDENTITY UNSTABLE",
                                                   runtime_age=runtime_age,
                                                   inventory_age=inventory_age)}
-        seen.add(transport)
         mode = entry.get("kernel_mode")
         driver = entry.get("driver")
         iface = entry.get("iface", "UNKNOWN")
@@ -166,37 +166,46 @@ def model(report, *, now=None):
                 or not isinstance(driver, str) or not _DRIVER.fullmatch(driver)
                 or not isinstance(iface, str) or not _IFACE.fullmatch(iface)
                 or iface in seen_ifaces or arphrd is None):
-            return {"capture": capture, "onboard": onboard, "usb": usb,
+            return {"capture": capture, "onboard": onboard, "usb": usb, "externals": [],
                     "inventory": "INVALID",
                     "readiness": _base_readiness("BLOCKED", "INVENTORY INVALID",
                                                   runtime_age=runtime_age,
                                                   inventory_age=inventory_age)}
         seen_ifaces.add(iface)
-        selected[transport] = {"state": "OBSERVED", "iface": iface,
-                               "driver": driver, "mode": mode.upper(),
-                               "link": arphrd, "reception": "UNVERIFIED"}
+        row = {"state": "OBSERVED", "iface": iface, "transport": transport,
+               "driver": driver, "mode": mode.upper(),
+               "link": arphrd, "reception": "UNVERIFIED"}
+        if transport == "onboard":
+            onboard_row = row
+        else:
+            externals.append(row)
     blockers = []
     if not fresh:
         blockers.append("RUNTIME STALE")
-    matching = [transport for transport, row in selected.items()
-                if row["iface"] == capture["iface"]]
+    all_rows = ([onboard_row] if onboard_row else []) + externals
+    matching = [r for r in all_rows if r["iface"] == capture["iface"]]
     if fresh and len(matching) != 1:
         blockers.append("CAPTURE IDENTITY MISMATCH")
     if capture["link"] not in (801, 803):
         blockers.append("CAPTURE FRAMING")
-    if "onboard" not in selected:
+    if onboard_row is None:
         blockers.append("ONBOARD MISSING")
-    if "usb" not in selected:
-        blockers.append("USB MISSING")
+    if not externals:
+        # Onboard-only is a complete device now, so this is informational, not a
+        # hard block on its own.
+        blockers.append("NO EXTERNAL RADIO")
     # Display inventory has no NM policy, socket exclusivity, decoded-frame,
     # or physical qualification proof. Keep these explicit even if framing is
     # compatible and the runtime-selected interface matches one inventory row.
     blockers.extend(("POLICY UNMEASURED", "RX UNVERIFIED", "PHYSICAL UNVERIFIED"))
     state = "BLOCKED" if any(item in blockers for item in (
         "RUNTIME STALE", "CAPTURE IDENTITY MISMATCH", "CAPTURE FRAMING",
-        "ONBOARD MISSING", "USB MISSING")) else "UNVERIFIED"
-    return {"capture": capture, "onboard": selected.get("onboard", onboard),
-            "usb": selected.get("usb", usb), "inventory": "CURRENT",
+        "ONBOARD MISSING")) else "UNVERIFIED"
+    return {"capture": capture,
+            "onboard": onboard_row or onboard,
+            "usb": externals[0] if externals else usb,   # primary external (back-compat)
+            "externals": externals,                        # the full list, nothing hidden
+            "inventory": "CURRENT",
             "readiness": _base_readiness(state, *blockers,
                                           runtime_age=runtime_age,
                                           inventory_age=inventory_age)}
