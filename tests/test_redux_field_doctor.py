@@ -154,3 +154,12 @@ def test_cli_requires_json_explicit_opt_in(capsys):
     with pytest.raises(SystemExit) as e:
         obj.main([])
     assert e.value.code==2
+
+
+
+def test_extra_duplicate_service_command_or_timer_schedule_is_not_trusted(tmp_path, monkeypatch):
+    obj, state, policy, service, timer = fixture(tmp_path, monkeypatch)
+    service.write_text(service.read_text() + "ExecStart=/bin/false\n")
+    assert obj.trusted_unit(service, obj.EXPECTED_SERVICE) == "unrecognized"
+    timer.write_text(timer.read_text() + "OnCalendar=*-*-* *:00:00\n")
+    assert obj.trusted_unit(timer, obj.EXPECTED_TIMER) == "unrecognized"
