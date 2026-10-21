@@ -24,10 +24,18 @@ dependency and actual source state. Keep already-completed evidence intact.
   with synthetic no-SSH systemd/revision tests. It reconstructs the pinned
   approved revision as a private detached worktree and rebinds only the local
   observer service; it does not reset attempts, alter expiry or collect data.
-  Next: require a green CI run, then one explicit WSL migration and an actual
-  scheduled report before counting field feedback live. Until migration,
-  do not ask the owner to `git pull` the mutable checkout. Never publish
-  telemetry or raw private reports to GitHub or grant Codex SSH.
+  The owner ran the migration in WSL on October 21: **8 tests passed**
+  and the tool returned `result=frozen`, `observer_service_updated=true`,
+  unchanged approval, timer and consumed-session budget. The timer showed a
+  prior 11:24 EDT trigger but no last collection-status JSON. It is therefore
+  NOT proven that SSH collection succeeded. A local no-SSH field doctor now
+  classifies approval, service, timer, recent attempts and last recorded
+  outcome without exposing Pi/private network details. New source-only
+  hardware feedback rejects stale observations older than two hours.
+  Next: read the local doctor and Codex status after CI is green, repair any
+  actual scheduled collection blocker, then independently verify one saved
+  read-only report. Never publish raw private reports to GitHub or grant Codex
+  arbitrary SSH.
 - [x] **P0 — Hardware bridge initial offline qualification:** The owner
   reported **29 passing** field bridge tests and successful explicit
   recurring read-only enrollment plus separate user-timer installation on
