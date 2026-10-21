@@ -190,6 +190,102 @@ def local_sanitized_hardware_feedback(*, runner=subprocess.run):
         return None
 
 
+# A source-only Codex cycle can fix its own failing offline test run ONCE.
+# Each independent verification returns a fixed reason, not raw logs or
+# private filesystem context. A second failure always stops publication.
+REPAIRABLE = frozenset(("python_tests_failed", "image_tests_failed",
+                        "compile_failed", "whitespace_failed"))
+
+
+def run_codex(checkout, instruction, env, *, timeout=1800, runner=subprocess.run):
+    """One sandboxed, noninteractive source-only model pass; no raw logs."""
+    try:
+        response = runner(
+            list(CODEX_COMMAND), cwd=checkout, input=instruction, text=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=timeout, check=False, env=env,
+        )
+        return response.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def guarded_changes(checkout, original_revision):
+    """Recheck BOTH the unchanged Git history and the publish allowlist."""
+    code, head = git(checkout, "rev-parse", "HEAD")
+    if code or head.strip() != original_revision:
+        return "agent_changed_git_history", []
+    try:
+        paths = changed_names(checkout)
+        safe, explanation = allowable(checkout, paths)
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        return "unsafe_git_status", []
+    return (None if safe else explanation), paths if safe else []
+
+
+def independent_verification(checkout, env, *, invoker=invoke):
+    """Return just the failing category; stdout/stderr are discarded."""
+    steps = (
+        (["python3", "-m", "pytest", "-q"], 600, "python_tests_failed"),
+        (["bash", "image/ci.sh"], 600, "image_tests_failed"),
+        (["python3", "-m", "compileall", "-q", "redux", "scripts", "boot", "image"],
+         120, "compile_failed"),
+        (["git", "diff", "--check"], 60, "whitespace_failed"),
+    )
+    for argv, timeout, reason in steps:
+        code, _ = invoker(argv, cwd=checkout, timeout=timeout, env=env)
+        if code:
+            return reason
+    return None
+
+
+def validate_with_one_repair(checkout, revision, environment, codex_env,
+                             original_instruction, *,
+                             verifier=independent_verification,
+                             agent=run_codex, inspector=guarded_changes):
+    """After a failed independent test, ask Codex to repair at most once.
+
+    The repair sees ONLY a fixed failure category, never raw pytest output
+    or private host data. Codex can inspect synthetic tests in its sandbox.
+    Both before and after repair the wrapper independently guards paths,
+    original Git HEAD and ALL complete validation steps.
+    """
+    issue, paths = inspector(checkout, revision)
+    if issue or not paths:
+        return issue, paths
+    reason = verifier(checkout, environment)
+    if not reason:
+        return None, paths
+    if reason not in REPAIRABLE:
+        return "verification_failed", paths
+
+    instruction = (
+        original_instruction
+        + "\n\n# ONE SOURCE-ONLY REPAIR PASS\n"
+        + "Your previous implementation did not pass the wrapper's "
+          "independent offline check: " + reason + ".\n"
+        + "The failed checkout has been retained for this ONE repair pass. "
+          "Use only repository-local source, synthetic tests and the existing "
+          "workspace-write sandbox. Diagnose the failing category by running "
+          "the appropriate offline test locally, fix it and run focused tests. "
+          "Do not operate Pi hardware, SSH, invoke sudo, change .git history, "
+          "modify protected files, or publish private test output. "
+          "Do not commit, push, deploy, or request user interaction. "
+          "If the failure cannot be corrected safely, leave a no-change result."
+    )
+    if not agent(checkout, instruction, codex_env, timeout=600):
+        return "codex_repair_failed", paths
+    issue, paths = inspector(checkout, revision)
+    if issue:
+        return issue, paths
+    if not paths:
+        return "repair_dropped_all_changes", paths
+    final_reason = verifier(checkout, environment)
+    if final_reason:
+        return "tests_failed_after_repair", paths
+    return None, paths
+
+
 def cycle(*, with_sanitized_field_feedback=False):
     if shutil.which("codex") is None:
         record("blocked", reason="codex_cli_unavailable")
@@ -275,47 +371,21 @@ def cycle(*, with_sanitized_field_feedback=False):
             for key in list(codex_env):
                 if key.startswith(("AWS_", "GITHUB_", "GH_", "PI_", "SSH_")):
                     codex_env.pop(key, None)
-            try:
-                codex = subprocess.run(
-                    list(CODEX_COMMAND),
-                    cwd=checkout, input=instruction, text=True,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    timeout=2700, check=False, env=codex_env,
-                )
-                exit_code = codex.returncode
-            except (OSError, subprocess.TimeoutExpired):
-                exit_code = 124
-            if exit_code:
+            if not run_codex(checkout, instruction, codex_env):
                 record("blocked", reason="codex_execution_failed", revision=revision)
                 return 2
-            code, new_head = git(checkout, "rev-parse", "HEAD")
-            if code or new_head.strip() != revision:
-                record("blocked", reason="agent_changed_git_history", revision=revision)
-                return 2
-            try:
-                paths = changed_names(checkout)
-                valid, why = allowable(checkout, paths)
-            except (ValueError, OSError, subprocess.TimeoutExpired):
-                valid, why, paths = False, "unsafe_git_status", []
-            if not valid:
-                record("blocked", reason=why, revision=revision)
+            # Preserve single-branch publication only after independent
+            # whole-suite validation, with at most one bounded source repair.
+            reason, paths = validate_with_one_repair(
+                checkout, revision, environment, codex_env, instruction)
+            if reason is not None:
+                record("blocked", reason=reason, revision=revision,
+                       changed=len(paths))
                 return 2
             if not paths:
-                record("idle", reason="no_source_change", revision=revision, changed=0)
+                record("idle", reason="no_source_change", revision=revision,
+                       changed=0)
                 return 0
-
-            # The wrapper, not Codex, owns final tests and Git publication.
-            for argv, timeout, reason in (
-                (["python3", "-m", "pytest", "-q"], 1500, "python_tests_failed"),
-                (["bash", "image/ci.sh"], 1500, "image_tests_failed"),
-                (["python3", "-m", "compileall", "-q", "redux", "scripts", "boot", "image"],
-                 120, "compile_failed"),
-                (["git", "diff", "--check"], 60, "whitespace_failed"),
-            ):
-                code, _ = invoke(argv, cwd=checkout, timeout=timeout, env=environment)
-                if code:
-                    record("blocked", reason=reason, revision=revision, changed=len(paths))
-                    return 2
 
             code, _ = git(checkout, "add", "-A", "--", *EDITABLE)
             if code:
