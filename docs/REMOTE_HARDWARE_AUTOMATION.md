@@ -179,3 +179,57 @@ decoding or owner, a processing ledger of 1 ready and 4 invalid, and
 missing 480x320 ILI9486/touch candidates. Future hardware automation
 must close these gates with actual observations rather than synthetic
 software test counts.
+
+## Stable collector while source development advances
+
+The approved hourly observer is pinned to the exact WSL checkout revision
+recorded when the owner enrolled. This is desirable: updating a collector's
+code must **not** automatically expand recurring physical authorization.
+However, frequent source pulls into that same checkout would cause subsequent
+observations to stop with `source_changed`.
+
+The new **source-only** migration utility
+`scripts/freeze-redux-field-bridge.py` reconstructs the exact *previously
+approved* Git revision as a separate, locally private detached worktree and
+verifies its original collector launcher/bundle SHA-256 and private approval
+record. It then changes only the user-level systemd field service's
+`ExecStart` to this detached snapshot. It does **not** reset, extend, or
+rewrite the approval; change the timer; open SSH; restart the Pi; or grant
+Codex credentials. If a read-only observation is currently active it refuses
+to migrate. Failed systemd reload restores the existing service path.
+
+The source-only plan is:
+
+```sh
+python3 scripts/freeze-redux-field-bridge.py --plan
+```
+
+After a successful **full** CI run and operator review, the one-time WSL
+sequence is (with no Pi command):
+
+```sh
+cd ~/redux-workbench-src &&
+git pull --ff-only &&
+python3 -m pytest -q tests/test_freeze_field_bridge.py &&
+python3 scripts/freeze-redux-field-bridge.py --migrate
+```
+
+The first `git pull` can briefly cause a scheduled collection to return
+`source_changed`; it should not consume a session attempt. The migrator
+pins and recovers the original approved revision from the existing
+owner-private approval, rather than treating the newly pulled HEAD as
+authorization. If the old commit is unavailable or any hashes disagree,
+migration halts **without** approving a replacement. A successful migration
+preserves the observer's consumed count, hourly schedule and existing
+expiry. Failed/missing local systemd or dirty/altered frozen sources are
+fail-closed blockers, never permission to proceed against the Pi.
+
+Once migrated, normal `git pull --ff-only` is allowed in the mutable
+source checkout without changing the frozen observer. Codex's ephemeral
+source clones continue independently. A future collector upgrade or
+approval renewal requires a separately reviewed migration/rotation;
+**do not silently reset the 40-attempt cap or auto-renew consent.**
+
+This migration has no power to repair the network interface, display,
+capture integrity or acceptance gaps. Its sole role is reliable, auditable
+unattended read-only metadata collection while software changes rapidly.
