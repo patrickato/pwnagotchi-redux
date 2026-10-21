@@ -41,6 +41,19 @@ _KIND = {"ap.new": "wifi", "ap.lost": "wifi", "client.new": "wifi",
          "ble.new": "ble", "ble.lost": "ble"}
 
 
+def _persona_detector_names(spec):
+    """Resolve a persona's detector selection ("all" | "none" | CSV of names) to
+    the names list DetectEngine wants: None = all, [] = none, else a valid subset."""
+    s = (spec or "all").strip().lower()
+    if s == "all":
+        return None
+    if s == "none":
+        return []
+    from ..detect.registry import list_detectors
+    valid = set(list_detectors())
+    return [n.strip() for n in s.split(",") if n.strip() in valid]
+
+
 class Augur:
     """Assembles and runs the full stack on one bus."""
 
@@ -66,6 +79,7 @@ class Augur:
         self.brain = brain or Brain()
         # trusted: declared-legitimate networks so the rogue-AP/evil-twin detector
         # can fire. Without an injected engine, wire it into the one we build.
+        self._trusted = trusted
         self.engine = detect_engine or DetectEngine(trusted=trusted)
         self.store = store if store is not None else SightingStore()
         self._position = position_provider
@@ -281,6 +295,11 @@ class Augur:
         self.supervisor.set_intent(Intent(p.intent))
         self._persona = p
         self._bind_scope = p.bind_scope
+        # Apply the persona's detector set for real: rebuild the live engine with
+        # exactly those detectors, preserving the trusted (evil-twin) set.
+        before_detectors = self.engine.detector_count
+        names = _persona_detector_names(p.detectors)
+        self.engine = DetectEngine(names=names, trusted=self._trusted)
         return {
             "persona": p.name,
             "summary": p.summary,
@@ -289,12 +308,9 @@ class Augur:
                 "intent": {"from": before["intent"], "to": p.intent},
                 "offense_enabled": {"from": before["offense_enabled"], "to": self.offense_enabled()},
                 "bind_scope": {"from": before["bind_scope"], "to": p.bind_scope},
+                "detectors": {"from": before_detectors, "to": self.engine.detector_count,
+                              "set": p.detectors},
             },
-            # declared, not applied here: the detector set is a preference this
-            # persona expresses; pruning the live engine is not enforced from here,
-            # so it's reported honestly as a declaration rather than a change.
-            "declares": {"detectors": p.detectors,
-                         "note": "detector set is a declared preference (not enforced here)"},
         }
 
     def persona(self):
