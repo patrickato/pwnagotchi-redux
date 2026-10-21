@@ -201,3 +201,28 @@ def test_approval_has_independent_hash_pins(tmp_path, monkeypatch):
     assert pol["launcher_sha256"] == values[0]
     assert pol["remote_bundle_sha256"] == values[1]
     assert "a" * 64 not in json.dumps(mod.plan())
+
+
+def test_field_timer_installer_is_syntax_valid_and_independent():
+    installer = ROOT / "scripts" / "install-redux-field-bridge.sh"
+    result = subprocess.run(
+        ["bash", "-n", str(installer)],
+        cwd=ROOT, text=True, capture_output=True, timeout=10, check=False)
+    assert result.returncode == 0, result.stderr
+    shell = installer.read_text()
+    assert "redux-field-bridge.service" in shell
+    assert "--approve-recurring-read-only" not in shell
+    assert "sudo" not in shell
+    assert "redux-autopilot.service" not in shell
+
+
+def test_policy_rejects_forged_source_pins(tmp_path, monkeypatch):
+    mod, key = setup_private(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod, "source_hashes",
+                        lambda: ("a" * 64, "b" * 64))
+    mod.enroll("192.168.56.24", key, interval_hours=6, days=1,
+               sessions=2, approve=True, now=100)
+    value = mod.load_policy()
+    value["remote_bundle_sha256"] = "UNTRUSTED"
+    with pytest.raises(ValueError, match="invalid_source_pins"):
+        mod.validate_policy(value)
