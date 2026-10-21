@@ -24,6 +24,10 @@ opt-in user timer are now in the source tree (scripts/redux-field-bridge.py,
 tests/test_redux_field_bridge.py). Its code/revision pins, strict-host-key
 existing collector, maximum session count, no-retry behavior, local-only
 0600 reports, and separate WSL approval are not themselves real Pi results.
+The owner approved read-only monitoring on October 21 at an accelerated
+**hourly** cadence with no more than **40 total attempts** and **14 days**
+of validity, whichever ends first. Source-only Codex must not expand this
+approval to any state change or additional RF/capture operation.
 Neither the controller nor its timer has been activated by the owner. Do not
 extend the source-only Codex timer to run SSH or add credentials. Future
 work: dedicated unprivileged OS account with Pi forced-command boundary,
