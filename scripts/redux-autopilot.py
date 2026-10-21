@@ -158,6 +158,23 @@ def cycle():
             if code or not re.fullmatch(r"[a-f0-9]{40}", revision):
                 record("blocked", reason="revision_unknown")
                 return 2
+            # A clone does not inherit the source checkout's repo-local
+            # author identity. Reuse only validated author metadata, never
+            # copy .git/config or credentials from the operator checkout.
+            author = {}
+            for key in ("user.name", "user.email"):
+                code, value = git(ROOT, "config", "--get", key)
+                value = value.strip()
+                if (code or not value or len(value) > 160 or
+                        any(c in value for c in "\r\n\x00")):
+                    record("blocked", reason="git_author_unavailable", revision=revision)
+                    return 2
+                author[key] = value
+            for key, value in author.items():
+                code, _ = git(checkout, "config", "--local", key, value)
+                if code:
+                    record("blocked", reason="git_author_unavailable", revision=revision)
+                    return 2
 
             instruction = prompt_file.read_text(encoding="utf-8")
             codex_env = dict(environment)
