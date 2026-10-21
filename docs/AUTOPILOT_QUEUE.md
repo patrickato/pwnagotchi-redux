@@ -8,6 +8,23 @@ dependency and actual source state. Keep already-completed evidence intact.
 
 ## Current highest-priority offline engineering tasks
 
+- [ ] **P0 — Finish truthful main-branch feature integration:** The owner
+  approved importing the Oct 21 `main` changes into the workbench without
+  modifying `main`. Source-only `redux/capstone.py`, `redux/benchpass.py`,
+  their tests, and `docs/BENCH_SESSION.md` have been selectively imported,
+  and `redux/cli.py` now exposes `redux demo` and `redux benchpass`.
+  Release-critical corrections: `demo --live` remains a read-only real-radio
+  PLANNER and returns 3 (UNKNOWN physical execution), not a capture success;
+  `benchpass` no longer considers skipped gates green, requires both Pi4/Pi5
+  for operator matrix completion, does not silently erase invalid ledgers,
+  and cannot independently certify hardware from typed PASS. Finish the
+  full Python/image CI after these last regressions, then mark this source
+  integration complete. The **actual** end-to-end hands-off executor
+  (radio role application, verified engine repoint, bounded passive test,
+  state rollback, and real frame evidence) is separate future hardware work
+  needing specific, limited approval; do not implement a fake live success.
+  Do not merge/change main or silently act against the Pi.
+
 - [ ] **P0 — Verified private hardware-to-Codex feedback:** A fixed-category
   no-SSH converter is implemented in `redux/field_feedback.py` and
   `scripts/redux-field-feedback.py`. A separate complete nested-schema
