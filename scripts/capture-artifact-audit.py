@@ -28,6 +28,24 @@ MAX_LEDGER_CELL_BYTES = 8192
 MAX_LEDGER_QUERY_SECONDS = 10.0
 
 
+def ledger_path_still_matches(db: Path, pinned: os.stat_result) -> bool:
+    """Reject ordinary SQLite pathname swaps against the pinned open ledger.
+
+    sqlite3 connects by pathname (not our O_NOFOLLOW fd). Verify that path
+    again both immediately after connection and after the ledger snapshot.
+    This does not certify malicious atomic swap-and-restore races; use only
+    on a locally trusted capture volume under the separately approved audit.
+    """
+    try:
+        current = db.lstat()
+        return (stat.S_ISREG(current.st_mode)
+                and (current.st_dev, current.st_ino) ==
+                    (pinned.st_dev, pinned.st_ino))
+    except OSError:
+        return False
+
+
+
 def audit(db: Path, output_dir: Path, *, max_rows=10000):
     result = {"result": "pass", "checked": 0, "issues": {}, "ready_rows": 0}
     def issue(code):
@@ -75,6 +93,12 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
         uri = "file:" + quote(str(db.absolute()), safe="/") + "?mode=ro"
         conn = sqlite3.connect(uri, uri=True, timeout=1.0)
         try:
+            # SQLite opens the ledger by pathname independently of the
+            # verified O_NOFOLLOW file descriptor. If a different database
+            # now occupies that path, do not interpret its rows as evidence.
+            if not ledger_path_still_matches(db, pinned_ledger):
+                issue("ledger_changed")
+                return result
             # A ready-row query has a fixed work deadline independent of the
             # SQLite lock timeout. Progress checks run on the query VM only,
             # never on the later bounded SHA-256 file reads.
@@ -97,6 +121,9 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
             rows = conn.execute("SELECT output_sha,output_path FROM artifacts WHERE status='ready'").fetchall()
             if len(rows) != count:
                 issue("audit_unavailable")
+                return result
+            if not ledger_path_still_matches(db, pinned_ledger):
+                issue("ledger_changed")
                 return result
         finally:
             conn.close()
@@ -191,10 +218,7 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
         # ledger, even though the original SQLite rows were internally
         # consistent. WAL writer updates on the same inode remain permitted.
         try:
-            current_ledger = db.lstat()
-            if (not stat.S_ISREG(current_ledger.st_mode)
-                    or (pinned_ledger.st_dev, pinned_ledger.st_ino) !=
-                    (current_ledger.st_dev, current_ledger.st_ino)):
+            if not ledger_path_still_matches(db, pinned_ledger):
                 issue("ledger_changed")
         except OSError:
             issue("ledger_changed")
