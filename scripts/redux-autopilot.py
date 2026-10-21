@@ -41,6 +41,7 @@ PROTECTED = {
     "scripts/redux-field-bridge.py",
     "scripts/install-redux-field-bridge.sh",
     "docs/REMOTE_HARDWARE_AUTOMATION.md",
+    "scripts/freeze-redux-field-bridge.py",
     # The private-report privacy boundary must never be rewritten by the
     # model that will later consume its filtered output.
     "redux/field_feedback.py",
