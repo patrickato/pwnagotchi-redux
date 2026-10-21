@@ -186,7 +186,16 @@ def cycle():
                     record("blocked", reason="git_author_unavailable", revision=revision)
                     return 2
 
-            instruction = prompt_file.read_text(encoding="utf-8")
+            # Read agent policy from the just-cloned shared branch, not
+            # the operator's potentially stale local checkout. Queue and
+            # task changes published through GitHub reach the next cycle.
+            agent_policy = checkout / "docs" / "AUTOPILOT_AGENT.md"
+            if (agent_policy.is_symlink() or not agent_policy.is_file()
+                    or agent_policy.stat().st_size > 16 * 1024):
+                record("blocked", reason="remote_agent_policy_invalid",
+                       revision=revision)
+                return 2
+            instruction = agent_policy.read_text(encoding="utf-8")
             codex_env = dict(environment)
             # Source-only Codex should not be given GitHub/SSH deployment
             # credentials as ambient environment variables.
