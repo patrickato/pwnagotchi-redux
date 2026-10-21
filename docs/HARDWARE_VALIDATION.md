@@ -98,9 +98,18 @@ redux run                           # then issue an intent change (hunt ↔ reco
 creature/assignment is reflected on the 3.5" TFT. Confirm the TFT actually renders (not just logs).
 
 ### 1.1 / 1.6 — the hands-off demo
-**Pass:** flash → boot → plug the Alfa → it auto-arranges and starts capturing on your own AP, with
-no manual steps. Record a short clip. This is the headline; it is only `done` when reproducible on
-a real Pi 4 **and** Pi 5.
+**One command:**
+```
+redux demo --live --intent hunt --offense      # (drop --offense/--intent for a passive listen)
+```
+Dry-run it first on any box (no hardware) to see the exact arrange→capture plan and reasons:
+```
+redux demo --intent hunt            # sample inventory; prints every step + why, --notransmit posture
+```
+**Pass:** flash → boot → plug the Alfa → `redux demo --live` auto-arranges the radios and starts
+capturing on your own AP, with no manual `airmon-ng`/`iw`. Each step prints its glass-box reason;
+nothing transmits unless offense is on **and** a target is armed in Scope. Record a short clip. This
+is the headline; it is only `done` when reproducible on a real Pi 4 **and** Pi 5.
 
 ## 2. Platform surfaces (quick on-device confirmations)
 

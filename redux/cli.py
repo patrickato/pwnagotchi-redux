@@ -6,6 +6,7 @@
     redux survey   --iface wlan1mon [--demo]                    passive AP situational-awareness sweep (read-only)
     redux selftest                                             on-device software battery (paste the report back)
     redux hwtest   --iface wlan1mon [--out FILE]                validation battery: software + synthetic detection + live passive
+    redux demo     [--intent I] [--live] [--offense]            hands-off pass (gate 1.6): arrange radios → capture, one command
 
 The hardware paths (live probe, a real BettercapDriver) are used when asked; the
 default/testable paths (stub radios, a replay driver) need no Pi. Everything it
@@ -578,6 +579,53 @@ def cmd_captap(args) -> int:
     if getattr(args, "captap_cmd", "demo") == "live":
         return _captap_live(args)
     return _captap_demo(args)
+
+
+def cmd_demo(args) -> int:
+    """The hands-off pass (Phase-1 gate 1.6) in one command: arrange radios by
+    intent → repoint the capture engine → bounded capture, every step glass-box.
+    Default is a dry run on a sample inventory (no hardware). `--live` probes the
+    real radios on the Pi; it is honest when none are present and never fabricates.
+    Nothing transmits unless posture + Scope allow it."""
+    import shutil
+    from .capstone import plan_capstone, sample_inventory
+    from .core import persona as _persona
+
+    scope = Scope.load(args.scope_file)
+    if args.persona:
+        offense = _persona.get(args.persona).offense_available
+    else:
+        offense = bool(args.offense)
+
+    if args.live:
+        from .radio.probe import probe
+        radios = probe()
+        engine = shutil.which("bettercap") is not None or shutil.which("angryoxide") is not None
+        source = "live probe"
+    else:
+        radios = sample_inventory()
+        engine = not args.no_engine
+        source = "sample inventory (dry run)"
+
+    cap = plan_capstone(radios, args.intent, scope, offense_enabled=offense,
+                        seconds=int(args.seconds), engine_available=engine)
+
+    if args.json:
+        print(json.dumps(cap.as_dict(), indent=2))
+        return 0 if cap.ok else 1
+
+    print(f"=== redux demo — hands-off pass ({source}; intent={cap.intent}, "
+          f"offense={'on' if offense else 'off'}) ===")
+    for s in cap.steps:
+        print(f"  [{'ok  ' if s.ok else 'STOP'}] {s.step:13} {s.detail}")
+        print(f"         └─ {s.reason}")
+    for w in cap.warnings:
+        print(f"  [warn] {w}")
+    print(f"summary: {cap.summary}")
+    if not args.live and cap.ok:
+        print("next:    run it for real on the Pi →  redux demo --live --intent "
+              f"{cap.intent}" + (" --offense" if offense else ""))
+    return 0 if cap.ok else 1
 
 
 def _captap_live(args) -> int:
@@ -1513,6 +1561,18 @@ def build_parser() -> argparse.ArgumentParser:
     cad_ = casub.add_parser("demo", help="run the chain with fake executors + render the report")
     cad_.add_argument("--targets", nargs="*", help="targets to run the chain against")
     ca.set_defaults(func=cmd_campaign)
+
+    dm = sub.add_parser("demo", help="hands-off pass (gate 1.6): arrange radios → capture, one command")
+    dm.add_argument("--intent", default="recon", choices=[i.value for i in Intent],
+                    help="declared intent (default recon; hunt = active capture)")
+    dm.add_argument("--live", action="store_true", help="probe the real radios on the Pi (default: dry run)")
+    dm.add_argument("--persona", help="posture (red/purple = offense; blue/recon = detection-only)")
+    dm.add_argument("--offense", action="store_true", help="enable offense without a persona (still Scope-gated)")
+    dm.add_argument("--seconds", type=float, default=30.0, help="capture duration (default 30)")
+    dm.add_argument("--no-engine", action="store_true", help="dry-run as if no capture engine present")
+    dm.add_argument("--json", action="store_true", help="emit the structured plan as JSON")
+    dm.add_argument("--scope-file", default=_DEFAULT_SCOPE_PATH)
+    dm.set_defaults(func=cmd_demo)
 
     ct = sub.add_parser("captap", help="raw 802.11 tap — probe/deauth parsing + cross-MAC re-id")
     ctsub = ct.add_subparsers(dest="captap_cmd", required=True)
