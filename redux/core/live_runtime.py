@@ -161,6 +161,26 @@ def free_bytes(path):
     return stats.f_bavail * stats.f_frsize
 
 
+def _arm_sentinel_from_env(agent):
+    """Arm the deploy-and-watch Sentinel when $REDUX_SENTINEL is set (e.g.
+    'armed', or a min severity like 'warning'/'critical'), routing detector/CSI
+    alerts to the live log. Unset -> off, so no behavior change by default.
+    Best-effort: never breaks startup."""
+    spec = os.environ.get("REDUX_SENTINEL")
+    if not spec:
+        return None
+    try:
+        from ..sentinel import CallableNotifier
+        low = spec.strip().lower()
+        armed = low == "armed"
+        sev = low if low in ("info", "warn", "warning", "critical") else "warn"
+        notifier = CallableNotifier(lambda ev: _LOG.warning(
+            "sentinel: %s", getattr(ev, "summary", getattr(ev, "reason", ev))))
+        return agent.enable_sentinel(notifier=notifier, armed=armed, min_severity=sev)
+    except Exception:
+        return None
+
+
 def select_radio(radios, preferred=""):
     """Use the existing orchestrator. Never make up absent radio capabilities."""
     radios = list(radios)
@@ -934,6 +954,7 @@ class LiveRuntime:
             store.close()
             raise
         agent.bus.on(Signal.EVENT, self._observe)
+        _arm_sentinel_from_env(agent)
         self.driver = driver
         self.augur = agent
         self._cached_visual = None

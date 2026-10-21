@@ -70,6 +70,7 @@ class Supervisor:
         narrator=None,
         detect_engine=None,
         bus=None,
+        alert_bus=None,
     ):
         self._radios = {r.iface: r for r in (radios or [])}
         self._intent = Intent(intent)
@@ -80,6 +81,10 @@ class Supervisor:
         self._narrator = narrator
         self._detect_engine = detect_engine
         self._bus = bus  # SignalBus hub; optional. Use a bus OR a direct narrator, not both.
+        # Dedup + escalate raw detector alerts before they fan out (honors the
+        # [detect] dedup_window_s / escalate_after / escalate_to config).
+        from ..detect.bus import AlertBus
+        self._alert_bus = alert_bus if alert_bus is not None else AlertBus()
         self._assignment = None
         self._capture_iface = None
         self.reasons: list = []
@@ -187,11 +192,16 @@ class Supervisor:
             self._emit(Signal.EVENT, event=e)
         if self._detect_engine is None:
             return []
-        alerts = self._detect_engine.feed_many(events_to_frames(events))
-        for a in alerts:
-            self._emit(Signal.ALERT, alert=a)
+        raw = self._detect_engine.feed_many(events_to_frames(events))
+        alerts = []
+        for a in raw:
+            published = self._alert_bus.publish(a)   # dedup + escalate
+            if published is None:
+                continue                              # near-duplicate suppressed
+            alerts.append(published)
+            self._emit(Signal.ALERT, alert=published)
             if self._narrator is not None:
-                self._narrator.say_alert(a)
+                self._narrator.say_alert(published)
         return alerts
 
     def creature_lines(self, n: Optional[int] = None):
