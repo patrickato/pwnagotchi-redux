@@ -65,10 +65,10 @@ UMask=0077
 UNIT
     cat > "${UNIT_DIR}/${NAME}.timer" <<'UNIT'
 [Unit]
-Description=Redux gated read-only Pi inventory every six hours
+Description=Redux gated read-only Pi inventory hourly
 
 [Timer]
-OnCalendar=*-*-* 00,06,12,18:20:00
+OnCalendar=*-*-* *:20:00
 Persistent=true
 RandomizedDelaySec=5min
 Unit=redux-field-bridge.service
