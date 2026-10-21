@@ -173,6 +173,11 @@ def trusted_unit(path, expected):
                  else "OnCalendar=")
         if sum(line.startswith(scope) for line in content.splitlines()) != 1:
             return "unrecognized"
+        if expected == EXPECTED_TIMER and (
+            content.splitlines().count("Unit=redux-field-bridge.service") != 1
+            or sum(line.startswith("Unit=") for line in content.splitlines()) != 1
+        ):
+            return "unrecognized"
         return "expected"
     except (OSError, UnicodeError):
         return "unavailable"
