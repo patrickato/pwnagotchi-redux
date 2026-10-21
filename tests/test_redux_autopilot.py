@@ -283,3 +283,124 @@ def test_feedback_filter_rejects_inconsistent_metadata_signals():
     payload["signals"] = ["usb_radiotap_not_reception_proof"]
     assert instance.local_sanitized_hardware_feedback(runner=lambda *a, **kw:
            SimpleNamespace(returncode=0, stdout=json.dumps(payload))) is None
+
+
+
+def test_full_offline_verification_keeps_expected_test_order():
+    instance = module()
+    observed = []
+    def fake(argv, **kwargs):
+        observed.append((argv, kwargs["timeout"]))
+        assert "ssh" not in argv
+        assert "sudo" not in argv
+        return 0, ""
+    assert instance.independent_verification("/synthetic-checkout", {},
+                                             invoker=fake) is None
+    assert observed[0][0] == ["python3", "-m", "pytest", "-q"]
+    assert observed[1][0] == ["bash", "image/ci.sh"]
+    assert observed[2][0][:4] == ["python3", "-m", "compileall", "-q"]
+    assert observed[3][0] == ["git", "diff", "--check"]
+    assert all(0 < timeout <= 600 for _, timeout in observed)
+
+
+def test_failed_python_tests_trigger_one_repair_and_full_reverification():
+    instance = module()
+    events = []
+    def inspector(cwd, revision):
+        events.append("inspect")
+        return None, ["redux/source.py", "tests/test_source.py"]
+    failures = iter(["python_tests_failed", None])
+    def verifier(cwd, env):
+        events.append("verify")
+        return next(failures)
+    def agent(cwd, instruction, env, *, timeout):
+        events.append("repair")
+        assert timeout == 600
+        assert "python_tests_failed" in instruction
+        assert "ONE SOURCE-ONLY REPAIR PASS" in instruction
+        assert "ssh" not in instruction.lower().split("your previous")[0]
+        return True
+    status, paths = instance.validate_with_one_repair(
+        "/synthetic", "a" * 40, {}, {}, "Safe offline source engineering.",
+        verifier=verifier, agent=agent, inspector=inspector)
+    assert status is None
+    assert paths == ["redux/source.py", "tests/test_source.py"]
+    assert events == ["inspect", "verify", "repair", "inspect", "verify"]
+
+
+def test_repair_always_stops_after_second_test_failure():
+    instance = module()
+    repairs = []
+    def agent(*args, **kwargs):
+        repairs.append(1)
+        return True
+    status, paths = instance.validate_with_one_repair(
+        "/synthetic", "a" * 40, {}, {}, "offline",
+        verifier=lambda *args: "python_tests_failed",
+        agent=agent, inspector=lambda *args: (None, ["tests/test_case.py"]))
+    assert status == "tests_failed_after_repair"
+    assert len(repairs) == 1
+    assert paths == ["tests/test_case.py"]
+
+
+def test_repair_never_proceeds_after_history_or_file_guard_failure():
+    instance = module()
+    for reason in ("agent_changed_git_history", "restricted_path",
+                   "unsafe_git_status", "symlinked_parent"):
+        status, paths = instance.validate_with_one_repair(
+            "/synthetic", "a" * 40, {}, {}, "offline",
+            verifier=lambda *args: pytest.fail("verification attempted"),
+            agent=lambda *args, **kwargs: pytest.fail("repair attempted"),
+            inspector=lambda *args: (reason, []))
+        assert status == reason and paths == []
+
+
+def test_repair_cannot_override_postrepair_protected_path_rejection():
+    instance = module()
+    guards = iter([(None, ["redux/safe.py"]),
+                   ("restricted_path", [])])
+    status, paths = instance.validate_with_one_repair(
+        "/synthetic", "a" * 40, {}, {}, "offline",
+        verifier=lambda *args: "python_tests_failed",
+        agent=lambda *args, **kw: True,
+        inspector=lambda *args: next(guards))
+    assert status == "restricted_path"
+    assert paths == []
+
+
+def test_no_repair_after_first_success_and_no_change_is_idle():
+    instance = module()
+    called = []
+    def no_agent(*a, **kw):
+        called.append(True)
+        return False
+    result = instance.validate_with_one_repair(
+        "/synthetic", "a" * 40, {}, {}, "offline",
+        verifier=lambda *args: None, agent=no_agent,
+        inspector=lambda *args: (None, ["redux/safe.py"]))
+    assert result == (None, ["redux/safe.py"])
+    no_change = instance.validate_with_one_repair(
+        "/synthetic", "a" * 40, {}, {}, "offline",
+        verifier=lambda *args: pytest.fail("tests attempted"),
+        agent=no_agent, inspector=lambda *args: (None, []))
+    assert no_change == (None, [])
+    assert called == []
+
+
+def test_repair_command_remains_sandboxed_and_noninteractive():
+    instance = module()
+    from types import SimpleNamespace
+    calls = []
+    def runner(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0)
+    assert instance.run_codex("/synthetic", "offline", {},
+                              timeout=600, runner=runner)
+    assert len(calls) == 1
+    argv, kw = calls[0]
+    assert tuple(argv) == instance.CODEX_COMMAND
+    assert argv[argv.index("--sandbox") + 1] == "workspace-write"
+    assert argv[argv.index("--ask-for-approval") + 1] == "never"
+    assert kw["timeout"] == 600
+    assert kw["stderr"] is subprocess.DEVNULL
+    assert kw["stdout"] is subprocess.DEVNULL
