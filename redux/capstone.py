@@ -46,8 +46,10 @@ class Capstone:
     posture: str = "passive"                            # passive | active
     transmit: bool = False
     armed_targets: int = 0
-    ok: bool = False
+    ok: bool = False  # ONLY plan viability, not a performed capture
     summary: str = ""
+    execution_performed: bool = False
+    physical_acceptance: str = "UNKNOWN"
 
     def as_dict(self) -> dict:
         return {
@@ -61,6 +63,9 @@ class Capstone:
             "transmit": self.transmit,
             "armed_targets": self.armed_targets,
             "ok": self.ok,
+            "plan_valid": self.ok,
+            "execution_performed": self.execution_performed,
+            "physical_acceptance": self.physical_acceptance,
             "summary": self.summary,
         }
 
@@ -70,7 +75,8 @@ def plan_capstone(radios, intent, scope, *, offense_enabled: bool = False,
     """Pure, hardware-free plan of the hands-off pass.
 
     Steps, in order: inventory -> orchestrate (intent->roles) -> pick capture
-    radio -> repoint the engine -> posture (transmit vs passive) -> capture plan.
+    radio -> proposed engine repoint -> posture -> proposed capture step.
+    This is a plan only: it never changes interfaces or starts capture.
     `offense_enabled` is the persona/posture gate; transmission also requires at
     least one armed Wi-Fi target in `scope`. Nothing here transmits.
     """
@@ -145,10 +151,11 @@ def plan_capstone(radios, intent, scope, *, offense_enabled: bool = False,
 
     cap.ok = engine_available
     if cap.ok:
-        cap.summary = (f"{intent.value}: arranged {len(radios)} radio(s), capture on "
-                       f"{cap.capture_iface} ({cap.posture}), engine ready — hands-off pass is wired")
+        cap.summary = (f"{intent.value}: PLANNED radio role assignment for {len(radios)} radio(s); "
+                       f"capture interface {cap.capture_iface} ({cap.posture}); "
+                       "capture has NOT been started or verified")
     else:
-        cap.summary = (f"{intent.value}: radios arranged and capture radio chosen "
+        cap.summary = (f"{intent.value}: planned radio assignments and capture interface "
                        f"({cap.capture_iface}), but no capture engine present")
     return cap
 
