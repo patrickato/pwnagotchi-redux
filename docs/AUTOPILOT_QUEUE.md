@@ -8,6 +8,15 @@ dependency and actual source state. Keep already-completed evidence intact.
 
 ## Current highest-priority offline engineering tasks
 
+- [ ] **P0 — Hardware bridge source qualification (OFFLINE ONLY):**
+  Test scripts/redux-field-bridge.py and its installer in isolated Linux
+  fixtures, run all tests/test_redux_field_bridge.py, check shell syntax,
+  audit source revision / SSH identity pinning, consent/renewal, policy
+  symlink/race safety, and confirm the existing acceptance collector is not
+  weakened. Fix actual failures with regression tests. Do **not** execute
+  observe, enroll, an SSH login, or enable the field timer.
+  Source-only completion is a prerequisite to requesting recurring
+  read-only operator consent, not permission to test the Pi.
 ## Hardware-automation safety milestone (source-only)
 
 A separate private, time-limited read-only Pi controller and six-hour
