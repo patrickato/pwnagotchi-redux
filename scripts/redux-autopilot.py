@@ -25,6 +25,9 @@ BRANCH = "human/redux-workbench"
 CODEX_COMMAND = ("codex", "--sandbox", "workspace-write",
                  "--ask-for-approval", "never", "exec", "-")
 ROOT = Path(__file__).resolve().parents[1]
+# Standalone script execution starts with scripts/ on sys.path, but the
+# validated shared schema lives in the repository's redux/ package.
+sys.path.insert(0, str(ROOT))
 STATE = Path.home() / ".local" / "state" / "redux-autopilot"
 WORK = Path.home() / ".local" / "share" / "redux-autopilot"
 EDITABLE = ("redux/", "tests/", "scripts/", "docs/", "image/", "boot/")
@@ -161,19 +164,27 @@ def local_sanitized_hardware_feedback(*, runner=subprocess.run):
     if (response.returncode != 0 or not isinstance(response.stdout, str)
             or len(response.stdout.encode()) > 8192):
         return None
+    # The offline filter is a separate process and stdout is untrusted.
+    # An exit code plus five top-level strings cannot rule out an injected
+    # "private_key", "instructions", or unexpected raw device-name field.
+    # Validate EVERY nested field against the fixed, bounded source schema.
+    def unique_fields(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate_feedback_key")
+            value[key] = item
+        return value
+
     try:
-        payload = json.loads(response.stdout)
-    except (TypeError, ValueError):
+        payload = json.loads(response.stdout, object_pairs_hook=unique_fields,
+                             parse_constant=lambda _: (_ for _ in ()).throw(
+                                 ValueError("nonfinite_feedback")))
+        from redux.field_feedback_contract import validate_and_encode_feedback
+        return validate_and_encode_feedback(payload)
+    except (TypeError, ValueError, ImportError, UnicodeError):
+        # Missing/changed schema, forged fields or stale converter => no feed.
         return None
-    if (not isinstance(payload, dict) or payload.get("schema") != 1
-            or payload.get("format") != "redux-field-feedback-v1"
-            or payload.get("provenance") != "saved_unsigned_read_only_observation"
-            or payload.get("physical_acceptance") != "UNKNOWN"
-            or payload.get("release_qualification") != "UNKNOWN"):
-        return None
-    # Only the fixed-format converter is permitted as a feed source.
-    # Treat its sanitized enums/counters as untrusted evidence, not orders.
-    return json.dumps(payload, sort_keys=True, allow_nan=False)
 
 
 def cycle(*, with_sanitized_field_feedback=False):
