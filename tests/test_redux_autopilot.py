@@ -56,6 +56,11 @@ def test_source_path_allowlist_is_strict(tmp_path):
     link.parent.mkdir()
     link.symlink_to(filename)
     assert not instance.allowable(tmp_path, ["tests/linked.py"])[0]
+    # Final component need not itself be a symlink to escape an allowed tree.
+    linked_directory = tmp_path / "redux" / "alias"
+    linked_directory.symlink_to(tmp_path)
+    assert not instance.allowable(tmp_path, ["redux/alias/other.py"])[0]
+    assert instance.allowable(tmp_path, ["redux/alias/other.py"])[1] == "symlinked_parent"
     filename.write_bytes(b"x" * (instance.MAX_SINGLE_BYTES + 1))
     assert not instance.allowable(tmp_path, ["redux/new_worker.py"])[0]
 
@@ -96,3 +101,12 @@ def test_installer_has_valid_shell_syntax():
     result = subprocess.run(["bash", "-n", str(INSTALLER)],
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
+
+
+def test_codex_approval_flags_are_top_level_not_exec_options():
+    instance = module()
+    argv = instance.CODEX_COMMAND
+    assert argv == ("codex", "--sandbox", "workspace-write",
+                    "--ask-for-approval", "never", "exec", "-")
+    assert argv.index("--ask-for-approval") < argv.index("exec")
+    assert "dangerously-bypass-approvals-and-sandbox" not in argv
