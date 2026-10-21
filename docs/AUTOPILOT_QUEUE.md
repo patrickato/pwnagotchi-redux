@@ -8,6 +8,16 @@ dependency and actual source state. Keep already-completed evidence intact.
 
 ## Current highest-priority offline engineering tasks
 
+- [ ] **P0 — Verified private hardware-to-Codex feedback:** A fixed-category
+  no-SSH converter is implemented in `redux/field_feedback.py` and
+  `scripts/redux-field-feedback.py` with 16 passing isolated Linux
+  fixture tests. The source-only Codex runner contains an *opt-in* filtered
+  feedback channel, but its existing installed timer does not enable
+  transmission. Qualify the full test suite, validate that at least one
+  real private observer report is available and fresh enough to guide work,
+  then arrange a deliberate WSL upgrade that does not silently invalidate
+  the currently pinned collector authorization. Never publish telemetry
+  or raw private reports to GitHub and never grant Codex SSH.
 - [ ] **P0 — Hardware bridge source qualification (OFFLINE ONLY):**
   Test scripts/redux-field-bridge.py and its installer in isolated Linux
   fixtures, run all tests/test_redux_field_bridge.py, check shell syntax,
