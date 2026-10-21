@@ -50,6 +50,7 @@ def test_source_path_allowlist_is_strict(tmp_path):
     assert not instance.allowable(tmp_path, ["scripts/redux-field-bridge.py"])[0]
     assert not instance.allowable(tmp_path, ["scripts/redux-field-feedback.py"])[0]
     assert not instance.allowable(tmp_path, ["redux/field_feedback.py"])[0]
+    assert not instance.allowable(tmp_path, ["redux/field_feedback_contract.py"])[0]
     assert not instance.allowable(tmp_path, ["docs/FIELD_FEEDBACK.md"])[0]
     assert not instance.allowable(tmp_path, ["scripts/install-redux-field-bridge.sh"])[0]
     assert not instance.allowable(tmp_path, [".github/workflows/new.yml"])[0]
