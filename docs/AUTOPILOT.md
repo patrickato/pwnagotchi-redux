@@ -126,3 +126,34 @@ publish private redacted aggregates from the verified Pi. It must pin the
 host key and IPv4 identity, bound rate/deadline/data volume, avoid remote
 writes and credentials in GitHub, and require its own operator approval.
 State-changing hardware experiments remain separate approved operations.
+
+## October 21: first installation and post-install hardening
+
+The owner installed and enabled the user timer from commit `a3fe728`,
+and all **six initial `test_redux_autopilot.py` tests passed** in WSL.
+That proves successful timer installation; it does **not** prove Codex has
+completed or pushed a scheduled mission yet.
+
+After installation, the GitHub workbench updated the runner so Codex approval
+flags are passed **before** `exec` for compatibility with supported CLI
+versions. The wrapper rejects symlinked parent directories in proposed code,
+and reads its mission instructions from the *freshly cloned* branch rather
+than requiring the human to pull a new queue on every cycle. New source-only
+tests cover both safeguards. These post-install changes are not in the
+already-running WSL checkout until it is updated.
+
+**One-time maintenance** after reviewing the committed source:
+
+```sh
+cd ~/redux-workbench-src &&
+git pull --ff-only &&
+python3 -m pytest -q tests/test_redux_autopilot.py
+```
+
+The timer's existing service definition executes the local script by path,
+so no timer reinstallation is needed. After a successful pull, future
+source-only priorities propagate through fresh clones. Do not disable the
+Codex sandbox to solve an agent error; consult the private
+`~/.local/state/redux-autopilot/last.json` bounded reason code.
+Do not claim unattended source work is proven until the first actual
+`published` or `idle` cycle appears (or is traceable to GitHub).
