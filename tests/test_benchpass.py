@@ -80,11 +80,12 @@ def test_only_filters_the_walk_and_report(tmp_path):
     assert rep.counts["pass"] == 2 and rep.clean
 
 
-def test_non_terminal_status_is_coerced_to_skip(tmp_path):
+def test_non_terminal_status_stays_pending_not_silent_skip(tmp_path):
     led = bp.Ledger(path=str(tmp_path / "l.json"))
     rep = bp.run_benchpass([bp.GATES[0]], lambda g: ("weird", ""), led)
-    assert led.status_of(bp.GATES[0].id) == "skip"
-    assert rep.counts["skip"] == 1
+    assert led.status_of(bp.GATES[0].id) == "pending"
+    assert rep.counts["pending"] == 1
+    assert not rep.complete and not rep.clean
 
 
 def test_report_clean_vs_complete(tmp_path):
@@ -167,4 +168,58 @@ def test_report_markdown_reflects_the_ledger(tmp_path):
                             board="pi4", model="Pi 4 Model B",
                             image_sha="abc", now=1800000000.0)
     assert "Pi 4 Model B" in md and "`pi4`" in md and "image SHA256: `abc`" in md
-    assert "CLEAN" in md and "| 1.6 " in md
+    assert "not independently qualified" in md.lower() and "| 1.6 " in md
+    assert "independent hardware acceptance" in md.lower()
+
+
+def test_no_skipped_gate_can_produce_clean_release_session(tmp_path):
+    led = bp.Ledger(path=str(tmp_path / "recorded.json"), board="pi4")
+    for gate in bp.GATES:
+        led.record(gate.id, "pass", "operator entry")
+    led.record(bp.GATES[-1].id, "skip", "hardware unavailable")
+    rep = bp.build_report(bp.GATES, led)
+    assert rep.complete is True
+    assert rep.clean is False
+    assert rep.independently_qualified is False
+    assert rep.as_dict()["independently_qualified"] is False
+
+
+def test_an_unverified_operator_pass_is_not_an_independent_hardware_result(tmp_path):
+    ledger = bp.Ledger(path=str(tmp_path / "recorded.json"), board="pi4")
+    for gate in bp.GATES:
+        ledger.record(gate.id, "pass", "typed by operator")
+    report = bp.build_report(bp.GATES, ledger)
+    assert report.clean
+    assert not report.independently_qualified
+    assert "not independently qualified" in bp.report_markdown(report)
+
+
+def test_a_single_board_is_never_reported_done_for_both_platforms(tmp_path):
+    ledger = bp.Ledger(path=str(tmp_path / "pi4.json"), board="pi4")
+    for gate in bp.GATES:
+        ledger.record(gate.id, "pass")
+    matrix = bp.board_matrix(bp.GATES, {"pi4": ledger})
+    assert matrix and not bp.all_boards_done(matrix)
+    assert all(not row["done"] for row in matrix)
+
+
+def test_existing_corrupt_or_wrong_format_ledger_is_never_silently_reset(tmp_path):
+    from pathlib import Path
+    import pytest
+    p = tmp_path / "existing-ledger.json"
+    for bad in ('{"format":"not-this-project","gates":{}}', "{broken",
+                '[]', '{"format":"redux-benchpass-ledger-v1","gates":[]}'):
+        p.write_text(bad)
+        before = p.read_bytes()
+        with pytest.raises(ValueError):
+            bp.Ledger.load(str(p))
+        assert p.read_bytes() == before
+
+
+def test_invalid_status_cannot_be_recorded_and_timestamp_zero_is_supported():
+    import pytest
+    led = bp.Ledger()
+    with pytest.raises(ValueError):
+        led.record("1.1", "verified")
+    led.record("1.1", "pass", now=0)
+    assert led.gates["1.1"]["at"] == 0
