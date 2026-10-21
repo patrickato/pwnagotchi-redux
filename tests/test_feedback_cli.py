@@ -80,3 +80,17 @@ def test_no_report_is_fixed_redacted_unknown(tmp_path,monkeypatch,capsys):
     value=json.loads(capsys.readouterr().out)
     assert value=={'schema':1,'format':'redux-field-feedback-v1',
                    'status':'unavailable','physical_acceptance':'UNKNOWN'}
+
+
+
+def test_offline_publisher_rejects_invalid_filtered_schema(tmp_path, monkeypatch):
+    """No extra fields may escape from even a compromised converter."""
+    from types import SimpleNamespace
+    from redux import field_feedback
+    _, source = private(tmp_path)
+    safe = field_feedback.facts(projected())
+    safe["private_network_identifier"] = "NEVER_EXPOSE_THIS"
+    monkeypatch.setattr(field_feedback, "facts", lambda *args: safe)
+    with pytest.raises(ValueError, match="invalid_feedback_shape"):
+        app.collect_feedback(source, runner=lambda *args, **kwargs:
+            SimpleNamespace(returncode=3, stdout=json.dumps(projected())))
