@@ -191,10 +191,13 @@ def gear_checklist(gates: List[Gate] = None) -> List[str]:
 @dataclass
 class Ledger:
     """Resumable per-gate progress, persisted as JSON so a long session can pause
-    and continue. Only PASS/FAIL/SKIP are terminal; anything else re-runs."""
+    and continue. Only PASS/FAIL/SKIP are terminal; anything else re-runs. `board`
+    names the board this ledger is for (e.g. pi4 / pi5), since a gate is only truly
+    done when it passes on both."""
     path: Optional[str] = None
     started: float = 0.0
     gates: dict = field(default_factory=dict)   # id -> {status, detail, at}
+    board: str = ""
 
     @classmethod
     def load(cls, path: str) -> "Ledger":
@@ -206,7 +209,7 @@ class Ledger:
         if data.get("format") != LEDGER_FORMAT:
             return cls(path=path, started=time.time())
         return cls(path=path, started=data.get("started", time.time()),
-                   gates=dict(data.get("gates", {})))
+                   gates=dict(data.get("gates", {})), board=data.get("board", ""))
 
     def status_of(self, gid: str) -> str:
         return self.gates.get(gid, {}).get("status", "pending")
@@ -221,7 +224,8 @@ class Ledger:
     def save(self) -> None:
         if not self.path:
             return
-        payload = {"format": LEDGER_FORMAT, "started": self.started, "gates": self.gates}
+        payload = {"format": LEDGER_FORMAT, "started": self.started,
+                   "gates": self.gates, "board": self.board}
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2)
@@ -275,3 +279,48 @@ def build_report(gates: List[Gate], ledger: Ledger, *, only: Optional[list] = No
     rep.complete = counts.get("pending", 0) == 0
     rep.clean = rep.complete and counts.get("fail", 0) == 0
     return rep
+
+
+def board_matrix(gates: List[Gate], ledgers: dict) -> list:
+    """Cross-board view. `ledgers` maps board name -> Ledger. A gate is `done`
+    only when EVERY provided board recorded `pass` for it (the project rule:
+    done = both Pi 4 and Pi 5). Returns rows for rendering."""
+    boards = list(ledgers.keys())
+    rows = []
+    for g in gates:
+        per = {b: ledgers[b].status_of(g.id) for b in boards}
+        done = bool(boards) and all(per[b] == "pass" for b in boards)
+        rows.append({"id": g.id, "title": g.title, "phase": g.phase,
+                     "per_board": per, "done": done})
+    return rows
+
+
+def all_boards_done(matrix: list) -> bool:
+    """True when every gate is done on every board."""
+    return bool(matrix) and all(r["done"] for r in matrix)
+
+
+def report_markdown(report: "Report", *, board: str = "", image_sha: str = "",
+                    model: str = "", now=None) -> str:
+    """A dated results block ready to paste into docs/IMAGE_BUILD.md's
+    hardware-gate record. Reflects only what the ledger actually holds."""
+    import datetime
+    ts = datetime.datetime.fromtimestamp(now or time.time(),
+                                         datetime.timezone.utc).strftime("%Y-%m-%d")
+    head = f"### {model or 'Pi'} — {ts} · benchpass"
+    lines = [head, ""]
+    if board:
+        lines.append(f"- board: `{board}`")
+    if image_sha:
+        lines.append(f"- image SHA256: `{image_sha}`")
+    c = report.counts
+    lines.append(f"- result: {c.get('pass',0)} pass · {c.get('fail',0)} fail · "
+                 f"{c.get('skip',0)} skip · {c.get('pending',0)} pending"
+                 + ("  — CLEAN" if report.clean else ""))
+    lines.append("")
+    lines.append("| gate | status | note |")
+    lines.append("|---|---|---|")
+    for r in report.rows:
+        note = (r.get("detail") or "").replace("|", "\\|")
+        lines.append(f"| {r['id']} {r['title']} | {r['status']} | {note} |")
+    return "\n".join(lines) + "\n"

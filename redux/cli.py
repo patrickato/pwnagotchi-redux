@@ -637,7 +637,10 @@ def cmd_benchpass(args) -> int:
     from . import benchpass as bp
 
     sub = getattr(args, "benchpass_cmd", None) or "prep"
-    ledger_path = getattr(args, "ledger", "benchpass-ledger.json")
+    board = getattr(args, "board", "") or ""
+    ledger_path = getattr(args, "ledger", "") or ""
+    if not ledger_path:
+        ledger_path = f"benchpass-{board}.json" if board else "benchpass-ledger.json"
     phases = {"phase1": "Phase 1 — flashable MVP", "platform": "Platform surfaces",
               "subsystem": "Subsystem battery"}
 
@@ -717,9 +720,31 @@ def cmd_benchpass(args) -> int:
                  if ready else "resolve the MISS rows above, then re-run preflight"))
         return 0 if ready else 1
 
+    if sub == "matrix":
+        boards = args.boards or ["pi4", "pi5"]
+        ledgers = {b: bp.Ledger.load(f"benchpass-{b}.json") for b in boards}
+        matrix = bp.board_matrix(bp.GATES, ledgers)
+        if getattr(args, "json", False):
+            print(json.dumps({"boards": boards, "matrix": matrix,
+                              "all_done": bp.all_boards_done(matrix)}, indent=2))
+            return 0 if bp.all_boards_done(matrix) else 1
+        print("=== redux benchpass — cross-board matrix (done = every board passes) ===")
+        print(f"  {'gate':8} " + " ".join(f"{b:>6}" for b in boards) + "  done")
+        for r in matrix:
+            cells = " ".join(f"{r['per_board'][b]:>6}" for b in boards)
+            print(f"  {r['id']:8} {cells}  {'✓' if r['done'] else ''}")
+        done = bp.all_boards_done(matrix)
+        print(f"\n{'ALL BOARDS DONE' if done else 'not done on every board yet'}")
+        return 0 if done else 1
+
     if sub == "report":
         led = bp.Ledger.load(ledger_path)
         rep = bp.build_report(bp.GATES, led)
+        if getattr(args, "markdown", False):
+            print(bp.report_markdown(rep, board=(board or led.board),
+                                     image_sha=getattr(args, "image_sha", ""),
+                                     model=getattr(args, "model", "")), end="")
+            return 0 if rep.clean else 1
         if getattr(args, "json", False):
             print(json.dumps(rep.as_dict(), indent=2))
             return 0 if rep.clean else 1
@@ -728,6 +753,8 @@ def cmd_benchpass(args) -> int:
 
     # run: guided walk, resumable ledger
     led = bp.Ledger.load(ledger_path)
+    if board:
+        led.board = board
     only = getattr(args, "only", None) or None
 
     def executor(g):
@@ -1735,12 +1762,20 @@ def build_parser() -> argparse.ArgumentParser:
     bpf = bpsub.add_parser("preflight", help="on the Pi: check prerequisites before starting")
     bpf.add_argument("--json", action="store_true")
     bpr = bpsub.add_parser("run", help="walk every gate on the Pi; record pass/fail/skip (resumable)")
-    bpr.add_argument("--ledger", default="benchpass-ledger.json", help="resumable progress file")
+    bpr.add_argument("--ledger", default="", help="resumable progress file (default benchpass-<board>.json)")
+    bpr.add_argument("--board", default="", help="board under test, e.g. pi4 / pi5 (done = both pass)")
     bpr.add_argument("--resume", action="store_true", help="skip gates already recorded")
     bpr.add_argument("--only", nargs="*", help="limit to these gate ids (e.g. 1.6 2b.6)")
     bprep = bpsub.add_parser("report", help="render the consolidated result from the ledger")
-    bprep.add_argument("--ledger", default="benchpass-ledger.json", help="resumable progress file")
+    bprep.add_argument("--ledger", default="", help="progress file (default benchpass-<board>.json)")
+    bprep.add_argument("--board", default="", help="board name (selects the default ledger)")
+    bprep.add_argument("--markdown", action="store_true", help="emit a paste-ready results block for IMAGE_BUILD.md")
+    bprep.add_argument("--image-sha", default="", help="image SHA256 to record in the markdown block")
+    bprep.add_argument("--model", default="", help="board model label for the markdown heading")
     bprep.add_argument("--json", action="store_true")
+    bpm = bpsub.add_parser("matrix", help="cross-board view: done only when every board passes")
+    bpm.add_argument("--boards", nargs="*", default=["pi4", "pi5"], help="boards to combine (default pi4 pi5)")
+    bpm.add_argument("--json", action="store_true")
     bp_.set_defaults(func=cmd_benchpass)
 
     ct = sub.add_parser("captap", help="raw 802.11 tap — probe/deauth parsing + cross-MAC re-id")

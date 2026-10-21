@@ -41,22 +41,27 @@ Resolve any `MISS` rows, then go.
 ## 3. Run the pass (resumable)
 
 ```sh
-redux benchpass run             # walks every gate; record pass/fail/skip each
+redux benchpass run --board pi4     # walks every gate; record pass/fail/skip each
 ```
 - It shows each gate's command and pass criterion; you run it, judge it, type the result.
-- `quit` any time — progress is saved. Continue with `redux benchpass run --resume`.
+- `quit` any time — progress is saved. Continue with `redux benchpass run --board pi4 --resume`.
 - Focus on a subset with `--only 1.6 2b.6`.
+- `--board` keeps a separate ledger per board (`benchpass-pi4.json`, `benchpass-pi5.json`). A gate
+  is only truly `done` when it passes on **both** — run the pass once per board.
 - The headline (gate 1.6) is just: `redux demo --live --intent hunt --offense` on your own armed AP — flash → boot → plug → auto-arrange → capture, hands-off. Record a short clip.
 
 ## 4. Read the result, record it
 
 ```sh
-redux benchpass report          # consolidated pass/fail/skip across all gates
+redux benchpass report --board pi4              # one board's result
+redux benchpass matrix                          # both boards side by side; ✓ = done on both
+redux benchpass report --board pi4 --markdown --model "Pi 4 Model B" --image-sha <sha>
 ```
-Then, per [`HARDWARE_VALIDATION.md` §3](HARDWARE_VALIDATION.md): append a dated
-block to `IMAGE_BUILD.md`'s hardware-gate record and flip the matching `TASKS.md`
-rows — `done` only when a gate passes on **both** Pi 4 and Pi 5; otherwise leave
-`done (sandbox)` with a note on exactly what failed and on which board.
+The `--markdown` form prints a dated block ready to paste straight into
+`IMAGE_BUILD.md`'s hardware-gate record. Then, per
+[`HARDWARE_VALIDATION.md` §3](HARDWARE_VALIDATION.md), flip the matching `TASKS.md`
+rows — `done` only when the `matrix` shows ✓ (pass on **both** Pi 4 and Pi 5);
+otherwise leave `done (sandbox)` with a note on exactly what failed and on which board.
 
 ## Scope reminder
 

@@ -125,3 +125,46 @@ def test_preflight_ready_ignores_optional_crypto():
     assert bp.preflight_ready(bp.preflight(base)) is True        # crypto optional
     base["capture_engine"] = False                               # a required one missing
     assert bp.preflight_ready(bp.preflight(base)) is False
+
+
+def test_board_matrix_done_only_when_every_board_passes(tmp_path):
+    l4 = bp.Ledger(path=str(tmp_path / "pi4.json"), board="pi4")
+    l5 = bp.Ledger(path=str(tmp_path / "pi5.json"), board="pi5")
+    for g in bp.GATES:
+        l4.record(g.id, "pass")
+        l5.record(g.id, "pass")
+    m = bp.board_matrix(bp.GATES, {"pi4": l4, "pi5": l5})
+    assert bp.all_boards_done(m) is True
+    l5.record("1.4", "fail", "no handshake")
+    m2 = bp.board_matrix(bp.GATES, {"pi4": l4, "pi5": l5})
+    assert bp.all_boards_done(m2) is False
+    row = next(r for r in m2 if r["id"] == "1.4")
+    assert row["done"] is False and row["per_board"] == {"pi4": "pass", "pi5": "fail"}
+
+
+def test_board_matrix_pending_board_is_not_done(tmp_path):
+    l4 = bp.Ledger(path=str(tmp_path / "pi4.json"), board="pi4")
+    l4.record("1.6", "pass")
+    l5 = bp.Ledger(path=str(tmp_path / "pi5.json"), board="pi5")  # nothing recorded
+    m = bp.board_matrix(bp.GATES, {"pi4": l4, "pi5": l5})
+    row = next(r for r in m if r["id"] == "1.6")
+    assert row["per_board"]["pi5"] == "pending" and row["done"] is False
+
+
+def test_ledger_board_roundtrips(tmp_path):
+    p = str(tmp_path / "l.json")
+    led = bp.Ledger(path=p, board="pi5")
+    led.record("1.1", "pass")
+    led.save()
+    assert bp.Ledger.load(p).board == "pi5"
+
+
+def test_report_markdown_reflects_the_ledger(tmp_path):
+    led = bp.Ledger(path=str(tmp_path / "l.json"), board="pi4")
+    for g in bp.GATES:
+        led.record(g.id, "pass")
+    md = bp.report_markdown(bp.build_report(bp.GATES, led),
+                            board="pi4", model="Pi 4 Model B",
+                            image_sha="abc", now=1800000000.0)
+    assert "Pi 4 Model B" in md and "`pi4`" in md and "image SHA256: `abc`" in md
+    assert "CLEAN" in md and "| 1.6 " in md
