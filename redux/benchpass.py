@@ -22,6 +22,7 @@ from typing import Callable, List, Optional
 
 LEDGER_FORMAT = "redux-benchpass-ledger-v1"
 TERMINAL = ("pass", "fail", "skip")
+REQUIRED_BOARDS = ("pi4", "pi5")
 
 
 @dataclass(frozen=True)
@@ -204,12 +205,22 @@ class Ledger:
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-        except (OSError, ValueError):
+        except FileNotFoundError:
             return cls(path=path, started=time.time())
-        if data.get("format") != LEDGER_FORMAT:
-            return cls(path=path, started=time.time())
+        except (OSError, ValueError) as exc:
+            raise ValueError("existing_benchpass_ledger_unreadable") from exc
+        if (type(data) is not dict or data.get("format") != LEDGER_FORMAT
+                or type(data.get("gates")) is not dict
+                or type(data.get("board", "")) is not str):
+            raise ValueError("existing_benchpass_ledger_invalid")
+        records = data["gates"]
+        if any(type(key) is not str or type(value) is not dict
+               or value.get("status") not in ("pass", "fail", "skip", "pending")
+               or type(value.get("detail", "")) is not str
+               for key, value in records.items()):
+            raise ValueError("existing_benchpass_ledger_invalid")
         return cls(path=path, started=data.get("started", time.time()),
-                   gates=dict(data.get("gates", {})), board=data.get("board", ""))
+                   gates=dict(records), board=data.get("board", ""))
 
     def status_of(self, gid: str) -> str:
         return self.gates.get(gid, {}).get("status", "pending")
@@ -218,8 +229,10 @@ class Ledger:
         return self.status_of(gid) in TERMINAL
 
     def record(self, gid: str, status: str, detail: str = "", *, now=None) -> None:
+        if status not in (*TERMINAL, "pending"):
+            raise ValueError("unrecognized_benchpass_status")
         self.gates[gid] = {"status": status, "detail": detail,
-                           "at": (now or time.time())}
+                           "at": (time.time() if now is None else now)}
 
     def save(self) -> None:
         if not self.path:
@@ -238,11 +251,13 @@ class Report:
     rows: list = field(default_factory=list)   # {id, title, phase, status, detail, needs}
     counts: dict = field(default_factory=dict)
     complete: bool = False                     # every gate terminal
-    clean: bool = False                        # complete AND no fails
+    clean: bool = False                        # all selected gates passed
+    independently_qualified: bool = False      # requires separately verified hardware evidence
 
     def as_dict(self) -> dict:
         return {"rows": self.rows, "counts": self.counts,
-                "complete": self.complete, "clean": self.clean}
+                "complete": self.complete, "clean": self.clean,
+                "independently_qualified": self.independently_qualified}
 
 
 def run_benchpass(gates: List[Gate], executor: Callable[[Gate], tuple], ledger: Ledger,
@@ -258,7 +273,7 @@ def run_benchpass(gates: List[Gate], executor: Callable[[Gate], tuple], ledger: 
             continue
         status, detail = executor(g)
         if status not in TERMINAL and status != "pending":
-            status = "skip"
+            status = "pending"
         ledger.record(g.id, status, detail)
         ledger.save()
     return build_report(gates, ledger, only=only)
@@ -276,8 +291,11 @@ def build_report(gates: List[Gate], ledger: Ledger, *, only: Optional[list] = No
                          "status": st, "detail": ledger.gates.get(g.id, {}).get("detail", ""),
                          "needs": list(g.needs)})
     rep.counts = counts
-    rep.complete = counts.get("pending", 0) == 0
-    rep.clean = rep.complete and counts.get("fail", 0) == 0
+    rep.complete = bool(rep.rows) and counts.get("pending", 0) == 0
+    rep.clean = rep.complete and counts.get("pass", 0) == len(rep.rows)
+    # A typed PASS is an operator observation, NOT independent hardware
+    # evidence. Do not upgrade a human-editable ledger into release PASS.
+    rep.independently_qualified = False
     return rep
 
 
@@ -286,12 +304,14 @@ def board_matrix(gates: List[Gate], ledgers: dict) -> list:
     only when EVERY provided board recorded `pass` for it (the project rule:
     done = both Pi 4 and Pi 5). Returns rows for rendering."""
     boards = list(ledgers.keys())
+    required_present = set(REQUIRED_BOARDS).issubset(ledgers)
     rows = []
     for g in gates:
         per = {b: ledgers[b].status_of(g.id) for b in boards}
-        done = bool(boards) and all(per[b] == "pass" for b in boards)
+        done = required_present and all(per[b] == "pass" for b in REQUIRED_BOARDS)
         rows.append({"id": g.id, "title": g.title, "phase": g.phase,
-                     "per_board": per, "done": done})
+                     "per_board": per, "done": done,
+                     "independently_qualified": False})
     return rows
 
 
@@ -305,10 +325,13 @@ def report_markdown(report: "Report", *, board: str = "", image_sha: str = "",
     """A dated results block ready to paste into docs/IMAGE_BUILD.md's
     hardware-gate record. Reflects only what the ledger actually holds."""
     import datetime
-    ts = datetime.datetime.fromtimestamp(now or time.time(),
-                                         datetime.timezone.utc).strftime("%Y-%m-%d")
+    ts = datetime.datetime.fromtimestamp(
+        time.time() if now is None else now,
+        datetime.timezone.utc).strftime("%Y-%m-%d")
     head = f"### {model or 'Pi'} — {ts} · benchpass"
-    lines = [head, ""]
+    lines = [head, "",
+             "**Operator-recorded results; independent hardware acceptance not established.**",
+             ""]
     if board:
         lines.append(f"- board: `{board}`")
     if image_sha:
@@ -316,7 +339,8 @@ def report_markdown(report: "Report", *, board: str = "", image_sha: str = "",
     c = report.counts
     lines.append(f"- result: {c.get('pass',0)} pass · {c.get('fail',0)} fail · "
                  f"{c.get('skip',0)} skip · {c.get('pending',0)} pending"
-                 + ("  — CLEAN" if report.clean else ""))
+                 + ("  — ALL OPERATOR-RECORDED PASS (not release-qualified)"
+                    if report.clean else ""))
     lines.append("")
     lines.append("| gate | status | note |")
     lines.append("|---|---|---|")
