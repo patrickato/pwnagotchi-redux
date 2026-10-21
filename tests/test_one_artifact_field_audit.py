@@ -277,3 +277,19 @@ def test_uninspected_ledger_or_directory_never_claims_artifact_damage(
     assert verdict["status"]=="unknown"
     assert verdict["reason"]==expected
     assert verdict["checked"]==0
+
+
+
+def test_actual_ingest_ownership_contract_requires_distinct_privileged_audit():
+    """A nonroot read attempt is not enough for 0700/0600 root-owned outputs."""
+    source=(ROOT/"redux/crack/ingest.py").read_text()
+    unit=(ROOT/"systemd/redux-capture-ingest.service").read_text()
+    launch=(ROOT/"scripts/redux-one-artifact-field-audit.py").read_text()
+    assert "User=root" in unit.splitlines()
+    assert "os.chmod(settings.output_dir, 0o700)" in source
+    assert "os.chmod(settings.database, 0o600)" in source
+    assert '"pi@"+host' in launch
+    assert '"sudo",' not in launch
+    # Fail if source evolves: a real privileged audit requires a separately
+    # reviewed, fixed command profile, never silent changes to file modes.
+    assert '"read_permission_unavailable"' in launch
