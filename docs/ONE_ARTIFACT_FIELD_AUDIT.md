@@ -91,3 +91,48 @@ GitHub CI and synthetic tests validate logic and response shape, not
 the permissions of the Pi's deployed capture filesystem or actual
 byte integrity. **Do not claim a hardware integrity PASS until a real
 one-shot report returns `verified_bytes` and is independently reviewed.**
+
+
+## October 21 first real run — ATTENTION before any hash
+
+The operator ran the single authorized attempt from WSL and reported that
+both targeted sets of tests passed (26 tests), then the Codex feedback toggle
+returned `sanitized_model_feedback=on`. The Pi audit returned:
+
+```json
+{"status":"attention","reason":"artifact_integrity_problem",
+ "checked":0,"ready_rows":0,"physical_acceptance":"UNKNOWN",
+ "handshake_authenticity":"UNKNOWN"}
+```
+
+**Interpretation:** The first protocol obscured a failure *before* any file
+was verified. With zero checked files, the result is **not proof that the
+ledger really has zero ready entries** and is **not proof of corruption**.
+The result's zeros are also default counters when early preflight or SQLite
+fails. It is unsafe to treat this as a failed hash.
+
+Source review found a likely permissions blocker. The installed
+`systemd/redux-capture-ingest.service` uses `User=root`; the ingestion
+worker sets `/captures/ready` to mode **0700** and
+`/captures/jobs.db` to mode **0600**. The one-shot audit purposely uses
+the unprivileged `pi` identity with **no sudo**. Unless those files are
+owned by `pi` or have independent read grants, it cannot inspect them.
+The field metadata reader does not require opening those protected files,
+so its prior success does not prove artifact audit access.
+
+The audit source now explicitly tests for read/search permissions after
+REDUXCAP verification, returning **UNKNOWN /
+`read_permission_unavailable`** when needed. It also maps unexamined
+schema/output-directory errors to specific UNKNOWN reasons rather than
+misleading generic artifact-integrity ATTENTION. These are **source-only**
+repairs; they have not been rerun against the Pi. The original one-time
+attempt marker remains consumed. Do **not** delete it, repeat the previous
+SSH audit, change directory permissions or add sudo under that authorization.
+
+Before any further real prepared-file inspection, independently review a
+new **separately authorized** minimal privileged *read-only* audit profile
+with fixed code, verified Pi identity, bounded file reads, no capture
+export, no automatic retries and no persistent Pi changes. Do not grant
+unrestricted model/root shell access. The separate hourly metadata observer
+continues unaffected and can still supply aggregate ledger-status categories
+to the now-consented Codex source-only lane.
