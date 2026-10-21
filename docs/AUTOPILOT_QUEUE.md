@@ -19,15 +19,15 @@ dependency and actual source state. Keep already-completed evidence intact.
   transmission. Qualify the full test suite, validate that at least one
   real private observer report is available and fresh enough to guide work,
   then arrange a deliberate WSL upgrade that does not silently invalidate
-  the currently pinned collector authorization. **Preferred next safety
-  improvement:** move the currently approved collector to a frozen,
-  private read-only code snapshot and rebind only its separate user timer,
-  preserving exact SHA/revision pins and already-consumed attempt counts.
-  Require explicit local approval for that migration and regression tests.
-  Do not ask the owner to `git pull` the mutable WSL checkout during an
-  active field authorization: `source_revision()` intentionally rejects
-  changes to its pinned source. Never publish telemetry or raw private
-  reports to GitHub and never grant Codex SSH.
+  the currently pinned collector authorization. The **frozen-collector
+  migrator** is now implemented in `scripts/freeze-redux-field-bridge.py`,
+  with synthetic no-SSH systemd/revision tests. It reconstructs the pinned
+  approved revision as a private detached worktree and rebinds only the local
+  observer service; it does not reset attempts, alter expiry or collect data.
+  Next: require a green CI run, then one explicit WSL migration and an actual
+  scheduled report before counting field feedback live. Until migration,
+  do not ask the owner to `git pull` the mutable checkout. Never publish
+  telemetry or raw private reports to GitHub or grant Codex SSH.
 - [x] **P0 — Hardware bridge initial offline qualification:** The owner
   reported **29 passing** field bridge tests and successful explicit
   recurring read-only enrollment plus separate user-timer installation on
