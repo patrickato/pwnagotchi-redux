@@ -16,8 +16,15 @@ dependency and actual source state. Keep already-completed evidence intact.
   transmission. Qualify the full test suite, validate that at least one
   real private observer report is available and fresh enough to guide work,
   then arrange a deliberate WSL upgrade that does not silently invalidate
-  the currently pinned collector authorization. Never publish telemetry
-  or raw private reports to GitHub and never grant Codex SSH.
+  the currently pinned collector authorization. **Preferred next safety
+  improvement:** move the currently approved collector to a frozen,
+  private read-only code snapshot and rebind only its separate user timer,
+  preserving exact SHA/revision pins and already-consumed attempt counts.
+  Require explicit local approval for that migration and regression tests.
+  Do not ask the owner to `git pull` the mutable WSL checkout during an
+  active field authorization: `source_revision()` intentionally rejects
+  changes to its pinned source. Never publish telemetry or raw private
+  reports to GitHub and never grant Codex SSH.
 - [ ] **P0 — Hardware bridge source qualification (OFFLINE ONLY):**
   Test scripts/redux-field-bridge.py and its installer in isolated Linux
   fixtures, run all tests/test_redux_field_bridge.py, check shell syntax,
