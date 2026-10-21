@@ -161,6 +161,20 @@ def free_bytes(path):
     return stats.f_bavail * stats.f_frsize
 
 
+def _gps_from_env():
+    """A position_provider from a serial GPS named by $REDUX_GPS (e.g.
+    /dev/ttyUSB0), or None when unset — so geo features light up when a GPS puck
+    is present, with no behavior change when it isn't. Best-effort, never raises."""
+    dev = os.environ.get("REDUX_GPS")
+    if not dev:
+        return None
+    try:
+        from ..geo.gps import serial_position_provider
+        return serial_position_provider(dev)
+    except Exception:
+        return None
+
+
 def select_radio(radios, preferred=""):
     """Use the existing orchestrator. Never make up absent radio capabilities."""
     radios = list(radios)
@@ -929,7 +943,8 @@ class LiveRuntime:
         store = SightingStore(self.config.state_dir / "sightings.db")
         try:
             agent = Augur(radios=radios, intent=Intent.RECON, driver=driver, store=store,
-                          resource_monitor=self.resources)
+                          resource_monitor=self.resources,
+                          position_provider=_gps_from_env())
         except Exception:
             store.close()
             raise
