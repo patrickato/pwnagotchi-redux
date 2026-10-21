@@ -630,6 +630,42 @@ def cmd_netrecon(args) -> int:
     return 0
 
 
+def cmd_sdr(args) -> int:
+    """Ingest SDR tool output into the sighting store so SDR captures reach geo/Dex:
+    rtl_433 ISM records (tagged with the receiver's position) or dump1090 ADS-B
+    records (the aircraft's own position). Reads line-delimited JSON, one record
+    per line — exactly what `rtl_433 -F json` / `dump1090 --write-json` emit."""
+    import json
+    from .geo.db import SightingStore, DEFAULT_DB_PATH
+    from .sdr import ingest_rtl433, ingest_adsb
+    cfg = _cfg(args)
+    db = args.db or (cfg.cache.db_path if cfg else None) or DEFAULT_DB_PATH
+    store = SightingStore(db)
+
+    def _records(path):
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict):
+                    yield rec
+
+    if args.adsb:
+        n = ingest_adsb(_records(args.file), store)
+        kind = "ADS-B aircraft"
+    else:
+        pos = (args.lat, args.lon) if args.lat is not None and args.lon is not None else None
+        n = ingest_rtl433(_records(args.file), store, position=pos)
+        kind = "ISM device"
+    print(f"ingested {n} {kind} sighting(s) from {args.file}")
+    return 0
+
+
 def cmd_captap(args) -> int:
     if getattr(args, "captap_cmd", "demo") == "live":
         return _captap_live(args)
@@ -1817,6 +1853,18 @@ def build_parser() -> argparse.ArgumentParser:
     nra.add_argument("--userlist", help="username wordlist to cred-test discovered services")
     nra.add_argument("--passlist", help="password wordlist to cred-test discovered services")
     nr.set_defaults(func=cmd_netrecon)
+
+    sd = sub.add_parser("sdr", help="ingest SDR output (rtl_433 ISM / dump1090 ADS-B) into the sighting store")
+    sdsub = sd.add_subparsers(dest="sdr_cmd", required=True)
+    sdi = sdsub.add_parser("ingest", help="ingest line-delimited JSON records from a file")
+    sdi.add_argument("file", help="file of line-delimited JSON (rtl_433 -F json / dump1090 --write-json)")
+    g = sdi.add_mutually_exclusive_group()
+    g.add_argument("--rtl433", action="store_true", help="records are rtl_433 ISM devices (default)")
+    g.add_argument("--adsb", action="store_true", help="records are dump1090 ADS-B aircraft")
+    sdi.add_argument("--lat", type=float, help="receiver latitude (tags ISM sightings)")
+    sdi.add_argument("--lon", type=float, help="receiver longitude (tags ISM sightings)")
+    sdi.add_argument("--db", help="sighting store path")
+    sd.set_defaults(func=cmd_sdr)
 
     dm = sub.add_parser("demo", help="hands-off pass (gate 1.6): arrange radios → capture, one command")
     dm.add_argument("--intent", default="recon", choices=[i.value for i in Intent],
