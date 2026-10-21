@@ -59,8 +59,8 @@ bash scripts/install-redux-autopilot.sh --install
 ```
 
 This opt-in creates two files under `~/.config/systemd/user`, enables the
-**user** timer, and runs source-only Codex cycles near 01:00, 07:00, 13:00 and
-19:00 local time with up to five minutes of jitter. It requests **no sudo**,
+**user** timer, and runs source-only Codex cycles every two hours
+(00:00, 02:00, ... 22:00 local time) with up to five minutes of jitter. It requests **no sudo**,
 does not install an OS package, does not touch the Pi, and does not start a
 Codex run directly during installation. A catch-up timer firing is possible
 after WSL restarts. The local systemd user manager and WSL distro must be
@@ -157,3 +157,34 @@ Codex sandbox to solve an agent error; consult the private
 `~/.local/state/redux-autopilot/last.json` bounded reason code.
 Do not claim unattended source work is proven until the first actual
 `published` or `idle` cycle appears (or is traceable to GitHub).
+
+## October 21: accelerated source cadence
+
+The owner asked for the fastest practical steady automated engineering pace,
+with complete testing and a clear distinction between software and hardware
+acceptance. ChatGPT's own recurring source-engineering task is now set to run
+**every two hours**. The WSL timer was originally installed with a six-hour
+schedule; a safely scoped migration path is added to
+`scripts/install-redux-autopilot.sh`.
+
+After pulling the latest trusted source and running
+`tests/test_redux_autopilot.py`, change **only** the installed Redux
+user-owned timer:
+
+```sh
+bash scripts/install-redux-autopilot.sh --retime
+```
+
+The migration is idempotent. It checks the original timer line, ownership,
+regular-file identity and the replacement's systemd calendar syntax, then
+reloads/restarts only the Redux **user timer**. It refuses unknown timer
+contents. There is no sudo, hardware access, or card/radio action. The
+existing service continues using the same installed executable path;
+future cycles require WSL to be running. A cycle is guarded by the same
+`flock` even if catch-up jobs overlap.
+
+Two-hour cadence is a **ceiling on cycle starts**, not a guarantee of 12
+finished features per day or a shorter test suite. The engine's source
+throughput and reliability must be measured from actual successful pushes,
+and a CI failure or missing WSL runner leaves the corresponding task
+blocked rather than magically completed.
