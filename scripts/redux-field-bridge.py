@@ -228,11 +228,13 @@ def invoke_collector(policy, evidence, *, runner=subprocess.run):
                         timeout=75, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return False
-    if len(result.stdout) > 131072:
+    if not isinstance(result.stdout, str) or len(result.stdout) > 131072:
         return False
     try:
         output = json.loads(result.stdout)
     except (TypeError, ValueError):
+        return False
+    if not isinstance(output, dict):
         return False
     # Collector exits 3 for UNKNOWN physical acceptance even when an unsigned
     # read-only report was saved. Never promote it into physical PASS.
