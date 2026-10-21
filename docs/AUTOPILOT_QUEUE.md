@@ -10,8 +10,11 @@ dependency and actual source state. Keep already-completed evidence intact.
 
 - [ ] **P0 — Verified private hardware-to-Codex feedback:** A fixed-category
   no-SSH converter is implemented in `redux/field_feedback.py` and
-  `scripts/redux-field-feedback.py` with 16 passing isolated Linux
-  fixture tests. The source-only Codex runner contains an *opt-in* filtered
+  `scripts/redux-field-feedback.py`. A separate complete nested-schema
+  validator is now enforced at the Codex-ingestion boundary, with regressions
+  for injected private fields and malformed JSON. This needs clean new CI
+  evidence before counting it accepted. The earlier 16 isolated feedback
+  fixture tests passed, but they are not physical Pi proof. The source-only Codex runner contains an *opt-in* filtered
   feedback channel, but its existing installed timer does not enable
   transmission. Qualify the full test suite, validate that at least one
   real private observer report is available and fresh enough to guide work,
@@ -25,18 +28,15 @@ dependency and actual source state. Keep already-completed evidence intact.
   active field authorization: `source_revision()` intentionally rejects
   changes to its pinned source. Never publish telemetry or raw private
   reports to GitHub and never grant Codex SSH.
-- [ ] **P0 — Hardware bridge source qualification (OFFLINE ONLY):**
-  Test scripts/redux-field-bridge.py and its installer in isolated Linux
-  fixtures, run all tests/test_redux_field_bridge.py, check shell syntax,
-  audit source revision / SSH identity pinning, consent/renewal, policy
-  symlink/race safety, and confirm the existing acceptance collector is not
-  weakened. Fix actual failures with regression tests. Do **not** execute
-  observe, enroll, an SSH login, or enable the field timer.
-  Source-only completion is a prerequisite to requesting recurring
-  read-only operator consent, not permission to test the Pi.
+- [x] **P0 — Hardware bridge initial offline qualification:** The owner
+  reported **29 passing** field bridge tests and successful explicit
+  recurring read-only enrollment plus separate user-timer installation on
+  October 21. The collector was not modified; tests do not attest actual
+  hourly SSH success. Real reports stay private in the WSL environment.
+  No extra RF, Pi-write, reboot or capture-audit permissions were granted.
 ## Hardware-automation safety milestone (source-only)
 
-A separate private, time-limited read-only Pi controller and six-hour
+A separate private, time-limited read-only Pi controller and **hourly**
 opt-in user timer are now in the source tree (scripts/redux-field-bridge.py,
 tests/test_redux_field_bridge.py). Its code/revision pins, strict-host-key
 existing collector, maximum session count, no-retry behavior, local-only
@@ -45,8 +45,10 @@ The owner approved read-only monitoring on October 21 at an accelerated
 **hourly** cadence with no more than **40 total attempts** and **14 days**
 of validity, whichever ends first. Source-only Codex must not expand this
 approval to any state change or additional RF/capture operation.
-Neither the controller nor its timer has been activated by the owner. Do not
-extend the source-only Codex timer to run SSH or add credentials. Future
+The owner **activated the local recurring approval and hourly WSL timer**
+after all 29 setup tests passed. Its first successful unattended Pi collection
+has not yet been independently established from connected GitHub evidence.
+Do not extend the source-only Codex timer to run SSH or add credentials. Future
 work: dedicated unprivileged OS account with Pi forced-command boundary,
 safe redacted evidence-return channel, CI/hardware contract tests, and
 separately approved physical experiment manifests and rollback procedures.
