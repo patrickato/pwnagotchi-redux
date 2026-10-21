@@ -8,6 +8,19 @@ dependency and actual source state. Keep already-completed evidence intact.
 
 ## Current highest-priority offline engineering tasks
 
+## Hardware-automation safety milestone (source-only)
+
+A separate private, time-limited read-only Pi controller and six-hour
+opt-in user timer are now in the source tree (scripts/redux-field-bridge.py,
+tests/test_redux_field_bridge.py). Its code/revision pins, strict-host-key
+existing collector, maximum session count, no-retry behavior, local-only
+0600 reports, and separate WSL approval are not themselves real Pi results.
+Neither the controller nor its timer has been activated by the owner. Do not
+extend the source-only Codex timer to run SSH or add credentials. Future
+work: dedicated unprivileged OS account with Pi forced-command boundary,
+safe redacted evidence-return channel, CI/hardware contract tests, and
+separately approved physical experiment manifests and rollback procedures.
+
 - [ ] **P0 — Prepared artifact-integrity readiness:** Review the existing
   `scripts/capture-artifact-audit.py` and `redux.crack.integrity_receipt`.
   Improve offline tests and read-only permission/race handling for the
