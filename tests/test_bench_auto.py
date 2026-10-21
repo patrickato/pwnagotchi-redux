@@ -372,3 +372,67 @@ def test_measure_facts_sees_radios():
     facts = ba.measure_facts(run=lambda c, t=20: (0, ""),
                              probe_radios=lambda: [FakeRadio("wlan1", monitor=True)])
     assert facts["radios"] is True and facts["monitor_radio"] is True
+
+
+# --------------------------------------------------------------------------- #
+# 1.5 intent switch + TFT render
+# --------------------------------------------------------------------------- #
+
+from redux.capstone import sample_inventory  # real Radio objects for decide()
+
+
+def _post_tft_run(c, t=20):
+    if "post" in c:
+        return 1, "redux POST\n[+] Capture radio\n[X] Capture engine\n-- DEGRADED --"
+    return 0, ""
+
+
+def test_intent_tft_skip_without_radios():
+    status, detail = mk(probe=lambda: [])(GMAP["1.5"])
+    assert status == "skip" and "no radios" in detail.lower()
+
+
+def test_intent_tft_pass_rearrange_and_render():
+    status, detail = mk(probe=sample_inventory, run=_post_tft_run)(GMAP["1.5"])
+    assert status == "pass"
+    assert "distinct" in detail.lower() and "tft" in detail.lower()
+
+
+def test_intent_tft_fail_when_frame_does_not_render():
+    status, detail = mk(probe=sample_inventory, run=lambda c, t=20: (0, ""))(GMAP["1.5"])
+    assert status == "fail" and "render" in detail.lower()
+
+
+# --------------------------------------------------------------------------- #
+# 2b.11 scope persistence placement
+# --------------------------------------------------------------------------- #
+
+def test_scope_persist_pass_on_persistent_fs(monkeypatch, tmp_path):
+    import redux.cli as cli
+    monkeypatch.setattr(cli, "_DEFAULT_SCOPE_PATH", str(tmp_path / "config" / "scope.json"))
+    monkeypatch.setattr(ba, "_fstype_of", lambda p: "ext4")
+    status, detail = mk()(GMAP["2b.11"])
+    assert status == "pass" and "persistent" in detail.lower()
+
+
+def test_scope_persist_fail_on_tmpfs(monkeypatch, tmp_path):
+    import redux.cli as cli
+    monkeypatch.setattr(cli, "_DEFAULT_SCOPE_PATH", str(tmp_path / "pwnagotchi" / "scope.json"))
+    monkeypatch.setattr(ba, "_fstype_of", lambda p: "tmpfs")
+    status, detail = mk()(GMAP["2b.11"])
+    assert status == "fail" and "survive reboot" in detail.lower()
+
+
+# --------------------------------------------------------------------------- #
+# 2b.12 deauth detector pipeline
+# --------------------------------------------------------------------------- #
+
+def test_deauth_detect_pass_fires_and_stays_silent():
+    status, detail = mk()(GMAP["2b.12"])
+    assert status == "pass"
+    assert "deauth_flood" in detail.lower() and "external deauth" in detail.lower()
+
+
+def test_fstype_of_reads_proc_mounts():
+    # smoke: resolves SOME fstype for root without throwing
+    assert isinstance(ba._fstype_of("/"), str)
