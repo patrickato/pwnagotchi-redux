@@ -31,7 +31,9 @@ FORMAT = "redux-one-prepared-artifact-audit-v1"
 KNOWN = frozenset(("verified_sha256_inode", "mount_unverified", "mount_changed",
                    "ledger_unavailable", "ledger_changed", "no_ready_row",
                    "row_scope_exceeded", "artifact_integrity_problem",
-                   "audit_unavailable", "execution_unavailable"))
+                   "audit_unavailable", "execution_unavailable",
+                   "read_permission_unavailable", "ledger_schema_missing",
+                   "output_directory_unavailable"))
 BOOTSTRAP = ("import sys; d=sys.stdin.buffer.read(65537); "
              "assert 0<len(d)<=65536, 'oversized source'; "
              "exec(compile(d,'<bounded-one-artifact-audit>','exec'),"
@@ -101,6 +103,13 @@ def run_once():
     if (LEDGER.is_symlink() or PREPARED.is_symlink()
             or not LEDGER.is_file() or not PREPARED.is_dir()):
         return result("unknown", "ledger_unavailable")
+    # The ingest systemd service runs as root and intentionally publishes
+    # jobs.db with mode 0600 and ready/ with mode 0700. Never elevate here:
+    # this check explains an ACCESS-denied result before touching SQLite or
+    # any prepared artifact; a new elevated profile requires new approval.
+    if not (os.access(LEDGER, os.R_OK)
+            and os.access(PREPARED, os.R_OK | os.X_OK)):
+        return result("unknown", "read_permission_unavailable")
     # Module source is sent by the owner-approved WSL launcher, in memory.
     # __name__ is not '__main__': the general-purpose audit CLI does not run.
     library = {"__name__":"reviewed_capture_artifact_audit",
@@ -128,6 +137,14 @@ def run_once():
         return result("unknown", "ledger_changed", checked, ready)
     if "ledger_unavailable" in issues:
         return result("unknown", "ledger_unavailable", checked, ready)
+    if "schema_missing" in issues:
+        return result("unknown", "ledger_schema_missing")
+    if "output_directory_untrusted" in issues:
+        return result("unknown", "output_directory_unavailable")
+    # Zero examined files with no established ready-row count is a failed
+    # preflight / query, not evidence of a corrupt capture or an empty ledger.
+    if checked == 0 and ready == 0:
+        return result("unknown", "audit_unavailable")
     if audited.get("result") == "attention":
         return result("attention", "artifact_integrity_problem", checked, ready)
     return result("unknown", "audit_unavailable", checked, ready)
