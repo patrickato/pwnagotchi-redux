@@ -350,10 +350,37 @@ def session_inspect(record, now=None):
 
     processing=record.get('processing')
     if isinstance(processing,dict):
+        artifact_total=count(processing.get('artifact_count'))
+        allowed_statuses={'ready','error','invalid','duplicate','skipped','deferred',
+                          'deferred_low_storage','paused_low_storage','storage_error'}
+        grouped=processing.get('by_status')
+        verified_groups=None
+        if (isinstance(grouped,dict) and len(grouped)<=len(allowed_statuses)
+                and all(type(key) is str and key in allowed_statuses
+                        and count(value) is not None for key,value in grouped.items())):
+            if artifact_total is not None and sum(grouped.values())==artifact_total:
+                verified_groups={key:grouped[key] for key in sorted(grouped)}
+        # A categorized ledger row is not independently verified capture
+        # material. Only the separate inode/digest audit can verify prepared files.
+        scan=processing.get('scan')
+        recent_scan=None
+        if isinstance(scan,dict):
+            scanned=count(scan.get('scanned'))
+            outcomes=scan.get('outcomes')
+            if (scanned is not None and isinstance(outcomes,dict)
+                    and len(outcomes)<=len(allowed_statuses)
+                    and all(type(k) is str and k in allowed_statuses
+                            and count(v) is not None for k,v in outcomes.items())
+                    and (sum(outcomes.values())==scanned
+                         or scanned==0 and outcomes=={'paused_low_storage':1})):
+                recent_scan={'scanned':scanned,
+                             'outcomes':{key:outcomes[key] for key in sorted(outcomes)}}
         observations['capture_processing']={
             'available':boolean(processing.get('available')),
-            'fresh':boolean(processing.get('fresh')),
-            'artifact_count':count(processing.get('artifact_count'))}
+            'fresh_at_collection':boolean(processing.get('fresh')),
+            'artifact_count':artifact_total,
+            'by_status':verified_groups,
+            'last_scan':recent_scan}
     plugins=record.get('plugins')
     if isinstance(plugins,dict):
         observations['plugin_inventory_available']=boolean(plugins.get('available'))
