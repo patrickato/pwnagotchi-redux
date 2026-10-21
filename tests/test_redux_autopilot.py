@@ -182,3 +182,48 @@ def test_timing_migration_refuses_unrecognized_timer(tmp_path):
                             capture_output=True, text=True, timeout=10)
     assert result.returncode != 0
     assert timer.read_bytes() == before
+
+
+def test_opt_in_private_hardware_summary_is_strictly_offline():
+    instance = module()
+    from types import SimpleNamespace
+    received = []
+    def fake_runner(argv, **kwargs):
+        received.append(argv)
+        assert "ssh" not in argv
+        assert argv[-1] == "--latest-private"
+        assert kwargs["timeout"] == 30
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "schema": 1,
+            "format": "redux-field-feedback-v1",
+            "provenance": "saved_unsigned_read_only_observation",
+            "physical_acceptance": "UNKNOWN",
+            "release_qualification": "UNKNOWN",
+        }))
+    encoded = instance.local_sanitized_hardware_feedback(runner=fake_runner)
+    assert len(received) == 1
+    assert json.loads(encoded)["release_qualification"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("payload", [
+    {"schema":1,"format":"redux-field-feedback-v1",
+     "provenance":"saved_unsigned_read_only_observation",
+     "physical_acceptance":"PASS","release_qualification":"UNKNOWN"},
+    {"schema":1,"format":"redux-field-feedback-v1",
+     "provenance":"untrusted","physical_acceptance":"UNKNOWN",
+     "release_qualification":"UNKNOWN"},
+    {"schema":2,"format":"redux-field-feedback-v1",
+     "provenance":"saved_unsigned_read_only_observation",
+     "physical_acceptance":"UNKNOWN","release_qualification":"UNKNOWN"},
+])
+def test_codex_feedback_rejects_hardware_pass_and_invalid_schema(payload):
+    instance = module()
+    from types import SimpleNamespace
+    assert instance.local_sanitized_hardware_feedback(
+        runner=lambda *a, **kw: SimpleNamespace(returncode=0,
+                                                 stdout=json.dumps(payload))) is None
+
+
+def test_feedback_remains_explicit_opt_in_by_default():
+    instance = module()
+    assert instance.cycle.__kwdefaults__["with_sanitized_field_feedback"] is False
