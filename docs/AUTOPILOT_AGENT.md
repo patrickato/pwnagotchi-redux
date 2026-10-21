@@ -11,7 +11,9 @@ commands or evidence.
 ## Read first
 
 Read `AGENTS.md`, `docs/WORKBENCH.md`, `docs/PROJECT_SCORECARD.md`,
-`docs/BRINGUP_SESSION.md`, and the relevant component tests.
+`docs/BRINGUP_SESSION.md`, `docs/AUTOPILOT_QUEUE.md`, and relevant tests.
+Pick the highest-priority still-open queue item that can be completed safely
+from source/fixtures alone; if no item is actionable, make no source change.
 Do not assume earlier GitHub source changes are deployed to the Pi.
 The installed Pi 4 image was `4f907ff` at the October 20 hardware inspection.
 
@@ -56,7 +58,8 @@ fail-closed authorization / regulatory / authenticated owner gates.
 ## Quality and completion
 
 Implement a bounded meaningful change with corresponding unit/regression
-tests. Run focused tests yourself and repair failures. The wrapper will
+tests. Only mark the queue item complete if its source acceptance is genuinely
+satisfied; otherwise record the remaining source-level blocker in that queue. Run focused tests yourself and repair failures. The wrapper will
 independently run the complete Python suite, image suite, compilation, and
 whitespace checks before it attempts any **non-forced** push to the shared
 workbench branch. Do not assume green tests prove hardware acceptance.
