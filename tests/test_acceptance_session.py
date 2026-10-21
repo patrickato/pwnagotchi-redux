@@ -444,3 +444,45 @@ def test_saved_session_detail_rejects_untrusted_free_text(tmp_path):
     assert observed['captures_available_mib'] is None
     assert observed['live_runtime']['events_seen'] is None
     assert 'PRIVATE' not in json.dumps(observed)
+
+
+def test_saved_session_exposes_ledger_status_groups_not_capture_proof(tmp_path):
+    """Stored aggregate ledger facts are available without opening a capture."""
+    fake_root(tmp_path)
+    report=snapshot(tmp_path)
+    report['processing']={
+        'available':True,'fresh':True,'artifact_count':5,
+        'by_status':{'ready':2,'invalid':1,'duplicate':1,'error':1},
+        'scan':{'scanned':2,'completed_utc':100,
+                'outcomes':{'ready':1,'invalid':1}},
+    }
+    projection=launcher().session_inspect(report,now=100)
+    capture=projection['observations']['capture_processing']
+    assert projection['physical_acceptance']=='UNKNOWN'
+    assert capture['fresh_at_collection'] is True
+    assert capture['artifact_count']==5
+    assert capture['by_status']=={
+        'duplicate':1,'error':1,'invalid':1,'ready':2}
+    assert capture['last_scan']=={
+        'scanned':2,'outcomes':{'invalid':1,'ready':1}}
+
+
+@pytest.mark.parametrize('groups',[
+    {'ready':5,'PRIVATE_NETWORK':1},
+    {'ready':True,'invalid':4},
+    {'ready':6},
+    {'ready':-1,'error':6},
+])
+def test_saved_session_rejects_untrusted_ledger_breakdown(tmp_path, groups):
+    fake_root(tmp_path)
+    report=snapshot(tmp_path)
+    report['processing']={
+        'available':True,'fresh':True,'artifact_count':5,'by_status':groups,
+        'scan':{'scanned':1,'outcomes':{'PRIVATE_NETWORK':1}},
+    }
+    projected=launcher().session_inspect(report,now=100)
+    facts=projected['observations']['capture_processing']
+    assert facts['artifact_count']==5
+    assert facts['by_status'] is None
+    assert facts['last_scan'] is None
+    assert 'PRIVATE_NETWORK' not in json.dumps(projected)
