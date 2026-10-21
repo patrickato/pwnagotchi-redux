@@ -110,6 +110,31 @@ class Scope:
         target = bssid or ssid or ip or "?"
         return False, f"refused: {target} is not in the active scope ({len(active)} authorized target(s))"
 
+    def authorize_network(self, cidr: str, now: Optional[float] = None,
+                          job: Optional[str] = None) -> tuple[bool, str]:
+        """Authorize a whole requested network: it must be fully CONTAINED in an
+        armed CIDR, not merely have its first address fall inside one. Prevents a
+        broad range (e.g. a /8 whose network address sits inside an armed /24)
+        from passing the gate and being swept in full."""
+        import ipaddress
+        try:
+            net = ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            return False, f"refused: {cidr} is not a valid network"
+        active = self.active_entries(now=now, job=job)
+        if not active:
+            return False, "refused: scope is empty — arm a target first"
+        for e in active:
+            if e.kind != "cidr":
+                continue
+            try:
+                armed = ipaddress.ip_network(e.value, strict=False)
+            except ValueError:
+                continue
+            if net.version == armed.version and net.subnet_of(armed):
+                return True, f"authorized: {cidr} within armed {e.value}"
+        return False, f"refused: {cidr} is not contained in any armed CIDR"
+
     def permits(self, *, bssid=None, ssid=None, ip=None,
                 now: Optional[float] = None, job: Optional[str] = None) -> bool:
         """Boolean form — drop-in for the driver's firing gate."""

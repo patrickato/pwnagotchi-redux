@@ -77,3 +77,14 @@ def test_live_runtime_gps_wiring_is_best_effort(monkeypatch):
     monkeypatch.setenv("REDUX_GPS", "/dev/nonexistent-gps")
     prov = _gps_from_env()
     assert prov is not None and prov() is None           # device absent -> no fix, no crash
+
+
+def test_stale_fix_is_dropped_not_served_forever():
+    clk = [0.0]
+    t = NmeaTracker(max_age_s=5.0, clock=lambda: clk[0])
+    t.feed(GGA)
+    assert t() is not None            # fresh
+    clk[0] = 4.0
+    assert t() is not None            # still within window
+    clk[0] = 6.0
+    assert t() is None                # aged out -> un-located, never a stale coordinate

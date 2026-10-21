@@ -12,6 +12,7 @@ injected open-hook so the pump is exercised without hardware.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional, Tuple
 
@@ -78,22 +79,39 @@ def parse_nmea_line(line: str) -> Optional[GpsFix]:
 
 
 class NmeaTracker:
-    """Holds the most recent valid fix; usable directly as a position_provider."""
-    def __init__(self) -> None:
+    """Holds the most recent valid fix; usable directly as a position_provider.
+
+    A fix is only returned while it is FRESH (within max_age_s). When the GPS is
+    unplugged or loses signal the reader stops feeding, the fix ages out, and the
+    tracker returns None — so sightings are left un-located rather than silently
+    stamped with a stale coordinate.
+    """
+    def __init__(self, *, max_age_s: float = 10.0,
+                 clock: Callable[[], float] = time.monotonic) -> None:
         self._fix: Optional[GpsFix] = None
+        self._fix_at: float = 0.0
+        self._max_age_s = float(max_age_s)
+        self._clock = clock
 
     def feed(self, line: str) -> Optional[GpsFix]:
         fix = parse_nmea_line(line)
         if fix is not None:
             self._fix = fix
-        return self._fix
+            self._fix_at = self._clock()
+        return self.fix
 
     @property
     def fix(self) -> Optional[GpsFix]:
-        return self._fix
+        f = self._fix                      # snapshot once (no torn lat/lon read)
+        if f is None:
+            return None
+        if self._clock() - self._fix_at > self._max_age_s:
+            return None                    # stale -> no fix
+        return f
 
     def __call__(self) -> Optional[Tuple[float, float]]:
-        return (self._fix.lat, self._fix.lon) if self._fix is not None else None
+        f = self.fix
+        return (f.lat, f.lon) if f is not None else None
 
 
 def pump_lines(lines: Iterable[str], tracker: NmeaTracker, *,

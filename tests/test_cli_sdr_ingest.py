@@ -36,3 +36,11 @@ def test_adsb_ingest_uses_aircraft_position(tmp_path):
     rc, out = _run(["sdr", "ingest", str(src), "--adsb", "--db", str(db)])
     assert rc == 0 and "ingested 1 ADS-B" in out
     assert SightingStore(str(db)).stats()["count"] == 1
+
+
+def test_out_of_range_adsb_coords_are_dropped():
+    from redux.sdr.ingest import adsb_to_sighting
+    bad = adsb_to_sighting({"hex": "abc", "lat": 999.0, "lon": -5.0})
+    assert bad is not None and bad.lat is None and bad.lon is None   # not stored as location
+    good = adsb_to_sighting({"hex": "abc", "lat": 42.1, "lon": -83.2})
+    assert good.lat == 42.1 and good.lon == -83.2

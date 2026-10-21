@@ -21,6 +21,7 @@ Target platform: arm64 Raspberry Pi 4 / Pi 5, jayofelony bettercap base.
 from __future__ import annotations
 
 import base64
+import re
 from datetime import datetime, timezone
 import json
 import math
@@ -352,6 +353,13 @@ class BettercapDriver:
     def deauth(self, bssid: str, ssid: str | None = None) -> dict:
         """Deauth a target. REFUSES unless the target is on the allowlist
         (empty by default). This is the gate, as real code."""
+        # The BSSID is interpolated into the engine command, so it must be a
+        # well-formed MAC — never caller-supplied free text (injection / garbage),
+        # even when authorization came via a matching SSID.
+        if not re.fullmatch(r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", bssid or ""):
+            reason = f"REFUSED deauth: {bssid!r} is not a valid BSSID"
+            self._say(reason)
+            raise FiringRefused(reason)
         if self.allowlist.empty:
             reason = (f"REFUSED deauth of {bssid}: authorized-target allowlist is empty "
                       f"(add the target explicitly to authorize)")

@@ -693,6 +693,14 @@ def cmd_portal(args) -> int:
     if not getattr(args, "authorized", False):
         print("refused: `serve` requires --authorized (authorized client testing only)")
         return 3
+    # posture gate: the portal is firing-capable (credential harvest), so a
+    # detection-only persona hard-disables it — same invariant as eap/capture.
+    if getattr(args, "persona", None):
+        from .core import persona as _persona
+        if not _persona.get(args.persona).offense_available:
+            print(f"refused: persona '{args.persona}' is detection-only — the portal is "
+                  f"firing-capable and will not run under it")
+            return 3
     try:
         httpd = serve(portal, authorized=True, port=args.port,
                       bind_scope=args.bind_scope, _serve=False)
@@ -1910,6 +1918,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     po = sub.add_parser("portal", help="captive/evil-portal for AUTHORIZED client testing")
     po.add_argument("--engagement", required=True, help="named engagement you are authorized to run")
+    po.add_argument("--persona", help="posture: a detection-only persona hard-disables serving")
     po.add_argument("--template", help="path to your own portal page (imitates no real brand)")
     po.add_argument("--port", type=int, default=8088)
     po.add_argument("--bind-scope", default="localhost",

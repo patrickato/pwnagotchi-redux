@@ -20,6 +20,7 @@ deauth stays behind the driver's empty-by-default allowlist gate.
 """
 from __future__ import annotations
 
+from collections import deque
 from typing import Callable, Optional, Protocol
 
 from ..radio import decide, Intent, Role
@@ -87,7 +88,9 @@ class Supervisor:
         self._alert_bus = alert_bus if alert_bus is not None else AlertBus()
         self._assignment = None
         self._capture_iface = None
-        self.reasons: list = []
+        # Bounded: a long field run with repeated hotplug/intent changes must not
+        # leak memory through an ever-growing reason log.
+        self.reasons = deque(maxlen=500)
         self._reassign()
 
     # --- state ------------------------------------------------------------- #

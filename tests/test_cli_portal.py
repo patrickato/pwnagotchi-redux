@@ -31,3 +31,8 @@ def test_plan_reports_a_custom_template(tmp_path):
     page.write_text("<html><body>my own page</body></html>")
     rc, out = _run(["portal", "--engagement", "acme", "--template", str(page), "plan"])
     assert rc == 0 and "custom (" in out
+
+
+def test_serve_refused_under_detection_only_persona():
+    rc, out = _run(["portal", "--engagement", "t", "--persona", "blue", "serve", "--authorized"])
+    assert rc == 3 and "detection-only" in out      # posture hard-disables firing
