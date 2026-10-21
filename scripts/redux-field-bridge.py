@@ -210,7 +210,8 @@ def load_policy():
     return validate_policy(json.loads(raw, object_pairs_hook=reject_duplicate_fields))
 
 
-def enroll(host, key, *, interval_hours, days, sessions, approve, now=None):
+def enroll(host, key, *, interval_hours, days, sessions, approve, now=None,
+           renewal=False):
     if not approve:
         raise ValueError("explicit_recurring_approval_required")
     if (type(interval_hours) is not int or interval_hours < 4
@@ -218,6 +219,14 @@ def enroll(host, key, *, interval_hours, days, sessions, approve, now=None):
             or type(sessions) is not int or not 1 <= sessions <= MAX_SESSIONS):
         raise ValueError("unsafe_recurring_scope")
     now = int(time.time()) if now is None else int(now)
+    if renewal:
+        try:
+            previous = load_policy()
+        except FileNotFoundError:
+            raise ValueError("no_existing_approval_to_renew")
+        if (previous["enabled"] and now < previous["expires"]
+                and previous["used"] < previous["max_sessions"]):
+            raise ValueError("active_approval_must_be_revoked_first")
     revision = source_revision()
     launcher_digest, remote_digest = source_hashes()
     policy = {
@@ -232,7 +241,7 @@ def enroll(host, key, *, interval_hours, days, sessions, approve, now=None):
         "last_attempt": None, "enabled": True,
     }
     validate_policy(policy)
-    write_json(POLICY_FILE, policy)
+    write_json(POLICY_FILE, policy, overwrite=renewal)
     return {"schema": SCHEMA, "status": "enrolled", "expires_in_days": days,
             "max_sessions": sessions, "interval_hours": interval_hours,
             "hardware_action_performed": False}
@@ -350,6 +359,13 @@ def main(argv=None):
     setup.add_argument("--days", type=int, default=14)
     setup.add_argument("--max-sessions", type=int, default=40)
     setup.add_argument("--approve-recurring-read-only", action="store_true")
+    renewal = sub.add_parser("renew", help="Explicitly renew an expired or revoked approval")
+    renewal.add_argument("--host", required=True)
+    renewal.add_argument("--key", required=True)
+    renewal.add_argument("--interval-hours", type=int, default=6)
+    renewal.add_argument("--days", type=int, default=14)
+    renewal.add_argument("--max-sessions", type=int, default=40)
+    renewal.add_argument("--approve-recurring-read-only", action="store_true")
     sub.add_parser("observe", help="Run once only under existing local approval")
     sub.add_parser("revoke", help="Disable future observations without Pi contact")
     args = parser.parse_args(argv)
@@ -357,10 +373,11 @@ def main(argv=None):
         if args.mode == "plan":
             print(json.dumps(plan(), sort_keys=True))
             return 0
-        if args.mode == "enroll":
+        if args.mode in ("enroll", "renew"):
             output = enroll(args.host, args.key, interval_hours=args.interval_hours,
                             days=args.days, sessions=args.max_sessions,
-                            approve=args.approve_recurring_read_only)
+                            approve=args.approve_recurring_read_only,
+                            renewal=args.mode == "renew")
         elif args.mode == "revoke":
             output = revoke()
         else:
