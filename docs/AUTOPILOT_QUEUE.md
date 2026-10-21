@@ -10,9 +10,12 @@ dependency and actual source state. Keep already-completed evidence intact.
 
 - [ ] **P0 — Prepared artifact-integrity readiness:** Review the existing
   `scripts/capture-artifact-audit.py` and `redux.crack.integrity_receipt`.
-  Improve offline tests, read-only permission/race handling and a concise
-  preflight/qualification plan for the *single ready* ledger row observed
-  on the Pi 4. **Do not read the real Pi ledger, open captures or run SSH.**
+  Improve offline tests and read-only permission/race handling for the
+  *single ready* ledger row observed on the Pi 4. A bounded no-I/O `--plan`
+  with synthetic tests was committed to `capture-artifact-audit.py` on
+  October 21; do not duplicate that completed subtask. Verify remaining
+  ledger, file replacement, and concurrency edge cases source-only.
+  **Do not read the real Pi ledger, open captures or run SSH.**
   A physical audit requires its own owner-approved read-only execution.
 - [ ] **P0 — Native monitor-VIF NetworkManager evidence:** Investigate source-only
   alternatives to NM's missing netdev enumeration, without assuming
