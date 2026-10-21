@@ -339,13 +339,15 @@ def test_post_ready_with_real_prereqs_passes(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 def test_unknown_gate_falls_back_to_operator():
+    from redux.benchpass import Gate
     called = {"n": 0}
 
     def ask(g):
         called["n"] += 1
         return "pass", "operator confirmed"
 
-    status, detail = mk(ask=ask)(GMAP["2b.5"])   # fox-hunt: no auto handler
+    fake = Gate("9.9", "subsystem", "a gate with no auto-handler", (), "run it", "it passes")
+    status, detail = mk(ask=ask)(fake)
     assert called["n"] == 1
     assert status == "pass"
 
@@ -436,3 +438,77 @@ def test_deauth_detect_pass_fires_and_stays_silent():
 def test_fstype_of_reads_proc_mounts():
     # smoke: resolves SOME fstype for root without throwing
     assert isinstance(ba._fstype_of("/"), str)
+
+
+# --------------------------------------------------------------------------- #
+# remaining subsystem gates: honest verdicts (2b.1/2b.3/2b.4/2b.5/2b.6/2b.7/2b.8)
+# --------------------------------------------------------------------------- #
+
+def test_csi_skip_without_source():
+    status, detail = mk(run=lambda c, t=20: (0, ""))(GMAP["2b.1"])
+    assert status == "skip" and "nexmon_csi" in detail.lower()
+
+
+def test_eap_skip_but_gating_verified_when_plan_refuses():
+    run = lambda c, t=20: (0, "EAP harvest ... runnable=False\n  refused: SSID not in the authorized scope")
+    status, detail = mk(run=run)(GMAP["2b.3"])
+    assert status == "skip" and "gating verified" in detail.lower()
+
+
+def test_eap_fail_when_plan_does_not_refuse():
+    run = lambda c, t=20: (0, "EAP harvest ... runnable=True, firing now")
+    status, detail = mk(run=run)(GMAP["2b.3"])
+    assert status == "fail" and "gating broken" in detail.lower()
+
+
+def test_mesh_skip_without_lora():
+    status, detail = mk()(GMAP["2b.4"])
+    assert status == "skip" and "lora" in detail.lower()
+
+
+def test_foxhunt_and_sentinel_skip_honestly():
+    s5, d5 = mk()(GMAP["2b.5"])
+    s7, d7 = mk()(GMAP["2b.7"])
+    assert s5 == "skip" and "walk" in d5.lower()
+    assert s7 == "skip" and "csi" in d7.lower()
+
+
+def test_fingerprint_skip_when_operator_declines():
+    status, detail = mk(confirm=lambda m: False)(GMAP["2b.6"])
+    assert status == "skip" and "captap live" in detail.lower()
+
+
+def test_fingerprint_pass_on_live_reid():
+    run = lambda c, t=20: (0, "device identities: 2 total, 1 re-identified across MAC")
+    status, detail = mk(confirm=lambda m: True,
+                        probe=lambda: [FakeRadio("wlan0", monitor=True)], run=run)(GMAP["2b.6"])
+    assert status == "pass" and "re-identified" in detail.lower()
+
+
+def test_operator_gating_pass():
+    calls = {"n": 0}
+
+    def run(c, t=20):
+        if "campaign" in c:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return 0, "[BLOCK] 00:11:22:33:44:55   capture   handshake_capture  — not authorized: scope is empty"
+            return 0, "[ok   ] 00:11:22:33:44:55   capture   handshake_capture  — authorized"
+        return 0, ""
+
+    status, detail = mk(run=run)(GMAP["2b.8"])
+    assert status == "pass" and "gating verified" in detail.lower()
+
+
+def test_operator_gating_fail_when_unarmed_not_blocked():
+    run = lambda c, t=20: (0, "[ok   ] 00:11:22:33:44:55   capture   handshake_capture  — authorized")
+    status, detail = mk(run=run)(GMAP["2b.8"])
+    assert status == "fail"
+
+
+def test_capture_line_parsers():
+    blocked = "[BLOCK] 00:11:22:33:44:55 capture handshake_capture — not authorized: scope is empty"
+    okline = "[ok   ] 00:11:22:33:44:55 capture handshake_capture — authorized"
+    assert ba._capture_blocked(blocked, "00:11:22:33:44:55") is True
+    assert ba._capture_authorized(okline, "00:11:22:33:44:55") is True
+    assert ba._capture_authorized(blocked, "00:11:22:33:44:55") is False

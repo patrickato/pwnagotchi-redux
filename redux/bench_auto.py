@@ -239,6 +239,13 @@ class AutoExecutor:
             "2.1": self._g_packs,
             "2.2": self._g_sightings,
             "2b.2": self._g_engines,
+            "2b.1": self._g_csi,
+            "2b.3": self._g_eap,
+            "2b.4": self._g_mesh,
+            "2b.5": self._g_foxhunt,
+            "2b.6": self._g_fingerprint,
+            "2b.7": self._g_sentinel,
+            "2b.8": self._g_operator,
             "2b.9": self._g_governor,
             "2b.10": self._g_post,
             "2b.11": self._g_scope_persist,
@@ -475,6 +482,101 @@ class AutoExecutor:
             return "pass", "POST READY, and the prerequisites really are present (monitor radio + engine)"
         return "pass", f"POST honestly reported {verdict.upper()} (radio={have_radio}, engine={have_engine})"
 
+    def _g_csi(self, g) -> Tuple[str, str]:
+        # Real CSI needs nexmon_csi firmware + a capture. redux `sense` only
+        # REPLAYS recorded CSI (no live source), so a hardware pass needs a real
+        # nexmon_csi capture on disk. Detect one; otherwise honest skip.
+        import glob
+        has_nexutil = shutil.which("nexutil") is not None
+        caps: list = []
+        for d in ("/captures", os.path.expanduser("~"), "/etc/redux"):
+            if os.path.isdir(d):
+                try:
+                    caps += glob.glob(os.path.join(d, "**", "*csi*.json"), recursive=True)
+                except Exception:
+                    pass
+        if caps:
+            rc, out = self._redux(["sense", "replay", caps[0], "--calibrate", "50"])
+            if rc == 0 and ("motion" in out.lower() or "occup" in out.lower()):
+                return "pass", f"sense pipeline validated on a real CSI capture ({os.path.basename(caps[0])})"
+            return "fail", f"CSI capture present but sense replay read no motion/occupancy: {out.strip()[:100]}"
+        return "skip", (f"no nexmon_csi source (nexutil {'present' if has_nexutil else 'absent'}, "
+                        "no *csi*.json capture). Needs nexmon_csi firmware + a real CSI capture")
+
+    def _g_eap(self, g) -> Tuple[str, str]:
+        # Machine-checkable: `eap plan` must REFUSE an unarmed SSID (gating). The
+        # live MSCHAPv2 capture + -m 5500 crack needs a real WPA-Enterprise SSID.
+        rc, out = self._redux(["eap", "--iface", "wlan1", "--persona", "red", "plan",
+                               "--ssid", "BenchpassNoSuchSSID", "--authorized"])
+        low = out.lower()
+        refused = ("refus" in low or "not in the authorized scope" in low or "runnable=false" in low)
+        if not refused:
+            return "fail", f"EAP plan did not refuse an unarmed SSID — gating broken: {out.strip()[:120]}"
+        return "skip", ("EAP gating verified (plan refuses an unarmed SSID); the live gate needs a "
+                        "WPA-Enterprise test SSID + client for the MSCHAPv2 capture + -m 5500 crack")
+
+    def _g_mesh(self, g) -> Tuple[str, str]:
+        import glob
+        lora = bool(glob.glob("/dev/spidev*")) or bool(glob.glob("/sys/class/net/lora*"))
+        if not lora:
+            return "skip", ("no LoRa radio detected (no /dev/spidev*, no lora iface). Needs 2 nodes "
+                            "with LoRa HATs + a shared swarm key; sync/HMAC logic is unit-validated")
+        return "skip", ("a LoRa device is present but convergence needs a SECOND node. Arm on node A, "
+                        "observe on node B; forged-delta rejection + duty cycle are unit-validated")
+
+    def _g_foxhunt(self, g) -> Tuple[str, str]:
+        return "skip", ("needs a live walk toward/away from an AP feeding real RSSI (hunt live, monitor "
+                        "mode + root). The gradient/centroid logic is unit-validated; the walk can't be self-tested")
+
+    def _g_sentinel(self, g) -> Tuple[str, str]:
+        return "skip", ("needs a CSI motion source + an armed walk-away (detector AND CSI motion must both "
+                        "alert while armed, suppressed when disarmed). Depends on 2b.1 CSI hardware; "
+                        "the sentinel wiring + de-dup are unit-validated")
+
+    def _g_fingerprint(self, g) -> Tuple[str, str]:
+        manual_cmd = "redux captap live --iface <monitor-iface> --seconds 30 --hop"
+        mons = [getattr(r, "iface", "") for r in self.probe_radios() if getattr(r, "monitor", False)]
+        if not self.confirm("Is your phone near the Pi for a 30s fingerprint tap?"):
+            return "skip", ("needs your phone near + a monitor tap on a free radio. The live daemon holds "
+                            f"the active radio, so free one (or set wlan0 to monitor) and run: {manual_cmd}")
+        iface = "wlan0" if any("wlan0" == i for i in mons) else (mons[0] if mons else "wlan0")
+        rc, out = self._redux(["captap", "live", "--iface", iface, "--seconds", "30", "--hop"])
+        import re
+        m = re.search(r"(\d+)\s+re-identified", out)
+        reid = int(m.group(1)) if m else 0
+        if reid >= 1:
+            return "pass", f"live tap on {iface} re-identified {reid} device(s) across MAC randomization"
+        low = out.lower()
+        if "monitor" in low or "hardware" in low or "no " in low or rc != 0:
+            return "skip", f"no usable monitor tap on {iface}: {out.strip()[:100] or 'see output'}"
+        return "skip", f"tap ran on {iface} but re-identified no device — put your phone near the Pi and rerun"
+
+    def _g_operator(self, g) -> Tuple[str, str]:
+        # Validate the kill-chain's authorization GATING on the real box: an
+        # unarmed target is blocked at capture, an armed one is authorized to
+        # advance. Uses a throwaway scope (never touches the operator's real one)
+        # and `campaign plan` (nothing executes — no frames transmitted).
+        import tempfile
+        from .core.scope import Scope
+        d = tempfile.mkdtemp(prefix="benchpass-op-")
+        sf = os.path.join(d, "scope.json")
+        tgt = "00:11:22:33:44:55"            # one of campaign's default plan targets
+        try:
+            _rc0, out0 = self._redux(["campaign", "--persona", "red", "--scope-file", sf, "plan"])
+            unarmed_blocked = _capture_blocked(out0, tgt)
+            s = Scope()
+            s.add(tgt, label="benchpass-op")
+            s.save(sf)
+            _rc1, out1 = self._redux(["campaign", "--persona", "red", "--scope-file", sf, "plan"])
+            armed_ok = _capture_authorized(out1, tgt)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        if unarmed_blocked and armed_ok:
+            return "pass", ("kill-chain gating verified on-box: unarmed target blocked at capture, armed "
+                            "target authorized to advance. (Real-executor deauth/capture/crack is the "
+                            "separate heavy field run against your own AP)")
+        return "fail", (f"kill-chain gating off: unarmed_blocked={unarmed_blocked}, armed_authorized={armed_ok}")
+
     def _g_intent_tft(self, g) -> Tuple[str, str]:
         # Gate 1.5: "intent switch re-arranges radios + repoints bettercap (TFT)."
         # Machine-checkable core: different intents yield different radio plans
@@ -692,6 +794,25 @@ def _parse_temp(out: str) -> Optional[float]:
     import re
     m = re.search(r"temp=([\d.]+)", out or "")
     return float(m.group(1)) if m else None
+
+
+def _capture_line(out: str, tgt: str) -> str:
+    """The kill-chain plan's capture-phase line for a target (contains the
+    target and the `handshake_capture` provider)."""
+    for line in (out or "").splitlines():
+        if tgt in line and "handshake_capture" in line:
+            return line
+    return ""
+
+
+def _capture_blocked(out: str, tgt: str) -> bool:
+    line = _capture_line(out, tgt).lower()
+    return "[block]" in line and "not authorized" in line
+
+
+def _capture_authorized(out: str, tgt: str) -> bool:
+    line = _capture_line(out, tgt).lower()
+    return bool(line) and "[block]" not in line and "not authorized" not in line
 
 
 def _fstype_of(path: str) -> str:
