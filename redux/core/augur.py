@@ -59,11 +59,14 @@ class Augur:
         scope: Optional[Scope] = None,
         resource_collector=None,
         resource_monitor=None,
+        trusted=None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
         self.brain = brain or Brain()
-        self.engine = detect_engine or DetectEngine()
+        # trusted: declared-legitimate networks so the rogue-AP/evil-twin detector
+        # can fire. Without an injected engine, wire it into the one we build.
+        self.engine = detect_engine or DetectEngine(trusted=trusted)
         self.store = store if store is not None else SightingStore()
         self._position = position_provider
         self.resources = resource_monitor if resource_monitor is not None else ResourceMonitor(
