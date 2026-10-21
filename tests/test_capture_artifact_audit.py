@@ -639,3 +639,48 @@ def test_ledger_path_guard_rejects_symlink_and_replaced_inode(tmp_path):
     with sqlite3.connect(db) as co:
         co.execute("CREATE TABLE artifacts (status TEXT)")
     assert not mod.ledger_path_still_matches(db, pinned)
+
+
+def test_cli_single_ready_row_scope_refuses_other_ready_rows_before_hashing(tmp_path, capsys, monkeypatch):
+    db, output = fixture(tmp_path)
+    ready(db, output, b"first prepared synthetic fixture")
+    ready(db, output, b"second prepared synthetic fixture")
+    # A separate one-row authorization must not silently inspect a second file.
+    report = mod.main(["--db", str(db), "--output", str(output),
+                       "--max-ready-rows", "1"])
+    result = json.loads(capsys.readouterr().out)
+    assert report == 1
+    assert result["result"] == "attention"
+    assert result["ready_rows"] == 2
+    assert result["checked"] == 0
+    assert result["issues"] == {"row_limit_exceeded": 1}
+
+
+def test_single_ready_row_cap_accepts_exactly_one_synthetic_output(tmp_path, capsys):
+    db, output = fixture(tmp_path)
+    ready(db, output)
+    result_code = mod.main(["--db", str(db), "--output", str(output),
+                            "--max-ready-rows", "1"])
+    result = json.loads(capsys.readouterr().out)
+    assert result_code == 0
+    assert result["checked"] == result["ready_rows"] == 1
+    assert result["issues"] == {}
+
+
+def test_bad_ready_row_scope_is_rejected_before_any_audit(tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "audit", lambda *a, **kw:
+                        pytest.fail("invalid scope must not read SQLite"))
+    for bound in ("0", "-1", "10001"):
+        with pytest.raises(SystemExit) as stop:
+            mod.main(["--max-ready-rows", bound, "--db", str(tmp_path / "none")])
+        assert stop.value.code == 2
+
+
+def test_plan_reports_stricter_operator_selected_limit_without_disk_reads(monkeypatch, capsys):
+    monkeypatch.setattr(mod, "audit", lambda *a, **kw:
+                        pytest.fail("offline plan accessed hardware"))
+    assert mod.main(["--plan", "--max-ready-rows", "1"]) == 3
+    result = json.loads(capsys.readouterr().out)
+    assert result["limits"]["ready_rows"] == 1
+    assert result["requires_separate_hardware_authorization"] is True
+    assert result["changes_capture_files"] is False
