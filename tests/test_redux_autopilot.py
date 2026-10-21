@@ -131,3 +131,52 @@ def test_cloned_policy_is_fresh_bounded_and_no_symlink(tmp_path):
     docs.symlink_to(ROOT / "docs", target_is_directory=True)
     with pytest.raises(ValueError, match="remote_agent_policy_invalid"):
         instance.cloned_policy(tmp_path)
+
+
+def test_timing_migration_is_two_hour_user_only_and_idempotent(tmp_path):
+    """Run --retime with fake systemd commands, never touching user's units."""
+    import os
+    import shutil
+    home = tmp_path / "home"
+    src = home / "redux-workbench-src" / "scripts"
+    src.mkdir(parents=True)
+    local = src / "install-redux-autopilot.sh"
+    shutil.copyfile(INSTALLER, local)
+    unit_dir = home / ".config" / "systemd" / "user"
+    unit_dir.mkdir(parents=True)
+    timer = unit_dir / "redux-autopilot.timer"
+    timer.write_text("[Timer]\\nOnCalendar=*-*-* 01,07,13,19:00:00\\nUnit=redux-autopilot.service\\n")
+    bindir = tmp_path / "fake-systemd"
+    bindir.mkdir()
+    for name in ("systemctl", "systemd-analyze"):
+        binary = bindir / name
+        binary.write_text("#!/bin/sh\\nexit 0\\n")
+        binary.chmod(0o700)
+    env = dict(os.environ, HOME=str(home), PATH=str(bindir) + os.pathsep + os.environ["PATH"])
+    for _ in range(2):
+        completed = subprocess.run(
+            ["bash", str(local), "--retime"], env=env, cwd=src.parent,
+            capture_output=True, text=True, timeout=10, check=False)
+        assert completed.returncode == 0, completed.stderr
+    assert "OnCalendar=*-*-* 00,02,04,06,08,10,12,14,16,18,20,22:00:00" in timer.read_text()
+    assert "01,07,13,19" not in timer.read_text()
+
+
+def test_timing_migration_refuses_unrecognized_timer(tmp_path):
+    import os
+    import shutil
+    home = tmp_path / "home"
+    scripts = home / "redux-workbench-src" / "scripts"
+    scripts.mkdir(parents=True)
+    local = scripts / "install-redux-autopilot.sh"
+    shutil.copyfile(INSTALLER, local)
+    units = home / ".config" / "systemd" / "user"
+    units.mkdir(parents=True)
+    timer = units / "redux-autopilot.timer"
+    timer.write_text("[Timer]\\nOnCalendar=hourly\\n")
+    before = timer.read_bytes()
+    env = dict(os.environ, HOME=str(home))
+    result = subprocess.run(["bash", str(local), "--retime"], env=env,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    assert timer.read_bytes() == before
