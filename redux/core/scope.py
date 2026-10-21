@@ -228,6 +228,12 @@ class Scope:
         p = path or self.path
         if not p:
             raise ValueError("no path to save Scope to")
+        # Turnkey: create the parent directory if it doesn't exist yet, so a
+        # first-ever `scope add` on a fresh box can't fail just because
+        # /etc/pwnagotchi (or any configured scope dir) hasn't been made.
+        parent = os.path.dirname(p)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         tmp = f"{p}.tmp"
         with open(tmp, "w") as f:
             json.dump(self.to_dict(), f, indent=2, sort_keys=True)

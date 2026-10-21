@@ -127,3 +127,18 @@ def test_scope_is_drop_in_for_the_firing_gate():
     s.add("aa:bb:cc:dd:ee:ff", label="authorized AP")
     out = drv.deauth("aa:bb:cc:dd:ee:ff")
     assert out  # transport ran the command
+
+
+def test_save_creates_missing_parent_dir(tmp_path):
+    """Turnkey: a first-ever `scope add` must not fail just because the scope
+    directory (e.g. /etc/pwnagotchi) has never been created. save() makes it."""
+    nested = tmp_path / "etc" / "pwnagotchi" / "scope.json"
+    assert not nested.parent.exists()
+    s = Scope()
+    s.add("AA:BB:CC:DD:EE:FF", label="my AP")
+    out = s.save(str(nested))
+    assert out == str(nested)
+    assert nested.is_file()
+    # and it round-trips
+    reloaded = Scope.load(str(nested))
+    assert reloaded.permits(bssid="aa:bb:cc:dd:ee:ff") is True
