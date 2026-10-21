@@ -210,6 +210,8 @@ def audit(db: Path, output_dir: Path, *, max_rows=10000):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--plan", action="store_true",
+                   help="Print bounded audit scope offline; do not read files")
     p.add_argument("--db", type=Path, default=Path("/captures/jobs.db"))
     p.add_argument("--output", type=Path, default=Path("/captures/ready"))
     p.add_argument("--receipt", type=Path,
@@ -217,6 +219,34 @@ def main(argv=None):
     p.add_argument("--inspect-receipt", type=Path,
                    help="Read and classify existing receipt; never scan captures")
     args = p.parse_args(argv)
+    if args.plan:
+        if args.receipt is not None or args.inspect_receipt is not None:
+            p.error("--plan must not combine with receipt read or publication")
+        # Offline disclosure only: one immutable scope contract and no I/O
+        # beyond printing bounded JSON. Never infer the presence of captures.
+        print(json.dumps({
+            "format": "redux-artifact-audit-plan-v1",
+            "requires_separate_hardware_authorization": True,
+            "database_mode": "sqlite_ro",
+            "source": "ready_ledger_records",
+            "prepared_output_checks": [
+                "regular_file", "expected_digest_filename",
+                "inode_and_directory_continuity", "sha256_bytes",
+            ],
+            "limits": {
+                "ready_rows": 10000,
+                "artifact_bytes": MAX_ARTIFACT,
+                "total_hash_bytes": MAX_TOTAL_BYTES,
+                "sqlite_cell_bytes": MAX_LEDGER_CELL_BYTES,
+                "sqlite_query_seconds": MAX_LEDGER_QUERY_SECONDS,
+            },
+            "changes_capture_files": False,
+            "writes_receipt": False,
+            "inspects_raw_pcap": False,
+            "proves_handshake_authenticity": False,
+            "physical_acceptance": "UNKNOWN",
+        }, sort_keys=True))
+        return 3
     if args.inspect_receipt is not None and args.receipt is not None:
         p.error("--inspect-receipt and --receipt cannot be combined")
     # The capture partition must be verified before accessing paths beneath
