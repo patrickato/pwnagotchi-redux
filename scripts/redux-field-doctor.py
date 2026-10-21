@@ -99,12 +99,13 @@ def approved_summary(state, now):
         if (not 0 <= policy["used"] <= policy["max_sessions"] <= 40
                 or not 0 < policy["created"] < policy["expires"]
                 or policy["expires"] - policy["created"] > 14 * 86400
-                or policy["interval_seconds"] < 3600
+                or not 3600 <= policy["interval_seconds"] <= 14 * 86400
                 or type(policy["enabled"]) is not bool):
             raise ValueError("untrusted_approval_bounds")
         last_attempt = policy["last_attempt"]
         if (last_attempt is not None and (type(last_attempt) is not int
-                or last_attempt < policy["created"])):
+                or last_attempt < policy["created"]
+                or last_attempt > policy["expires"])):
             raise ValueError("untrusted_approval_attempt")
         if now < policy["created"]:
             status = "clock_before_approval"
@@ -163,9 +164,14 @@ def trusted_unit(path, expected):
                 or info.st_size > 8192 or info.st_nlink != 1):
             return "unavailable"
         content = path.read_text("utf-8")
-        if (content.count(expected) != 1 or
-                content.count("ExecStart=") != (1 if "ExecStart=" in expected else 0)
-                and "ExecStart=" in expected):
+        if content.splitlines().count(expected) != 1:
+            return "unrecognized"
+        # A recognized line among additional arbitrary commands is NOT
+        # a recognized timer/service; no misleading green status.
+        scope = ("ExecStart=" if expected.startswith("ExecStart=") else
+                 "WorkingDirectory=" if expected.startswith("WorkingDirectory=")
+                 else "OnCalendar=")
+        if sum(line.startswith(scope) for line in content.splitlines()) != 1:
             return "unrecognized"
         return "expected"
     except (OSError, UnicodeError):
