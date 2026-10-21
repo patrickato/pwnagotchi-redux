@@ -118,6 +118,8 @@ def write_json(name, value, *, overwrite=False):
 
 
 def private_ip(value):
+    if type(value) is not str:
+        raise ValueError("invalid_ip_type")
     ip = ipaddress.ip_address(value)
     if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
         raise ValueError("unsafe_ip_target")
@@ -125,6 +127,8 @@ def private_ip(value):
 
 
 def key_path(value):
+    if type(value) is not str and not isinstance(value, Path):
+        raise ValueError("invalid_key_path_type")
     key = Path(value).expanduser().absolute()
     if not key.is_file() or key.is_symlink():
         raise ValueError("key_unavailable")
@@ -173,7 +177,14 @@ def load_policy():
         raw = stream.read(8193)
     if len(raw) > 8192:
         raise ValueError("oversized_local_policy")
-    return validate_policy(json.loads(raw))
+    def reject_duplicate_fields(items):
+        value = {}
+        for key, item in items:
+            if key in value:
+                raise ValueError("duplicate_policy_field")
+            value[key] = item
+        return value
+    return validate_policy(json.loads(raw, object_pairs_hook=reject_duplicate_fields))
 
 
 def enroll(host, key, *, interval_hours, days, sessions, approve, now=None):
