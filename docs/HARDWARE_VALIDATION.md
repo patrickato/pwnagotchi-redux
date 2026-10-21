@@ -5,6 +5,10 @@ Everything in `main` is **sandbox-verified** (merged + `pytest` green, no hardwa
 checklist for that pass: boot the image, run each check, record the real output, and flip the
 matching `TASKS.md` row from `done (sandbox)` to `done`. Sandbox-green ≠ done.
 
+> **Doing it all in one sitting?** [`BENCH_SESSION.md`](BENCH_SESSION.md) drives every gate below as
+> one resumable pass via `redux benchpass` (prep → preflight → run → report). This runbook remains
+> the per-gate detail and pass criteria.
+
 ## Recorded results
 
 ### Pi 4 Model B — 2026-10-08 · cleared detection/survey/framework lane (`redux hwtest`)
