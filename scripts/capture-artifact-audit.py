@@ -262,7 +262,7 @@ def main(argv=None):
                 "inode_and_directory_continuity", "sha256_bytes",
             ],
             "limits": {
-                "ready_rows": 10000,
+                "ready_rows": args.max_ready_rows,
                 "artifact_bytes": MAX_ARTIFACT,
                 "total_hash_bytes": MAX_TOTAL_BYTES,
                 "sqlite_cell_bytes": MAX_LEDGER_CELL_BYTES,
