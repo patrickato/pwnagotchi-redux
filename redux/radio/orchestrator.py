@@ -191,6 +191,29 @@ def decide(radios: Iterable[Radio], intent, *, keep_uplink: bool = False) -> Ass
     return Assignment(roles, reasons, warnings, capture_mode, capture_band)
 
 
+def assign_ap_radio(assignment) -> dict:
+    """Pick a radio to host a rogue-AP / EAP evil-twin / captive portal WITHOUT
+    disrupting capture. Prefer a spare (idle) radio so AP runs *alongside* the
+    hunt; then an uplink (noting its internet drops); only share the capture radio
+    as a last resort, flagged as a collision so the caller can warn. Glass-box.
+    """
+    roles = getattr(assignment, "roles", {}) or {}
+    idle = [i for i, r in roles.items() if r is Role.IDLE]
+    uplink = [i for i, r in roles.items() if r is Role.UPLINK]
+    if idle:
+        return {"iface": idle[0], "collides": False,
+                "reason": f"rogue-AP/EAP on spare radio {idle[0]} — capture runs undisturbed"}
+    if uplink:
+        return {"iface": uplink[0], "collides": False,
+                "reason": f"rogue-AP/EAP on {uplink[0]} (was uplink — internet drops while the AP runs)"}
+    cap = next((i for i, r in roles.items() if r is Role.CAPTURE), None)
+    if cap is not None:
+        return {"iface": cap, "collides": True,
+                "reason": (f"rogue-AP would share the capture radio {cap} — add a radio to "
+                           f"run rogue-AP and capture at the same time")}
+    return {"iface": None, "collides": False, "reason": "no radio available for rogue-AP"}
+
+
 def on_hotplug(current_radios: Iterable[Radio], new_radio: Radio, intent, **kw) -> Assignment:
     """A radio was plugged in. Recompute; `decide` handles promotion automatically."""
     return decide(list(current_radios) + [new_radio], intent, **kw)

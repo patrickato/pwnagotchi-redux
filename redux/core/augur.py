@@ -330,14 +330,26 @@ class Augur:
             sentinel.observe_motion(eng._last)
         return out
 
-    def eap_plan(self, ssid: str, *, authorized: bool = False, iface: str = "wlan1") -> dict:
+    def eap_plan(self, ssid: str, *, authorized: bool = False, iface: str = "") -> dict:
         """Plan a Scope-aimed, posture-gated WPA-Enterprise EAP harvest. Honors
-        offense_enabled() and requires the SSID to be in Scope + authorized=True."""
+        offense_enabled() and requires the SSID to be in Scope + authorized=True.
+
+        When no iface is given, the orchestrator assigns the rogue-AP its own
+        radio — a spare one so the evil-twin runs *alongside* capture instead of
+        colliding with it — and the plan carries that choice and any collision
+        warning (glass-box)."""
         from ..eap import EapHarvester, EapConfig
-        h = EapHarvester(config=EapConfig(iface=iface))
+        from ..radio import decide, assign_ap_radio
+        ap = {"iface": iface, "collides": False, "reason": "explicit iface"} if iface else \
+            assign_ap_radio(decide(self.supervisor.radios, self.supervisor.intent))
+        h = EapHarvester(config=EapConfig(iface=ap["iface"] or "wlan1"))
         plan = h.plan(self.scope, ssid, authorized=authorized, active=self.offense_enabled())
         out = plan.to_dict()
         out["engine_present"] = h.available()
+        out["ap_iface"] = ap["iface"]
+        out["ap_reason"] = ap["reason"]
+        if ap["collides"]:
+            out["ap_collision"] = ap["reason"]
         return out
 
     # --- sentinel (deploy-and-watch guardian) ------------------------------ #

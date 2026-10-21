@@ -1174,7 +1174,8 @@ def cmd_eap(args) -> int:
     if args.persona:
         bc.apply_persona(args.persona)
     bc.scope = Scope.load(args.scope_file)
-    plan = bc.eap_plan(args.ssid, authorized=args.authorized, iface=args.iface or "wlan1")
+    # No --iface: let the orchestrator assign the rogue-AP its own radio.
+    plan = bc.eap_plan(args.ssid, authorized=args.authorized, iface=args.iface or "")
     print(f"EAP harvest for SSID '{args.ssid}': runnable={plan['runnable']} "
           f"(engine_present={plan['engine_present']}, offense={bc.offense_enabled()})")
     print(f"  {plan['reason']}")
