@@ -15,7 +15,7 @@ doesn't have. Identity, voice, and the creature face: `docs/AUGUR.md`.
 > driver, 13-detector suite, CSI motion/occupancy sensing, spatial DB + Field Dex, scope-gated
 > offense (capture→crack, network kill-chain, captive portal), SDR passive-sensing, Expeditions,
 > record/ghost, packs, plugin-compat shim, CLI, passive survey, and web dashboard —
-> is built and green under the test suite (807 tests, no hardware required). The **passive
+> is covered by a growing hardware-free regression suite (see current GitHub CI). The **passive
 > detection / capture / survey / framework spine now has a first real-hardware pass on a Pi 4**
 > (via `redux hwtest`: software battery green on-device, radios enumerated, a live passive
 > capture parsing 703 real frames into 2 APs / 3 identities). The rest — live-attack detection,
@@ -72,7 +72,8 @@ everything above them:
 | Web | `redux/web/` | glass-box dashboard — **live moving map** (own track + colored AP pins + radar marker), activity sparkline, plain/rich skin toggle; rendered client-side (no Pi cost), self-contained, offline |
 | Personas | `redux/core/persona.py` | one box, pick your hat (red/blue/purple/recon/mesh/sigint) — a declarative capability+posture set; posture is an *extra* gate that can only tighten firing, never widen it |
 | Capture tap | `redux/captap/` | raw 802.11 parser (deauth/disassoc + probe-request **IE fingerprint**) feeding the Dex (real cross-MAC re-id) + flood detectors — the P0 gap, producer side done |
-| CLI | `redux/cli.py` | `redux status / run / web / tft / captap / packs / doctor / post / persona / sense / sentinel / mesh / campaign / hunt / capture / eap / range / report / scope / dex / expedition / ghost` |
+| CLI | `redux/cli.py` | `redux status / run / web / tft / captap / packs / doctor / post / persona / sense / sentinel / mesh / campaign / hunt / capture / eap / range / report / scope / dex / expedition / ghost / demo / benchpass` |
+| Hardware-session tooling | `redux/capstone.py`, `redux/benchpass.py` | `redux demo` previews orchestration (never executes capture); `redux benchpass` records operator results for Pi 4/Pi 5 without independently certifying release evidence. See `docs/BENCH_SESSION.md`. |
 
 Everything assembles on one bus through `Augur` and runs as a single system. Offensive
 capabilities are full-power but consult the central Scope for aiming (see below).
@@ -164,8 +165,10 @@ docs/reference/   material COPIED (not forked) from the Beast repos — provenan
 
 ```
 pip install -e ".[dev]"
-pytest                 # 807 tests, no hardware needed
+python3 -m pytest -q    # growing offline regression suite; see current CI for counts
 
+redux demo --intent recon  # synthetic planning ONLY (no capture or Pi changes)
+redux benchpass prep    # operator hardware-session checklist (no hardware)
 redux status           # glass-box status snapshot (JSON)
 redux run              # run pump cycles (optionally over a recorded session)
 redux web              # serve the glass-box dashboard (least-exposed bind scope by default)
