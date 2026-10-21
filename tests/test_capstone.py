@@ -85,3 +85,57 @@ def test_as_dict_is_json_shaped():
     assert d["capture_iface"] == "wlan1"
     assert isinstance(d["steps"], list) and d["steps"][0]["step"] == "inventory"
     assert d["posture"] in ("passive", "active")
+
+
+def test_plan_exposes_unexecuted_unknown_even_when_radio_engine_ready():
+    cap = plan_capstone(sample_inventory(), "recon", Scope(), engine_available=True)
+    report = cap.as_dict()
+    assert cap.ok is True
+    assert report["plan_valid"] is True
+    assert report["execution_performed"] is False
+    assert report["physical_acceptance"] == "UNKNOWN"
+    assert "NOT been started or verified" in cap.summary
+
+
+def test_live_cli_only_reads_inventory_never_runs_capture(monkeypatch, capsys):
+    """A live probe is NEVER evidence of role application / a frame capture."""
+    import json
+    from types import SimpleNamespace
+    from redux import cli
+    from redux.radio import probe as probe_module
+
+    events = []
+    def sample_probe():
+        events.append("probe")
+        return sample_inventory()
+
+    # No real hardware access in this test; all live inventory is synthetic.
+    import redux.radio.probe as probe_file
+    monkeypatch.setattr(probe_file, "probe", sample_probe)
+    monkeypatch.setattr(cli.Scope, "load", lambda path: Scope())
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
+    args = SimpleNamespace(
+        live=True, intent="recon", seconds=30.0, scope_file="synthetic",
+        persona=None, offense=False, no_engine=False, json=True)
+    assert cli.cmd_demo(args) == 3
+    report = json.loads(capsys.readouterr().out)
+    assert events == ["probe"]
+    assert report["mode"] == "read_only_hardware_probe_plan"
+    assert report["plan_valid"] is True
+    assert report["execution_performed"] is False
+    assert report["physical_acceptance"] == "UNKNOWN"
+
+
+def test_synthetic_cli_demo_never_looks_like_accepted_hardware(capsys, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from redux import cli
+    monkeypatch.setattr(cli.Scope, "load", lambda path: Scope())
+    args = SimpleNamespace(
+        live=False, intent="recon", seconds=30.0, scope_file="synthetic",
+        persona=None, offense=False, no_engine=False, json=True)
+    assert cli.cmd_demo(args) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["mode"] == "synthetic_dry_run"
+    assert report["execution_performed"] is False
+    assert report["physical_acceptance"] == "UNKNOWN"
