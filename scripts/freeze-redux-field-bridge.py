@@ -172,10 +172,18 @@ def migration():
             # No timer or approval file changes. The next scheduled run
             # executes the same revision and consumes the same attempt ledger.
             rewrite_service(replacement)
-            out = command(["systemctl", "--user", "daemon-reload"])
-            if out.returncode:
+            try:
+                out = command(["systemctl", "--user", "daemon-reload"])
+                if out.returncode:
+                    raise ValueError("systemd_reload_failed")
+            except (OSError, ValueError):
+                # Even a missing/timed-out systemctl must restore the original
+                # service file; do not leave a half-migrated active observer.
                 rewrite_service(existing)
-                command(["systemctl", "--user", "daemon-reload"])
+                try:
+                    command(["systemctl", "--user", "daemon-reload"])
+                except (OSError, ValueError):
+                    pass
                 raise ValueError("systemd_reload_failed")
         except Exception:
             # Leave a validated worktree available for offline diagnosis.
