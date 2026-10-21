@@ -93,3 +93,38 @@ observations to the shared GitHub branch, even when the repository is private.
 
 No additional physical authorization, capture-content access, service
 restart, RF operation or image deployment is conferred by this source work.
+
+## October 21: unattended collection liveness and freshness gate
+
+The owner successfully migrated the scheduled read-only Pi observer into a
+private **frozen, exact-revision worktree**. The existing approval, hourly
+timer, and remaining-attempt count were preserved. One earlier timer trigger
+was visible, but no `last-status.json` was printed, so an actual successful
+SSH-backed collection remains **unverified**. A systemd timer firing is not
+the same as verified collection.
+
+The mutable workbench now ships an **offline field doctor**, invoked through:
+
+```sh
+bash scripts/install-redux-field-bridge.sh --status
+```
+
+It inspects only local systemd and owner-private policy/status files; it does
+not SSH, initiate another collection, read captures or return private hosts,
+keys or raw session records. It explicitly distinguishes an expected hourly
+service/timer, approved session counts and expiry, a previous saved
+collection attempt, and the local systemd result code. A missing last result
+is `never_recorded`, **not** success or implicit failure of RF reception.
+After the frozen migration, normal source pulls no longer change the
+approved observer's code.
+
+Even when an existing `session-<random>.json` report is available, the
+private feedback converter refuses records older than **two hours**, or
+more than five minutes in the future. This prevents stale physical metadata
+from silently driving new Codex work. It never overwrites, removes or
+rotates private hardware evidence. The ongoing observer scope is unchanged:
+hourly, at most 40 attempts, valid for 14 days, read-only only.
+
+Before opting into model ingestion, confirm one actual `observed` local
+status and recent private report using the offline doctor. The existing
+Codex timer does **not** upload Pi observations by default.
