@@ -38,10 +38,13 @@ dependency and actual source state. Keep already-completed evidence intact.
   hardware release acceptance). The source-only feedback filter rejects
   reports older than two hours. A consent-gated, user-service-only
   feedback toggle now exists in `scripts/configure-redux-codex-feedback.py`.
-  It remains disabled on WSL, but **the owner explicitly approved**
-  sanitized category transfer to the Codex cloud model on October 21,
-  independently of metadata observation. The one-time service toggle and
-  its consent flag are ready for controlled WSL activation after CI.
+  **The user enabled it on WSL October 21**: 26 offline tests passed,
+  the consent controller returned `sanitized_model_feedback=on`, and
+  a subsequent status check returned `on`. Consent was granted for
+  fixed-category cloud model ingestion independently of metadata
+  observation. Confirm at least one *subsequent* Codex source cycle
+  actually consumes a fresh saved category summary; an enabled timer alone
+  does not prove the data handoff or an automatic fix.
   Never share raw private reports, SSH credentials, identifying network
   data or Pi commands.
 - [x] **P0 — Hardware bridge initial offline qualification:** The owner
@@ -95,6 +98,21 @@ separately approved physical experiment manifests and rollback procedures.
   inspect only sanitized aggregate results, and stop on UNKNOWN/ATTENTION.
   No PI-side run has occurred yet; SHA file-integrity evidence will NOT
   prove handshake authenticity, received 802.11 frames, or release PASS.
+- [ ] **P0 — Physical prepared-artifact audit blocked by ownership:**
+  The user performed the separately approved, one-shot non-root audit on
+  October 21. It returned `status=attention`, `checked=0`,
+  `ready_rows=0`, `reason=artifact_integrity_problem`, with no verified
+  bytes. This is an **early audit failure**, not proof of an empty ledger
+  or corrupted file. The worker service is `User=root`, with
+  `/captures/ready` mode 0700 and `jobs.db` 0600, so the `pi` SSH audit
+  identity likely lacks access. A source-only diagnosis fix now classifies
+  read denial as UNKNOWN before hashing, with synthetic tests. The old
+  one-shot approval was consumed: **do not retry, delete the local marker,
+  chmod/chown Pi artifacts, or grant sudo**. Develop and independently
+  validate a narrowly constrained, separately approved privileged read-only
+  option, or wait for a controlled disposable-image upgrade. Keep raw
+  captures and prepared authentication bytes private.
+
 - [ ] **P0 — Native monitor-VIF NetworkManager evidence:** Investigate source-only
   alternatives to NM's missing netdev enumeration, without assuming
   `not enumerated = unmanaged`. Build only parsers, independent evidence
