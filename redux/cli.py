@@ -1306,9 +1306,19 @@ def cmd_capture(args) -> int:
         print(f"  armed targets: {', '.join(plan['targets'])}")
     for k, v in (plan.get("outputs") or {}).items():
         print(f"  out[{k}]: {v}")
+    # Per-radio engine plan: every capture radio bound to an engine, not just one.
+    binds = bc.capture_bindings()
+    if binds:
+        print("\nper-radio plan (all capture radios, tandem widens the surface):")
+        for b in binds:
+            print(f"  {b['iface']} [{b['role']}/{b['mode']} "
+                  f"{b['band'] + 'GHz' if b['band'] else '-'}] -> "
+                  f"{b['engine'] or 'none'}: {b['reason']}")
     # Always show the AngryOxide command it WOULD run (preview; no binary needed to print it)
+    primary_iface = args.iface or next((b["iface"] for b in binds
+                                        if b["role"] == "capture"), "") or "wlan1"
     from .crack import AngryOxideProvider, AngryOxideConfig
-    ao = AngryOxideProvider(config=AngryOxideConfig(iface=args.iface or "wlan1"))
+    ao = AngryOxideProvider(config=AngryOxideConfig(iface=primary_iface))
     prev = ao.plan(bc.scope, active=bc.offense_enabled())
     print(f"\nAngryOxide preview (installed={ao.available()}):")
     if prev.runnable:

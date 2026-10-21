@@ -432,6 +432,24 @@ class Augur:
         out["offense_enabled"] = active
         return out
 
+    def capture_bindings(self, assignment=None) -> list:
+        """The FULL per-radio engine plan: every capture radio the orchestrator
+        assigned gets its own engine (AngryOxide scalpel on the primary, bettercap
+        nervous-system on a tandem radio, passive AngryOxide beyond that) — so a
+        second radio adds real capture surface instead of idling. Glass-box; the
+        live supervisor spawns one capture consumer per binding."""
+        from ..crack.capture import (plan_capture_bindings, AngryOxideProvider,
+                                      BettercapProvider)
+        from ..radio import decide
+        if assignment is None:
+            assignment = decide(self.supervisor.radios, self.supervisor.intent)
+        ao_present = AngryOxideProvider().available()
+        bc_present = BettercapProvider(
+            driver=getattr(self.supervisor, "driver", None)).available()
+        bindings = plan_capture_bindings(
+            assignment, angryoxide_present=ao_present, bettercap_present=bc_present)
+        return [b.to_dict() for b in bindings]
+
     def dex(self):
         """The Field Dex: the recon ledger built from this device's sightings."""
         from ..dex import build_dex
