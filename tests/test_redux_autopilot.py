@@ -145,12 +145,12 @@ def test_timing_migration_is_two_hour_user_only_and_idempotent(tmp_path):
     unit_dir = home / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True)
     timer = unit_dir / "redux-autopilot.timer"
-    timer.write_text("[Timer]\\nOnCalendar=*-*-* 01,07,13,19:00:00\\nUnit=redux-autopilot.service\\n")
+    timer.write_text("[Timer]\nOnCalendar=*-*-* 01,07,13,19:00:00\nUnit=redux-autopilot.service\n")
     bindir = tmp_path / "fake-systemd"
     bindir.mkdir()
     for name in ("systemctl", "systemd-analyze"):
         binary = bindir / name
-        binary.write_text("#!/bin/sh\\nexit 0\\n")
+        binary.write_text("#!/bin/sh\nexit 0\n")
         binary.chmod(0o700)
     env = dict(os.environ, HOME=str(home), PATH=str(bindir) + os.pathsep + os.environ["PATH"])
     for _ in range(2):
@@ -173,7 +173,7 @@ def test_timing_migration_refuses_unrecognized_timer(tmp_path):
     units = home / ".config" / "systemd" / "user"
     units.mkdir(parents=True)
     timer = units / "redux-autopilot.timer"
-    timer.write_text("[Timer]\\nOnCalendar=hourly\\n")
+    timer.write_text("[Timer]\nOnCalendar=hourly\n")
     before = timer.read_bytes()
     env = dict(os.environ, HOME=str(home))
     result = subprocess.run(["bash", str(local), "--retime"], env=env,
