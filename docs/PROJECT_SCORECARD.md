@@ -7,6 +7,54 @@
 > do not substitute for physical acceptance. The nearer-term **Pi 4 usable
 > capture MVP** has different, stricter pass/fail gates below.
 
+## October 21 autonomy and release forecast (conditional)
+
+**Latest estimated completion remains ~60–65%, ±10 percentage points**
+for the broad standalone Redux v1 vision. The eight original autopilot
+guardrail tests passed on the owner's Ubuntu WSL checkout. The new
+autopilot-hardening and timer migration tests are committed but still
+require execution in that checkout; do **not** count GitHub source changes
+as a verified local Codex run.
+
+The ChatGPT source-engineering schedule is now every **two hours**.
+A safe, user-owned WSL timer migration has also been committed, changing
+Codex source-only cycles from six hours to **two hours** once applied
+locally. This means *up to* 12 scheduled opportunities per day while WSL
+is running, not 12 delivered features or CI-successful commits. Actual
+velocity is UNKNOWN until at least several unattended cycles and pushes
+complete with independent CI.
+
+### Estimated release windows, starting October 21, 2026
+
+| Goal | Planning range | Dependencies |
+| --- | --- | --- |
+| Usable Pi 4 capture beta | 4–8 weeks, mid-November to mid-December 2026 | Measured and validated real 802.11 reception on an operator-owned test network; durable capture rotation, handoff and prepared-artifact audit |
+| Functional Pi 4 TFT/UI field candidate | 6–12 weeks, December 2026 to January 2027 | Bound 480x320 TFT and touch hardware, actual pixels and gesture validation, performance tuning |
+| Stable polished Redux/ Augur v1 candidate | 3–6 months, January to April 2027 | Radio/capture + display gates, 24–72-hour endurance, restart/reboot/data recovery, permission/security review, signed candidate, update/rollback evidence and user acceptance |
+| Broadest optional platform expansion | 6–12+ months | Pi 5 physical validation, optional peripherals and mature additional modules; exact scope can expand indefinitely |
+
+These ranges assume working automation/CI, timely approvals and physical
+test access and no unforeseen firmware or kernel blocker. If native Wi-Fi
+requires a new driver architecture, or Pi 5/TFT hardware is unavailable,
+calendar estimates extend. Physical release gate closure cannot be
+accelerated by repeating synthetic software tests.
+
+**Hard definition of "finished"**: a release build cannot be labeled
+v1-ready until the intended supported hardware has demonstrable RF
+reception, privacy-preserving capture integrity, working screen/touch
+where claimed, operational user controls and plugins, repeatable
+boot/recovery, documented signed image and update/rollback, acceptable
+power/thermal behavior, and measured endurance with no critical known
+failures. Optional experiments can continue after a fixed, qualified
+release; they must not endlessly prevent shipping the core product.
+
+The Oct 20/21 Pi 4 evidence remains: ARM64 boot/storage/runtime verified;
+onboard monitor-labeled Wi-Fi ARPHRD1, USB monitor ARPHRD803 but no decoded
+frames measured, one ledger record marked ready without independent file
+integrity verification, 4 invalid, five duplicate last-scan outcomes,
+480x320 ILI9486/touch device not enumerated. Nothing in the current source
+commits changes these historical observations.
+
 ## October 17 source-only UI increment (percentage unchanged)
 
 The native 480×320 renderer now has **five** pages: Overview, Captures,
