@@ -54,8 +54,8 @@ display, runtime and processing metadata. Results stay unsigned.
 The new bridge separates two decisions:
 
 1. **Enrollment (explicit, finite approval):** pin one private IPv4 target,
-   one existing owner-only SSH key path, SHA-256 of the launcher and memory
-   bundle, rate, expiry and session limit. The approval stays on WSL only at
+   one existing owner-only SSH key path, the exact clean Git revision,
+   SHA-256 of the launcher and memory bundle, rate, expiry and session limit. The approval stays on WSL only at
    ~/.local/state/redux-field-bridge/recurring-approval.json, file mode 0600
    inside a 0700 directory.
 2. **Scheduled execution:** only an enabled, unexpired approval permits one
@@ -99,8 +99,14 @@ approval data. The installer modifies only the user-owned WSL timer. Revoke:
 
     bash scripts/install-redux-field-bridge.sh --disable
 
-After expiry, source change, or session exhaustion, the controller stops
-rather than auto-renewing permission. A new, reviewed scope is required.
+After expiry, source revision/bundle change, or session exhaustion, the
+controller stops rather than auto-renewing permission. The source-only Codex
+worker uses a separate disposable clone and does not alter the approved WSL
+checkout, so unrelated GitHub commits cannot silently change the approved
+field collector. To renew after expiry or explicit revocation, repeat the
+reviewed enrollment options with the 'renew' subcommand in place of 'enroll';
+the explicit approval flag is still mandatory. Renewing an active approval
+is refused. A new, reviewed scope is required.
 Do not report real automation success until a session actually runs.
 
 **Important:** This initial controller is not yet a hardened OS-level trust
