@@ -55,7 +55,8 @@ def newest_private(state=None):
 
 
 def collect_feedback(report, *, runner=subprocess.run):
-    from redux.field_feedback import encoded_facts
+    from redux.field_feedback import facts
+    from redux.field_feedback_contract import validate_and_encode_feedback
     report = private_report(report)
     argv = [sys.executable, str(ROOT / 'scripts' / 'redux-acceptance.py'),
             '--json', 'session-inspect', '--session-file', str(report)]
@@ -70,7 +71,9 @@ def collect_feedback(report, *, runner=subprocess.run):
         projected = json.loads(proc.stdout)
     except (TypeError, ValueError) as exc:
         raise ValueError('invalid_offline_inspection') from exc
-    return encoded_facts(projected)
+    # Enforce the same complete nested allowlist before writing even to
+    # stdout, not only when Codex later consumes the result.
+    return validate_and_encode_feedback(facts(projected))
 
 
 def main(argv=None):
