@@ -185,8 +185,8 @@ def cycle():
                     codex_env.pop(key, None)
             try:
                 codex = subprocess.run(
-                    ["codex", "exec", "--sandbox", "workspace-write",
-                     "--ask-for-approval", "never", "-"],
+                    ["codex", "--sandbox", "workspace-write",
+                     "--ask-for-approval", "never", "exec", "-"],
                     cwd=checkout, input=instruction, text=True,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     timeout=2700, check=False, env=codex_env,
