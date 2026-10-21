@@ -227,3 +227,53 @@ def test_unverified_mount_refuses_ledger_even_when_ready_fixture_exists(tmp_path
     assert result["status"]=="unknown"
     assert result["reason"]=="mount_unverified"
     assert result["checked"]==0
+
+
+def test_unprivileged_capture_directory_is_unknown_before_opening_ledger(tmp_path):
+    """Simulate read denial; no sudo, hashing, or file-content interpretation."""
+    mod=module()
+    captures,ready,db=scratch(tmp_path)
+    prepared(db,ready,b"synthetic secretless content")
+    prelude=mod.REMOTE_PRELUDE.replace(
+        'ROOT = Path("/captures")','ROOT = Path('+repr(str(captures))+')')
+    prelude += (
+        '\ndef mount_identity():\n    return (1, 1, "1:1")\n'
+        '\nos.access=lambda path, flags: False\n'
+    )
+    audit_source='def audit(*args, **kwargs):\n    raise AssertionError("denied preflight must not invoke audit")\n'
+    payload=(prelude+"\nAUDITOR_SOURCE="+repr(audit_source)+
+             "\n"+mod.REMOTE_EPILOGUE).encode()
+    out=subprocess.run([sys.executable,"-I","-c",mod.BOOTSTRAP],
+                       input=payload,capture_output=True,timeout=10,check=False)
+    assert out.returncode==0, out.stderr.decode()[:100]
+    verdict=mod.classify(out.stdout.decode(),0)
+    assert verdict["status"]=="unknown"
+    assert verdict["reason"]=="read_permission_unavailable"
+    assert verdict["ready_rows"]==0 and verdict["checked"]==0
+    assert verdict["pi_file_writes_requested"] is False
+
+
+@pytest.mark.parametrize("issues,expected", [
+    ({"schema_missing":1},"ledger_schema_missing"),
+    ({"output_directory_untrusted":1},"output_directory_unavailable"),
+    ({"audit_unavailable":1},"audit_unavailable"),
+])
+def test_uninspected_ledger_or_directory_never_claims_artifact_damage(
+        tmp_path,issues,expected):
+    mod=module()
+    captures,ready,db=scratch(tmp_path)
+    prelude=mod.REMOTE_PRELUDE.replace(
+        'ROOT = Path("/captures")','ROOT = Path('+repr(str(captures))+')')
+    prelude += '\ndef mount_identity():\n    return (1, 1, "1:1")\n'
+    audit_source=('def audit(*args, **kwargs):\n    return '+
+                  repr({"result":"attention","checked":0,
+                        "ready_rows":0,"issues":issues})+'\n')
+    payload=(prelude+"\nAUDITOR_SOURCE="+repr(audit_source)+
+             "\n"+mod.REMOTE_EPILOGUE).encode()
+    out=subprocess.run([sys.executable,"-I","-c",mod.BOOTSTRAP],
+                       input=payload,capture_output=True,timeout=10,check=False)
+    assert out.returncode==0, out.stderr.decode()[:100]
+    verdict=mod.classify(out.stdout.decode(),0)
+    assert verdict["status"]=="unknown"
+    assert verdict["reason"]==expected
+    assert verdict["checked"]==0
