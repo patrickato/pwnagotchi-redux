@@ -109,6 +109,17 @@ def allowable(cwd, paths):
     return True, "bounded_sources"
 
 
+def cloned_policy(checkout):
+    """Read bounded current-branch instructions, never following symlinks."""
+    docs = checkout / "docs"
+    policy = docs / "AUTOPILOT_AGENT.md"
+    if (docs.is_symlink() or not docs.is_dir() or
+            policy.is_symlink() or not policy.is_file() or
+            policy.stat().st_size > 16 * 1024):
+        raise ValueError("remote_agent_policy_invalid")
+    return policy.read_text(encoding="utf-8")
+
+
 def record(status, *, reason, revision=None, changed=None):
     """Only bounded non-sensitive outcome codes persist on the workstation."""
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -189,13 +200,12 @@ def cycle():
             # Read agent policy from the just-cloned shared branch, not
             # the operator's potentially stale local checkout. Queue and
             # task changes published through GitHub reach the next cycle.
-            agent_policy = checkout / "docs" / "AUTOPILOT_AGENT.md"
-            if (agent_policy.is_symlink() or not agent_policy.is_file()
-                    or agent_policy.stat().st_size > 16 * 1024):
+            try:
+                instruction = cloned_policy(checkout)
+            except (OSError, ValueError, UnicodeError):
                 record("blocked", reason="remote_agent_policy_invalid",
                        revision=revision)
                 return 2
-            instruction = agent_policy.read_text(encoding="utf-8")
             codex_env = dict(environment)
             # Source-only Codex should not be given GitHub/SSH deployment
             # credentials as ambient environment variables.
