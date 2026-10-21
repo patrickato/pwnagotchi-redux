@@ -576,6 +576,52 @@ def cmd_campaign(args) -> int:
     return 0
 
 
+def _wordlist(path):
+    """Read a username/password wordlist (bounded), empty tuple on any error."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = []
+            for line in f:
+                s = line.strip()
+                if s:
+                    lines.append(s)
+                if len(lines) >= 10000:
+                    break
+            return tuple(lines)
+    except OSError:
+        return ()
+
+
+def cmd_netrecon(args) -> int:
+    """The network-layer kill-chain over the ARMED Scope (the second half of the
+    chain the RF side can't do): scan one authorized subnet, or autorun the whole
+    armed scope (scan -> optional cred-test -> loot). Real nmap/hydra on the Pi;
+    honest tool-absence off it. Scope decides WHERE, always — nothing off-scope runs."""
+    import json
+    from .netrecon import recon_subnet, autorun, ReconRefused
+    scope = Scope.load(args.scope_file)
+    if args.netrecon_cmd == "scan":
+        try:
+            res = recon_subnet(args.cidr, scope=scope)
+        except ReconRefused as e:
+            print(f"refused: {e}")
+            return 3
+        if not res.available:
+            print(f"scan unavailable: {res.reason}")
+            return 0
+        print(f"{res.reason} (via {res.tool or 'scanner'})")
+        for h in res.hosts:
+            ports = ", ".join((f"{p.number}/{p.proto} {p.service}".strip()) for p in h.ports)
+            print(f"  {h.ip:15} {h.hostname or '-':20} {ports}")
+        return 0
+    # autorun: autonomous sweep over every armed CIDR
+    users = _wordlist(args.userlist) if args.userlist else ()
+    pws = _wordlist(args.passlist) if args.passlist else ()
+    book = autorun(scope=scope, usernames=users, passwords=pws)
+    print(json.dumps(book.to_dict(), indent=2))
+    return 0
+
+
 def cmd_captap(args) -> int:
     if getattr(args, "captap_cmd", "demo") == "live":
         return _captap_live(args)
@@ -1742,6 +1788,16 @@ def build_parser() -> argparse.ArgumentParser:
     cad_ = casub.add_parser("demo", help="run the chain with fake executors + render the report")
     cad_.add_argument("--targets", nargs="*", help="targets to run the chain against")
     ca.set_defaults(func=cmd_campaign)
+
+    nr = sub.add_parser("netrecon", help="network-layer kill-chain over the armed scope (scan/cred/loot)")
+    nr.add_argument("--scope-file", default=_DEFAULT_SCOPE_PATH)
+    nrsub = nr.add_subparsers(dest="netrecon_cmd", required=True)
+    nrs = nrsub.add_parser("scan", help="scan one authorized subnet")
+    nrs.add_argument("cidr", help="CIDR to scan (must be authorized in scope)")
+    nra = nrsub.add_parser("autorun", help="autonomous sweep over every armed CIDR (scan→cred→loot)")
+    nra.add_argument("--userlist", help="username wordlist to cred-test discovered services")
+    nra.add_argument("--passlist", help="password wordlist to cred-test discovered services")
+    nr.set_defaults(func=cmd_netrecon)
 
     dm = sub.add_parser("demo", help="hands-off pass (gate 1.6): arrange radios → capture, one command")
     dm.add_argument("--intent", default="recon", choices=[i.value for i in Intent],
