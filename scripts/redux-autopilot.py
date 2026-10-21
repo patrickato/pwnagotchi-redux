@@ -47,6 +47,7 @@ PROTECTED = {
     "redux/field_feedback.py",
     "redux/field_feedback_contract.py",
     "scripts/redux-field-feedback.py",
+    "scripts/redux-field-doctor.py",
     "docs/FIELD_FEEDBACK.md",
 }
 MAX_CHANGED = 35
