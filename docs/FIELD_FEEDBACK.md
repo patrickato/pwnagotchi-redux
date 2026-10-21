@@ -128,3 +128,58 @@ hourly, at most 40 attempts, valid for 14 days, read-only only.
 Before opting into model ingestion, confirm one actual `observed` local
 status and recent private report using the offline doctor. The existing
 Codex timer does **not** upload Pi observations by default.
+
+## Explicit service-level Codex feedback opt-in
+
+The local user service can now optionally send **only** the validated,
+categorical fields from an existing recent read-only Pi report to the
+Codex model during a future **source-only** cycle. This is a distinct
+decision from authorizing the hour-by-hour Pi observer: model ingestion
+was **not** enabled by that earlier hardware authorization.
+
+Inspect the no-I/O scope contract:
+
+```sh
+python3 scripts/configure-redux-codex-feedback.py --plan
+```
+
+If and **only if the owner explicitly consents** to sending these
+limited measurements (radio link-type numbers, monitor/managed labels,
+NetworkManager state categories, TFT blocker categories, aggregate
+capture-worker counts and coarse storage band) to Codex, the one-time
+local action is:
+
+```sh
+python3 scripts/configure-redux-codex-feedback.py \
+  --enable --approve-sanitized-model-data
+```
+
+This updates the **user** `redux-autopilot.service` ExecStart argument
+only; the existing source-only Codex timer is unchanged, the Pi is not
+contacted, the frozen observer is not modified, and authorization to
+perform hardware operations is not granted to Codex. Subsequent Codex
+cycles use `--with-sanitized-field-feedback` to invoke the local
+offline converter; an unavailable or expired report is omitted.
+
+To inspect or revoke the optional model-data handoff (no Pi access):
+
+```sh
+python3 scripts/configure-redux-codex-feedback.py --status
+python3 scripts/configure-redux-codex-feedback.py --disable
+```
+
+The tool refuses unexpected/multiple service commands, untrusted service
+file ownership/permissions and symlinked units; it writes one private
+atomic replacement and rolls back if `systemctl --user daemon-reload`
+fails. Its synthetic tests do not touch the owner's user-systemd service.
+
+**Confidentiality:** although free-form identifiers, MACs, IPs, SSIDs,
+filenames, keys, raw captures and prepared capture bytes are excluded by
+the schema, even approved category values reveal something about the
+hardware. Enabling is therefore an explicit user decision. Codex remains
+a cloud model; no feature promises that this metadata stays exclusively
+on the local machine.
+
+A successful `--enable` command means the service was configured, **not**
+that a Codex run subsequently ingested the data, fixed hardware or
+completed on-Pi acceptance.
