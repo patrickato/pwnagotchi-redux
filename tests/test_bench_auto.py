@@ -172,22 +172,28 @@ def test_handshake_fail_when_no_artifact_after_capture():
     assert status == "fail" and "no valid handshake" in detail.lower()
 
 
-def test_handshake_pass_on_verified_artifact():
+def test_handshake_autopass_from_existing_daemon_capture():
+    # A valid handshake already on disk (passive daemon) → PASS with NO operator
+    # action, even nested in subdirs, even if the operator would decline a live run.
     d = tempfile.mkdtemp()
+    nested = os.path.join(d, "ready", "2026-10-21")
+    os.makedirs(nested)
     line = ("WPA*02*" + "a" * 32 + "*001122334455*66778899aabb*6578616d706c65*"
             + "b" * 64 + "*aabbccdd*02\n")
-    with open(os.path.join(d, "cap.hc22000"), "wb") as fh:
+    with open(os.path.join(nested, "cap.hc22000"), "wb") as fh:
         fh.write(line.encode())
     status, detail = mk(probe=lambda: [FakeRadio("wlan1", monitor=True)],
-                        run=lambda c, t=20: (0, "scope: 1 active / 1 total"),
-                        confirm=lambda m: True, handshake_dirs=(d,))(GMAP["1.4"])
-    assert status == "pass" and "verified" in detail.lower()
+                        confirm=lambda m: False,    # would decline — must not matter
+                        handshake_dirs=(d,))(GMAP["1.4"])
+    assert status == "pass" and "already captured" in detail.lower()
+    assert "001122334455" in detail                 # BSSID surfaced
 
 
-def test_handshake_skip_when_operator_did_not_run():
+def test_handshake_skip_when_nothing_on_disk_and_operator_declines():
     status, detail = mk(probe=lambda: [FakeRadio("wlan1", monitor=True)],
                         run=lambda c, t=20: (0, "scope: 1 active"),
-                        confirm=lambda m: False)(GMAP["1.4"])
+                        confirm=lambda m: False,
+                        handshake_dirs=(tempfile.mkdtemp(),))(GMAP["1.4"])
     assert status == "skip" and "did not run" in detail.lower()
 
 

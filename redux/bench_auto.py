@@ -152,43 +152,55 @@ def _radio_line(r) -> str:
     return f"{getattr(r,'iface','?')}({bands},{mon},{inj})"
 
 
+# Where real captures land: the live daemon writes to the REDUXCAP partition
+# (/captures/...), bettercap's own default is ~, and the old pwnagotchi path is
+# kept for compatibility. These are scanned RECURSIVELY, because the pipeline
+# files handed-off captures into dated subdirs (ready/, active/, …).
 _HANDSHAKE_DIRS = (
-    "/etc/pwnagotchi/handshakes",
     "/captures",
+    "/etc/pwnagotchi/handshakes",
     os.path.expanduser("~"),
 )
+_MAX_WALK_FILES = 20000      # bound the walk so a huge tree can't stall the pass
 
 
 def _find_valid_handshakes(run_dirs: Optional[Sequence[str]] = None) -> Tuple[int, str]:
-    """Scan capture dirs for *.hc22000 and count structurally valid records using
-    the real crack-pipeline parser. Returns (valid_record_count, detail). Honest:
-    a structural check is NOT cryptographic proof, and the detail says so."""
+    """Recursively scan capture dirs for *.hc22000 and count structurally valid
+    records using the real crack-pipeline parser. Returns (valid_record_count,
+    detail) with the distinct BSSIDs seen. Honest: a structural check is NOT
+    cryptographic proof, and the detail says so."""
     dirs = run_dirs if run_dirs is not None else _HANDSHAKE_DIRS
     try:
         from .crack.ingest import normalize_22000
     except Exception as e:
         return 0, f"crack parser unavailable: {e}"
     total = 0
-    scanned = []
+    files = 0
+    seen = 0
+    bssids: set = set()
     for d in dirs:
-        try:
-            if not os.path.isdir(d):
-                continue
-            for name in os.listdir(d):
+        if not os.path.isdir(d):
+            continue
+        for dp, _dn, fn in os.walk(d):
+            for name in fn:
+                seen += 1
+                if seen > _MAX_WALK_FILES:
+                    break
                 if not name.endswith(".hc22000"):
                     continue
-                path = os.path.join(d, name)
                 try:
-                    records, _bssids = normalize_22000(open(path, "rb").read())
-                    total += len(records)
-                    scanned.append(name)
+                    recs, bs = normalize_22000(open(os.path.join(dp, name), "rb").read())
+                    if recs:
+                        total += len(recs)
+                        files += 1
+                        bssids.update(bs)
                 except Exception:
                     continue
-        except Exception:
-            continue
-    if not scanned:
-        return 0, "no .hc22000 artifacts found in capture dirs"
-    return total, f"{total} valid 22000 record(s) in {len(scanned)} file(s) (structural, not crypto proof)"
+    if not files:
+        return 0, "no valid .hc22000 artifacts found under the capture dirs"
+    bl = ", ".join(sorted(bssids)[:6]) + ("…" if len(bssids) > 6 else "")
+    return total, (f"{total} valid 22000 record(s) in {files} file(s); "
+                   f"BSSID(s): {bl} (structural screen, not crypto proof)")
 
 
 # ----------------------------------------------------------------------------- #
@@ -304,18 +316,24 @@ class AutoExecutor:
         mons = [r for r in self.probe_radios() if getattr(r, "monitor", False)]
         if not mons:
             return "skip", "no monitor-capable adapter present for a live capture"
-        # Scope check — we only ever verify a capture against the operator's OWN
-        # armed AP; we never fire here.
+        # Automation first: the passive live daemon may already have captured a
+        # real handshake. Scan what's on disk before asking the operator to do
+        # anything — if a valid one exists, this gate needs zero manual steps.
+        count, detail = _find_valid_handshakes(self.handshake_dirs)
+        if count > 0:
+            return "pass", f"real handshake already captured on-device — {detail}"
+        # None yet: offer the operator a live capture against their OWN armed AP.
+        # We only ever verify a capture here; we never fire.
         rc, out = self._redux(["scope", "list"])
         armed = rc == 0 and "empty" not in out.lower() and out.strip() != ""
         iface = getattr(mons[0], "iface", "wlan1")
-        self.report(f"  · monitor radio: {iface};  scope armed: {armed}")
+        self.report(f"  · no handshake on disk yet. monitor radio: {iface}; scope armed: {armed}")
         self.report(f"      run this against your OWN AP, reconnect a client, then confirm:")
         self.report(f"        {g.live}")
         if not armed:
             self.report("      (scope looks empty — arm your own AP first: redux scope add / arm-lab)")
         if not self.confirm("Capture run finished against your own AP?"):
-            return "skip", "operator did not run the live capture"
+            return "skip", "no handshake on disk yet and operator did not run a live capture"
         count, detail = _find_valid_handshakes(self.handshake_dirs)
         if count > 0:
             return "pass", f"captured handshake artifact verified — {detail}"
