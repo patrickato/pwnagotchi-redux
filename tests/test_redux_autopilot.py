@@ -47,6 +47,8 @@ def test_source_path_allowlist_is_strict(tmp_path):
     filename.write_text("# source only\n")
     assert instance.allowable(tmp_path, ["redux/new_worker.py"])[0]
     assert not instance.allowable(tmp_path, ["scripts/redux-autopilot.py"])[0]
+    assert not instance.allowable(tmp_path, ["scripts/redux-field-bridge.py"])[0]
+    assert not instance.allowable(tmp_path, ["scripts/install-redux-field-bridge.sh"])[0]
     assert not instance.allowable(tmp_path, [".github/workflows/new.yml"])[0]
     assert not instance.allowable(tmp_path, ["AGENTS.md"])[0]
     assert not instance.allowable(tmp_path, ["redux/../.ssh/id_ed25519"])[0]
