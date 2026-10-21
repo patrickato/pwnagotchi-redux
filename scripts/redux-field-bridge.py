@@ -57,6 +57,26 @@ def plan():
     }
 
 
+def source_revision():
+    """Require exact clean reviewed checkout, not merely one unchanged file."""
+    def call(*argv):
+        try:
+            result = subprocess.run(["git", *argv], cwd=ROOT,
+                                    capture_output=True, text=True,
+                                    timeout=8, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            raise ValueError("git_identity_unavailable")
+        if result.returncode != 0:
+            raise ValueError("git_identity_unavailable")
+        return result.stdout.strip()
+    revision = call("rev-parse", "HEAD")
+    if not re.fullmatch(r"[a-f0-9]{40}", revision):
+        raise ValueError("unrecognized_checkout_revision")
+    if call("status", "--porcelain", "--untracked-files=no"):
+        raise ValueError("dirty_collector_source")
+    return revision
+
+
 def source_hashes():
     """Pin the reviewed launcher and exact remote in-memory module bundle."""
     script = ROOT / "scripts" / "redux-acceptance.py"
@@ -143,11 +163,14 @@ def validate_policy(value):
     if not isinstance(value, dict) or set(value) != {
         "schema", "host", "key_path", "created", "expires",
         "interval_seconds", "max_sessions", "used", "last_attempt", "enabled",
-        "launcher_sha256", "remote_bundle_sha256"
+        "launcher_sha256", "remote_bundle_sha256", "source_revision"
     } or value["schema"] != SCHEMA:
         raise ValueError("invalid_approval_schema")
     private_ip(value["host"])
     key_path(value["key_path"])
+    if (not isinstance(value["source_revision"], str)
+            or not re.fullmatch(r"[a-f0-9]{40}", value["source_revision"])):
+        raise ValueError("invalid_revision_pin")
     if (not isinstance(value["launcher_sha256"], str)
             or not re.fullmatch(r"[a-f0-9]{64}", value["launcher_sha256"])
             or not isinstance(value["remote_bundle_sha256"], str)
@@ -195,12 +218,14 @@ def enroll(host, key, *, interval_hours, days, sessions, approve, now=None):
             or type(sessions) is not int or not 1 <= sessions <= MAX_SESSIONS):
         raise ValueError("unsafe_recurring_scope")
     now = int(time.time()) if now is None else int(now)
+    revision = source_revision()
     launcher_digest, remote_digest = source_hashes()
     policy = {
         "schema": SCHEMA, "host": private_ip(host),
         "key_path": key_path(key),
         "created": now, "expires": now + days * 86400,
         "interval_seconds": interval_hours * 3600,
+        "source_revision": revision,
         "launcher_sha256": launcher_digest,
         "remote_bundle_sha256": remote_digest,
         "max_sessions": sessions, "used": 0,
@@ -270,9 +295,10 @@ def run_once(*, now=None, runner=subprocess.run):
             status = "revoked"
         elif clock >= policy["expires"] or clock < policy["created"]:
             status = "expired"
-        elif source_hashes() != (
-            policy["launcher_sha256"], policy["remote_bundle_sha256"]
-        ):
+        elif (source_revision() != policy["source_revision"]
+                or source_hashes() != (
+                    policy["launcher_sha256"], policy["remote_bundle_sha256"]
+                )):
             status = "source_changed"
         elif policy["used"] >= policy["max_sessions"]:
             status = "exhausted"
