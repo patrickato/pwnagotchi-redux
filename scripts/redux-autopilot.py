@@ -20,6 +20,10 @@ import time
 
 REPO = "https://github.com/patrickato/pwnagotchi-redux.git"
 BRANCH = "human/redux-workbench"
+# Approval policy is a root option on both newer and older Codex CLI
+# releases; placing it after 'exec' fails in some shipped versions.
+CODEX_COMMAND = ("codex", "--sandbox", "workspace-write",
+                 "--ask-for-approval", "never", "exec", "-")
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path.home() / ".local" / "state" / "redux-autopilot"
 WORK = Path.home() / ".local" / "share" / "redux-autopilot"
@@ -92,6 +96,12 @@ def allowable(cwd, paths):
         ):
             return False, "restricted_path"
         source = cwd / name
+        # Reject symlinked parents as well as the final component; a path
+        # inside an allowed tree must never traverse out through an alias.
+        relative = Path(name)
+        parents = list(relative.parents)[:-1]
+        if any((cwd / parent).is_symlink() for parent in parents):
+            return False, "symlinked_parent"
         if not source.is_file() or source.is_symlink():
             return False, "nonregular_or_missing_output"
         if source.stat().st_size > MAX_SINGLE_BYTES:
@@ -185,8 +195,7 @@ def cycle():
                     codex_env.pop(key, None)
             try:
                 codex = subprocess.run(
-                    ["codex", "--sandbox", "workspace-write",
-                     "--ask-for-approval", "never", "exec", "-"],
+                    list(CODEX_COMMAND),
                     cwd=checkout, input=instruction, text=True,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     timeout=2700, check=False, env=codex_env,
