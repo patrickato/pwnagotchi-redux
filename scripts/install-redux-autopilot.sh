@@ -43,6 +43,10 @@ case "${1:---plan}" in
       printf 'Refusing: systemd user manager unavailable in this WSL session\n' >&2; exit 2;
     }
     python3 "${BASE}/scripts/redux-autopilot.py" plan
+    # Never enable a timer whose guardrail regressions are failing.
+    python3 -m pytest -q "${BASE}/tests/test_redux_autopilot.py" || {
+      printf 'Refusing: autopilot guardrail tests failed\n' >&2; exit 2;
+    }
     mkdir -p -m 700 "${UNIT_DIR}"
     if [[ -e "${UNIT_DIR}/${NAME}.service" || -e "${UNIT_DIR}/${NAME}.timer" ]]; then
       printf 'Refusing to overwrite existing timer/service files; inspect them manually\n' >&2
