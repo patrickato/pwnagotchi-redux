@@ -33,6 +33,11 @@ PROTECTED = {
     "scripts/install-redux-autopilot.sh",
     "docs/AUTOPILOT.md",
     "docs/AUTOPILOT_AGENT.md",
+    # Hardware bridge code has access to a private SSH identity only after
+    # explicit user enrollment; source-only Codex must never revise it.
+    "scripts/redux-field-bridge.py",
+    "scripts/install-redux-field-bridge.sh",
+    "docs/REMOTE_HARDWARE_AUTOMATION.md",
 }
 MAX_CHANGED = 35
 MAX_SINGLE_BYTES = 512 * 1024
