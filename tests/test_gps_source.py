@@ -88,3 +88,14 @@ def test_stale_fix_is_dropped_not_served_forever():
     assert t() is not None            # still within window
     clk[0] = 6.0
     assert t() is None                # aged out -> un-located, never a stale coordinate
+
+
+def test_nmea_rejects_nonfinite_coord_without_crashing():
+    """A nan/inf coordinate field must return None, never raise — one bad sentence
+    must not kill the GPS reader thread. (No checksum here so the isfinite guard,
+    not checksum rejection, is what's exercised.)"""
+    from redux.geo.gps import parse_nmea_line
+    assert parse_nmea_line("$GPGGA,123519,nan,N,01131.000,E,1,08,0.9,545.4,M,,,") is None
+    assert parse_nmea_line("$GPGGA,123519,4807.038,N,inf,E,1,08,0.9,545.4,M,,,") is None
+    # a well-formed line (no checksum, which the parser tolerates) still parses
+    assert parse_nmea_line("$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,,,") is not None

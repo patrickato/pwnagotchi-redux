@@ -29,6 +29,24 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Optional
 
 
+def default_scope_path() -> str:
+    """The one canonical scope-store path, shared by the CLI firing tools AND the
+    crack-audit pipeline so arming in one place is honoured by the other.
+
+    REDUX_SCOPE overrides. Otherwise prefer the persistent REDUXCAP partition
+    (/captures) over the overlay root's /etc, which is tmpfs (RAM) on the field
+    image and would drop armed targets on reboot. Falls back to /etc off-image."""
+    env = os.environ.get("REDUX_SCOPE")
+    if env:
+        return env
+    try:
+        if os.path.ismount("/captures"):
+            return "/captures/config/scope.json"
+    except OSError:
+        pass
+    return "/etc/pwnagotchi/scope.json"
+
+
 def _norm_bssid(b: str) -> str:
     return (b or "").strip().lower()
 
@@ -228,18 +246,43 @@ class Scope:
         p = path or self.path
         if not p:
             raise ValueError("no path to save Scope to")
-        # Turnkey: create the parent directory if it doesn't exist yet, so a
-        # first-ever `scope add` on a fresh box can't fail just because
-        # /etc/pwnagotchi (or any configured scope dir) hasn't been made.
+        # This file is the firing-authorization list. On a shared partition
+        # (e.g. the Pi's /captures, where an unprivileged service user also
+        # writes) a world-readable/writable scope would leak the target list and,
+        # worse, let a non-root process arm targets the root firing path then
+        # trusts. So: owner-only dir (0700) and file (0600), and an O_NOFOLLOW,
+        # O_EXCL temp write so a pre-planted symlink can't redirect the write
+        # onto a root-owned file. Turnkey too: create the parent if missing.
         parent = os.path.dirname(p)
         if parent:
-            os.makedirs(parent, exist_ok=True)
+            os.makedirs(parent, mode=0o700, exist_ok=True)
+            try:
+                os.chmod(parent, 0o700)      # tighten even if it pre-existed looser
+            except OSError:
+                pass
         tmp = f"{p}.tmp"
-        with open(tmp, "w") as f:
-            json.dump(self.to_dict(), f, indent=2, sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
+        try:
+            os.unlink(tmp)                   # clear any stale/planted temp first
+        except OSError:
+            pass
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(tmp, flags, 0o600)
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(self.to_dict(), f, indent=2, sort_keys=True)
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         os.replace(tmp, p)          # atomic rename
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
         self.path = p
         return p
 

@@ -61,3 +61,18 @@ def test_parse_findmnt_classifies_network_and_local():
     assert p.target(Tier.PRIMARY) == "/captures"
     assert p.target(Tier.BULK) == "/mnt/usbbulk"
     assert p.target(Tier.ARCHIVE) == "/mnt/nas"
+
+
+def test_parse_findmnt_walks_children():
+    """findmnt -J nests the USB/NAS mounts under / as children — they must be seen."""
+    from redux.storage_tier import parse_findmnt
+    tree = {"filesystems": [{"target": "/", "fstype": "ext4", "options": "rw", "source": "/dev/mmcblk0p2",
+             "children": [
+                {"target": "/captures", "fstype": "ext4", "options": "rw", "source": "/dev/mmcblk0p3"},
+                {"target": "/mnt/bulk", "fstype": "ext4", "options": "rw", "source": "/dev/sda1"},
+                {"target": "/mnt/nas", "fstype": "nfs", "options": "rw", "source": "10.0.0.5:/vol"},
+             ]}]}
+    vols = parse_findmnt(tree)
+    mounts = {v.mountpoint for v in vols}
+    assert {"/", "/captures", "/mnt/bulk", "/mnt/nas"} <= mounts
+    assert any(v.network for v in vols if v.mountpoint == "/mnt/nas")

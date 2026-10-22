@@ -185,7 +185,7 @@ def test_handshake_autopass_from_existing_daemon_capture():
     status, detail = mk(probe=lambda: [FakeRadio("wlan1", monitor=True)],
                         confirm=lambda m: False,    # would decline — must not matter
                         handshake_dirs=(d,))(GMAP["1.4"])
-    assert status == "pass" and "already captured" in detail.lower()
+    assert status == "pass" and "capture store" in detail.lower()
     assert "001122334455" in detail                 # BSSID surfaced
 
 

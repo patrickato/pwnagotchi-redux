@@ -12,6 +12,7 @@ injected open-hook so the pump is exercised without hardware.
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional, Tuple
@@ -43,6 +44,8 @@ def _coord(val: str, hemi: str) -> Optional[float]:
     try:
         v = float(val)
     except ValueError:
+        return None
+    if not math.isfinite(v):          # reject nan/inf before int(v//100) can raise
         return None
     deg = int(v // 100)
     dec = deg + (v - deg * 100) / 60.0

@@ -52,20 +52,37 @@ class StoragePlan:
 
 
 def parse_findmnt(text) -> List[StorageVolume]:
-    """Pure parser of `findmnt -J -o TARGET,FSTYPE,OPTIONS,SOURCE` output."""
+    """Pure parser of `findmnt -J -o TARGET,FSTYPE,OPTIONS,SOURCE` output.
+
+    `findmnt -J` emits a TREE: the USB bulk disk and the NAS mount appear as
+    `children` of `/`, not as top-level rows. Walk the tree so those tiers are
+    actually seen (a flat top-level-only read would make the whole feature no-op)."""
     out: List[StorageVolume] = []
     try:
         data = json.loads(text) if isinstance(text, str) else text
     except (ValueError, TypeError):
         return out
-    rows = data.get("filesystems", []) if isinstance(data, dict) else []
-    for row in rows if isinstance(rows, list) else []:
+    roots = data.get("filesystems", []) if isinstance(data, dict) else []
+    if not isinstance(roots, list):
+        return out
+    stack = list(roots)
+    seen_targets: set = set()
+    budget = 0
+    while stack and budget < 4096:
+        budget += 1
+        row = stack.pop()
         if not isinstance(row, dict):
             continue
+        children = row.get("children")
+        if isinstance(children, list):
+            stack.extend(children)
         target = row.get("target")
         fstype = str(row.get("fstype", "")).lower()
         if not isinstance(target, str) or not target or not fstype:
             continue
+        if target in seen_targets:
+            continue
+        seen_targets.add(target)
         opts = str(row.get("options", ""))
         source = str(row.get("source", ""))
         rw = "rw" in opts.split(",")

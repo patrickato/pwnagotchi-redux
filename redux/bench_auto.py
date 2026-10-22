@@ -152,23 +152,42 @@ def _radio_line(r) -> str:
     return f"{getattr(r,'iface','?')}({bands},{mon},{inj})"
 
 
-# Where real captures land: the live daemon writes to the REDUXCAP partition
-# (/captures/...), bettercap's own default is ~, and the old pwnagotchi path is
-# kept for compatibility. These are scanned RECURSIVELY, because the pipeline
-# files handed-off captures into dated subdirs (ready/, active/, …).
-_HANDSHAKE_DIRS = (
-    "/captures",
-    "/etc/pwnagotchi/handshakes",
-    os.path.expanduser("~"),
-)
-_MAX_WALK_FILES = 20000      # bound the walk so a huge tree can't stall the pass
+# Scan ONLY the device's own capture store — the REDUXCAP partition the live
+# daemon writes to (/captures/..., incl. the pipeline's ready/ active/ subdirs).
+# We deliberately do NOT scan ~ or /etc/pwnagotchi/handshakes: a .hc22000 copied
+# in from another box must never let the headline "captured" gate claim a capture
+# this board didn't make (glass-box / real-data).
+_HANDSHAKE_DIRS = ("/captures",)
+_MAX_WALK_FILES = 20000               # bound the walk so a huge tree can't stall it
+_MAX_HC22000_BYTES = 32 * 1024 * 1024  # skip anything too big to be a real capture
+
+
+def _read_bounded_nofollow(path: str, limit: int) -> Optional[bytes]:
+    """Read up to `limit` bytes without following a symlink and without slurping a
+    giant file into RAM. None if it isn't a regular file, is a symlink, is too
+    big, or can't be read."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        import stat as _stat
+        if not _stat.S_ISREG(st.st_mode) or st.st_size > limit:
+            return None
+        return os.read(fd, limit)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
 
 
 def _find_valid_handshakes(run_dirs: Optional[Sequence[str]] = None) -> Tuple[int, str]:
-    """Recursively scan capture dirs for *.hc22000 and count structurally valid
-    records using the real crack-pipeline parser. Returns (valid_record_count,
-    detail) with the distinct BSSIDs seen. Honest: a structural check is NOT
-    cryptographic proof, and the detail says so."""
+    """Recursively scan the device capture store for *.hc22000 and count
+    structurally valid records using the real crack-pipeline parser. Returns
+    (valid_record_count, detail) with the distinct BSSIDs seen. Reads are bounded
+    and symlink-safe. Honest: a structural check is NOT cryptographic proof, and
+    the detail says so."""
     dirs = run_dirs if run_dirs is not None else _HANDSHAKE_DIRS
     try:
         from .crack.ingest import normalize_22000
@@ -182,22 +201,29 @@ def _find_valid_handshakes(run_dirs: Optional[Sequence[str]] = None) -> Tuple[in
         if not os.path.isdir(d):
             continue
         for dp, _dn, fn in os.walk(d):
+            if seen > _MAX_WALK_FILES:
+                break
             for name in fn:
                 seen += 1
                 if seen > _MAX_WALK_FILES:
                     break
                 if not name.endswith(".hc22000"):
                     continue
+                raw = _read_bounded_nofollow(os.path.join(dp, name), _MAX_HC22000_BYTES)
+                if raw is None:
+                    continue
                 try:
-                    recs, bs = normalize_22000(open(os.path.join(dp, name), "rb").read())
+                    recs, bs = normalize_22000(raw)
                     if recs:
                         total += len(recs)
                         files += 1
                         bssids.update(bs)
                 except Exception:
                     continue
+        if seen > _MAX_WALK_FILES:
+            break
     if not files:
-        return 0, "no valid .hc22000 artifacts found under the capture dirs"
+        return 0, "no valid .hc22000 artifacts found in the device capture store (/captures)"
     bl = ", ".join(sorted(bssids)[:6]) + ("…" if len(bssids) > 6 else "")
     return total, (f"{total} valid 22000 record(s) in {files} file(s); "
                    f"BSSID(s): {bl} (structural screen, not crypto proof)")
@@ -331,7 +357,7 @@ class AutoExecutor:
         # anything — if a valid one exists, this gate needs zero manual steps.
         count, detail = _find_valid_handshakes(self.handshake_dirs)
         if count > 0:
-            return "pass", f"real handshake already captured on-device — {detail}"
+            return "pass", f"valid handshake present in the device capture store — {detail}"
         # None yet: offer the operator a live capture against their OWN armed AP.
         # We only ever verify a capture here; we never fire.
         rc, out = self._redux(["scope", "list"])
@@ -457,15 +483,20 @@ class AutoExecutor:
         if real_temp is None:
             return "skip", "no vcgencmd temp reading (not a Pi / tool absent)"
         now = self.now()
-        gov = Governor()
-        d_real = gov.evaluate(valid_reading(Reading(cpu_temp_c=real_temp)), now)
-        # drive a synthetic hot reading to prove the escalation path FULL->SURVIVAL
-        gov_hot = Governor()
-        d_hot = gov_hot.evaluate(valid_reading(Reading(cpu_temp_c=88.0)), now)
-        if d_hot.mode == Mode.SURVIVAL and d_hot.interval_scale > d_real.interval_scale:
-            return "pass", (f"real temp {real_temp:g}°C -> {d_real.mode.value}; "
-                            f"synthetic 88°C -> SURVIVAL (cadence x{d_hot.interval_scale:g})")
-        return "fail", f"governor did not escalate on 88°C (got {d_hot.mode.value})"
+        # Prove escalation against a COOL baseline and a hot reading, both from
+        # fresh governors — so the verdict doesn't depend on the board's actual
+        # temperature at probe time (an already-hot Pi must not false-FAIL).
+        d_cool = Governor().evaluate(valid_reading(Reading(cpu_temp_c=40.0)), now)
+        d_hot = Governor().evaluate(valid_reading(Reading(cpu_temp_c=88.0)), now)
+        d_real = Governor().evaluate(valid_reading(Reading(cpu_temp_c=real_temp)), now)
+        escalates = (d_hot.mode == Mode.SURVIVAL and d_cool.mode == Mode.FULL
+                     and d_hot.interval_scale >= d_cool.interval_scale)
+        if escalates:
+            return "pass", (f"governor escalates on real readings: 40°C -> {d_cool.mode.value}, "
+                            f"88°C -> SURVIVAL (cadence x{d_hot.interval_scale:g}); "
+                            f"this board now {real_temp:g}°C -> {d_real.mode.value}")
+        return "fail", (f"governor did not escalate correctly: 40°C -> {d_cool.mode.value}, "
+                        f"88°C -> {d_hot.mode.value}")
 
     def _g_post(self, g) -> Tuple[str, str]:
         rc, out = self._redux(["post"])
@@ -724,7 +755,8 @@ class AutoExecutor:
             return port
 
         port = _free_port()
-        token = "benchpass-token"
+        import secrets
+        token = "bp-" + secrets.token_urlsafe(24)   # per-run, not a known constant
         cmd = list(self.redux_prefix) + ["web", "--port", str(port),
                                          "--bind-scope", "localhost", "--token", token]
         try:

@@ -300,6 +300,12 @@ class Augur:
         before_detectors = self.engine.detector_count
         names = _persona_detector_names(p.detectors)
         self.engine = DetectEngine(names=names, trusted=self._trusted)
+        # Critical: re-point the live pump at the rebuilt engine. The Supervisor
+        # captured the original engine at construction, so without this the
+        # persona's detector set would change self.engine (captap path) while the
+        # live bettercap-event pump kept running the OLD set — reporting a change
+        # that never reached detection. One engine, one source of truth.
+        self.supervisor.set_detect_engine(self.engine)
         return {
             "persona": p.name,
             "summary": p.summary,
@@ -464,11 +470,13 @@ class Augur:
         return out
 
     def capture_bindings(self, assignment=None) -> list:
-        """The FULL per-radio engine plan: every capture radio the orchestrator
+        """The FULL per-radio engine PLAN: every capture radio the orchestrator
         assigned gets its own engine (AngryOxide scalpel on the primary, bettercap
         nervous-system on a tandem radio, passive AngryOxide beyond that) — so a
-        second radio adds real capture surface instead of idling. Glass-box; the
-        live supervisor spawns one capture consumer per binding."""
+        second radio adds real capture surface instead of idling. Glass-box, and
+        currently a plan/preview only (consumed by `redux capture`): the live
+        per-binding spawn is not wired yet, and when it is, the primary-radio owner
+        must be reconciled with the bettercap driver the supervisor points there."""
         from ..crack.capture import (plan_capture_bindings, AngryOxideProvider,
                                       BettercapProvider)
         from ..radio import decide

@@ -29,24 +29,10 @@ from .engine import BettercapDriver, ReplayTransport, BettercapConfig
 from .packs import PackManager, DependencyError
 
 # The central authorized-target list every firing-capable function consults.
-def _default_scope_path() -> str:
-    """Where the firing tools read/write the authorized-target scope.
-
-    REDUX_SCOPE always wins. Otherwise prefer the persistent REDUXCAP partition
-    (/captures) so armed targets survive a reboot — on the field image the
-    overlay root's /etc is tmpfs (RAM), which would silently drop the scope on
-    power-cycle. Fall back to the legacy /etc path only when /captures isn't a
-    mount (e.g. a dev checkout)."""
-    env = os.environ.get("REDUX_SCOPE")
-    if env:
-        return env
-    try:
-        if os.path.ismount("/captures"):
-            return "/captures/config/scope.json"
-    except Exception:
-        pass
-    return "/etc/pwnagotchi/scope.json"
-
+# One canonical resolver (redux.core.scope.default_scope_path) is shared with the
+# crack-audit pipeline so the CLI firing tools and the audit worker never arm
+# against different scope files.
+from .core.scope import default_scope_path as _default_scope_path
 
 _DEFAULT_SCOPE_PATH = _default_scope_path()
 

@@ -24,6 +24,18 @@ def test_none_persona_disables_detectors_for_real():
     assert out["changed"]["detectors"]["to"] == 0
 
 
+def test_persona_repoints_the_live_pump_engine():
+    # Regression: apply_persona must re-point the Supervisor's engine (the one the
+    # live pump feeds), not just self.engine — otherwise the pump keeps running the
+    # old detector set while the API reports the new one (a glass-box lie).
+    aug = Augur()
+    assert aug.supervisor._detect_engine.detector_count > 0
+    aug.apply_persona("mesh")                                 # detectors="none"
+    assert aug.engine.detector_count == 0
+    assert aug.supervisor._detect_engine is aug.engine        # same instance
+    assert aug.supervisor._detect_engine.detector_count == 0  # pump actually pruned
+
+
 def test_persona_apply_preserves_the_trusted_set():
     from redux.detect.rogue_ap import parse_trusted_networks
     from redux.detect.frames import Frame, FrameType

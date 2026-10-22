@@ -187,7 +187,9 @@ def _arm_sentinel_from_env(agent):
         from ..sentinel import CallableNotifier
         low = spec.strip().lower()
         armed = low == "armed"
-        sev = low if low in ("info", "warn", "warning", "critical") else "warn"
+        if low == "warning":          # accept the value the docstring advertises;
+            low = "warn"              # the Severity enum spells it "warn"
+        sev = low if low in ("info", "warn", "critical") else "warn"
         notifier = CallableNotifier(lambda ev: _LOG.warning(
             "sentinel: %s", getattr(ev, "summary", getattr(ev, "reason", ev))))
         return agent.enable_sentinel(notifier=notifier, armed=armed, min_severity=sev)

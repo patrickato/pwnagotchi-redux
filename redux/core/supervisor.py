@@ -130,6 +130,13 @@ class Supervisor:
         self._emit(Signal.RADIOS_CHANGED, ifaces=list(self._radios))
         self._reassign()
 
+    def set_detect_engine(self, engine) -> None:
+        """Re-point the live pump at a rebuilt detector engine (e.g. after a
+        persona switch). Without this the pump keeps feeding the engine captured
+        at construction, so a persona's detector-set change would never reach the
+        place detection actually happens — a glass-box lie."""
+        self._detect_engine = engine
+
     def add_radio(self, radio) -> None:
         """Hotplug: a radio appeared."""
         self._radios[radio.iface] = radio
