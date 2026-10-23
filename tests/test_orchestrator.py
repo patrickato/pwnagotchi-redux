@@ -16,11 +16,35 @@ def test_online_prefers_onboard_uplink():
     assert a.roles["wlan1"] is Role.IDLE
 
 
-def test_hunt_promotes_injector_and_keeps_onboard_online():
+def test_hunt_promotes_injector_and_enlists_onboard_as_tandem():
     a = decide([ONBOARD, ALFA], Intent.HUNT)
-    assert a.roles["wlan1"] is Role.CAPTURE      # Alfa injects -> capture
-    assert a.roles["wlan0"] is Role.UPLINK       # onboard kept online
+    assert a.roles["wlan1"] is Role.CAPTURE      # Alfa injects -> primary active capture
+    assert a.roles["wlan0"] is Role.SCAN         # onboard joins the hunt (passive tandem)
     assert "inject" in a.reasons["wlan1"]
+    assert a.capture_mode["wlan1"] == "active"
+    assert a.capture_mode["wlan0"] == "passive"
+    # tandem radios spread across bands rather than fighting one channel
+    assert a.capture_band["wlan1"] != a.capture_band["wlan0"]
+
+
+def test_hunt_keep_uplink_opt_in_holds_onboard_online():
+    a = decide([ONBOARD, ALFA], Intent.HUNT, keep_uplink=True)
+    assert a.roles["wlan1"] is Role.CAPTURE      # Alfa still captures
+    assert a.roles["wlan0"] is Role.UPLINK       # onboard held online by opt-in
+
+
+def test_onboard_only_hunt_is_a_complete_capturing_device():
+    a = decide([ONBOARD], Intent.HUNT)
+    assert a.roles["wlan0"] is Role.CAPTURE      # works with no dongle at all
+    assert a.capture_mode["wlan0"] == "passive"  # honest: brcmfmac isn't an injector
+
+
+def test_non_monitor_onboard_gives_internet_instead_of_idling():
+    deaf_onboard = Radio("wlan0", phy="phy0", bands=frozenset({"2.4"}), monitor=False,
+                         inject=False, driver="brcmfmac", onboard=True)
+    a = decide([deaf_onboard, ALFA], Intent.HUNT)
+    assert a.roles["wlan1"] is Role.CAPTURE
+    assert a.roles["wlan0"] is Role.UPLINK       # can't capture -> provides sync, not idle
 
 
 def test_hunt_with_only_onboard_degrades_passive_and_warns():
@@ -47,8 +71,21 @@ def test_recon_is_passive_capture():
 
 
 def test_hotplug_promotes_then_unplug_falls_back():
+    # onboard alone captures; plug the Alfa and it takes over active capture while
+    # the onboard drops to tandem; unplug and capture falls straight back — never dark.
+    base = decide([ONBOARD], Intent.HUNT)
+    assert base.roles["wlan0"] is Role.CAPTURE
     promoted = on_hotplug([ONBOARD], ALFA, Intent.HUNT)
     assert promoted.roles["wlan1"] is Role.CAPTURE
-    assert promoted.roles["wlan0"] is Role.UPLINK
+    assert promoted.roles["wlan0"] is Role.SCAN
     fallback = on_unplug([ONBOARD], Intent.HUNT)
     assert fallback.roles["wlan0"] is Role.CAPTURE
+
+
+def test_three_radios_all_contribute_to_capture():
+    a = decide([ONBOARD, ALFA, SIXE], Intent.HUNT)
+    assert a.roles["wlan2"] is Role.CAPTURE                 # 6 GHz radio leads (active)
+    assert a.roles["wlan1"] is Role.SCAN                    # Alfa tandem
+    assert a.roles["wlan0"] is Role.SCAN                    # onboard tandem
+    # three radios, three distinct bands covered at once
+    assert len(set(a.capture_band.values())) == 3

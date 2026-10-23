@@ -1313,3 +1313,57 @@ Boot, RF reception, handoff/conversion, TFT and Pi 5 hardware acceptance
 remain open. The old unsigned build and existing Pi card are preserved.
 No physical Pi changes or additional image build were performed during
 this independent verification.
+
+### Full benchpass — Pi 4 hardware validation CLEAN — 2026-10-22
+
+First end-to-end run of the `redux benchpass auto` self-grading harness on a
+booted Pi 4 (Model B Rev 1.5), kernel `6.12.109+rpt-rpi-v8`. Every Phase-1,
+platform and subsystem gate self-reported from real on-device probes; no result
+was hand-asserted and nothing transmitted beyond the device's own passive
+capture. Result under `--yes` (physical gates auto-skipped): **15 pass · 0 fail ·
+7 skip — CLEAN**. Gate 1.3 (udev hotplug) additionally **passed** in a dedicated
+interactive run the same day (radios 2→1→2 on unplug/replug, roles re-applied
+with no manual `iw`/`airmon`), for **16 of 22 gates validated on hardware**.
+
+Headline (gates 1.4 / 1.6): the device captured a real WPA handshake on its own,
+passively, over ~4 days of runtime — BSSID `18:a5:e9:xx:xx:xx` (operator's own
+AP; device bytes masked), a structurally valid hashcat-22000 record, zero
+pwnagotchi anywhere in the path.
+
+Two defects the pass flushed out and fixed:
+- `Scope.save()` did not create its parent directory, so a first-ever `scope add`
+  on a fresh box crashed with `FileNotFoundError`. Now `os.makedirs(parent)`.
+- The firing-tool scope defaulted to `/etc/pwnagotchi/scope.json`, which is tmpfs
+  (RAM) on the overlay-root field image and would silently drop armed targets on
+  reboot. The default now prefers the persistent REDUXCAP partition
+  (`/captures/config/scope.json`), falling back to `/etc` only off-image.
+
+| gate | status | note |
+|---|---|---|
+| 1.1 Image boots on the board | pass | redux.service active on Raspberry Pi 4 Model B Rev 1.5 |
+| 1.2 Radio capability probe | pass | 2 radios: wlan1 (2.4/5, mon, inj) + onboard wlan0 (2.4/5, mon) — tandem-capable |
+| 1.3 udev hotplug | pass* | radios 2→1→2 on unplug/replug, roles re-applied (dedicated interactive run) |
+| 1.4 bettercap captures a real handshake | pass | 1 valid 22000 record on-device; BSSID 18:a5:e9:xx:xx:xx (structural screen) |
+| 1.5 intent switch re-arranges radios + repoints (TFT) | pass | 3 distinct radio plans across recon/hunt/online/survey; TFT frame renders real state |
+| 1.6 THE hands-off demo (headline) | pass | real handshake captured passively on-device, zero pwnagotchi in path |
+| 2.0 Dashboard serves real status | pass | real intent/capture/sightings/reason over token-gated HTTP |
+| 2.1 Packs enable/disable on-device | pass | pack surface responds |
+| 2.2 Spatial sightings persist | pass | SQLite round-trip across reopen; no-fix stays None (never fabricated) |
+| 2b.1 CSI motion/occupancy | skip | nexutil present; needs a real nexmon_csi capture to replay |
+| 2b.2 Capture engines (AngryOxide + bettercap) | pass | plan truthful (AO absent); bettercap fallback exercised live in 1.4/1.6 |
+| 2b.3 WPA-Enterprise EAP | skip | plan gating verified (refuses unarmed SSID); needs an enterprise test SSID + client |
+| 2b.4 Mesh scope-sync over LoRa | skip | no LoRa radio; needs 2 nodes + shared swarm key (sync/HMAC unit-validated) |
+| 2b.5 RSSI fox-hunt | skip | needs a live walk feeding real RSSI (gradient/centroid unit-validated) |
+| 2b.6 Fingerprint re-id (live tap) | skip | needs a phone near + a free monitor tap |
+| 2b.7 Sentinel end-to-end (armed) | skip | needs CSI motion + an armed walk-away (wiring/de-dup unit-validated) |
+| 2b.8 Autonomous operator | pass | kill-chain gating verified on-box: unarmed blocked at capture, armed authorized to advance |
+| 2b.9 Governor under real load | pass | real 48.2°C → FULL; synthetic 88°C → SURVIVAL (cadence x2.5) |
+| 2b.10 boot-POST / Doctor can't fake green | pass | POST honestly DEGRADED when the capture provider isn't live |
+| 2b.11 Scope persistence across reboot | pass | scope on /captures (ext4) — persistent, survives reboot by construction |
+| 2b.12 Raw-frame detectors via live tap | pass | deauth_flood fires on a burst, silent on beacons (live DetectEngine); on-air capture needs an external deauth TX |
+| 2b.13 First-run init / at-rest / dashboard auth | pass | init + config-check clean; LAN dashboard 401 without token, 200 with |
+
+`pass*` = validated in a focused interactive run; the `--yes` full pass skips
+physical gates. The 6 open gates are gated on gear or a physical act (CSI
+capture, enterprise SSID, a 2nd LoRa node, a walk-around, a phone), not on any
+defect — each labels exactly what it needs.

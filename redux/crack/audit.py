@@ -19,6 +19,7 @@ import time
 import tomllib
 
 from .ingest import _digest_file, normalize_22000
+from ..core.scope import default_scope_path as _default_scope_path
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ class AuditSettings:
         return cls(
             enabled=opts.get("enabled") is True,
             wordlist=Path(opts.get("wordlist") or "/nonexistent/redux-wordlist"),
-            scope_file=Path(opts.get("scope_file") or "/etc/pwnagotchi/scope.json"),
+            scope_file=Path(opts.get("scope_file") or _default_scope_path()),
             results_dir=Path(opts.get("results_dir") or "/captures/audits"),
             database=Path(pipeline.get("database") or "/captures/jobs.db"),
             binary=str(opts.get("binary") or "hashcat"),

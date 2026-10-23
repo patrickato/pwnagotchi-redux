@@ -431,6 +431,12 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None, s
                   (str(usb["link"]) if usb["link"] is not None else "--") +
                   " / RX UNVERIFIED / OWNER UNVERIFIED",
                   font=_font(8), fill=AMBER)
+        extras = radios.get("externals", [])[1:]   # additional dongles beyond the first
+        if extras:
+            label = "ALSO " + ", ".join(e["iface"] + "/" + e["mode"][:3] for e in extras[:4])
+            if len(extras) > 4:
+                label += " +" + str(len(extras) - 4)
+            text_line((20, 296), label[:60], font=_font(8), fill=SUBTLE)
     else:
         text_line((20, 160), "DOCTOR / ACTIONABLE FINDINGS",
                   font=_font(12, bold=True), fill=SUBTLE)

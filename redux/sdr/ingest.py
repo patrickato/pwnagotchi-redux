@@ -73,6 +73,12 @@ def adsb_to_sighting(record: dict) -> Optional[Sighting]:
         lon = float(lon) if lon is not None else None
     except (TypeError, ValueError):
         lat = lon = None
+    # Range-check like the NMEA path: garbled ADS-B (e.g. lat 999) must not poison
+    # centroid/coverage/distance math downstream — drop out-of-range coords.
+    import math
+    if lat is None or lon is None or not math.isfinite(lat) or not math.isfinite(lon) \
+            or not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+        lat = lon = None
     flight = str(record.get("flight") or record.get("callsign") or "").strip()
     ts = record.get("now") or record.get("time") or record.get("seen")
     return Sighting(

@@ -156,9 +156,10 @@ def recon_subnet(cidr: str, *, scope, scanner: Optional[Scanner] = None,
     if require_scope:
         if scope is None:
             raise ReconRefused(f"refused to scan {cidr}: no scope provided")
-        # require that a representative address of the CIDR is authorized
-        probe_ip = cidr.split("/", 1)[0]
-        ok, why = scope.authorize(ip=probe_ip)
+        # The WHOLE requested network must be contained in an armed CIDR — not
+        # merely have its first address fall inside one (which would let a broad
+        # range pass and be swept in full).
+        ok, why = scope.authorize_network(cidr)
         if not ok:
             raise ReconRefused(f"refused to scan {cidr}: {why}")
     return (scanner or NmapScanner()).scan(cidr)

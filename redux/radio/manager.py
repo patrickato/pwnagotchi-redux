@@ -100,11 +100,15 @@ class RadioManager:
     testable with a fake that just records Actions.
     """
 
-    def __init__(self, radios=None, intent=Intent.RECON, applier=None):
+    def __init__(self, radios=None, intent=Intent.RECON, applier=None, *, keep_uplink=False):
         self._radios = {r.iface: r for r in (radios or [])}
         self._intent = Intent(intent)
         self._applier = applier or _iw_apply
-        self._assignment = decide(self._radios.values(), self._intent)
+        # keep_uplink: hold one managed uplink (preferring onboard) during capture
+        # instead of enlisting it as a tandem radio. Default off = max capture.
+        self._keep_uplink = bool(keep_uplink)
+        self._assignment = decide(self._radios.values(), self._intent,
+                                  keep_uplink=self._keep_uplink)
         self._out_of_sync = False
 
     @property
@@ -137,7 +141,8 @@ class RadioManager:
             raise RuntimeError("radio state unverified after failed transition; re-probe required")
         proposed_radios = dict(self._radios) if radios is None else dict(radios)
         proposed_intent = self._intent if intent is None else Intent(intent)
-        new_assignment = decide(list(proposed_radios.values()), proposed_intent)
+        new_assignment = decide(list(proposed_radios.values()), proposed_intent,
+                                keep_uplink=self._keep_uplink)
         actions = plan_transition(self._assignment.roles, new_assignment.roles, gone=gone)
         self._apply_actions(actions)
         # Commit the in-memory plan *only after* all applier calls succeeded.

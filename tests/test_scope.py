@@ -127,3 +127,54 @@ def test_scope_is_drop_in_for_the_firing_gate():
     s.add("aa:bb:cc:dd:ee:ff", label="authorized AP")
     out = drv.deauth("aa:bb:cc:dd:ee:ff")
     assert out  # transport ran the command
+
+
+def test_save_creates_missing_parent_dir(tmp_path):
+    """Turnkey: a first-ever `scope add` must not fail just because the scope
+    directory (e.g. /etc/pwnagotchi) has never been created. save() makes it."""
+    nested = tmp_path / "etc" / "pwnagotchi" / "scope.json"
+    assert not nested.parent.exists()
+    s = Scope()
+    s.add("AA:BB:CC:DD:EE:FF", label="my AP")
+    out = s.save(str(nested))
+    assert out == str(nested)
+    assert nested.is_file()
+    # and it round-trips
+    reloaded = Scope.load(str(nested))
+    assert reloaded.permits(bssid="aa:bb:cc:dd:ee:ff") is True
+
+
+def test_save_hardens_permissions(tmp_path):
+    """The firing-authorization file must be owner-only (0600) in an owner-only
+    dir (0700) — it lives on a shared partition on the device."""
+    import os, stat
+    p = tmp_path / "cfg" / "scope.json"
+    s = Scope()
+    s.add("AA:BB:CC:DD:EE:FF")
+    s.save(str(p))
+    assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(p.parent).st_mode) == 0o700
+
+
+def test_save_refuses_symlinked_temp(tmp_path):
+    """A pre-planted scope.json.tmp symlink must not be followed (no redirecting
+    the write onto another file)."""
+    import os
+    victim = tmp_path / "victim"
+    victim.write_text("precious")
+    p = tmp_path / "scope.json"
+    os.symlink(str(victim), str(p) + ".tmp")
+    Scope().save(str(p))                       # must not clobber the symlink target
+    assert victim.read_text() == "precious"
+    assert p.is_file()
+
+
+def test_default_scope_path_prefers_captures_mount(monkeypatch):
+    import redux.core.scope as sc
+    monkeypatch.delenv("REDUX_SCOPE", raising=False)
+    monkeypatch.setattr(sc.os.path, "ismount", lambda p: p == "/captures")
+    assert sc.default_scope_path() == "/captures/config/scope.json"
+    monkeypatch.setattr(sc.os.path, "ismount", lambda p: False)
+    assert sc.default_scope_path() == "/etc/pwnagotchi/scope.json"
+    monkeypatch.setenv("REDUX_SCOPE", "/tmp/custom.json")
+    assert sc.default_scope_path() == "/tmp/custom.json"

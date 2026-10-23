@@ -98,18 +98,38 @@ def test_unknown_transport_duplicate_usb_and_missing_iw_identity_fail_closed(tmp
         di.collect(sys_root=root, run=lambda args: iw_text(unknown),
                    wall_clock=lambda: 1000.0)
 
-    root2 = tmp_path / "other" / "sys" / "class" / "net"
-    root2.mkdir(parents=True)
-    first = add_net(root2, iface="wlan1", ifindex=7, phy="phy1",
-                    transport="usb", driver="mt76x2u", arphrd=803)
-    second = add_net(root2, iface="wlan2", ifindex=8, phy="phy2",
-                     transport="usb", driver="mt76x2u", arphrd=803)
-    with pytest.raises(Unavailable, match="multiple_physical_radios_same_transport"):
-        di.collect(sys_root=root2, run=lambda args: iw_text(first, second),
-                   wall_clock=lambda: 1000.0)
     with pytest.raises(Unavailable, match="radio_identity_changed"):
-        di.collect(sys_root=root2, run=lambda args: "",
+        di.collect(sys_root=root, run=lambda args: "",
                    wall_clock=lambda: 1000.0)
+
+
+def test_multiple_usb_dongles_all_reported_not_blinded(tmp_path):
+    # onboard + two USB dongles: the whole rig is reported, nothing fails closed.
+    root = tmp_path / "sys" / "class" / "net"
+    root.mkdir(parents=True)
+    onboard = add_net(root, iface="wlan0", ifindex=4, phy="phy0",
+                      transport="sdio", driver="brcmfmac", arphrd=1)
+    usb1 = add_net(root, iface="wlan1", ifindex=7, phy="phy1",
+                   transport="usb", driver="mt76x2u", arphrd=803)
+    usb2 = add_net(root, iface="wlan2", ifindex=8, phy="phy2",
+                   transport="usb", driver="rtl88xxau", arphrd=803)
+    result = di.collect(sys_root=root, run=lambda a: iw_text(onboard, usb1, usb2),
+                        wall_clock=lambda: 1000.0)
+    ifaces = [r["iface"] for r in result["radios"]]
+    assert ifaces == ["wlan0", "wlan1", "wlan2"]       # onboard first, then externals
+    assert result["radios"][0]["transport"] == "onboard"
+    assert [r["transport"] for r in result["radios"][1:]] == ["usb", "usb"]
+
+    # and the panel surfaces every external, not just the first
+    from redux.display import radio_panel, fbui
+    report = {"runtime": {"state": "running", "iface": "wlan1",
+                          "capture_link_type": 803, "updated_utc": 1000.0},
+              "radio_inventory": result}
+    model = radio_panel.model(report, now=1001.0)
+    assert model["inventory"] == "CURRENT"
+    assert model["usb"]["iface"] == "wlan1"            # primary external (back-compat)
+    assert [e["iface"] for e in model["externals"]] == ["wlan1", "wlan2"]
+    assert fbui.render(report, page="radios", now=1001.0).size == (480, 320)
 
 
 def test_driver_rebind_during_sample_is_rejected(tmp_path):

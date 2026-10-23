@@ -29,6 +29,24 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Optional
 
 
+def default_scope_path() -> str:
+    """The one canonical scope-store path, shared by the CLI firing tools AND the
+    crack-audit pipeline so arming in one place is honoured by the other.
+
+    REDUX_SCOPE overrides. Otherwise prefer the persistent REDUXCAP partition
+    (/captures) over the overlay root's /etc, which is tmpfs (RAM) on the field
+    image and would drop armed targets on reboot. Falls back to /etc off-image."""
+    env = os.environ.get("REDUX_SCOPE")
+    if env:
+        return env
+    try:
+        if os.path.ismount("/captures"):
+            return "/captures/config/scope.json"
+    except OSError:
+        pass
+    return "/etc/pwnagotchi/scope.json"
+
+
 def _norm_bssid(b: str) -> str:
     return (b or "").strip().lower()
 
@@ -109,6 +127,31 @@ class Scope:
                 return True, f"authorized: {e.kind} {e.value}{tag}, {exp}"
         target = bssid or ssid or ip or "?"
         return False, f"refused: {target} is not in the active scope ({len(active)} authorized target(s))"
+
+    def authorize_network(self, cidr: str, now: Optional[float] = None,
+                          job: Optional[str] = None) -> tuple[bool, str]:
+        """Authorize a whole requested network: it must be fully CONTAINED in an
+        armed CIDR, not merely have its first address fall inside one. Prevents a
+        broad range (e.g. a /8 whose network address sits inside an armed /24)
+        from passing the gate and being swept in full."""
+        import ipaddress
+        try:
+            net = ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            return False, f"refused: {cidr} is not a valid network"
+        active = self.active_entries(now=now, job=job)
+        if not active:
+            return False, "refused: scope is empty — arm a target first"
+        for e in active:
+            if e.kind != "cidr":
+                continue
+            try:
+                armed = ipaddress.ip_network(e.value, strict=False)
+            except ValueError:
+                continue
+            if net.version == armed.version and net.subnet_of(armed):
+                return True, f"authorized: {cidr} within armed {e.value}"
+        return False, f"refused: {cidr} is not contained in any armed CIDR"
 
     def permits(self, *, bssid=None, ssid=None, ip=None,
                 now: Optional[float] = None, job: Optional[str] = None) -> bool:
@@ -203,12 +246,43 @@ class Scope:
         p = path or self.path
         if not p:
             raise ValueError("no path to save Scope to")
+        # This file is the firing-authorization list. On a shared partition
+        # (e.g. the Pi's /captures, where an unprivileged service user also
+        # writes) a world-readable/writable scope would leak the target list and,
+        # worse, let a non-root process arm targets the root firing path then
+        # trusts. So: owner-only dir (0700) and file (0600), and an O_NOFOLLOW,
+        # O_EXCL temp write so a pre-planted symlink can't redirect the write
+        # onto a root-owned file. Turnkey too: create the parent if missing.
+        parent = os.path.dirname(p)
+        if parent:
+            os.makedirs(parent, mode=0o700, exist_ok=True)
+            try:
+                os.chmod(parent, 0o700)      # tighten even if it pre-existed looser
+            except OSError:
+                pass
         tmp = f"{p}.tmp"
-        with open(tmp, "w") as f:
-            json.dump(self.to_dict(), f, indent=2, sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
+        try:
+            os.unlink(tmp)                   # clear any stale/planted temp first
+        except OSError:
+            pass
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(tmp, flags, 0o600)
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(self.to_dict(), f, indent=2, sort_keys=True)
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         os.replace(tmp, p)          # atomic rename
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
         self.path = p
         return p
 

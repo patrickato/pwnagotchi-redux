@@ -281,3 +281,14 @@ def test_http_transport_invalid_json_is_explicit(monkeypatch):
     with pytest.raises(BettercapUnavailable, match="invalid JSON for GET /session"):
         HttpTransport(BettercapConfig()).session()
 
+
+
+def test_deauth_refuses_a_malformed_bssid_before_firing():
+    # a non-MAC must never be interpolated into the engine command, even with a
+    # non-empty allowlist authorizing by SSID.
+    drv = BettercapDriver(transport=ReplayTransport(),
+                          allowlist=Allowlist(ssids={"MyNet"}))
+    with pytest.raises(FiringRefused, match="not a valid BSSID"):
+        drv.deauth("$(reboot)", ssid="MyNet")
+    with pytest.raises(FiringRefused, match="not a valid BSSID"):
+        drv.deauth("zz:zz:zz:zz:zz:zz", ssid="MyNet")

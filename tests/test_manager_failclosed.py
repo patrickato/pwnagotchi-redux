@@ -52,7 +52,10 @@ def test_failure_after_partial_hotplug_does_not_claim_success():
         if len(actions) == 2:
             raise RuntimeError("simulated second transition failure")
 
-    mgr = RadioManager([ONBOARD], intent=Intent.HUNT, applier=second_fails)
+    # keep_uplink makes the hotplug a genuine two-move transition (onboard
+    # managed -> monitor as well as the new USB), so the second move can fail.
+    mgr = RadioManager([ONBOARD], intent=Intent.HUNT, applier=second_fails,
+                       keep_uplink=True)
     original = mgr.assignment
     with pytest.raises(RuntimeError, match="incomplete"):
         mgr.add_radio(USB)
@@ -64,7 +67,10 @@ def test_failure_after_partial_hotplug_does_not_claim_success():
 def test_failed_remove_keeps_prior_assignment_dirty():
     def fail(_):
         raise RuntimeError("synthetic down failure")
-    mgr = RadioManager([ONBOARD, USB], intent=Intent.HUNT, applier=fail)
+    # keep_uplink: onboard rides managed as the uplink, so losing the USB forces a
+    # real managed -> monitor move on the onboard (which the applier fails).
+    mgr = RadioManager([ONBOARD, USB], intent=Intent.HUNT, applier=fail,
+                       keep_uplink=True)
     before = mgr.assignment
     with pytest.raises(RuntimeError):
         mgr.remove_radio("wlan1")
