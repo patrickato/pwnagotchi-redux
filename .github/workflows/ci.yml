@@ -21,11 +21,14 @@ jobs:
       - name: Compile check
         run: python -m compileall redux
       - name: Tests
-        # -p no:cacheprovider: the cache plugin writing .pytest_cache in the
-        # runner checkout made pytest exit 2 (an internal/plugin error, fast and
-        # with no test-level detail). CI is a fresh checkout every run and needs
-        # no cross-run cache, so disabling it is both the fix and harmless here.
-        run: pytest -p no:cacheprovider
+        run: |
+          set +e
+          python -m pytest -rA -p no:cacheprovider > /tmp/pytest.txt 2>&1
+          rc=$?
+          echo "== pytest exit code: $rc =="
+          tail -n 120 /tmp/pytest.txt | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+          cat /tmp/pytest.txt
+          exit $rc
       - name: Shell syntax
         run: for f in $(git ls-files '*.sh'); do bash -n "$f"; done
 
