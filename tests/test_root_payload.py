@@ -242,6 +242,45 @@ def test_native_tft_payload_is_required_but_never_enabled(tmp_path):
         gate.verify(root)
 
 
+def _add_tft35a_turnkey(root):
+    """Stage the validated tft35a turnkey screen onto a rootfs fixture: the
+    measured framebuffer seed and the enabled first-boot seeder, exactly as the
+    40-power tft35a stage does."""
+    systemd = root / "etc/systemd/system"
+    (root / "usr/share/redux/fbui.seed.env").write_text(
+        (ROOT / "config/fbui.tft35a.env").read_text())
+    (systemd / "redux-fbui-seed.service").write_text(
+        (ROOT / "systemd/redux-fbui-seed.service").read_text())
+    wants = systemd / "multi-user.target.wants"
+    wants.mkdir(exist_ok=True)
+    (wants / "redux-fbui-seed.service").symlink_to("../redux-fbui-seed.service")
+    (wants / "redux-fbui.service").symlink_to("../redux-fbui.service")
+
+
+def test_tft35a_turnkey_screen_may_autostart_fbui(tmp_path):
+    """The sanctioned turnkey tft35a path (validated seed staged + seeder
+    enabled) is allowed to enable redux-fbui so a fresh flash boots to a screen.
+    The unit's own ConditionPathExists still guards an un-seeded boot."""
+    root = slot(tmp_path)
+    _add_tft35a_turnkey(root)
+    assert gate.verify(root)["root_payload_verified"] is True
+
+
+def test_fbui_autostart_without_turnkey_seed_is_still_rejected(tmp_path):
+    """Enabling redux-fbui WITHOUT the turnkey seeding (no seed env / seeder not
+    enabled) must still be refused — the exception is only the exact tft35a shape."""
+    root = slot(tmp_path)
+    systemd = root / "etc/systemd/system"
+    wants = systemd / "multi-user.target.wants"
+    wants.mkdir(exist_ok=True)
+    (wants / "redux-fbui.service").symlink_to("../redux-fbui.service")
+    # seed env present but seeder NOT enabled -> not the turnkey shape
+    (root / "usr/share/redux/fbui.seed.env").write_text(
+        (ROOT / "config/fbui.tft35a.env").read_text())
+    with pytest.raises(ValueError, match="autostart"):
+        gate.verify(root)
+
+
 def test_export_rejects_baked_in_unverified_framebuffer_config(tmp_path):
     root = slot(tmp_path)
     active = root / "captures/config/fbui.env"
