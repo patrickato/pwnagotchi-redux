@@ -1,7 +1,39 @@
 """Keep all test/interpreter caches in a disposable directory owned by this run."""
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
+
+import pytest
+
+
+def run_field_script_unprivileged(script, timeout=5):
+    """Run a field script as a non-root user and return the CompletedProcess.
+
+    The field scripts guard with an EUID!=0 check that exits 2 before any
+    probing or mutation. A test that simply runs the script asserts that
+    non-root path — but CI runners (and root dev boxes) execute the test
+    process itself as root, so a bare invocation would sail past the EUID
+    guard and hit the next check instead. Force the non-root path: when the
+    test is root, drop to an unprivileged user; otherwise run directly.
+    """
+    argv = ["bash", str(script)]
+    if os.geteuid() != 0:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    setpriv = shutil.which("setpriv")
+    if setpriv is not None:
+        return subprocess.run(
+            [setpriv, "--reuid=65534", "--regid=65534", "--clear-groups", *argv],
+            capture_output=True, text=True, timeout=timeout)
+    for dropper in ("runuser", "su"):
+        tool = shutil.which(dropper)
+        if tool is not None:
+            return subprocess.run(
+                [tool, "-s", "/bin/bash", "nobody", "-c",
+                 "exec bash " + str(script)],
+                capture_output=True, text=True, timeout=timeout)
+    pytest.skip("no privilege-drop tool (setpriv/runuser/su) to exercise the non-root guard")
 
 
 def pytest_configure(config):
