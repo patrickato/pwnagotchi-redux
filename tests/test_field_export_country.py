@@ -41,6 +41,10 @@ def test_lite_staging_requires_selected_country_before_unmount(tmp_path):
     assert script.index("redux-root-payload.py") < script.index('unmount "${ROOTFS_DIR}"')
     assert '--root "${ROOTFS_DIR}" --expected-country US' in script
     assert (tree / "export-image/redux-root-payload.py").is_file()
+    # root_payload.py imports unit_readiness by bare name at runtime, so its
+    # dependency must be staged beside it or the finalise step dies with
+    # ModuleNotFoundError: No module named 'unit_readiness'.
+    assert (tree / "export-image/unit_readiness.py").is_file()
 
 
 def test_ab_staging_requires_country_for_both_mounted_roots(tmp_path):
