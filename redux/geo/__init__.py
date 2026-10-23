@@ -23,8 +23,11 @@ from redux.geo.wigle import (
     write_wigle_csv,
 )
 from redux.geo.wigle_queue import WigleExportQueue
+from redux.geo.wigle_upload import UploadReport, upload_when_online
 
 __all__ = [
+    "UploadReport",
+    "upload_when_online",
     "CoverageGrid",
     "DEFAULT_DB_PATH",
     "Fix",

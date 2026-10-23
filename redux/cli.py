@@ -1764,6 +1764,14 @@ def cmd_wordlist(args) -> int:
     return 2
 
 
+def cmd_online(args) -> int:
+    """Report whether the device currently has uplink (glass-box; no data leaves)."""
+    from .connectivity.online import check_online
+    s = check_online(host=args.host, port=args.port, timeout=args.timeout)
+    print(s.reason)
+    return 0 if s.online else 1
+
+
 def cmd_pipeline(args) -> int:
     """Run or inspect the independent capture artifact workflow."""
     from .crack.ingest import Settings, CaptureIngestor, read_summary
@@ -1991,6 +1999,12 @@ def build_parser() -> argparse.ArgumentParser:
     wlr = wlc.add_parser("remove", help="unregister a list (leaves the file on disk)")
     wlr.add_argument("key", help="wordlist id or name to remove")
     wl.set_defaults(func=cmd_wordlist)
+
+    on = sub.add_parser("online", help="check whether the device currently has internet uplink")
+    on.add_argument("--host", default="one.one.one.one", help="reachability host (default one.one.one.one)")
+    on.add_argument("--port", type=int, default=443, help="reachability port (default 443)")
+    on.add_argument("--timeout", type=float, default=2.0, help="probe timeout seconds (default 2.0)")
+    on.set_defaults(func=cmd_online)
 
     ini = sub.add_parser("init", help="first-run setup: write config + swarm key + operator checklist")
     ini.add_argument("--dir", default="/etc/redux", help="config directory (default /etc/redux)")
