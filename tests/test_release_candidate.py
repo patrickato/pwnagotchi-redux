@@ -23,7 +23,14 @@ import qualify_candidate as gate
 from release_manifest import publish
 
 spec=importlib.util.spec_from_file_location('candidate_fixtures',ROOT/'tests/test_update_framework.py')
-fixtures=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixtures)
+fixtures=importlib.util.module_from_spec(spec)
+# test_update_framework skips at module level when cryptography can't be imported
+# (a cffi/ABI failure, not just a missing module). Propagate that as a clean
+# module-level skip here rather than a collection crash (pytest exit code 2).
+try:
+    spec.loader.exec_module(fixtures)
+except pytest.skip.Exception:
+    pytest.skip("cryptography-backed signing fixtures unavailable", allow_module_level=True)
 certificates=fixtures.certificates
 REV=fixtures.REV
 
