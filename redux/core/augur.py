@@ -73,6 +73,7 @@ class Augur:
         resource_collector=None,
         resource_monitor=None,
         trusted=None,
+        recon_channels=None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
@@ -105,6 +106,7 @@ class Augur:
         self.supervisor = Supervisor(
             radios=radios, intent=intent, driver=driver,
             detect_engine=self.engine, bus=self.bus,
+            recon_channels=recon_channels,
         )
         # Now that the driver exists, arm its deauth allowlist from the scope set
         # above (the __init__ scope assignment ran before the driver existed).
