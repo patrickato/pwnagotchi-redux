@@ -239,13 +239,25 @@ def test_collector_receipt_requires_current_boot_and_root_regular_file(tmp_path,
     with pytest.raises(LeaseLost):FileLeaseEvidence(fifo)()
 
 
-def test_disabled_usb_mode_cannot_fall_through_to_legacy_retuning(tmp_path,monkeypatch):
+def test_disabled_usb_mode_uses_usb_through_guarded_monitor(tmp_path,monkeypatch):
+    # Turnkey policy: with the field lease disabled (the default), a USB adapter
+    # is a first-class capture radio and falls through to the SAME guarded
+    # ensure_monitor path as the onboard radio — it is no longer refused. The
+    # connected-uplink guard inside ensure_monitor is the real protection (tested
+    # in test_live_runtime.py); here we prove the USB gate no longer blocks.
     import redux.core.live_runtime as mod
     config=LiveConfig(state_dir=tmp_path/'s',active_dir=tmp_path/'a',capture_dir=tmp_path/'i',enable_web=False)
+    assert config.require_usb_lease is False
     monkeypatch.setattr(mod,'usb_attached',lambda _:True)
-    def forbidden(*args,**kwargs):pytest.fail('must not retune or spawn an unleased USB interface')
-    r=LiveRuntime(config,executor=forbidden,spawn=forbidden)
-    with pytest.raises(LeaseLost):r._launch('wlan1')
+    reached={'ensure_monitor':False}
+    class _Reached(Exception):pass
+    def spy_ensure_monitor(iface,*a,**k):
+        reached['ensure_monitor']=iface
+        raise _Reached  # stop _launch here; we only assert the USB gate let us through
+    monkeypatch.setattr(mod,'ensure_monitor',spy_ensure_monitor)
+    r=LiveRuntime(config,executor=lambda *a,**k:None,spawn=lambda *a,**k:None)
+    with pytest.raises(_Reached):r._launch('wlan1')   # NOT LeaseLost — USB is allowed now
+    assert reached['ensure_monitor']=='wlan1'          # it went through the guarded monitor path
     assert r.process is None and r.engine_attempts==0
     r.close()
 
