@@ -315,7 +315,14 @@ def package_inventory(root):
     return {'count': len(entries), 'sha256': hashlib.sha256(raw.encode()).hexdigest()}
 
 
-def verify(root, *, profile="lite", other_root=None, expected_country=None):
+def verify(root, *, profile="lite", other_root=None, expected_country=None,
+           reviewed_source=None):
+    # Reviewed payload lives in the repo's image/ dir. That is Path(__file__).parent
+    # for an in-repo run, but NOT when this file is staged into pi-gen's
+    # export-image/ as redux-root-payload.py — so the caller (prepare_boot_gate)
+    # passes the real image/ path and we never guess it from __file__.
+    reviewed_source = (Path(__file__).parent if reviewed_source is None
+                       else Path(reviewed_source))
     if expected_country is not None:
         if (not isinstance(expected_country, str) or len(expected_country) != 2
                 or not expected_country.isascii() or not expected_country.isupper()
@@ -340,12 +347,12 @@ def verify(root, *, profile="lite", other_root=None, expected_country=None):
         inventories.append(package_inventory(candidate))
         for name in ('field-diagnostics', 'resource-summary'):
             catalog_path = f"usr/share/redux/packs/{name}/pack.toml"
-            reviewed = Path(__file__).parent / f"stage-redux/60-packs/files/catalog/{name}/pack.toml"
+            reviewed = reviewed_source / f"stage-redux/60-packs/files/catalog/{name}/pack.toml"
             if text(candidate, catalog_path) != reviewed.read_text():
                 raise ValueError("installed native pack catalog differs from reviewed payload")
         for filename in ('registry.py', 'runtime.py', 'native_observer.py'):
             installed = regular(candidate, f"opt/redux/redux/packs/{filename}")
-            reviewed = Path(__file__).resolve().parents[1] / 'redux/packs' / filename
+            reviewed = reviewed_source.parent / 'redux/packs' / filename
             if installed.stat().st_size > 65536 or installed.read_bytes() != reviewed.read_bytes():
                 raise ValueError("installed native implementation differs from reviewed registry")
         ab_units = {**{unit: rules[1:] for unit, rules in _AB_UNITS.items()}, **_AB_REQUIRED_UNITS} if profile=='ab' else None
@@ -381,10 +388,14 @@ def main(argv=None):
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--other-root", type=Path)
     parser.add_argument("--expected-country")
+    parser.add_argument("--reviewed-source", type=Path,
+                        help="repo image/ dir holding the reviewed pack catalog and "
+                             "native packs; defaults to this script's own directory")
     args = parser.parse_args(argv)
     try:
         report = verify(args.root, profile=args.profile, other_root=args.other_root,
-                        expected_country=args.expected_country)
+                        expected_country=args.expected_country,
+                        reviewed_source=args.reviewed_source)
     except (OSError, UnicodeError, ValueError) as exc:
         parser.error(str(exc))
     print(json.dumps(report, sort_keys=True))
