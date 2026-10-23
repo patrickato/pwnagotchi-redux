@@ -18,8 +18,11 @@ def row(package, name):return next(r for r in package['payload']['observations']
 
 @pytest.fixture
 def signer():
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from cryptography.hazmat.primitives import serialization
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives import serialization
+    except Exception as error:  # noqa: BLE001 - absent/broken cryptography must skip, not error
+        pytest.skip(f"cryptography unavailable or failed to import: {type(error).__name__}")
     key=Ed25519PrivateKey.generate()  # isolated, memory-only TEST key
     public=key.public_key().public_bytes(serialization.Encoding.Raw,serialization.PublicFormat.Raw).hex()
     policy=dict(schema=1,target=deepcopy(TARGET),session_id='7'*64,collector_sha256='8'*64,public_key=public,
