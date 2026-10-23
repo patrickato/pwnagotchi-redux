@@ -482,8 +482,10 @@ class LiveRuntime:
             raise LeaseLost('USB interlock persistence unavailable') from None
 
     def _check_usb_lease(self):
-        if self.lease_guard is None and self.iface and usb_attached(self.iface):
-            raise LeaseLost("USB capture requires explicit lease configuration")
+        # With the field lease disabled, a USB adapter is a first-class capture
+        # radio (guarded only by ensure_monitor's connected-uplink refusal), so
+        # there is nothing to enforce here. The lease checks apply only when the
+        # operator opted into the full provenance model (lease_guard present).
         if self.lease_guard is not None:
             try:
                 self.lease_guard.check(owner_pid=getattr(self.process, 'pid', None))
@@ -916,8 +918,12 @@ class LiveRuntime:
             self._save_lease_interlock(False)
             self._check_usb_lease()  # USB mode never retunes or acquires an NM-owned device.
         else:
-            if usb_attached(iface):
-                raise LeaseLost("USB capture requires explicit lease configuration")
+            # Turnkey (require_usb_lease=false, the default): bring ANY capture
+            # radio — onboard OR a USB adapter — to monitor through the same
+            # guarded path, so a plugged Alfa upgrades capability instead of being
+            # ignored. ensure_monitor still refuses a CONNECTED uplink, which is
+            # the real protection against tearing down the box's own link. The
+            # full field-provenance USB lease stays available via require_usb_lease=true.
             ensure_monitor(iface, run=self.executor,
                            allow_connected=self.config.allow_connected_capture)
         credentials = secrets.token_hex(24)
@@ -950,8 +956,6 @@ class LiveRuntime:
         self.log_handle = self._open_engine_log()
         self.engine_attempts += 1
         self._check_usb_lease()
-        if self.lease_guard is None and usb_attached(iface):
-            raise LeaseLost("USB interface appeared without a qualified lease")
         self.process = self.spawn(
             [self.config.bettercap_binary, "-iface", iface, "-caplet", str(caplet),
              "-no-history", "-env-file", "", "-no-colors", "-silent"],
