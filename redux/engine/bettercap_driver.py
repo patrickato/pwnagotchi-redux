@@ -291,6 +291,31 @@ class BettercapDriver:
         self._operation_guard = operation_guard
         self._capture_iface = capture_iface
 
+    def arm_from_scope(self, scope) -> "Allowlist":
+        """Populate the firing allowlist from the central Scope's ACTIVE targets,
+        so `redux scope add <bssid/ssid>` actually arms this driver's deauth gate.
+
+        Only BSSID and SSID entries arm deauth; a CIDR is a network-layer target,
+        not a Wi-Fi deauth target, so it's skipped. FAIL-CLOSED: an empty, expired,
+        or CIDR-only scope yields an empty allowlist, and deauth() still refuses.
+        Replaces the whole allowlist each call, so de-scoping a target disarms it."""
+        al = Allowlist()
+        try:
+            entries = scope.active_entries()
+        except Exception:
+            entries = []
+        for e in entries:
+            kind = getattr(e, "kind", None)
+            val = getattr(e, "value", None)
+            if not val:
+                continue
+            if kind == "bssid":
+                al.add(bssid=val)
+            elif kind == "ssid":
+                al.add(ssid=val)
+        self.allowlist = al
+        return al
+
     @property
     def base_url(self) -> str:
         return self.config.base_url

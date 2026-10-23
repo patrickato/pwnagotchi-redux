@@ -106,6 +106,31 @@ class Augur:
             radios=radios, intent=intent, driver=driver,
             detect_engine=self.engine, bus=self.bus,
         )
+        # Now that the driver exists, arm its deauth allowlist from the scope set
+        # above (the __init__ scope assignment ran before the driver existed).
+        self._arm_driver_from_scope()
+
+    # --- scope (arms the driver's firing gate on every change) ------------- #
+
+    @property
+    def scope(self):
+        return self._scope
+
+    @scope.setter
+    def scope(self, value) -> None:
+        self._scope = value if value is not None else Scope()
+        # Keep the bettercap driver's firing allowlist in lock-step with the
+        # central Scope, so `redux scope add` arms deauth and de-scoping disarms
+        # it. Guarded: during __init__ the supervisor/driver may not exist yet.
+        self._arm_driver_from_scope()
+
+    def _arm_driver_from_scope(self) -> None:
+        driver = getattr(getattr(self, "supervisor", None), "driver", None)
+        if driver is not None and hasattr(driver, "arm_from_scope"):
+            try:
+                driver.arm_from_scope(self._scope)
+            except Exception:
+                pass
 
     # --- geo-tagging (bus subscriber) -------------------------------------- #
 
