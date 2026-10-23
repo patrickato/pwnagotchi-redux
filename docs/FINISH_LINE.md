@@ -43,9 +43,13 @@ column on the right is the **only** part that physically requires the Pi + radio
   bring-up; the **brcmfmac injection self-test** that unlocks onboard active
   deauth; capture running with **no USB dongle** present.
 - **Per-radio engines** (AngryOxide + bettercap across capture radios) — plan
-  built + tested offline. Integration/bench: prove the supervisor **spawns and
-  supervises real engine processes per binding**, both bands at once. The plan
-  alone is not execution.
+  built + tested offline. The workbench now has a separately tested *measured*
+  passive two-radio binding gate (`redux.engine.tandem_readiness`) requiring
+  both radios' decoded reception and exclusive ownership; it deliberately
+  never launches an engine. Integration/bench: prove the supervisor **spawns
+  and supervises real engine processes per binding**, both bands at once,
+  safely excludes competing owners and closes/ingests both output streams.
+  Planning and receipt checks alone are not execution.
 - **Capture itself** — bench: a real handshake/PMKID on your own AP, zero
   pwnagotchi in the path (HARDWARE_VALIDATION §1.4, §2b.2).
 

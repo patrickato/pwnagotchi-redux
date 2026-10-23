@@ -267,7 +267,8 @@ class KernelUsbVerifier:
                 supplicants += 1
                 if '/wpa_supplicant.service' not in (directory/'cgroup').read_text():
                     raise LeaseLost('unowned supplicant instance')
-            if comm in {'hostapd','iwd','tcpdump','dumpcap','tshark','airodump-ng','hcxdumptool','kismet'}:
+            if comm in {'hostapd','iwd','tcpdump','dumpcap','tshark','airodump-ng','hcxdumptool','kismet',
+                        'angryoxide'}:
                 raise LeaseLost('conflicting capture owner')
             if comm == 'bettercap' and int(directory.name) != owner_pid:
                 raise LeaseLost('unowned Bettercap instance')

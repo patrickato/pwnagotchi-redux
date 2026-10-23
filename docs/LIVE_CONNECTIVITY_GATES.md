@@ -84,6 +84,29 @@ ifindex mapping across exec or a REST operation; a field removal-race test is
 still mandatory. The startup caplet does not start recon: qualification is
 rechecked before recon. No claim of race-free kernel ownership is made.
 
+### Measured tandem execution boundary (source-only)
+
+`redux/engine/tandem_readiness.py` now joins the previously separate
+per-radio engine planner and measured USB lease planner, limited to exactly
+one onboard Bettercap radio and one external USB AngryOxide radio. It requires
+independent Ethernet continuity, both engines present, fresh distinct
+PHY/ifindex identities, explicit exclusive ownership, native 802.11/radiotap
+link types and **positive decoded reception on both radios**. Driver-name
+injection guesses are dropped, and both bindings are forced passive. The
+returned USB lease pins phy/ifindex, while public preview output omits them.
+Unknown/stale/conflicting evidence produces no executable bindings.
+
+`radio_qualified` describes **only** measured RF-side prerequisites. It is
+**not** permission to start either engine; the result always has
+`activation_authorized=false`. The existing USB kernel verifier now also
+rejects an unowned `angryoxide` process as a capture conflict. The future
+process supervisor must positively pin and continuously recheck the separate
+Bettercap/AngryOxide owners before allowing legitimate concurrent use; it
+cannot bypass that conflict check simply because both binaries are installed.
+Closed output files, conversion, service lifecycle, hotplug, Pi 4/5 reception
+and owner approval remain separate unpassed gates. No executable, boot unit,
+Pi setting, NetworkManager role or RF mode was changed in this milestone.
+
 ## BlueZ PAN executor and authenticated agent
 
 `redux/connectivity/bluez_executor.py` provides the asynchronous executor,

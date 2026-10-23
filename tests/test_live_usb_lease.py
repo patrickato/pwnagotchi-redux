@@ -188,6 +188,15 @@ def test_independent_kernel_route_nm_bus_process_and_identity_checks(tmp_path):
     assert not any('set' in cmd or cmd[0]=='systemctl' for cmd in commands)
 
 
+def test_unowned_angryoxide_is_a_capture_conflict_not_a_usb_lease(tmp_path):
+    verifier, lease, _, _, proc, _ = kernel_fixture(tmp_path)
+    stranger = proc / '44'
+    stranger.mkdir()
+    (stranger / 'comm').write_text('angryoxide')
+    with pytest.raises(LeaseLost, match='conflicting capture owner'):
+        verifier(lease, None)
+
+
 @pytest.mark.parametrize('fault', ['route','unknown_nm','mode','shared_phy','link_down','ifindex','extra_supplicant','generation'])
 def test_independent_kernel_failures_never_trust_receipt_alone(tmp_path,fault):
     verifier,lease,state,node,proc,_=kernel_fixture(tmp_path)
