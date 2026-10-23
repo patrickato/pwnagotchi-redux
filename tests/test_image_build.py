@@ -1219,8 +1219,11 @@ def test_watchdog_stage_is_idempotent_on_real_shipped_unit(tmp_path):
     sed edits, then assert the readiness parser accepts the result and each owned
     directive appears exactly once."""
     import os
-    sys.path.insert(0, str(REPO / "image"))
-    import unit_readiness
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "unit_readiness", REPO / "image/unit_readiness.py")
+    unit_readiness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(unit_readiness)
 
     root = tmp_path / "release-rootfs"
     (root / "etc/initramfs-tools").mkdir(parents=True)
