@@ -100,6 +100,50 @@ leverage.
 - **Governor real collector** — needs the on-Pi `vcgencmd`/battery feed
   (needs-hardware; runbook §2b.9).
 
+## P1 — from the Oct 2026 full-tree audit (post-#172)
+
+These are **tracked, not yet built** — each is a design/semantics call the owner
+should weigh, not a mechanical fix. The core gate (`redux/core/scope.py`) and every
+radio-transmit path were traced and found correctly gated; these are the loose edges.
+
+- **Mesh scope-sync replay across reboot / direct removal.** `ScopeSync._clock`
+  (`redux/mesh/scope_sync.py`) is the anti-replay memory, but it is in-memory only and
+  value-level (job-independent, deliberately — a global remove must supersede a job
+  re-add; see `tests/test_mesh.py::test_global_remove_supersedes...`). Two integration
+  requirements close the window and must be met WHEN the LoRa mesh is wired live
+  (it is a dormant library today): (1) **persist the clock** alongside `scope.json`
+  (atomic) and reload at boot, so a power-cycle can't let a captured signed `add`
+  re-arm a removed target; (2) **route all local Scope mutations through
+  `ScopeSync.unarm()`** (today `redux scope remove` edits the Scope directly and the
+  clock never learns of the removal). The signed-but-not-encrypted LoRa lane means
+  deltas are capturable, so this matters once the mesh carries real authorization.
+- **SSID-armed deauth trusts the caller's SSID label.** `Allowlist.permits(bssid, ssid)`
+  (`redux/engine/bettercap_driver.py`) authorizes a deauth if EITHER the BSSID or the
+  SSID matches, and `deauth(bssid, ssid)` passes the caller-supplied `ssid` through. An
+  SSID arm therefore authorizes deauth of ANY BSSID labeled with that SSID, with no
+  check that the BSSID actually broadcasts it. Operator-invoked and recon-sourced in
+  practice, so low real-world risk, but looser than the glass-box promise. Fix: resolve
+  SSID arms to concrete BSSIDs from the live recon table before firing.
+- **Portal posture gate is persona-conditional.** `cmd_portal` (`redux/cli.py`) applies
+  the detection-only posture check only when `--persona` is passed; `serve --authorized`
+  with no persona stands up the credential-harvesting portal under any posture. It is
+  gated by the explicit `--authorized` flag, but unlike `eap`/`capture` it does not
+  consult Scope/offense posture unconditionally. Consider requiring the engagement SSID
+  to be in Scope for the portal, for one consistent firing contract.
+- **`authorize(job=...)` excludes globally-armed entries** (`redux/core/scope.py`
+  `active_entries`): a `job`-scoped authorize matches only `e.job == job`, so a global
+  (`job=""`, e.g. `arm-lab`) target is NOT authorized under any job. No caller passes
+  `job` today (latent), but a future per-job campaign would silently ignore lab/global
+  arms. Decide: job-scoped authorize should match `job` OR global, or document the
+  exclusion.
+- **`crack()` is scope-optional by design.** With `scope=None` it runs without an
+  authorization check (documented "optionally checks"; `tests/test_crack.py` relies on
+  it; cracking is offline, no RF). Left as-is intentionally; flagged only so a future
+  caller knows to pass a Scope for the authorization belt.
+- **`/boot/firmware` hardening sed is a silent no-op if the pinned pi-gen ever emits the
+  fstab line without the literal `defaults`** (`image/stage-redux/10-overlay/00-run.sh`).
+  No contract checks the result. Works with the current pinned pi-gen; pin a test on it.
+
 ## Not building (would be theater on this hardware)
 
 - Wi-Fi 7 / 6GHz / MLO offense (no Pi 7 radio), on-device LLM operator (infeasible +

@@ -71,8 +71,12 @@ def import_token(tok: str) -> SwarmKey:
         raise ValueError("not an Augur swarm-key token")
     try:
         body = json.loads(base64.urlsafe_b64decode(tok[len(_TOKEN_PREFIX):]))
+        expires = body.get("e")
+        # Coerce expiry to float|None here so a malformed token fails cleanly as a
+        # corrupt token, not later with a TypeError inside is_expired()'s `now >= expires`.
         return SwarmKey(key=base64.urlsafe_b64decode(body["k"]), created=float(body["c"]),
-                        label=body.get("l", ""), expires=body.get("e"))
+                        label=body.get("l", ""),
+                        expires=None if expires is None else float(expires))
     except Exception as e:
         raise ValueError("corrupt swarm-key token") from e
 

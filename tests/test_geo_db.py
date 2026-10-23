@@ -82,6 +82,19 @@ def test_dedup_ignores_weaker_rssi_but_keeps_first_seen():
         assert row.first_seen == 1990.0  # earlier ts recorded
 
 
+def test_merge_with_missing_timestamp_does_not_corrupt_first_seen():
+    # regression: a merged sighting with ts=0 (missing/unknown time, e.g. a
+    # bettercap event with no timestamp) must not drag first_seen back to epoch 0
+    # (1970). The earliest real timestamp stays.
+    with SightingStore(":memory:") as db:
+        db.insert(_s(rssi=-50, ts=1000.0, provenance="first real"))
+        db.insert(_s(rssi=-40, ts=0.0, provenance="stronger but timeless"))
+        row = db.get("wifi", "aa:bb:cc:dd:ee:01")
+        assert row is not None
+        assert row.rssi == -40            # stronger sample still wins
+        assert row.first_seen == 1000.0   # NOT 0.0
+
+
 def test_query_by_kind_and_time():
     with SightingStore(":memory:") as db:
         db.insert(_s(mac="11:11:11:11:11:11", kind="wifi", ts=10.0))
