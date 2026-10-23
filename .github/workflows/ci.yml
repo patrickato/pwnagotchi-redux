@@ -21,22 +21,11 @@ jobs:
       - name: Compile check
         run: python -m compileall redux
       - name: Tests
-        run: |
-          # Surface the real failure as GH annotations (the full log blob is not
-          # always reachable from the review side). Capture the run, then echo
-          # the summary/error lines as ::error:: so they show via the checks API.
-          set +e
-          python -m pytest -rA -p no:cacheprovider > /tmp/pytest.txt 2>&1
-          rc=$?
-          echo "pytest exit code: $rc"
-          if [ "$rc" -ne 0 ]; then
-            # last ~80 lines usually hold the summary / tracebacks / interruption
-            tail -n 80 /tmp/pytest.txt | while IFS= read -r line; do
-              printf '::error::%s\n' "$line"
-            done
-          fi
-          cat /tmp/pytest.txt
-          exit $rc
+        # -p no:cacheprovider: the cache plugin writing .pytest_cache in the
+        # runner checkout made pytest exit 2 (an internal/plugin error, fast and
+        # with no test-level detail). CI is a fresh checkout every run and needs
+        # no cross-run cache, so disabling it is both the fix and harmless here.
+        run: pytest -p no:cacheprovider
       - name: Shell syntax
         run: for f in $(git ls-files '*.sh'); do bash -n "$f"; done
 
