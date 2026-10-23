@@ -17,7 +17,13 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'image'))
 import candidate_factory as factory
-from test_release_candidate import fixtures, certificates, add_boot, fat, ext, disk, requires_tools
+# test_release_candidate (and test_update_framework behind it) skip at module
+# level when cryptography can't be imported; keep that a clean skip here instead
+# of a collection crash (pytest exit code 2).
+try:
+    from test_release_candidate import fixtures, certificates, add_boot, fat, ext, disk, requires_tools
+except pytest.skip.Exception:
+    pytest.skip("cryptography-backed signing fixtures unavailable", allow_module_level=True)
 from release_manifest import publish
 
 
