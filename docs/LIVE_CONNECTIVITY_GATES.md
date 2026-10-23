@@ -122,15 +122,37 @@ lease, while handoff failures preserve original files and block re-arm until
 reconciliation. A dropped Bettercap peer, changed mount identity or kernel
 lease loss latches the companion; it does not auto-restart.
 
-This is an **opt-in Python lifecycle API, not yet wired into `redux-live.service`
-or the main `LiveRuntime.tick`/rotation path**. The Pi has not run these
-processes together; source-only tests use synthetic `/proc`, radio receipts,
-process handles and mount identities. Do not enable on boot or treat test
-success as RF qualification. Outstanding integration: the explicit caller
-interface from LiveRuntime, full-process shutdown ordering, on-Pi output
-format/conversion observations, hotplug and dual-band reception, field consent
-and verified Pi 4/5 acceptance. No executable, boot unit, Pi setting,
-NetworkManager role, or RF mode was changed by these source commits.
+`LiveRuntime.attach_tandem(companion, operator_authorized=True)` now provides
+the guarded handoff from a **connected, running onboard Bettercap owner** into
+the optional companion. It requires the exact same Bettercap child object and
+interface, identical live/active/incoming directory bindings, an independent
+USB guard, exclusive onboard ownership and REDUXCAP continuity. This is a
+source API, **not a boot configuration option**: no
+systemd unit, CLI, or automatic service startup calls it. A readiness receipt
+or config setting alone cannot start AngryOxide.
+
+When attached, every live tick checks both process owners. Normal rotation
+stops/reaps AngryOxide and safely queues its closed output **before** shutting
+down Bettercap and publishing its capture. After normal rotation, Bettercap
+may resume solo; AngryOxide requires a new explicitly approved attachment.
+An unexpected companion loss instead stops the entire pair and latches
+`tandem_blocked`; `rearm_tandem(operator_authorized=True)` allows *only solo*
+Bettercap to resume after every writer and handoff has cleared. Unreapable USB
+children and pending handoffs hold their owner reference and block retries.
+
+The live checkpoint includes a `runtime.tandem` section (state, iface, closed
+handoff count, sanitized error, no auto-restart), and Doctor makes a distinct
+process-health finding. Even `running` is only **attention**: it is not proof
+of valid 802.11 receptions or crackable hashes. A broken interlock is an
+action finding, not a false all-green dashboard.
+
+The Pi has still **not** run these processes together. Source-only tests use
+synthetic `/proc`, radio receipts, process handles and mount identities. Do
+not enable on boot or treat green CI as RF qualification. Outstanding: a
+reviewed field entrypoint and consent, actual dual-radio hotplug/dual-band
+reception, real AngryOxide output ingestion and conversion, process-liveness
+hardening under physical faults, and verified Pi 4/5 acceptance. No executable,
+boot unit, Pi setting, NetworkManager role, or RF mode was changed here.
 
 ## BlueZ PAN executor and authenticated agent
 

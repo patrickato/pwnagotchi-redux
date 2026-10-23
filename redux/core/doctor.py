@@ -275,3 +275,32 @@ def with_native_plugins(report, inventory):
             findings.append(Finding('upstream diagnosis', Status.UNKNOWN, 'Invalid upstream Doctor evidence.'))
     findings.append(finding)
     return Doctor(probes=[lambda inp, value=value: value for value in findings]).report(DoctorInputs())
+
+
+def with_tandem_owner(report, observed):
+    """Describe a companion *process*, not unmeasured on-air receive quality."""
+    observed = observed if isinstance(observed, dict) else {}
+    state = observed.get('state')
+    if state == 'running':
+        status = Status.ATTENTION
+        summary = 'Both capture processes are supervised; RF reception still needs field proof.'
+    elif state in ('interlocked', 'handoff_blocked', 'termination_pending', 'tandem_blocked'):
+        status = Status.ACTION_REQUIRED
+        summary = 'The tandem capture owner is interlocked; review evidence before re-arming.'
+    else:
+        status = Status.UNKNOWN
+        summary = 'Tandem process health has no current verified observation.'
+    finding = Finding('tandem capture', status, summary,
+                      'A process/USB-lease check is not a decoded-frame or converted-hash check.',
+                      remediation='Inspect live tandem status and retained captures; approve a fresh measured trial.')
+    raw = report.get('findings') if isinstance(report, dict) else None
+    findings = []
+    for row in raw[:64] if isinstance(raw, list) else []:
+        try:
+            findings.append(Finding(row['area'], Status(row['status']), row['summary'],
+                                    row.get('reason', ''), row.get('detail', {}), row.get('remediation', '')))
+        except (KeyError, ValueError, TypeError):
+            findings.append(Finding('upstream diagnosis', Status.UNKNOWN,
+                                    'Invalid upstream Doctor evidence.'))
+    findings.append(finding)
+    return Doctor(probes=[lambda inp, value=value: value for value in findings]).report(DoctorInputs())

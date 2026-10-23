@@ -48,10 +48,13 @@ column on the right is the **only** part that physically requires the Pi + radio
   authorize launch. The new opt-in `redux.engine.tandem_runtime` supervises a
   *synthetic-tested* passive USB AngryOxide child alongside pinned Bettercap,
   monitors both process identities and releases closed outputs to ingest only
-  after a confirmed stop. Integration/bench: connect it to LiveRuntime's real
-  owner loop, prove both radios and engines work simultaneously, verify
-  real `.pcapng`/`.hc22000` ingest, USB removal handling and safe shutdown on
-  Pi 4/5. Offline subprocess doubles are **not** a successful field trial.
+  after a confirmed stop. `LiveRuntime.attach_tandem` now binds that child to
+  the live owner loop for periodic supervision, coordinated rotation/shutdown,
+  Doctor and local dashboard reporting. Still **not automatically started** by
+  the boot service. Integration/bench: approve a field entrypoint, prove both
+  radios and engines receive simultaneously, verify real `.pcapng`/`.hc22000`
+  ingest, USB removal handling and safe shutdown on Pi 4/5. Offline subprocess
+  doubles are **not** a successful field trial.
 - **Capture itself** — bench: a real handshake/PMKID on your own AP, zero
   pwnagotchi in the path (HARDWARE_VALIDATION §1.4, §2b.2).
 

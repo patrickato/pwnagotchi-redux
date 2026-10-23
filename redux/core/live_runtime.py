@@ -380,6 +380,11 @@ class LiveRuntime:
                 KernelUsbVerifier(config.usb_management_peer, run=executor), clock=clock)
         self._lease_interlock = False
         self.process = None
+        # A second engine is never launched from configuration or boot. An
+        # explicitly authorized caller may attach one after Bettercap connects.
+        self.tandem = None
+        self._tandem_interlock = False
+        self._tandem_last = {"state": "disabled", "handed_off": 0, "last_error": ""}
         self.augur = None
         self.driver = None
         self.web = None
@@ -518,6 +523,53 @@ class LiveRuntime:
         self.state = 'degraded'
         self.next_try = self.clock()
 
+    def attach_tandem(self, companion, *, operator_authorized=False):
+        """One explicitly approved passive USB companion for THIS Bettercap.
+
+        This API is deliberately not called by the boot service. The caller
+        must have acquired independent measured radio/USB/process evidence and
+        construct ``TandemCompanion`` with the existing child as its peer.
+        """
+        from ..engine.tandem_runtime import TandemCompanion
+
+        if (operator_authorized is not True or not isinstance(companion, TandemCompanion)
+                or self._closing or self._tandem_interlock or self.tandem is not None
+                or self.lease_guard is not None or self.state != 'running'
+                or self.augur is None or self.process is None
+                or self.process.poll() is not None or not self._capture_mount_ok()
+                or companion.bettercap_child is not self.process
+                or companion.bettercap_owner.iface != self.iface
+                or companion.paths.active != self.config.active_dir
+                or companion.paths.incoming != self.config.capture_dir
+                or companion.paths.state != self.config.state_dir
+                or (self.capture_mount_identity is not None
+                    and companion.mount_probe() != self.capture_mount_identity)):
+            raise LeaseLost('live tandem attachment requires the verified running onboard owner and approval')
+        # Retain the owner reference even if spawn fails: an unreapable child
+        # or still-pending output must remain supervised and cannot be retried.
+        self.tandem = companion
+        try:
+            companion.start(operator_authorized=True)
+        except Exception:
+            self._tandem_interlock = True
+            raise
+        self._tandem_last = {"state": "running", "handed_off": companion.handoffs,
+                             "last_error": ""}
+
+    def rearm_tandem(self, *, operator_authorized=False):
+        """After a fully stopped pair, re-enable SOLO Bettercap explicitly.
+
+        Re-arming never re-spawns AngryOxide; another independently approved
+        attach and fresh readiness proof is required for tandem capture.
+        """
+        if (operator_authorized is not True or not self._tandem_interlock
+                or self.tandem is not None or self.process is not None
+                or self.augur is not None or self._closing):
+            raise LeaseLost('tandem re-arm requires approved, fully released owners')
+        self._tandem_interlock = False
+        self.state = 'degraded'
+        self.next_try = self.clock()
+
     def _capture_mount_ok(self):
         return (not self.capture_mount_required
                 or (self.capture_mount_identity is not None
@@ -631,6 +683,16 @@ class LiveRuntime:
             "capture_link_assessment": link_assessment(capture_link_type),
             "events_seen": self.created, "handshake_events": self.handshakes,
             "pid": self.process.pid if self.process is not None else None,
+            "tandem": ({"state": self.tandem.state,
+                        "iface": self.tandem.readiness.usb_lease.iface,
+                        "handed_off": self.tandem.handoffs,
+                        "last_error": self.tandem.last_error[:140],
+                        "automatic_restart": False}
+                       if self.tandem is not None else
+                       {**self._tandem_last,
+                        "state": "interlocked" if self._tandem_interlock else
+                                 self._tandem_last["state"],
+                        "automatic_restart": False}),
             "capture_file": str(self.capture_file) if self.capture_file else "",
             "handed_off": self.handoffs,
             "handoff_error": self.last_handoff_error[:120],
@@ -740,6 +802,9 @@ class LiveRuntime:
         if self.config.enable_native_plugins:
             from .doctor import with_native_plugins
             report = with_native_plugins(report, snapshot.get("plugins", {}))
+        if self.tandem is not None or self._tandem_interlock:
+            from .doctor import with_tandem_owner
+            report = with_tandem_owner(report, metadata['tandem'])
         def health_view():
             return describe_live_health(
                 self.state, iface=self.iface or "",
@@ -1045,6 +1110,24 @@ class LiveRuntime:
     def _drop(self):
         # Stop the writer FIRST. Until it has exited, do not close the
         # logger/SQLite resources, publish a .pcap, or forget its PID.
+        if self.tandem is not None:
+            try:
+                companion_stopped = self.tandem.stop()
+            except Exception as error:
+                companion_stopped = False
+                self.observer_errors['tandem_shutdown'] = type(error).__name__
+            if not companion_stopped:
+                # Stop the onboard writer too, even when the USB child cannot
+                # be reaped or its files cannot be published yet. Keep both
+                # owner references and prohibit a second launch.
+                self._stop_engine_child()
+                self.state = 'termination_pending'
+                self.last_error = f'tandem teardown pending: {self.tandem.state}'
+                return False
+            self._tandem_last = {"state": self.tandem.state,
+                                 "handed_off": self.tandem.handoffs,
+                                 "last_error": self.tandem.last_error[:140]}
+            self.tandem = None
         if not self._stop_engine_child():
             return False
         if self.augur is not None:
@@ -1218,6 +1301,25 @@ class LiveRuntime:
                 "after remount to reacquire the ownership lock"
             )
             self._checkpoint()  # in-memory only; never create a rootfs fallback
+            return self.state
+        # Tandem is an opt-in lifetime attachment, not a second autonomous
+        # launch loop. A lost companion stops BOTH engines; no fallback radio
+        # retuning or automatic re-arm is allowed.
+        if self.tandem is not None:
+            try:
+                if self.tandem.tick() != 'running':
+                    self._tandem_interlock = True
+            except Exception as error:
+                self.observer_errors['tandem_supervision'] = type(error).__name__
+                self._tandem_interlock = True
+        if self._tandem_interlock:
+            if self.tandem is not None or self.process is not None or self.augur is not None:
+                if not self._drop():
+                    self._checkpoint()
+                    return self.state
+            self.state = 'tandem_blocked'
+            self.last_error = 'tandem ownership lost; fresh qualification and explicit re-arm required'
+            self._checkpoint()
             return self.state
         self._enforce_log_limit()
         # Bring up read-only diagnostics even without a radio or working
@@ -1400,7 +1502,7 @@ class LiveRuntime:
             fcntl.flock(self._lock.fileno(), fcntl.LOCK_UN)
             self._lock.close()
         if not stopped:
-            raise RuntimeError("Bettercap child remained alive during Redux shutdown")
+            raise RuntimeError("capture writer remained alive or closed-file handoff remains pending")
 
 
 def preflight(config, *, which=shutil.which, radio_probe=probe,
