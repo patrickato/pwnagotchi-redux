@@ -22,18 +22,21 @@ jobs:
         run: python -m compileall redux
       - name: Tests
         run: |
-          # Surface collection errors as GH annotations (the full log blob is
-          # not always reachable). Collect first; if that fails, echo the errors
-          # as ::error:: lines (visible via the checks API) and stop.
-          if ! python -m pytest --co -q > /tmp/collect.txt 2>&1; then
-            echo "::error::pytest collection failed (exit $?):"
-            sed -n '1,80p' /tmp/collect.txt | while IFS= read -r line; do
+          # Surface the real failure as GH annotations (the full log blob is not
+          # always reachable from the review side). Capture the run, then echo
+          # the summary/error lines as ::error:: so they show via the checks API.
+          set +e
+          python -m pytest -rA -p no:cacheprovider > /tmp/pytest.txt 2>&1
+          rc=$?
+          echo "pytest exit code: $rc"
+          if [ "$rc" -ne 0 ]; then
+            # last ~80 lines usually hold the summary / tracebacks / interruption
+            tail -n 80 /tmp/pytest.txt | while IFS= read -r line; do
               printf '::error::%s\n' "$line"
             done
-            cat /tmp/collect.txt
-            exit 1
           fi
-          pytest
+          cat /tmp/pytest.txt
+          exit $rc
       - name: Shell syntax
         run: for f in $(git ls-files '*.sh'); do bash -n "$f"; done
 
