@@ -1664,12 +1664,22 @@ def cmd_scope(args) -> int:
     function consults. Edits are saved atomically back to the scope file."""
     path = args.file
     scope = Scope.load(path)
+    if args.scope_cmd == "lab-mode":
+        if args.state in ("on", "off"):
+            scope.lab_mode = (args.state == "on")
+            scope.save(path)
+        print("lab mode: " + ("ON — firing is approved on sight for your own gear "
+                              "(RF targets + private networks), each logged"
+                              if scope.lab_mode else
+                              "OFF — targets must be armed before firing (safe default)"))
+        return 0
     if args.scope_cmd == "list":
         s = scope.summary()
         print(f"scope: {s['active']} active / {s['total']} total"
               + (f", {s['expired']} expired" if s["expired"] else "")
               + (f" | jobs: {', '.join(s['jobs'])}" if s["jobs"] else "")
-              + ("  (EMPTY — nothing authorized)" if s["empty"] else ""))
+              + ("  (EMPTY — nothing authorized)" if s["empty"] else "")
+              + ("  [LAB MODE ON]" if s["lab_mode"] else ""))
         now = time.time()
         for e in scope.entries:
             state = "active" if e.active(now) else "EXPIRED"
@@ -2294,6 +2304,10 @@ def build_parser() -> argparse.ArgumentParser:
     al.add_argument("--auto", action="store_true",
                     help="auto-detect your own kit (own private subnet/radios/AP) and arm it, zero typing")
     al.add_argument("--bssid", action="append"); al.add_argument("--ssid", action="append"); al.add_argument("--cidr", action="append")
+    lm = scsub.add_parser("lab-mode",
+                          help="your-own-lab switch: approve firing on sight (RF + private nets), each logged")
+    lm.add_argument("state", nargs="?", default="status", choices=("on", "off", "status"),
+                    help="on | off | status (default: status)")
     sc.set_defaults(func=cmd_scope)
     return p
 

@@ -93,9 +93,22 @@ def classify_target(token: str) -> str:
 
 @dataclass
 class Scope:
-    """The central authorized-target list. Empty by default."""
+    """The central authorized-target list. Empty by default.
+
+    lab_mode is the one-switch loosening for working on your OWN gear: off by
+    default (so the device still never fires at something you didn't choose out
+    of the box), but when you turn it on, authorize() stops making you pre-arm and
+    re-arm every target — it approves any concrete RF target and any PRIVATE
+    network on sight, logging a glass-box reason each time. It is deliberately
+    asymmetric: public IP ranges are NEVER auto-approved even in lab mode, and the
+    things that can't be aimed (BLE/beacon spam, jamming) have no firing path at
+    all, lab mode or not. Explicit arming still works and still records targets for
+    the picker; lab mode just removes the friction when everything in range is
+    yours.
+    """
     entries: List[ScopeEntry] = field(default_factory=list)
     path: Optional[str] = None
+    lab_mode: bool = False
 
     # --- queries ----------------------------------------------------------- #
 
@@ -117,16 +130,22 @@ class Scope:
         """Glass-box decision: (permitted, human-readable reason)."""
         now = time.time() if now is None else now
         active = self.active_entries(now=now, job=job)
-        if not active:
-            where = f" for job '{job}'" if job else ""
-            return False, f"refused: scope is empty{where} — arm a target first"
         for e in active:
             if e.matches(bssid=bssid, ssid=ssid, ip=ip):
                 exp = "no expiry" if e.expires is None else f"expires {time.strftime('%Y-%m-%d', time.gmtime(e.expires))}"
                 tag = f" (job '{e.job}')" if e.job else ""
                 return True, f"authorized: {e.kind} {e.value}{tag}, {exp}"
-        target = bssid or ssid or ip or "?"
-        return False, f"refused: {target} is not in the active scope ({len(active)} authorized target(s))"
+        target = bssid or ssid or ip
+        # lab mode: on your own gear, approve any concrete RF target on sight
+        # (logged), instead of refusing until it's been armed. Off by default.
+        if self.lab_mode and target is not None:
+            return True, (f"authorized: lab mode — {target} approved on sight "
+                          f"(your own lab; disable with `redux scope lab-mode off`)")
+        if not active:
+            where = f" for job '{job}'" if job else ""
+            return False, (f"refused: scope is empty{where} — arm a target first, "
+                           f"or enable lab mode for your own gear (`redux scope lab-mode on`)")
+        return False, f"refused: {target or '?'} is not in the active scope ({len(active)} authorized target(s))"
 
     def authorize_network(self, cidr: str, now: Optional[float] = None,
                           job: Optional[str] = None) -> tuple[bool, str]:
@@ -140,8 +159,6 @@ class Scope:
         except ValueError:
             return False, f"refused: {cidr} is not a valid network"
         active = self.active_entries(now=now, job=job)
-        if not active:
-            return False, "refused: scope is empty — arm a target first"
         for e in active:
             if e.kind != "cidr":
                 continue
@@ -151,6 +168,15 @@ class Scope:
                 continue
             if net.version == armed.version and net.subnet_of(armed):
                 return True, f"authorized: {cidr} within armed {e.value}"
+        # lab mode auto-approves PRIVATE networks only — a public range is never
+        # swept on sight, even in lab mode (the one guard that stays).
+        if self.lab_mode:
+            if net.is_private:
+                return True, f"authorized: lab mode — private network {cidr} (your own lab)"
+            return False, f"refused: {cidr} is a public range — not auto-approved even in lab mode; arm it explicitly"
+        if not active:
+            return False, ("refused: scope is empty — arm a target first, or enable "
+                           "lab mode for your own private networks (`redux scope lab-mode on`)")
         return False, f"refused: {cidr} is not contained in any armed CIDR"
 
     def permits(self, *, bssid=None, ssid=None, ip=None,
@@ -240,7 +266,8 @@ class Scope:
     # --- persistence (atomic, infrequent — SD-friendly) -------------------- #
 
     def to_dict(self) -> dict:
-        return {"version": 1, "entries": [asdict(e) for e in self.entries]}
+        return {"version": 1, "lab_mode": self.lab_mode,
+                "entries": [asdict(e) for e in self.entries]}
 
     def save(self, path: Optional[str] = None) -> str:
         p = path or self.path
@@ -303,7 +330,7 @@ class Scope:
                 ))
             except (KeyError, TypeError, ValueError):
                 continue   # skip malformed rows, keep the rest
-        return cls(entries=entries, path=path)
+        return cls(entries=entries, path=path, lab_mode=bool(data.get("lab_mode", False)))
 
     def summary(self) -> dict:
         now = time.time()
@@ -314,4 +341,5 @@ class Scope:
             "expired": len(self.entries) - len(active),
             "jobs": self.jobs(),
             "empty": self.empty,
+            "lab_mode": self.lab_mode,
         }
