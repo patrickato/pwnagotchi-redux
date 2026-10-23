@@ -694,10 +694,19 @@ def cmd_portal(args) -> int:
         print(f"  page bytes: {len(portal.page())}")
         print("  NOT serving (plan only) — add `serve --authorized` to run an authorized engagement.")
         return 0
-    # serve: refuse unless explicitly authorized
+    # serve: require explicit --authorized, UNLESS lab mode is on. Lab mode is the
+    # own-gear switch (`redux scope lab-mode on`) that already waives pre-arming for
+    # the firing paths, so it waives the portal's per-run --authorized too.
     if not getattr(args, "authorized", False):
-        print("refused: `serve` requires --authorized (authorized client testing only)")
-        return 3
+        from .core.scope import Scope, default_scope_path
+        try:
+            lab = Scope.load(default_scope_path()).lab_mode
+        except Exception:
+            lab = False
+        if not lab:
+            print("refused: `serve` requires --authorized (or turn on lab mode: `redux scope lab-mode on`)")
+            return 3
+        print("lab mode on — `--authorized` waived for your own lab")
     # posture gate: the portal is firing-capable (credential harvest), so a
     # detection-only persona hard-disables it — same invariant as eap/capture.
     if getattr(args, "persona", None):
