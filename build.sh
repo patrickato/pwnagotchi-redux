@@ -95,6 +95,14 @@ cp "$REPO_DIR/systemd/redux-fbui.service" \
     "$PI_GEN_DIR/stage-redux/00-redux/files/redux-fbui.service"
 cp "$REPO_DIR/config/fbui.example.env" \
     "$PI_GEN_DIR/stage-redux/00-redux/files/fbui.example.env"
+# TFT seed assets. Staged unconditionally; only the tft35a profile's 40-power
+# stage installs them (the file marker files/tft35a gates that). They turn a
+# fresh flash of a tft35a-profile image into a working, self-seeding screen.
+mkdir -p "$PI_GEN_DIR/stage-redux/40-power/files"
+cp "$REPO_DIR/systemd/redux-fbui-seed.service" \
+    "$PI_GEN_DIR/stage-redux/40-power/files/redux-fbui-seed.service"
+cp "$REPO_DIR/config/fbui.tft35a.env" \
+    "$PI_GEN_DIR/stage-redux/40-power/files/fbui.seed.env"
 if [[ -n ${REDUX_REGULATORY_COUNTRY:-} ]]; then
     printf '%s\n' "$REDUX_REGULATORY_COUNTRY" > "$PI_GEN_DIR/stage-redux/00-redux/files/regulatory-country"
     chmod 0644 "$PI_GEN_DIR/stage-redux/00-redux/files/regulatory-country"
@@ -146,8 +154,39 @@ if [[ -n ${REDUX_POWER_CONFIG:-} ]]; then
 fi
 case ${REDUX_TFT_PROFILE:-none} in
     none) ;;
-    mpi3501) touch "$PI_GEN_DIR/stage-redux/40-power/files/mpi3501" ;;
-    *) echo 'Unsupported TFT profile; select none or mpi3501.' >&2; exit 1 ;;
+    mpi3501)
+        # Legacy profile: the distro's generic fbtft ILI9486 overlay. It SHEARS
+        # the MPI3501 (ILI9486 + XPT2046) panel and ships no touch node, so it is
+        # kept only for continuity. Prefer REDUX_TFT_PROFILE=tft35a below.
+        touch "$PI_GEN_DIR/stage-redux/40-power/files/mpi3501" ;;
+    tft35a)
+        # Proven goodtft MPI3501 overlay: drives the ILI9486 framebuffer upright
+        # at rotate=270 AND declares the XPT2046/ADS7846 touch controller (so a
+        # /dev/input/eventN appears for the fbui). We never reconstruct this
+        # hardware-critical blob from source: the operator supplies the exact
+        # compiled overlay they have validated on the panel, via
+        # REDUX_TFT_OVERLAY=/abs/path/tft35a.dtbo (from goodtft LCD-show's
+        # usr/tft35a-overlay.dtb). The stage refuses to claim a working TFT
+        # without it.
+        [[ -n ${REDUX_TFT_OVERLAY:-} ]] || {
+            echo 'REDUX_TFT_PROFILE=tft35a requires REDUX_TFT_OVERLAY=/abs/path/tft35a.dtbo (the validated goodtft overlay blob).' >&2
+            exit 1
+        }
+        [[ ${REDUX_TFT_OVERLAY} = /* && -f ${REDUX_TFT_OVERLAY} ]] || {
+            echo "REDUX_TFT_OVERLAY must be an absolute path to an existing .dtbo: ${REDUX_TFT_OVERLAY}" >&2
+            exit 1
+        }
+        # A Device Tree blob begins with the big-endian FDT magic 0xd00dfeed.
+        python3 - "$REDUX_TFT_OVERLAY" <<'VERIFY_DTBO' || { echo 'REDUX_TFT_OVERLAY is not a Device Tree blob (bad FDT magic).' >&2; exit 1; }
+import sys
+with open(sys.argv[1], 'rb') as handle:
+    magic = handle.read(4)
+sys.exit(0 if magic == b'\xd0\x0d\xfe\xed' else 1)
+VERIFY_DTBO
+        touch "$PI_GEN_DIR/stage-redux/40-power/files/tft35a"
+        install -m 0644 "$REDUX_TFT_OVERLAY" \
+            "$PI_GEN_DIR/stage-redux/40-power/files/tft35a.dtbo" ;;
+    *) echo 'Unsupported TFT profile; select none, mpi3501 or tft35a.' >&2; exit 1 ;;
 esac
 mkdir -p "$PI_GEN_DIR/stage-redux/00-redux/files/redux"
 cp -a "$REPO_DIR/redux/." "$PI_GEN_DIR/stage-redux/00-redux/files/redux/"
