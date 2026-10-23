@@ -43,13 +43,15 @@ column on the right is the **only** part that physically requires the Pi + radio
   bring-up; the **brcmfmac injection self-test** that unlocks onboard active
   deauth; capture running with **no USB dongle** present.
 - **Per-radio engines** (AngryOxide + bettercap across capture radios) — plan
-  built + tested offline. The workbench now has a separately tested *measured*
-  passive two-radio binding gate (`redux.engine.tandem_readiness`) requiring
-  both radios' decoded reception and exclusive ownership; it deliberately
-  never launches an engine. Integration/bench: prove the supervisor **spawns
-  and supervises real engine processes per binding**, both bands at once,
-  safely excludes competing owners and closes/ingests both output streams.
-  Planning and receipt checks alone are not execution.
+  and offline lifecycle built + tested. `redux.engine.tandem_readiness`
+  requires both radios' decoded reception/exclusive ownership and cannot
+  authorize launch. The new opt-in `redux.engine.tandem_runtime` supervises a
+  *synthetic-tested* passive USB AngryOxide child alongside pinned Bettercap,
+  monitors both process identities and releases closed outputs to ingest only
+  after a confirmed stop. Integration/bench: connect it to LiveRuntime's real
+  owner loop, prove both radios and engines work simultaneously, verify
+  real `.pcapng`/`.hc22000` ingest, USB removal handling and safe shutdown on
+  Pi 4/5. Offline subprocess doubles are **not** a successful field trial.
 - **Capture itself** — bench: a real handshake/PMKID on your own AP, zero
   pwnagotchi in the path (HARDWARE_VALIDATION §1.4, §2b.2).
 

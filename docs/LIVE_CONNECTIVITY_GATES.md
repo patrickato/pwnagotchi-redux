@@ -98,14 +98,39 @@ Unknown/stale/conflicting evidence produces no executable bindings.
 
 `radio_qualified` describes **only** measured RF-side prerequisites. It is
 **not** permission to start either engine; the result always has
-`activation_authorized=false`. The existing USB kernel verifier now also
-rejects an unowned `angryoxide` process as a capture conflict. The future
-process supervisor must positively pin and continuously recheck the separate
-Bettercap/AngryOxide owners before allowing legitimate concurrent use; it
-cannot bypass that conflict check simply because both binaries are installed.
-Closed output files, conversion, service lifecycle, hotplug, Pi 4/5 reception
-and owner approval remain separate unpassed gates. No executable, boot unit,
-Pi setting, NetworkManager role or RF mode was changed in this milestone.
+`activation_authorized=false`.
+
+The new optional `redux.engine.tandem_runtime.TandemCompanion` implements a
+source-only passive AngryOxide process owner **beside an already running,
+caller-owned Bettercap process**. `tandem_usb_guard` configures the independent
+kernel USB verifier for that pairing. It allows the pinned onboard Bettercap
+peer plus **exactly one** supervised USB AngryOxide child; unowned copies of
+either capture engine remain fatal conflicts. `ProcessOwner` checks process
+PID, kernel process-start tick, executable name and exact interface argument
+before startup and during each periodic guard check. PID reuse, renamed or
+reconfigured processes, missing Ethernet/NM/USB evidence and fresh unknown
+owners are all rejected. The existing single-Bettercap USB path is unchanged.
+
+`start(operator_authorized=True)` is a separate per-start authorization gate;
+the candidate cannot set it. The companion spawns only with `--notransmit`,
+no target or auto-hunt arguments, on the measured USB interface. Its own
+single-purpose output directory lives under the pinned REDUXCAP mount. A
+successful stop terminates/reaps the writer **before** fsync/hard-link/unlink
+handoff of `.pcap`, `.pcapng`, `.cap`, and `.hc22000` to the existing ingest
+queue. Other child outputs remain untouched. Unreapable children retain the
+lease, while handoff failures preserve original files and block re-arm until
+reconciliation. A dropped Bettercap peer, changed mount identity or kernel
+lease loss latches the companion; it does not auto-restart.
+
+This is an **opt-in Python lifecycle API, not yet wired into `redux-live.service`
+or the main `LiveRuntime.tick`/rotation path**. The Pi has not run these
+processes together; source-only tests use synthetic `/proc`, radio receipts,
+process handles and mount identities. Do not enable on boot or treat test
+success as RF qualification. Outstanding integration: the explicit caller
+interface from LiveRuntime, full-process shutdown ordering, on-Pi output
+format/conversion observations, hotplug and dual-band reception, field consent
+and verified Pi 4/5 acceptance. No executable, boot unit, Pi setting,
+NetworkManager role, or RF mode was changed by these source commits.
 
 ## BlueZ PAN executor and authenticated agent
 

@@ -6,7 +6,8 @@ import subprocess
 
 import pytest
 
-from redux.radio.live_lease import LeaseObservation, UsbLeaseGuard, LeaseLost, FileLeaseEvidence
+from redux.radio.live_lease import (LeaseObservation, UsbLeaseGuard, LeaseLost,
+                                    FileLeaseEvidence, ProcessOwner, KernelUsbVerifier)
 from redux.radio.split_integration import MeasuredRadio
 from redux.radio.orchestrator import Radio
 from redux.radio.dual_radio import RadioEvidence
@@ -195,6 +196,79 @@ def test_unowned_angryoxide_is_a_capture_conflict_not_a_usb_lease(tmp_path):
     (stranger / 'comm').write_text('angryoxide')
     with pytest.raises(LeaseLost, match='conflicting capture owner'):
         verifier(lease, None)
+
+
+def mock_process(proc, pid, engine, iface, *, ticks=100, duplicate=False):
+    directory = proc / str(pid)
+    directory.mkdir(exist_ok=True)
+    (directory / 'comm').write_text(engine)
+    flag = '-iface' if engine == 'bettercap' else '-i'
+    argv = [f'/usr/bin/{engine}', flag, iface]
+    if duplicate:
+        argv.extend([flag, 'wlan9'])
+    (directory / 'cmdline').write_bytes(b'\0'.join(x.encode() for x in argv) + b'\0')
+    (directory / 'stat').write_text(f'{pid} ({engine}) ' + ' '.join(['S'] + ['0'] * 18 + [str(ticks)]))
+    return directory
+
+
+def tandem_verifier(tmp_path):
+    baseline, lease, state, node, proc, commands = kernel_fixture(tmp_path)
+    peer = mock_process(proc, 42, 'bettercap', 'wlan0')
+    owner = ProcessOwner.pin(42, 'bettercap', 'wlan0', proc_root=proc)
+    checker = KernelUsbVerifier('192.0.2.1', run=baseline.run,
+                                sys_root=baseline.sys_root, proc_root=proc,
+                                owner_engine='angryoxide', tandem_peer=owner)
+    return checker, lease, state, proc, peer
+
+
+def test_tandem_kernel_verifier_pins_two_distinct_process_incarnations(tmp_path):
+    checker, lease, _, proc, peer = tandem_verifier(tmp_path)
+    checker(lease, None)  # Bettercap is expected; no AngryOxide is yet authorized.
+    oxide = mock_process(proc, 55, 'angryoxide', 'wlan1', ticks=230)
+    with pytest.raises(LeaseLost):
+        checker(lease, None)
+    checker(lease, 55)
+    checker(lease, 55)
+    (oxide / 'stat').write_text('55 (angryoxide) ' + ' '.join(['S'] + ['0'] * 18 + ['231']))
+    with pytest.raises(LeaseLost, match='incarnation'):
+        checker(lease, 55)
+    (oxide / 'stat').write_text('55 (angryoxide) ' + ' '.join(['S'] + ['0'] * 18 + ['230']))
+    mock_process(proc, 56, 'angryoxide', 'wlan1')
+    with pytest.raises(LeaseLost, match='conflicting'):
+        checker(lease, 55)
+    (proc / '56' / 'comm').write_text('sleep')
+    (peer / 'cmdline').write_bytes(b'/usr/bin/bettercap\0-iface\0wlan1\0')
+    with pytest.raises(LeaseLost, match='arguments'):
+        checker(lease, 55)
+
+
+def test_tandem_kernel_rejects_duplicate_iface_and_peer_disappearance(tmp_path):
+    checker, lease, _, proc, peer = tandem_verifier(tmp_path)
+    mock_process(proc, 55, 'angryoxide', 'wlan1', duplicate=True)
+    with pytest.raises(LeaseLost, match='arguments'):
+        checker(lease, 55)
+    (proc / '55' / 'cmdline').write_bytes(b'/usr/bin/angryoxide\0-i\0wlan1\0')
+    checker(lease, 55)
+    (peer / 'comm').write_text('sleep')
+    with pytest.raises(LeaseLost):
+        checker(lease, 55)
+
+
+def test_tandem_verifier_requires_pinned_bettercap_owner(tmp_path):
+    verifier, _, _, _, proc, _ = kernel_fixture(tmp_path)
+    with pytest.raises(ValueError):
+        KernelUsbVerifier('192.0.2.1', owner_engine='angryoxide')
+    with pytest.raises(LeaseLost):
+        ProcessOwner.pin(44, 'angryoxide', 'wlan1', proc_root=proc)
+
+
+def test_tandem_verifier_refuses_bettercap_on_usb_interface(tmp_path):
+    checker, lease, _, proc, peer = tandem_verifier(tmp_path)
+    (peer / 'cmdline').write_bytes(b'/usr/bin/bettercap\0-iface\0wlan1\0')
+    same_usb = ProcessOwner.pin(42, 'bettercap', 'wlan1', proc_root=proc)
+    checker.tandem_peer = same_usb
+    with pytest.raises(LeaseLost, match='may not share'):
+        checker(lease, None)
 
 
 @pytest.mark.parametrize('fault', ['route','unknown_nm','mode','shared_phy','link_down','ifindex','extra_supplicant','generation'])

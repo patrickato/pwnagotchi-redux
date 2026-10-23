@@ -37,6 +37,57 @@ class LeaseLost(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ProcessOwner:
+    """A pinned Linux process incarnation AND its exact capture interface.
+
+    A PID or process name on its own is not an ownership proof: PID reuse,
+    process replacement, and a second interface argument must fail closed.
+    """
+    pid: int
+    engine: str
+    iface: str
+    start_ticks: int
+
+    @classmethod
+    def pin(cls, pid, engine, iface, *, proc_root=Path('/proc')):
+        if (type(pid) is not int or pid <= 0 or engine not in ('bettercap', 'angryoxide')
+                or not isinstance(iface, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,15}', iface)):
+            raise LeaseLost('invalid process owner identity')
+        owner = cls(pid, engine, iface, 0)
+        ticks = owner._inspect(Path(proc_root))
+        return cls(pid, engine, iface, ticks)
+
+    def verify(self, *, proc_root=Path('/proc')):
+        if self._inspect(Path(proc_root)) != self.start_ticks:
+            raise LeaseLost('capture process incarnation changed')
+
+    def _inspect(self, proc_root):
+        try:
+            directory = proc_root / str(self.pid)
+            if (directory / 'comm').read_text().strip() != self.engine:
+                raise LeaseLost('capture process name changed')
+            argv = (directory / 'cmdline').read_bytes()[:16385]
+            if len(argv) > 16384 or not argv.endswith(b'\x00'):
+                raise LeaseLost('capture command line unverified')
+            parts = [x.decode('utf-8') for x in argv[:-1].split(b'\x00')]
+            flag = '-iface' if self.engine == 'bettercap' else '-i'
+            positions = [i for i, arg in enumerate(parts) if arg == flag]
+            if (not parts or Path(parts[0]).name != self.engine or len(positions) != 1
+                    or positions[0] + 1 >= len(parts) or parts[positions[0] + 1] != self.iface):
+                raise LeaseLost('capture interface arguments changed')
+            # proc stat field 22 (starttime); field 2 is parenthesized and
+            # may itself contain spaces or parentheses.
+            stat_row = (directory / 'stat').read_text()
+            fields = stat_row.rsplit(') ', 1)[1].split()
+            ticks = int(fields[19])
+            if ticks <= 0:
+                raise LeaseLost('capture process starttime unverified')
+            return ticks
+        except (OSError, UnicodeError, ValueError, IndexError):
+            raise LeaseLost('capture process identity unavailable') from None
+
+
+@dataclass(frozen=True)
 class LeaseObservation:
     radios: tuple[MeasuredRadio, ...]
     sampled_at: float
@@ -172,6 +223,8 @@ class UsbLeaseGuard:
     def release(self):
         # Only called AFTER old child termination and closed-file handoff.
         self.lease = None
+        if hasattr(self.verify_kernel, 'release_owner'):
+            self.verify_kernel.release_owner()
 
     def rearm(self, *, owner_authorized=False):
         if owner_authorized is not True or self.lease is not None:
@@ -189,11 +242,19 @@ class KernelUsbVerifier:
     This live integration intentionally never tries to acquire ownership itself.
     """
     def __init__(self, management_peer, *, run=subprocess.run, sys_root=Path('/sys/class/net'),
-                 proc_root=Path('/proc')):
+                 proc_root=Path('/proc'), owner_engine='bettercap', tandem_peer=None):
+        if (owner_engine not in ('bettercap', 'angryoxide')
+                or (owner_engine == 'angryoxide') != (tandem_peer is not None)
+                or (tandem_peer is not None and
+                    (not isinstance(tandem_peer, ProcessOwner) or tandem_peer.engine != 'bettercap'))):
+            raise ValueError('tandem requires a pinned Bettercap peer and AngryOxide owner')
         self.peer = str(ipaddress.ip_address(management_peer))
         self.run, self.sys_root, self.proc_root = run, Path(sys_root), Path(proc_root)
         self.ethernet_identity = None
         self.net_identity = None
+        self.owner_engine = owner_engine
+        self.tandem_peer = tandem_peer
+        self.owner_identity = None
 
     def _command(self, *args):
         p = self.run(list(args), capture_output=True, text=True, timeout=2, check=False,
@@ -205,6 +266,8 @@ class KernelUsbVerifier:
     def __call__(self, lease, owner_pid):
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,15}', lease.iface):
             raise LeaseLost('invalid capture netdev')
+        if self.tandem_peer is not None and self.tandem_peer.iface == lease.iface:
+            raise LeaseLost('Bettercap and AngryOxide may not share the USB interface')
         routes = json.loads(self._command('ip', '-j', 'route', 'get', self.peer))
         eth = json.loads(self._command('ip', '-j', 'address', 'show', 'dev', 'eth0'))
         if (len(routes) != 1 or routes[0].get('dev') != 'eth0' or len(eth) != 1
@@ -256,6 +319,8 @@ class KernelUsbVerifier:
             if not value.startswith('s ') or json.loads(value[2:]) == lease.iface:
                 raise LeaseLost('supplicant capture exclusion unverified')
         supplicants = 0
+        peer_seen = False
+        owner_seen = False
         for directory in self.proc_root.iterdir():
             if not directory.name.isdigit():
                 continue
@@ -267,11 +332,27 @@ class KernelUsbVerifier:
                 supplicants += 1
                 if '/wpa_supplicant.service' not in (directory/'cgroup').read_text():
                     raise LeaseLost('unowned supplicant instance')
+            pid = int(directory.name)
+            if (self.tandem_peer is not None and pid == self.tandem_peer.pid
+                    and comm == 'bettercap'):
+                self.tandem_peer.verify(proc_root=self.proc_root)
+                peer_seen = True
+                continue
+            if self.owner_engine == 'angryoxide' and comm == 'angryoxide' and pid == owner_pid:
+                if self.owner_identity is None:
+                    self.owner_identity = ProcessOwner.pin(pid, 'angryoxide', lease.iface,
+                                                           proc_root=self.proc_root)
+                self.owner_identity.verify(proc_root=self.proc_root)
+                owner_seen = True
+                continue
             if comm in {'hostapd','iwd','tcpdump','dumpcap','tshark','airodump-ng','hcxdumptool','kismet',
                         'angryoxide'}:
                 raise LeaseLost('conflicting capture owner')
-            if comm == 'bettercap' and int(directory.name) != owner_pid:
+            if comm == 'bettercap' and (self.owner_engine != 'bettercap' or pid != owner_pid):
                 raise LeaseLost('unowned Bettercap instance')
+        if (self.tandem_peer is not None and not peer_seen
+                or self.owner_engine == 'angryoxide' and owner_pid is not None and not owner_seen):
+            raise LeaseLost('pinned tandem engine missing')
         if supplicants != 1 or (Path('/run/wpa_supplicant')/lease.iface).exists():
             raise LeaseLost('supplicant process ownership unverified')
         if (node.stat().st_dev, node.stat().st_ino) != net_identity or int((node/'ifindex').read_text()) != lease.ifindex:
@@ -280,3 +361,7 @@ class KernelUsbVerifier:
 
     def release(self):
         self.net_identity = None
+        self.release_owner()
+
+    def release_owner(self):
+        self.owner_identity = None
