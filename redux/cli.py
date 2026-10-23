@@ -1202,9 +1202,37 @@ def cmd_tft(args) -> int:
 
 
 def cmd_hunt(args) -> int:
-    if getattr(args, "hunt_cmd", "demo") == "live":
+    hc = getattr(args, "hunt_cmd", "demo")
+    if hc == "live":
         return _hunt_live(args)
+    if hc == "track":
+        return _hunt_track(args)
     return _hunt_demo(args)
+
+
+def _hunt_track(args) -> int:
+    """Scope-bounded location trail demo: fixes are logged over time ONLY for an
+    armed target. A bystander BSSID is refused and never written — the trail is a
+    fox-hunt history of what you're hunting, not a who-was-where log of the air."""
+    from .geo import TrackStore
+    armed = "aa:bb:cc:dd:ee:ff"
+    bystander = "11:22:33:44:55:66"
+    scope = Scope(); scope.add(armed, "bssid", job="hunt")
+    store = TrackStore(":memory:")
+    print("redux hunt track demo — Scope-bounded location trail (in-memory)")
+    # a few fixes on the armed target as you move
+    for i, (la, lo, r) in enumerate([(42.00, -83.00, -70), (42.01, -83.01, -58),
+                                     (42.012, -83.012, -47)]):
+        ok, why = store.record_fix(scope, armed, la, lo, rssi=r, ts=100 + i, now=100 + i)
+        print(f"  armed fix {i+1}: logged={ok}")
+    ok, why = store.record_fix(scope, bystander, 42.02, -83.02, now=110)
+    print(f"  bystander fix: logged={ok} — {why}")
+    print(f"  trail length (armed): {store.count(armed)}   bystander logged: {store.count(bystander)}")
+    est = store.estimate(armed)
+    if est is not None:
+        print(f"  estimate: {est.lat:.5f},{est.lon:.5f} — {est.reason}")
+    print("  → only armed targets accumulate a trail; bystanders are never logged.")
+    return 0
 
 
 def _hunt_live(args) -> int:
@@ -2224,6 +2252,8 @@ def build_parser() -> argparse.ArgumentParser:
     hul.add_argument("--target", required=True, help="target BSSID to hunt (your own gear)")
     hul.add_argument("--channel", type=int, default=None, help="park on the target's channel")
     hul.add_argument("--seconds", type=float, default=60.0, help="run for N seconds (default 60)")
+    husub.add_parser("track", help="scope-bounded location trail: log fixes over time "
+                                   "for ARMED targets only (bystanders never logged)")
     hu.set_defaults(func=cmd_hunt)
 
     me = sub.add_parser("mesh", help="off-grid swarm — authenticated distributed Scope sync")

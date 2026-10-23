@@ -434,6 +434,28 @@ class Augur:
     def scope_sync(self):
         return getattr(self, "_scope_sync", None)
 
+    # --- scope-bounded fox-hunt location trail ----------------------------- #
+
+    def track_store(self, path=None):
+        """The persistent fix-trail store (lazy). Fixes are Scope-gated at write
+        time, so the trail only ever holds location history for armed targets."""
+        ts = getattr(self, "_track_store", None)
+        if ts is None:
+            from ..geo import TrackStore, DEFAULT_TRACKS_PATH
+            ts = TrackStore(path or DEFAULT_TRACKS_PATH)
+            self._track_store = ts
+        return ts
+
+    def record_hunt_fix(self, bssid, lat, lon, *, rssi=None, now=None,
+                        node_id="", job=None):
+        """Log one fox-hunt fix against THIS box's live Scope — authorized targets
+        only. Returns the glass-box (recorded, reason); a bystander is refused and
+        nothing is written."""
+        return self.track_store().record_fix(
+            self.scope, bssid, lat, lon, rssi=rssi, now=now,
+            node_id=node_id or getattr(self, "node_id", ""), job=job,
+            provenance="fox-hunt fix (live)")
+
     # --- autonomous kill-chain operator ------------------------------------ #
 
     def operator(self):
