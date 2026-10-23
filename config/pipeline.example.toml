@@ -32,4 +32,6 @@ wordlist = ""
 scope_file = ""
 results_dir = "/captures/audits"
 binary = "hashcat"
-max_runtime_seconds = 600
+# Per-capture crack budget, in seconds. 30 up to 86400 (24h) — set it high for an
+# overnight run against your own handshake; it only bounds a single attempt.
+max_runtime_seconds = 1800
