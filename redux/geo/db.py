@@ -157,7 +157,12 @@ class SightingStore:
             )
             return
 
-        first_seen = min(existing.first_seen or existing.ts, sighting.ts)
+        # Only let a positive timestamp pull first_seen earlier. A sighting with
+        # a missing/zero ts (e.g. a bettercap event with no time) would otherwise
+        # drive first_seen to epoch 0 (1970) and silently corrupt the earliest-seen
+        # record; keep the prior value in that case.
+        prior_first = existing.first_seen or existing.ts
+        first_seen = min(prior_first, sighting.ts) if sighting.ts and sighting.ts > 0 else prior_first
         keep_new = _better_rssi(sighting.rssi, existing.rssi)
 
         if keep_new:

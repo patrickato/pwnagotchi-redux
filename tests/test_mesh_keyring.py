@@ -53,6 +53,18 @@ def test_import_token_rejects_garbage():
         import_token("AKEY1:@@@not-base64@@@")
 
 
+def test_import_token_with_nonnumeric_expiry_fails_as_corrupt():
+    # regression: a token whose "e" (expiry) is a non-numeric string must be
+    # rejected as corrupt at import, not accepted and then crash later inside
+    # is_expired()'s `now >= expires` with a TypeError.
+    import base64, json
+    body = {"k": base64.urlsafe_b64encode(b"x" * 32).decode(), "c": 100.0,
+            "l": "op", "e": "soon"}
+    tok = "AKEY1:" + base64.urlsafe_b64encode(json.dumps(body).encode()).decode()
+    with pytest.raises(ValueError, match="corrupt"):
+        import_token(tok)
+
+
 def test_rotation_grace_lets_recent_keys_still_verify():
     r = SwarmKeyring()
     old = r.rotate(now=0.0)
