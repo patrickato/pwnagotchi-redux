@@ -119,3 +119,21 @@ def test_augur_campaign_plan_reflects_posture_and_engine():
     cap = next(s for s in plan if s["phase"] == "capture")
     # armed + offense on, but no capture engine present → blocked on capability
     assert cap["allowed"] is False and "capability" in cap["reason"]
+
+
+def test_augur_swarm_worker_regates_assignments_against_this_box():
+    # A SwarmWorker from a live box inherits that box's real gates: an assignment
+    # for a target this box has NOT armed is refused locally, signature regardless.
+    from redux.mesh import SwarmCoordinator, NodeProfile
+    r = Radio("wlan0", bands=frozenset({"2.4"}), monitor=True, inject=True, driver="mt76")
+    bc = Augur(radios=[r], intent=Intent.RECON)
+    bc.scope = Scope()                 # nothing armed on this box
+    bc.apply_persona("red")            # offense enabled
+    fired = []
+    worker = bc.swarm_worker(b"swarm-key", node_id="n1",
+                             executors={Phase.CAPTURE: lambda t: fired.append(t) or (True, "x")})
+    coord = SwarmCoordinator(b"swarm-key")
+    coord.add_node(NodeProfile("n1", caps={"capture.handshake": True}))
+    out = worker.accept(coord.assignments([ARMED])[0])
+    assert out["fired"] is False and "local gate refused" in out["reason"]
+    assert fired == []                 # never fired at an un-armed target

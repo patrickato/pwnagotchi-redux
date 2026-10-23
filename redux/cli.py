@@ -1280,10 +1280,56 @@ def _hunt_demo(args) -> int:
     return 0
 
 
+def _cmd_mesh_swarm(args) -> int:
+    """Coordinated multi-device capture demo (SIMULATED): a coordinator places the
+    capture chain across two nodes by capability, and each node re-gates the
+    assignment against its OWN Scope before firing — the coordinator distributes
+    work, never permission."""
+    from .mesh import NodeProfile, SwarmCoordinator, SwarmWorker
+    from .operator.operator import Operator, Phase
+    key = b"swarm-shared-key"
+    cap = "capture.handshake"
+    target = "00:11:22:33:44:55"
+
+    def armed():
+        s = Scope(); s.add(target, "bssid", job="op"); return s
+
+    print("redux swarm ops demo — coordinated capture across 2 nodes (SIMULATED)")
+    coord = SwarmCoordinator(key, node_id="coordinator")
+    coord.add_node(NodeProfile("alpha", caps={cap: True}))    # has a capture engine
+    coord.add_node(NodeProfile("bravo", caps={cap: False}))   # recon-only
+    for a in coord.plan([target], job="op"):
+        if a.phase is Phase.CAPTURE:
+            print(f"  placement: capture → {a.assignee or 'UNPLACED'} ({a.reason})")
+
+    def captured(_t):
+        return True, "handshake captured"
+
+    # alpha is armed + capable → fires. bravo is armed but a stranger hands IT the
+    # capture task directly; it has no capture engine, so its local gate refuses.
+    alpha = SwarmWorker(Operator(armed(), caps={cap: True}), key, node_id="alpha",
+                        executors={Phase.CAPTURE: captured})
+    msgs = coord.assignments([target], job="op")
+    for m in msgs:
+        r = alpha.accept(m)
+        if r.get("phase") == "capture" and r.get("reason", "") and "not me" not in r["reason"]:
+            print(f"  alpha (armed+capable): fired={r['fired']} — {r.get('result', r['reason'])}")
+
+    # the safety property: an UN-ARMED node refuses a correctly-signed assignment.
+    blank = SwarmWorker(Operator(Scope(), caps={cap: True}), key, node_id="alpha",
+                        executors={Phase.CAPTURE: captured})
+    r = blank.accept(msgs[0])
+    print(f"  un-armed node, VALID signature: fired={r['fired']} — {r['reason']}")
+    print("  → authorization is never delegated: every node re-checks its own Scope.")
+    return 0
+
+
 def cmd_mesh(args) -> int:
     """Mesh demo: a 3-node swarm sharing one authorized Scope over the (simulated)
     LoRa lane — arm on one node, it converges everywhere; a forged delta (wrong
     swarm key) is rejected."""
+    if getattr(args, "mesh_cmd", "demo") == "swarm":
+        return _cmd_mesh_swarm(args)
     from .mesh import ScopeSync, LoopbackMesh, SignedMessage, sign
     key = b"swarm-shared-key"
     mesh = LoopbackMesh()
@@ -2183,6 +2229,8 @@ def build_parser() -> argparse.ArgumentParser:
     me = sub.add_parser("mesh", help="off-grid swarm — authenticated distributed Scope sync")
     mesub = me.add_subparsers(dest="mesh_cmd", required=True)
     mesub.add_parser("demo", help="3-node swarm: propagate an arm + reject a forged delta")
+    mesub.add_parser("swarm", help="coordinated capture: place the chain across nodes, "
+                                   "each re-gates locally before it fires")
     mk = mesub.add_parser("key", help="swarm-key lifecycle: gen/rotate/show/export/import (sealed)")
     mksub = mk.add_subparsers(dest="key_cmd", required=True)
 
