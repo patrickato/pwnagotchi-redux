@@ -67,6 +67,14 @@ class TftCfg:
 
 
 @dataclass
+class DetectCfg:
+    # Networks you assert are legitimate, so the rogue-AP / evil-twin detector can
+    # flag impersonation of them. Each: {ssid, bssids=[...], channels=[...], security=[...]}.
+    # Empty (default) keeps the detector quiet — it never guesses what's "yours".
+    trusted_networks: list = field(default_factory=list)
+
+
+@dataclass
 class AugurConfig:
     cache: CacheCfg = field(default_factory=CacheCfg)
     web: WebCfg = field(default_factory=WebCfg)
@@ -74,9 +82,11 @@ class AugurConfig:
     persona: PersonaCfg = field(default_factory=PersonaCfg)
     vault: VaultCfg = field(default_factory=VaultCfg)
     tft: TftCfg = field(default_factory=TftCfg)
+    detect: DetectCfg = field(default_factory=DetectCfg)
 
     _SECTIONS = {"cache": CacheCfg, "web": WebCfg, "mesh": MeshCfg,
-                 "persona": PersonaCfg, "vault": VaultCfg, "tft": TftCfg}
+                 "persona": PersonaCfg, "vault": VaultCfg, "tft": TftCfg,
+                 "detect": DetectCfg}
 
     @classmethod
     def from_dict(cls, d: Dict) -> "AugurConfig":

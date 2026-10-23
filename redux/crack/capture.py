@@ -166,6 +166,87 @@ def select_capture_provider(providers: List[CaptureProvider]):
     return None, "no capture engine available"
 
 
+# --- per-radio engine assignment (consume the FULL capture map) ------------- #
+
+@dataclass(frozen=True)
+class CaptureBinding:
+    """One capture radio bound to one engine (glass-box)."""
+    iface: str
+    role: str                 # "capture" (primary) | "scan" (tandem passive)
+    engine: Optional[str]     # "angryoxide" | "bettercap" | None
+    mode: str                 # "active" | "passive"
+    band: str                 # "2.4" | "5" | "6" | ""
+    reason: str
+
+    def to_dict(self) -> dict:
+        return {"iface": self.iface, "role": self.role, "engine": self.engine,
+                "mode": self.mode, "band": self.band, "reason": self.reason}
+
+
+def _band_label(band: str) -> str:
+    return f"{band}GHz" if band else "its assigned band"
+
+
+def plan_capture_bindings(assignment, *, angryoxide_present: bool,
+                          bettercap_present: bool) -> List[CaptureBinding]:
+    """Bind an engine to EVERY capture radio the orchestrator assigned, not just
+    the primary — so tandem radios add real capture surface instead of idling.
+
+    Honors the bake-off (docs/ENGINE_BAKEOFF.md): AngryOxide is the scalpel on the
+    primary (active when the radio can inject); bettercap is the nervous system
+    (recon + BLE + event bus) on a tandem radio when a second radio exists; any
+    further tandem radios run passive AngryOxide on their own band. With a single
+    engine present it drives every radio. Pure/testable — no OS calls.
+    """
+    from ..radio.orchestrator import Role
+    roles = getattr(assignment, "roles", {}) or {}
+    cap_mode = getattr(assignment, "capture_mode", {}) or {}
+    cap_band = getattr(assignment, "capture_band", {}) or {}
+
+    primary = [i for i, r in roles.items() if r == Role.CAPTURE]
+    tandem = [i for i, r in roles.items() if r == Role.SCAN]
+    order = primary + tandem
+    if not order:
+        return []
+
+    bindings: List[CaptureBinding] = []
+    bettercap_placed = False
+    for iface in order:
+        is_primary = iface in primary
+        role = "capture" if is_primary else "scan"
+        mode = cap_mode.get(iface) or ("active" if is_primary else "passive")
+        band = cap_band.get(iface, "")
+        if not angryoxide_present and not bettercap_present:
+            bindings.append(CaptureBinding(
+                iface, role, None, mode, band,
+                "no capture engine available (no AngryOxide binary, no bettercap driver)"))
+            continue
+        if is_primary:
+            if angryoxide_present:
+                engine = "angryoxide"
+                reason = f"AngryOxide scalpel: {mode} capture on {_band_label(band)} (validated 22000)"
+            else:
+                engine = "bettercap"
+                reason = f"bettercap capture: {mode} on {_band_label(band)}"
+        else:
+            # First tandem radio goes to the nervous system (recon + BLE + events)
+            # when both engines are present, so they run side by side; the rest run
+            # passive AngryOxide on their own band.
+            if bettercap_present and not bettercap_placed and angryoxide_present:
+                engine = "bettercap"
+                bettercap_placed = True
+                reason = (f"bettercap nervous-system: recon + BLE + event bus on "
+                          f"{_band_label(band)} (runs alongside the scalpel)")
+            elif angryoxide_present:
+                engine = "angryoxide"
+                reason = f"AngryOxide passive: tandem capture on {_band_label(band)}"
+            else:
+                engine = "bettercap"
+                reason = f"bettercap recon: tandem on {_band_label(band)}"
+        bindings.append(CaptureBinding(iface, role, engine, mode, band, reason))
+    return bindings
+
+
 def register_capture_providers(graph, *, angryoxide_present: bool, bettercap_present: bool):
     """Register both engines as CAPTURE_HANDSHAKE providers so the capability graph
     can name the active engine and explain it. AngryOxide is registered first →

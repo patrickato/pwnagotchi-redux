@@ -20,6 +20,7 @@ deauth stays behind the driver's empty-by-default allowlist gate.
 """
 from __future__ import annotations
 
+from collections import deque
 from typing import Callable, Optional, Protocol
 
 from ..radio import decide, Intent, Role
@@ -70,6 +71,7 @@ class Supervisor:
         narrator=None,
         detect_engine=None,
         bus=None,
+        alert_bus=None,
     ):
         self._radios = {r.iface: r for r in (radios or [])}
         self._intent = Intent(intent)
@@ -80,9 +82,15 @@ class Supervisor:
         self._narrator = narrator
         self._detect_engine = detect_engine
         self._bus = bus  # SignalBus hub; optional. Use a bus OR a direct narrator, not both.
+        # Dedup + escalate raw detector alerts before they fan out (honors the
+        # [detect] dedup_window_s / escalate_after / escalate_to config).
+        from ..detect.bus import AlertBus
+        self._alert_bus = alert_bus if alert_bus is not None else AlertBus()
         self._assignment = None
         self._capture_iface = None
-        self.reasons: list = []
+        # Bounded: a long field run with repeated hotplug/intent changes must not
+        # leak memory through an ever-growing reason log.
+        self.reasons = deque(maxlen=500)
         self._reassign()
 
     # --- state ------------------------------------------------------------- #
@@ -121,6 +129,13 @@ class Supervisor:
         self._radios = {r.iface: r for r in radios}
         self._emit(Signal.RADIOS_CHANGED, ifaces=list(self._radios))
         self._reassign()
+
+    def set_detect_engine(self, engine) -> None:
+        """Re-point the live pump at a rebuilt detector engine (e.g. after a
+        persona switch). Without this the pump keeps feeding the engine captured
+        at construction, so a persona's detector-set change would never reach the
+        place detection actually happens — a glass-box lie."""
+        self._detect_engine = engine
 
     def add_radio(self, radio) -> None:
         """Hotplug: a radio appeared."""
@@ -187,11 +202,16 @@ class Supervisor:
             self._emit(Signal.EVENT, event=e)
         if self._detect_engine is None:
             return []
-        alerts = self._detect_engine.feed_many(events_to_frames(events))
-        for a in alerts:
-            self._emit(Signal.ALERT, alert=a)
+        raw = self._detect_engine.feed_many(events_to_frames(events))
+        alerts = []
+        for a in raw:
+            published = self._alert_bus.publish(a)   # dedup + escalate
+            if published is None:
+                continue                              # near-duplicate suppressed
+            alerts.append(published)
+            self._emit(Signal.ALERT, alert=published)
             if self._narrator is not None:
-                self._narrator.say_alert(a)
+                self._narrator.say_alert(published)
         return alerts
 
     def creature_lines(self, n: Optional[int] = None):

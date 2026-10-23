@@ -52,7 +52,12 @@ def test_failure_after_partial_hotplug_does_not_claim_success():
         if len(actions) == 2:
             raise RuntimeError("simulated second transition failure")
 
-    mgr = RadioManager([ONBOARD], intent=Intent.HUNT, applier=second_fails)
+    # Keeping the onboard uplink forces two changes when USB arrives:
+    # onboard capture -> managed uplink, plus USB -> capture. Without it,
+    # capability-scaling keeps the onboard capture as a tandem radio and
+    # needs only one new interface action.
+    mgr = RadioManager([ONBOARD], intent=Intent.HUNT, applier=second_fails,
+                       keep_uplink=True)
     original = mgr.assignment
     with pytest.raises(RuntimeError, match="incomplete"):
         mgr.add_radio(USB)
@@ -64,7 +69,10 @@ def test_failure_after_partial_hotplug_does_not_claim_success():
 def test_failed_remove_keeps_prior_assignment_dirty():
     def fail(_):
         raise RuntimeError("synthetic down failure")
-    mgr = RadioManager([ONBOARD, USB], intent=Intent.HUNT, applier=fail)
+    # In max-capture tandem mode the remaining onboard capture needs no
+    # retune when USB disappears. Keep-uplink mode does require reassignment.
+    mgr = RadioManager([ONBOARD, USB], intent=Intent.HUNT, applier=fail,
+                       keep_uplink=True)
     before = mgr.assignment
     with pytest.raises(RuntimeError):
         mgr.remove_radio("wlan1")

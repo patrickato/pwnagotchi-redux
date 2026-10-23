@@ -89,7 +89,7 @@ def test_same_physical_radio_collapses_to_current_monitor_vif(tmp_path):
     assert result["radios"][0]["arphrd"] == 803
 
 
-def test_unknown_transport_duplicate_usb_and_missing_iw_identity_fail_closed(tmp_path):
+def test_unknown_transport_multi_usb_and_missing_iw_identity(tmp_path):
     root = tmp_path / "sys" / "class" / "net"
     root.mkdir(parents=True)
     unknown = add_net(root, iface="wlan0", ifindex=4, phy="phy0",
@@ -104,9 +104,11 @@ def test_unknown_transport_duplicate_usb_and_missing_iw_identity_fail_closed(tmp
                     transport="usb", driver="mt76x2u", arphrd=803)
     second = add_net(root2, iface="wlan2", ifindex=8, phy="phy2",
                      transport="usb", driver="mt76x2u", arphrd=803)
-    with pytest.raises(Unavailable, match="multiple_physical_radios_same_transport"):
-        di.collect(sys_root=root2, run=lambda args: iw_text(first, second),
-                   wall_clock=lambda: 1000.0)
+    result = di.collect(sys_root=root2, run=lambda args: iw_text(first, second),
+                        wall_clock=lambda: 1000.0)
+    assert [row["iface"] for row in result["radios"]] == ["wlan1", "wlan2"]
+    assert all(row["transport"] == "usb" and row["identity_stable"]
+               for row in result["radios"])
     with pytest.raises(Unavailable, match="radio_identity_changed"):
         di.collect(sys_root=root2, run=lambda args: "",
                    wall_clock=lambda: 1000.0)

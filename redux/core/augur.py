@@ -41,6 +41,19 @@ _KIND = {"ap.new": "wifi", "ap.lost": "wifi", "client.new": "wifi",
          "ble.new": "ble", "ble.lost": "ble"}
 
 
+def _persona_detector_names(spec):
+    """Resolve a persona's detector selection ("all" | "none" | CSV of names) to
+    the names list DetectEngine wants: None = all, [] = none, else a valid subset."""
+    s = (spec or "all").strip().lower()
+    if s == "all":
+        return None
+    if s == "none":
+        return []
+    from ..detect.registry import list_detectors
+    valid = set(list_detectors())
+    return [n.strip() for n in s.split(",") if n.strip() in valid]
+
+
 class Augur:
     """Assembles and runs the full stack on one bus."""
 
@@ -59,11 +72,15 @@ class Augur:
         scope: Optional[Scope] = None,
         resource_collector=None,
         resource_monitor=None,
+        trusted=None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
         self.brain = brain or Brain()
-        self.engine = detect_engine or DetectEngine()
+        # trusted: declared-legitimate networks so the rogue-AP/evil-twin detector
+        # can fire. Without an injected engine, wire it into the one we build.
+        self._trusted = trusted
+        self.engine = detect_engine or DetectEngine(trusted=trusted)
         self.store = store if store is not None else SightingStore()
         self._position = position_provider
         self.resources = resource_monitor if resource_monitor is not None else ResourceMonitor(
@@ -89,6 +106,31 @@ class Augur:
             radios=radios, intent=intent, driver=driver,
             detect_engine=self.engine, bus=self.bus,
         )
+        # Now that the driver exists, arm its deauth allowlist from the scope set
+        # above (the __init__ scope assignment ran before the driver existed).
+        self._arm_driver_from_scope()
+
+    # --- scope (arms the driver's firing gate on every change) ------------- #
+
+    @property
+    def scope(self):
+        return self._scope
+
+    @scope.setter
+    def scope(self, value) -> None:
+        self._scope = value if value is not None else Scope()
+        # Keep the bettercap driver's firing allowlist in lock-step with the
+        # central Scope, so `redux scope add` arms deauth and de-scoping disarms
+        # it. Guarded: during __init__ the supervisor/driver may not exist yet.
+        self._arm_driver_from_scope()
+
+    def _arm_driver_from_scope(self) -> None:
+        driver = getattr(getattr(self, "supervisor", None), "driver", None)
+        if driver is not None and hasattr(driver, "arm_from_scope"):
+            try:
+                driver.arm_from_scope(self._scope)
+            except Exception:
+                pass
 
     # --- geo-tagging (bus subscriber) -------------------------------------- #
 
@@ -278,6 +320,17 @@ class Augur:
         self.supervisor.set_intent(Intent(p.intent))
         self._persona = p
         self._bind_scope = p.bind_scope
+        # Apply the persona's detector set for real: rebuild the live engine with
+        # exactly those detectors, preserving the trusted (evil-twin) set.
+        before_detectors = self.engine.detector_count
+        names = _persona_detector_names(p.detectors)
+        self.engine = DetectEngine(names=names, trusted=self._trusted)
+        # Critical: re-point the live pump at the rebuilt engine. The Supervisor
+        # captured the original engine at construction, so without this the
+        # persona's detector set would change self.engine (captap path) while the
+        # live bettercap-event pump kept running the OLD set — reporting a change
+        # that never reached detection. One engine, one source of truth.
+        self.supervisor.set_detect_engine(self.engine)
         return {
             "persona": p.name,
             "summary": p.summary,
@@ -286,12 +339,9 @@ class Augur:
                 "intent": {"from": before["intent"], "to": p.intent},
                 "offense_enabled": {"from": before["offense_enabled"], "to": self.offense_enabled()},
                 "bind_scope": {"from": before["bind_scope"], "to": p.bind_scope},
+                "detectors": {"from": before_detectors, "to": self.engine.detector_count,
+                              "set": p.detectors},
             },
-            # declared, not applied here: the detector set is a preference this
-            # persona expresses; pruning the live engine is not enforced from here,
-            # so it's reported honestly as a declaration rather than a change.
-            "declares": {"detectors": p.detectors,
-                         "note": "detector set is a declared preference (not enforced here)"},
         }
 
     def persona(self):
@@ -330,14 +380,26 @@ class Augur:
             sentinel.observe_motion(eng._last)
         return out
 
-    def eap_plan(self, ssid: str, *, authorized: bool = False, iface: str = "wlan1") -> dict:
+    def eap_plan(self, ssid: str, *, authorized: bool = False, iface: str = "") -> dict:
         """Plan a Scope-aimed, posture-gated WPA-Enterprise EAP harvest. Honors
-        offense_enabled() and requires the SSID to be in Scope + authorized=True."""
+        offense_enabled() and requires the SSID to be in Scope + authorized=True.
+
+        When no iface is given, the orchestrator assigns the rogue-AP its own
+        radio — a spare one so the evil-twin runs *alongside* capture instead of
+        colliding with it — and the plan carries that choice and any collision
+        warning (glass-box)."""
         from ..eap import EapHarvester, EapConfig
-        h = EapHarvester(config=EapConfig(iface=iface))
+        from ..radio import decide, assign_ap_radio
+        ap = {"iface": iface, "collides": False, "reason": "explicit iface"} if iface else \
+            assign_ap_radio(decide(self.supervisor.radios, self.supervisor.intent))
+        h = EapHarvester(config=EapConfig(iface=ap["iface"] or "wlan1"))
         plan = h.plan(self.scope, ssid, authorized=authorized, active=self.offense_enabled())
         out = plan.to_dict()
         out["engine_present"] = h.available()
+        out["ap_iface"] = ap["iface"]
+        out["ap_reason"] = ap["reason"]
+        if ap["collides"]:
+            out["ap_collision"] = ap["reason"]
         return out
 
     # --- sentinel (deploy-and-watch guardian) ------------------------------ #
@@ -431,6 +493,26 @@ class Augur:
         out["selected_engine"] = prov.name
         out["offense_enabled"] = active
         return out
+
+    def capture_bindings(self, assignment=None) -> list:
+        """The FULL per-radio engine PLAN: every capture radio the orchestrator
+        assigned gets its own engine (AngryOxide scalpel on the primary, bettercap
+        nervous-system on a tandem radio, passive AngryOxide beyond that) — so a
+        second radio adds real capture surface instead of idling. Glass-box, and
+        currently a plan/preview only (consumed by `redux capture`): the live
+        per-binding spawn is not wired yet, and when it is, the primary-radio owner
+        must be reconciled with the bettercap driver the supervisor points there."""
+        from ..crack.capture import (plan_capture_bindings, AngryOxideProvider,
+                                      BettercapProvider)
+        from ..radio import decide
+        if assignment is None:
+            assignment = decide(self.supervisor.radios, self.supervisor.intent)
+        ao_present = AngryOxideProvider().available()
+        bc_present = BettercapProvider(
+            driver=getattr(self.supervisor, "driver", None)).available()
+        bindings = plan_capture_bindings(
+            assignment, angryoxide_present=ao_present, bettercap_present=bc_present)
+        return [b.to_dict() for b in bindings]
 
     def dex(self):
         """The Field Dex: the recon ledger built from this device's sightings."""

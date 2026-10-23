@@ -14,7 +14,12 @@ min_free_bytes = 67108864 # Keep reserve for runtime/SQLite; report pause when l
 [audit]
 enabled = false
 wordlist = ""
-scope_file = "/etc/pwnagotchi/scope.json"
+# Leave scope_file unset (or "") to use the same default the CLI firing tools
+# arm into — the persistent /captures/config/scope.json on the field image,
+# /etc/pwnagotchi/scope.json off-image, or $REDUX_SCOPE. Set an explicit path
+# only to override. A hardcoded /etc path here would make the audit worker gate
+# against a different, empty scope and silently skip cracking every armed target.
+scope_file = ""
 results_dir = "/captures/audits"
 binary = "hashcat"
 max_runtime_seconds = 600

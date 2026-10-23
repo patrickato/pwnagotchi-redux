@@ -84,12 +84,10 @@ class Operator:
             return self.scope.authorize(bssid=target)
         if kind == "ssid":
             return self.scope.authorize(ssid=target)
-        import ipaddress
-        try:
-            ip = str(ipaddress.ip_network(target, strict=False).network_address)
-        except ValueError:
-            ip = target
-        return self.scope.authorize(ip=ip)
+        # A network/host target must be CONTAINED in an armed CIDR (a single host
+        # resolves to a /32); this refuses a broad range that merely starts inside
+        # scope, closing the same widening gap as recon_subnet.
+        return self.scope.authorize_network(target)
 
     def _gate(self, target: str, phase: Phase) -> Tuple[bool, bool, str]:
         """(allowed, authorized, reason) for one firing step."""

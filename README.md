@@ -72,8 +72,8 @@ everything above them:
 | Web | `redux/web/` | glass-box dashboard — **live moving map** (own track + colored AP pins + radar marker), activity sparkline, plain/rich skin toggle; rendered client-side (no Pi cost), self-contained, offline |
 | Personas | `redux/core/persona.py` | one box, pick your hat (red/blue/purple/recon/mesh/sigint) — a declarative capability+posture set; posture is an *extra* gate that can only tighten firing, never widen it |
 | Capture tap | `redux/captap/` | raw 802.11 parser (deauth/disassoc + probe-request **IE fingerprint**) feeding the Dex (real cross-MAC re-id) + flood detectors — the P0 gap, producer side done |
-| CLI | `redux/cli.py` | `redux status / run / web / tft / captap / packs / doctor / post / persona / sense / sentinel / mesh / campaign / hunt / capture / eap / range / report / scope / dex / expedition / ghost / demo / benchpass` |
-| Hardware-session tooling | `redux/capstone.py`, `redux/benchpass.py` | `redux demo` previews orchestration (never executes capture); `redux benchpass` records operator results for Pi 4/Pi 5 without independently certifying release evidence. See `docs/BENCH_SESSION.md`. |
+| CLI | `redux/cli.py` | `redux status / run / web / tft / captap / packs / doctor / post / persona / sense / sentinel / mesh / campaign / hunt / capture / eap / netrecon / portal / sdr / range / report / scope / dex / expedition / ghost / demo / benchpass` |
+| Hardware-session tooling | `redux/capstone.py`, `redux/benchpass.py`, `redux/bench_auto.py` | `redux demo` previews orchestration (never executes capture); `redux benchpass` sequences per-board checks and `auto` can probe supported gates. Neither independently certifies physical release evidence. See `docs/BENCH_SESSION.md`. |
 
 Everything assembles on one bus through `Augur` and runs as a single system. Offensive
 capabilities are full-power but consult the central Scope for aiming (see below).
@@ -108,9 +108,11 @@ See `AGENTS.md` for the full contract, and `ASSIGNMENTS.md` for the enforced bui
 
 ## Verification status (honest)
 
-- **Sandbox-verified:** the whole test suite (`pytest`, 807 tests) runs green against real logic —
+- **Sandbox coverage:** the broad `pytest` suite contains thousands of offline checks against real logic —
   orchestrator decisions, signal/brain/action spine, detectors over synthetic frames, spatial DB,
   packs, shim, CLI, web payload. Image-build scripting is unit-tested for structure/wiring.
+  Run the suite and image gates for each integration commit; a pass on one branch
+  or in a limited container is not a pass certificate for another branch.
 - **Hardware-verified (Pi 4, 2026-10-08):** the passive detection/capture/survey/framework spine,
   via `redux hwtest` on a Pi 4 Model B — software battery green on-device, radios enumerated,
   bettercap present, and a live **passive** monitor capture parsing 703 real frames into 2 APs and

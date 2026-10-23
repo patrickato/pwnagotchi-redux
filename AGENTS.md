@@ -4,6 +4,20 @@ This repo is built by several agents in parallel (Claude Code, a Codex CLI, a Ge
 whatever you point at it) plus the human owner. These rules keep them from clobbering each other
 and keep `main` always-green. Any agent working here follows this file.
 
+## `main` and `human/redux-workbench` are kept separate — 2026-10-21
+
+`main` is the reviewed trunk. It advances only by (a) direct reviewed commits and
+(b) curated integrations from `human/redux-workbench` performed **only when the
+owner instructs it**. The workbench branch runs its own autonomous loop and
+pushes only to itself; its self-running machinery (the Codex autopilot) is
+deliberately **not** carried onto `main`, so `main` never self-runs. Nothing on
+`main` writes to the workbench branch, and the workbench's autopilot writes only
+to `human/redux-workbench` — the two never spill into each other. The
+owner has additionally authorized a one-time, tested import of newer
+`main` functionality into the independent workbench on 2026-10-23.
+This does not authorize any write to `main`, nor change the autonomous
+agent's workbench-only push destination.
+
 ## Active workbench autonomy override — 2026-10-12
 
 **Only on `human/redux-workbench`,** this section overrides older

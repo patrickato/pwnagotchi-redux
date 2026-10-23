@@ -26,7 +26,7 @@ Pi hardware**; `done` = also passed a real-hardware pass. (See README *Verificat
 | 1.3 | Radio Orchestrator udev hotplug → `on_hotplug`/`on_unplug`, apply monitor up/down | plug/unplug an adapter mid-run; roles re-apply with no manual steps | in main (#2): manager + plan_transition + hotplug entrypoint + udev rule/hook; 17 tests. Live iw/ip apply = on-Pi gate |
 | 1.4 | `BettercapDriver` live client (REST/ws), `set_interface`, event stream | capture one handshake on an authorized/own AP with zero pwnagotchi code in the path | in main (#5): REST driver + injectable transport, glass-box events, empty-by-default allowlist firing gate, ReplayTransport for CI. Live capture on a real AP + ws stream = on-Pi gate |
 | 1.5 | Supervisor loop wiring orchestrator + driver + creature screen | intent switch re-arranges radios + repoints bettercap, shown on the TFT | in main (#10): decision/wiring core — intent/hotplug → decide → radio apply → repoint bettercap at the capture radio, glass-box reasons, injected RadioControl/Driver protocols. Creature TFT + timed loop = on-Pi gate |
-| 1.6 | The demo: flash, plug Alfa, auto-arrange + capture, hands-off (record a clip) | reproducible on a real Pi 4 / Pi 5 | open |
+| 1.6 | The demo: flash, plug Alfa, auto-arrange + capture, hands-off (record a clip) | reproducible on a real Pi 4 / Pi 5 | open — `redux demo` is plan-only; `redux benchpass` records results but does not execute the demo; authorized live orchestration and physical Pi passes remain |
 
 ## Phase 2 — fusion, brain, packs (see docs/ for detail)
 

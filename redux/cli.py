@@ -7,7 +7,7 @@
     redux selftest                                             on-device software battery (paste the report back)
     redux hwtest   --iface wlan1mon [--out FILE]                validation battery: software + synthetic detection + live passive
     redux demo     [--intent I] [--live] [--json]               inspect orchestrator capture plan (no execution)
-    redux benchpass prep | run | report | matrix                 guided release qualification ledger
+    redux benchpass prep | preflight | auto | run | report | matrix  qualification ledger and probes
 
 The hardware paths (live probe, a real BettercapDriver) are used when asked; the
 default/testable paths (stub radios, a replay driver) need no Pi. Everything it
@@ -29,7 +29,12 @@ from .engine import BettercapDriver, ReplayTransport, BettercapConfig
 from .packs import PackManager, DependencyError
 
 # The central authorized-target list every firing-capable function consults.
-_DEFAULT_SCOPE_PATH = os.environ.get("REDUX_SCOPE", "/etc/pwnagotchi/scope.json")
+# One canonical resolver (redux.core.scope.default_scope_path) is shared with the
+# crack-audit pipeline so the CLI firing tools and the audit worker never arm
+# against different scope files.
+from .core.scope import default_scope_path as _default_scope_path
+
+_DEFAULT_SCOPE_PATH = _default_scope_path()
 
 
 # stub radios for the no-hardware paths (real enumeration is `probe()` on a Pi)
@@ -55,7 +60,15 @@ def _radios(args) -> List[Radio]:
 
 
 def _build(args, driver=None) -> Augur:
-    return Augur(radios=_radios(args), intent=Intent(args.intent), driver=driver)
+    # Populate the rogue-AP/evil-twin detector's trusted set from the config's
+    # [detect] trusted_networks (only when --config is passed; empty otherwise).
+    trusted = None
+    cfg = _cfg(args)
+    if cfg is not None:
+        from .detect.rogue_ap import parse_trusted_networks
+        trusted = parse_trusted_networks(getattr(cfg.detect, "trusted_networks", []))
+    return Augur(radios=_radios(args), intent=Intent(args.intent), driver=driver,
+                 trusted=trusted)
 
 
 # --- subcommands ------------------------------------------------------------- #
@@ -576,6 +589,138 @@ def cmd_campaign(args) -> int:
     return 0
 
 
+def _wordlist(path):
+    """Read a username/password wordlist (bounded), empty tuple on any error."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = []
+            for line in f:
+                s = line.strip()
+                if s:
+                    lines.append(s)
+                if len(lines) >= 10000:
+                    break
+            return tuple(lines)
+    except OSError:
+        return ()
+
+
+def cmd_netrecon(args) -> int:
+    """The network-layer kill-chain over the ARMED Scope (the second half of the
+    chain the RF side can't do): scan one authorized subnet, or autorun the whole
+    armed scope (scan -> optional cred-test -> loot). Real nmap/hydra on the Pi;
+    honest tool-absence off it. Scope decides WHERE, always — nothing off-scope runs."""
+    import json
+    from .netrecon import recon_subnet, autorun, ReconRefused
+    scope = Scope.load(args.scope_file)
+    if args.netrecon_cmd == "scan":
+        try:
+            res = recon_subnet(args.cidr, scope=scope)
+        except ReconRefused as e:
+            print(f"refused: {e}")
+            return 3
+        if not res.available:
+            print(f"scan unavailable: {res.reason}")
+            return 0
+        print(f"{res.reason} (via {res.tool or 'scanner'})")
+        for h in res.hosts:
+            ports = ", ".join((f"{p.number}/{p.proto} {p.service}".strip()) for p in h.ports)
+            print(f"  {h.ip:15} {h.hostname or '-':20} {ports}")
+        return 0
+    # autorun: autonomous sweep over every armed CIDR
+    users = _wordlist(args.userlist) if args.userlist else ()
+    pws = _wordlist(args.passlist) if args.passlist else ()
+    book = autorun(scope=scope, usernames=users, passwords=pws)
+    print(json.dumps(book.to_dict(), indent=2))
+    return 0
+
+
+def cmd_sdr(args) -> int:
+    """Ingest SDR tool output into the sighting store so SDR captures reach geo/Dex:
+    rtl_433 ISM records (tagged with the receiver's position) or dump1090 ADS-B
+    records (the aircraft's own position). Reads line-delimited JSON, one record
+    per line — exactly what `rtl_433 -F json` / `dump1090 --write-json` emit."""
+    import json
+    from .geo.db import SightingStore, DEFAULT_DB_PATH
+    from .sdr import ingest_rtl433, ingest_adsb
+    cfg = _cfg(args)
+    db = args.db or (cfg.cache.db_path if cfg else None) or DEFAULT_DB_PATH
+    store = SightingStore(db)
+
+    def _records(path):
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict):
+                    yield rec
+
+    if args.adsb:
+        n = ingest_adsb(_records(args.file), store)
+        kind = "ADS-B aircraft"
+    else:
+        pos = (args.lat, args.lon) if args.lat is not None and args.lon is not None else None
+        n = ingest_rtl433(_records(args.file), store, position=pos)
+        kind = "ISM device"
+    print(f"ingested {n} {kind} sighting(s) from {args.file}")
+    return 0
+
+
+def cmd_portal(args) -> int:
+    """Captive / evil-portal for AUTHORIZED client testing. `plan` previews what
+    would be served (no server runs). `serve` actually stands it up — and ONLY
+    with --authorized — binding least-exposed with the URL logged. For a real
+    engagement you supply your own page; the built-in template imitates no brand."""
+    from .portal import CaptivePortal, serve
+    template = None
+    if getattr(args, "template", None):
+        try:
+            with open(args.template, encoding="utf-8") as f:
+                template = f.read()
+        except OSError as e:
+            print(f"template: {e}")
+            return 2
+    portal = CaptivePortal(engagement=args.engagement,
+                           **({"template": template} if template else {}))
+    if args.portal_cmd == "plan":
+        print(f"captive portal (engagement={args.engagement}):")
+        print(f"  bind_scope: {args.bind_scope}   port: {args.port}")
+        print(f"  template:   {'custom (' + args.template + ')' if template else 'built-in generic (imitates no brand)'}")
+        print(f"  page bytes: {len(portal.page())}")
+        print("  NOT serving (plan only) — add `serve --authorized` to run an authorized engagement.")
+        return 0
+    # serve: refuse unless explicitly authorized
+    if not getattr(args, "authorized", False):
+        print("refused: `serve` requires --authorized (authorized client testing only)")
+        return 3
+    # posture gate: the portal is firing-capable (credential harvest), so a
+    # detection-only persona hard-disables it — same invariant as eap/capture.
+    if getattr(args, "persona", None):
+        from .core import persona as _persona
+        if not _persona.get(args.persona).offense_available:
+            print(f"refused: persona '{args.persona}' is detection-only — the portal is "
+                  f"firing-capable and will not run under it")
+            return 3
+    try:
+        httpd = serve(portal, authorized=True, port=args.port,
+                      bind_scope=args.bind_scope, _serve=False)
+    except ValueError as e:
+        print(f"refused: {e}")
+        return 3
+    try:
+        httpd.serve_forever()           # blocks until Ctrl-C
+    except KeyboardInterrupt:
+        print(f"\nportal stopped — {len(portal.submissions)} submission(s) recorded.")
+    finally:
+        httpd.shutdown()
+    return 0
+
+
 def cmd_captap(args) -> int:
     if getattr(args, "captap_cmd", "demo") == "live":
         return _captap_live(args)
@@ -754,6 +899,72 @@ def cmd_benchpass(args) -> int:
             print(json.dumps(rep.as_dict(), indent=2))
             return 0 if rep.clean else 1
         _render_benchpass_report(rep)
+        return 0 if rep.clean else 1
+
+    if sub == "auto":
+        from .bench_auto import AutoExecutor, measure_facts
+        led = bp.Ledger.load(ledger_path)
+        if board:
+            led.board = board
+        only = getattr(args, "only", None) or None
+        # Auto-measured preflight first — never start blind.
+        facts = measure_facts()
+        pf = bp.preflight(facts)
+        print("=== redux benchpass — auto (self-grading; physical steps prompted) ===")
+        for key, label, _ in bp.PREREQS:
+            v = pf[key]
+            mark = "OK  " if v["ok"] else ("----" if key == "crypto" else "MISS")
+            print(f"  [{mark}] {v['label']}: {v['detail']}")
+        if not bp.preflight_ready(pf):
+            print("\nheads-up: some prerequisites are MISSING — those gates will SKIP honestly, not fake a pass.")
+        print("\nWalking gates. Machine-checkable ones grade themselves; you'll be")
+        print("prompted only for physical actions (plug a radio, trigger a handshake)"
+              + (" — and those auto-SKIP with --yes." if getattr(args, "yes", False) else "."))
+
+        def _confirm(msg):
+            if getattr(args, "yes", False):
+                print(f"  {msg} → skipped (--yes)")
+                return False
+            try:
+                return input(f"  {msg} [Enter=yes / n=skip]: ").strip().lower() in ("", "y", "yes")
+            except EOFError:
+                return False
+
+        def _ask(g):
+            if getattr(args, "yes", False):
+                return "skip", "needs operator judgment (--yes: skipped)"
+            print(f"      run:  {g.live}")
+            print(f"      pass: {g.passes}")
+            try:
+                a = input("  your result [pass/fail/skip]: ").strip().lower()
+            except EOFError:
+                return "skip", "non-interactive, no verdict"
+            note = ""
+            if a in ("f", "fail", "s", "skip"):
+                try:
+                    note = input("  note: ").strip()
+                except EOFError:
+                    note = ""
+            return {"p": "pass", "pass": "pass", "f": "fail", "fail": "fail",
+                    "s": "skip", "skip": "skip"}.get(a, "skip"), note
+
+        # Pin sub-calls to the SAME codebase we're running, so `auto` never
+        # silently drives a stale `redux` already installed on the image.
+        ax = AutoExecutor(confirm=_confirm, ask=_ask,
+                          redux_prefix=[sys.executable, "-m", "redux.cli"])
+        try:
+            rep = bp.run_benchpass(bp.GATES, ax, led,
+                                   resume=getattr(args, "resume", False), only=only)
+        except KeyboardInterrupt:
+            led.save()
+            print("\n(paused — progress saved; resume with:  redux benchpass auto --resume)")
+            return 2
+        print()
+        _render_benchpass_report(rep)
+        print(f"\nledger: {ledger_path}")
+        if getattr(args, "markdown", False):
+            print()
+            print(bp.report_markdown(rep, board=(board or led.board)), end="")
         return 0 if rep.clean else 1
 
     # run: guided walk, resumable ledger
@@ -1179,7 +1390,8 @@ def cmd_eap(args) -> int:
     if args.persona:
         bc.apply_persona(args.persona)
     bc.scope = Scope.load(args.scope_file)
-    plan = bc.eap_plan(args.ssid, authorized=args.authorized, iface=args.iface or "wlan1")
+    # No --iface: let the orchestrator assign the rogue-AP its own radio.
+    plan = bc.eap_plan(args.ssid, authorized=args.authorized, iface=args.iface or "")
     print(f"EAP harvest for SSID '{args.ssid}': runnable={plan['runnable']} "
           f"(engine_present={plan['engine_present']}, offense={bc.offense_enabled()})")
     print(f"  {plan['reason']}")
@@ -1311,9 +1523,19 @@ def cmd_capture(args) -> int:
         print(f"  armed targets: {', '.join(plan['targets'])}")
     for k, v in (plan.get("outputs") or {}).items():
         print(f"  out[{k}]: {v}")
+    # Per-radio engine plan: every capture radio bound to an engine, not just one.
+    binds = bc.capture_bindings()
+    if binds:
+        print("\nper-radio plan (all capture radios, tandem widens the surface):")
+        for b in binds:
+            print(f"  {b['iface']} [{b['role']}/{b['mode']} "
+                  f"{b['band'] + 'GHz' if b['band'] else '-'}] -> "
+                  f"{b['engine'] or 'none'}: {b['reason']}")
     # Always show the AngryOxide command it WOULD run (preview; no binary needed to print it)
+    primary_iface = args.iface or next((b["iface"] for b in binds
+                                        if b["role"] == "capture"), "") or "wlan1"
     from .crack import AngryOxideProvider, AngryOxideConfig
-    ao = AngryOxideProvider(config=AngryOxideConfig(iface=args.iface or "wlan1"))
+    ao = AngryOxideProvider(config=AngryOxideConfig(iface=primary_iface))
     prev = ao.plan(bc.scope, active=bc.offense_enabled())
     print(f"\nAngryOxide preview (installed={ao.available()}):")
     if prev.runnable:
@@ -1748,9 +1970,45 @@ def build_parser() -> argparse.ArgumentParser:
     cad_.add_argument("--targets", nargs="*", help="targets to run the chain against")
     ca.set_defaults(func=cmd_campaign)
 
+    nr = sub.add_parser("netrecon", help="network-layer kill-chain over the armed scope (scan/cred/loot)")
+    nr.add_argument("--scope-file", default=_DEFAULT_SCOPE_PATH)
+    nrsub = nr.add_subparsers(dest="netrecon_cmd", required=True)
+    nrs = nrsub.add_parser("scan", help="scan one authorized subnet")
+    nrs.add_argument("cidr", help="CIDR to scan (must be authorized in scope)")
+    nra = nrsub.add_parser("autorun", help="autonomous sweep over every armed CIDR (scan→cred→loot)")
+    nra.add_argument("--userlist", help="username wordlist to cred-test discovered services")
+    nra.add_argument("--passlist", help="password wordlist to cred-test discovered services")
+    nr.set_defaults(func=cmd_netrecon)
+
+    sd = sub.add_parser("sdr", help="ingest SDR output (rtl_433 ISM / dump1090 ADS-B) into the sighting store")
+    sdsub = sd.add_subparsers(dest="sdr_cmd", required=True)
+    sdi = sdsub.add_parser("ingest", help="ingest line-delimited JSON records from a file")
+    sdi.add_argument("file", help="file of line-delimited JSON (rtl_433 -F json / dump1090 --write-json)")
+    g = sdi.add_mutually_exclusive_group()
+    g.add_argument("--rtl433", action="store_true", help="records are rtl_433 ISM devices (default)")
+    g.add_argument("--adsb", action="store_true", help="records are dump1090 ADS-B aircraft")
+    sdi.add_argument("--lat", type=float, help="receiver latitude (tags ISM sightings)")
+    sdi.add_argument("--lon", type=float, help="receiver longitude (tags ISM sightings)")
+    sdi.add_argument("--db", help="sighting store path")
+    sd.set_defaults(func=cmd_sdr)
+
+    po = sub.add_parser("portal", help="captive/evil-portal for AUTHORIZED client testing")
+    po.add_argument("--engagement", required=True, help="named engagement you are authorized to run")
+    po.add_argument("--persona", help="posture: a detection-only persona hard-disables serving")
+    po.add_argument("--template", help="path to your own portal page (imitates no real brand)")
+    po.add_argument("--port", type=int, default=8088)
+    po.add_argument("--bind-scope", default="localhost",
+                    choices=["localhost", "lan", "tailscale", "auto"])
+    posub = po.add_subparsers(dest="portal_cmd", required=True)
+    posub.add_parser("plan", help="preview what would be served (no server runs)")
+    pos = posub.add_parser("serve", help="stand up the portal (requires --authorized)")
+    pos.add_argument("--authorized", action="store_true",
+                     help="confirm this is an engagement you are permitted to run")
+    po.set_defaults(func=cmd_portal)
+
     dm = sub.add_parser("demo", help="PLAN ONLY: preview intent → radio roles → capture (no execution)")
     dm.add_argument("--intent", default="recon", choices=[i.value for i in Intent],
-                    help="declared intent (default recon; hunt = active capture)")
+                    help="declared intent (default recon; hunt = capture intent)")
     dm.add_argument("--live", action="store_true", help="read-only actual radio probe; no configuration or capture")
     dm.add_argument("--persona", help="posture (red/purple = offense; blue/recon = detection-only)")
     dm.add_argument("--offense", action="store_true", help="enable offense without a persona (still Scope-gated)")
@@ -1771,6 +2029,13 @@ def build_parser() -> argparse.ArgumentParser:
     bpr.add_argument("--board", default="", help="board under test, e.g. pi4 / pi5 (done = both pass)")
     bpr.add_argument("--resume", action="store_true", help="skip gates already recorded")
     bpr.add_argument("--only", nargs="*", help="limit to these gate ids (e.g. 1.6 2b.6)")
+    bpa = bpsub.add_parser("auto", help="auto-grade every machine-checkable gate; prompt only for physical steps")
+    bpa.add_argument("--ledger", default="", help="resumable progress file (default benchpass-<board>.json)")
+    bpa.add_argument("--board", default="", help="board under test, e.g. pi4 / pi5 (done = both pass)")
+    bpa.add_argument("--resume", action="store_true", help="skip gates already recorded")
+    bpa.add_argument("--only", nargs="*", help="limit to these gate ids (e.g. 1.6 2b.6)")
+    bpa.add_argument("--yes", action="store_true", help="auto-skip (not fail) gates that need a physical action you can't do now")
+    bpa.add_argument("--markdown", action="store_true", help="also print a paste-ready results block at the end")
     bprep = bpsub.add_parser("report", help="render the consolidated result from the ledger")
     bprep.add_argument("--ledger", default="", help="progress file (default benchpass-<board>.json)")
     bprep.add_argument("--board", default="", help="board name (selects the default ledger)")

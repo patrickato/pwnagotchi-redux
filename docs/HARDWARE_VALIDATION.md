@@ -5,6 +5,10 @@ Everything in `main` is **sandbox-verified** (merged + `pytest` green, no hardwa
 checklist for that pass: boot the image, run each check, record the real output, and flip the
 matching `TASKS.md` row from `done (sandbox)` to `done`. Sandbox-green ≠ done.
 
+> **Doing it all in one sitting?** [`BENCH_SESSION.md`](BENCH_SESSION.md) drives every gate below as
+> one resumable pass via `redux benchpass` (prep → preflight → run → report). This runbook remains
+> the per-gate detail and pass criteria.
+
 ## Recorded results
 
 ### Pi 4 Model B — 2026-10-08 · cleared detection/survey/framework lane (`redux hwtest`)
@@ -98,9 +102,23 @@ redux run                           # then issue an intent change (hunt ↔ reco
 creature/assignment is reflected on the 3.5" TFT. Confirm the TFT actually renders (not just logs).
 
 ### 1.1 / 1.6 — the hands-off demo
-**Pass:** flash → boot → plug the Alfa → it auto-arranges and starts capturing on your own AP, with
-no manual steps. Record a short clip. This is the headline; it is only `done` when reproducible on
-a real Pi 4 **and** Pi 5.
+**Read-only plan / diagnosis:**
+```
+redux demo --live --intent hunt --offense
+```
+Preview the logic on any box (no hardware) to see the arrange→capture plan and reasons:
+```
+redux demo --intent hunt            # sample inventory; no transmission or radio changes
+```
+**Important:** `redux demo --live` probes and previews only. It does **not**
+apply radio roles, launch a capture engine, repoint bettercap, or transmit,
+even when `--offense` is specified. Run and separately validate the authorized
+live executor before marking gate 1.6 as passed.
+
+**Pass:** flash → boot → plug the Alfa → an authorized live supervisor
+auto-arranges the radios and captures on your own AP, with no manual
+`airmon-ng`/`iw`. Record a short clip and runtime evidence. The headline gate
+is only `done` when independently reproducible on a real Pi 4 and Pi 5.
 
 ## 2. Platform surfaces (quick on-device confirmations)
 
