@@ -95,9 +95,12 @@ _UNITS = {
                               "Before=redux-live.service",
                               "CapabilityBoundingSet=CAP_NET_ADMIN"),
     "redux-live.service": ("multi-user.target.wants", "Type=simple",
-                           "Wants=redux-regdom.service",
-                           "After=local-fs.target redux.service redux-regdom.service",
-                           "RequiresMountsFor=/captures", "ReadWritePaths=/captures",
+                           "Wants=redux-regdom.service captures.mount",
+                           "After=local-fs.target redux.service redux-regdom.service captures.mount",
+                           # Soft mount dependency, NOT RequiresMountsFor: the diagnostics
+                           # supervisor must still start (and serve a storage-paused Doctor)
+                           # when REDUXCAP is absent, rather than fail its mount dependency.
+                           "ReadWritePaths=/captures",
                            "Environment=PYTHONPATH=/opt/redux",
                            "Environment=HOME=/captures/live", "ProtectHome=true"),
     "redux-capture-ingest.timer": ("timers.target.wants", "Unit=redux-capture-ingest.service"),
