@@ -2,6 +2,8 @@
 from pathlib import Path
 import subprocess
 
+from conftest import run_field_script_unprivileged
+
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/field-engine-check.sh"
 
 
@@ -21,7 +23,6 @@ def test_script_is_valid_shell_and_has_no_radio_changes():
 
 
 def test_requires_root_before_any_probes():
-    result = subprocess.run(["bash", str(SCRIPT)], capture_output=True,
-                            text=True, timeout=5)
+    result = run_field_script_unprivileged(SCRIPT)
     assert result.returncode == 2
     assert "sudo" in result.stderr
