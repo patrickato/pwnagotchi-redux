@@ -56,31 +56,42 @@ Each refresh reads `http://127.0.0.1:8080/api/status` over loopback
 with a 2-second timeout and a 64 KiB maximum response, then paints a
 480×320 frame every two seconds. An absent/old health report renders
 UNKNOWN/STALE, not a fabricated green status. It shows no raw captures
-or credentials. By default the app does not access a touch input node. With the
-physically identified ADS7846/XPT2046 event source and operator approval,
-the manually started renderer can optionally read **classic single-touch
-swipes** to change pages:
+or credentials. The app reads a touch input node only when told to. There are
+two ways to point it at the ADS7846/XPT2046 source:
 
 ```sh
+# Explicit node (manual bring-up / diagnostics):
 sudo redux-fbui --framebuffer /dev/fbN --run \
     --touch-device /dev/input/eventN --swipe-axis x
+
+# Resolve the single touch node by controller name (what the service uses):
+sudo redux-fbui --framebuffer /dev/fbN --run --touch-auto
 ```
 
-The `eventN` device and `x` axis must be selected from the actual
-`redux-display-diag` readings; neither is guessed. For a physically
-rotated controller use `--swipe-axis y` and/or `--swipe-reverse`.
-The default raw-axis threshold is 300 units; `--swipe-threshold` can
-be selected deliberately after measuring your touch controller's range.
-One complete left or right swipe changes between Overview, Captures and
-Doctor. Vertical movement on the other axis does not navigate. The reader
-is read-only, nonblocking, nofollow, does not EVIOCGRAB or change input
-calibration, and resets an incomplete gesture after kernel SYN_DROPPED.
+`--touch-auto` identifies the touch controller by its kernel name (exactly one
+`ads7846`/`xpt2046` input node). It never guesses an arbitrary `eventN`: if zero
+or several match, it prints a note and the display keeps running **without**
+touch — the same outcome as an unset `--touch-device`. The explicit `eventN`
+device and `x` axis must be selected from the actual `redux-display-diag`
+readings. For a physically rotated controller use `--swipe-axis y` and/or
+`--swipe-reverse`. The default raw-axis threshold is 300 units; `--swipe-threshold`
+can be selected deliberately after measuring your touch controller's range.
+One complete left or right swipe changes pages. Vertical movement on the other
+axis does not navigate. The reader is read-only, nonblocking, nofollow, does not
+EVIOCGRAB or change input calibration, and resets an incomplete gesture after
+kernel SYN_DROPPED.
+
+**Service behavior:** `redux-fbui.service` now runs with `--touch-auto`, so on a
+panel whose overlay registers the XPT2046 touch node (e.g. the `tft35a` image
+profile), **swipe navigation is on by default** — and a panel with no touch node
+simply runs display-only. Remove the flag from the unit to disable touch. Raw
+swipes need no calibration; calibrated tap-to-tab navigation is the separate
+five-tap flow below.
 
 **Touch caveats:** physical accuracy, raw-axis reversal, finger pressure,
-tap calibration, swipe latency and long press are not yet hardware
-qualified. This first native implementation provides swipe navigation
-only; its systemd service intentionally leaves touch **off** until the
-operator separately validates input and decides to enable it.
+tap calibration, swipe latency and long press are not yet hardware qualified.
+Swipe navigation works on raw axes; tap-to-tab requires the five-tap
+calibration below plus `--confirm-touch-calibration`.
 
 ### Offline five-tap calibration preparation
 
