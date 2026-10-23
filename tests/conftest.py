@@ -1,5 +1,6 @@
 """Keep all test/interpreter caches in a disposable directory owned by this run."""
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -17,22 +18,26 @@ def run_field_script_unprivileged(script, timeout=5):
     process itself as root, so a bare invocation would sail past the EUID
     guard and hit the next check instead. Force the non-root path: when the
     test is root, drop to an unprivileged user; otherwise run directly.
+
+    The script content is piped to `bash` on stdin rather than passed as a
+    path, so the dropped user never needs to traverse/read the checkout (a CI
+    runner's work tree is often not readable by `nobody`). Root reads the file;
+    the unprivileged shell only sees the bytes and its own low EUID.
     """
-    argv = ["bash", str(script)]
+    source = Path(script).read_text()
     if os.geteuid() != 0:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(["bash", "-s"], input=source,
+                              capture_output=True, text=True, timeout=timeout)
     setpriv = shutil.which("setpriv")
     if setpriv is not None:
         return subprocess.run(
-            [setpriv, "--reuid=65534", "--regid=65534", "--clear-groups", *argv],
-            capture_output=True, text=True, timeout=timeout)
+            [setpriv, "--reuid=65534", "--regid=65534", "--clear-groups", "bash", "-s"],
+            input=source, capture_output=True, text=True, timeout=timeout)
     for dropper in ("runuser", "su"):
         tool = shutil.which(dropper)
         if tool is not None:
-            return subprocess.run(
-                [tool, "-s", "/bin/bash", "nobody", "-c",
-                 "exec bash " + str(script)],
-                capture_output=True, text=True, timeout=timeout)
+            return subprocess.run([tool, "-s", "/bin/bash", "nobody", "-c", "exec bash -s"],
+                                  input=source, capture_output=True, text=True, timeout=timeout)
     pytest.skip("no privilege-drop tool (setpriv/runuser/su) to exercise the non-root guard")
 
 
