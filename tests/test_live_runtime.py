@@ -137,6 +137,96 @@ def test_safe_radio_selection_fails_closed_on_uninspectable_interface():
     assert live.choose_safe_radio([radio()], run=failing) is None
 
 
+def test_unleased_selection_skips_usb_before_inspecting_it(monkeypatch):
+    """An attractive USB adapter must not block the onboard legacy owner."""
+    monkeypatch.setattr(live, "usb_attached", lambda iface: iface == "wlan1")
+    radios = [radio("wlan0", onboard=True, bands=("2.4",)),
+              radio("wlan1", bands=("2.4", "5"))]
+    inspected = []
+
+    def readonly(args, **kwargs):
+        inspected.append(args)
+        assert args == ["iw", "dev", "wlan0", "info"]
+        return subprocess.CompletedProcess(args, 0, "type monitor\n", "")
+
+    assert live.choose_safe_radio(radios, run=readonly, exclude_usb=True) == "wlan0"
+    assert inspected == [["iw", "dev", "wlan0", "info"]]
+    assert live.choose_safe_radio(radios, preferred="wlan1", run=readonly,
+                                  exclude_usb=True) is None
+    assert live.choose_safe_radio(radios, allow_connected=True,
+                                  exclude_usb=True) == "wlan0"
+
+
+def test_unleased_live_auto_mode_never_starts_bettercap_on_usb(tmp_path, monkeypatch):
+    monkeypatch.setattr(live, "usb_attached", lambda iface: iface == "wlan1")
+    radios = [radio("wlan0", onboard=True, bands=("2.4",)),
+              radio("wlan1", bands=("2.4", "5"))]
+    commands = []
+    spawned = []
+
+    def readonly(args, **kwargs):
+        commands.append(args)
+        assert args == ["iw", "dev", "wlan0", "info"]
+        return subprocess.CompletedProcess(args, 0, "type monitor\n", "")
+
+    def spawn(args, **kwargs):
+        spawned.append(args)
+        return Child()
+
+    runtime = live.LiveRuntime(cfg(tmp_path), radio_probe=lambda: radios,
+                               executor=readonly, spawn=spawn)
+    try:
+        assert runtime.tick() == "starting_engine"
+        assert runtime.iface == "wlan0"
+        assert spawned[0][spawned[0].index("-iface") + 1] == "wlan0"
+        assert all("wlan1" not in command for command in commands)
+    finally:
+        runtime.close()
+
+
+def test_explicit_unleased_usb_pin_never_falls_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(live, "usb_attached", lambda iface: iface == "wlan1")
+    radios = [radio("wlan0", onboard=True), radio("wlan1")]
+
+    def no_calls(*args, **kwargs):
+        pytest.fail("unleased USB must not be inspected or activated")
+
+    runtime = live.LiveRuntime(cfg(tmp_path, preferred_iface="wlan1"),
+                               radio_probe=lambda: radios,
+                               executor=no_calls, spawn=no_calls)
+    try:
+        assert runtime.tick() == "degraded"
+        assert runtime.engine_attempts == 0
+        assert "no monitor-capable" in runtime.last_error
+    finally:
+        runtime.close()
+
+
+def test_unleased_preflight_agrees_with_runtime_radio_selection(tmp_path, monkeypatch):
+    monkeypatch.setattr(live, "usb_attached", lambda iface: iface == "wlan1")
+    config = cfg(tmp_path)
+    for path in (config.state_dir, config.capture_dir, config.active_dir):
+        path.mkdir()
+    radios = [radio("wlan0", onboard=True, bands=("2.4",)),
+              radio("wlan1", bands=("2.4", "5"))]
+
+    def readonly(args, **kwargs):
+        assert args == ["iw", "dev", "wlan0", "info"]
+        return subprocess.CompletedProcess(args, 0, "type monitor\n", "")
+
+    result = live.preflight(config, which=lambda _: "/usr/bin/tool",
+                            radio_probe=lambda: radios, radio_run=readonly,
+                            available_bytes=lambda _: 200 * 1024 * 1024)
+    assert result["ready"] is True
+    assert result["capture_radio"] == "wlan0"
+    config = cfg(tmp_path, preferred_iface="wlan1")
+    result = live.preflight(config, which=lambda _: "/usr/bin/tool",
+                            radio_probe=lambda: radios, radio_run=readonly,
+                            available_bytes=lambda _: 200 * 1024 * 1024)
+    assert result["ready"] is False
+    assert result["capture_radio"] is None
+
+
 def test_connected_wifi_uplink_does_not_get_disconnected():
     commands = []
     def runner(argv, **kwargs):

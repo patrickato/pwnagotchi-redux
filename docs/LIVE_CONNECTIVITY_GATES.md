@@ -20,6 +20,12 @@ peer. Connected-capture override is incompatible. Defaults remain false;
 positively detected USB interfaces cannot fall through to legacy mode setters
 when this feature is disabled. The onboard legacy path is otherwise unchanged.
 No management interface is retuned or adopted as a capture fallback.
+In unleased *automatic* selection, the runtime and read-only preflight now
+exclude detected USB radios **before** the capability ranking: attaching a
+more capable Alfa cannot strand an otherwise eligible onboard Bettercap owner
+in a retry loop. Explicitly pinning a USB interface without a lease still
+fails closed (no silent fallback). USB lease mode does not switch to onboard
+after lease loss; its persistent interlock remains mandatory.
 
 A root-owned, non-group/world-writable regular evidence receipt (no leaf
 symlink, maximum 64 KiB) supplies **real collector observations**, not operator

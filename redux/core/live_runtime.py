@@ -210,7 +210,7 @@ def select_radio(radios, preferred=""):
 
 
 def choose_safe_radio(radios, preferred="", *, run=subprocess.run,
-                      allow_connected=False):
+                      allow_connected=False, exclude_usb=False):
     """Prefer the best available capture radio without stealing a live uplink.
 
     Candidate eligibility is checked without changing an interface. If an
@@ -218,6 +218,20 @@ def choose_safe_radio(radios, preferred="", *, run=subprocess.run,
     Explicit operator opt-in allows the existing orchestrator's raw choice.
     """
     candidates = list(radios)
+    if exclude_usb:
+        # The unleased owner is allowed to use the normal onboard path only.
+        # A newly plugged USB radio may outrank it in decide(), but the live
+        # runtime must not repeatedly choose that USB device and then fail
+        # at _launch()'s mandatory lease check. Do not inspect or retune it.
+        filtered = []
+        for radio in candidates:
+            try:
+                if usb_attached(radio.iface):
+                    continue
+            except (OSError, ValueError):
+                continue  # uncertain identity is not permission to use USB
+            filtered.append(radio)
+        candidates = filtered
     if allow_connected:
         iface, _ = select_radio(candidates, preferred)
         return iface
@@ -1289,7 +1303,8 @@ class LiveRuntime:
                 if self.lease_guard is None and now - self.last_probe >= self.config.probe_seconds:
                     radio = choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
                                               run=self.executor,
-                                              allow_connected=self.config.allow_connected_capture)
+                                              allow_connected=self.config.allow_connected_capture,
+                                              exclude_usb=True)
                     if radio != self.iface:
                         raise RuntimeError("capture radio removed or reassigned")
                     self.last_probe = now
@@ -1332,7 +1347,8 @@ class LiveRuntime:
                 iface = (self.config.preferred_iface if self.lease_guard is not None else
                          choose_safe_radio(self.radio_probe(), self.config.preferred_iface,
                                            run=self.executor,
-                                           allow_connected=self.config.allow_connected_capture))
+                                           allow_connected=self.config.allow_connected_capture,
+                                           exclude_usb=True))
                 if not iface:
                     raise RuntimeError("no monitor-capable Wi-Fi interface detected")
                 self._launch(iface)
@@ -1441,7 +1457,8 @@ def preflight(config, *, which=shutil.which, radio_probe=probe,
         else:
             iface = choose_safe_radio(ifaces, config.preferred_iface,
                                       run=radio_run,
-                                      allow_connected=config.allow_connected_capture)
+                                      allow_connected=config.allow_connected_capture,
+                                      exclude_usb=True)
         if iface and not config.require_usb_lease and usb_attached(iface):
             errors.append("USB capture requires explicit lease configuration")
         checks["capture_interface_found"] = bool(iface)
