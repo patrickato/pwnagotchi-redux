@@ -21,7 +21,19 @@ jobs:
       - name: Compile check
         run: python -m compileall redux
       - name: Tests
-        run: pytest
+        run: |
+          # Surface collection errors as GH annotations (the full log blob is
+          # not always reachable). Collect first; if that fails, echo the errors
+          # as ::error:: lines (visible via the checks API) and stop.
+          if ! python -m pytest --co -q > /tmp/collect.txt 2>&1; then
+            echo "::error::pytest collection failed (exit $?):"
+            sed -n '1,80p' /tmp/collect.txt | while IFS= read -r line; do
+              printf '::error::%s\n' "$line"
+            done
+            cat /tmp/collect.txt
+            exit 1
+          fi
+          pytest
       - name: Shell syntax
         run: for f in $(git ls-files '*.sh'); do bash -n "$f"; done
 
