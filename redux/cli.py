@@ -1039,15 +1039,17 @@ def _captap_live(args) -> int:
 
     stop = threading.Event()
     if args.hop:
-        chans = [1, 6, 11]
-        print(f"redux captap live — {args.iface}, hopping {chans} (≤{args.seconds}s)")
+        from .radio.channels import all_band_channels, parse_channels
+        chans = parse_channels(args.channels) if getattr(args, "channels", None) else all_band_channels()
+        print(f"redux captap live — {args.iface}, sweeping {len(chans)} channels "
+              f"across all bands (≤{args.seconds}s)")
 
         def _hop():
             i = 0
             while not stop.is_set():
                 _setch(chans[i % len(chans)])
                 i += 1
-                stop.wait(2.0)
+                stop.wait(getattr(args, "dwell", 2.0))
         threading.Thread(target=_hop, daemon=True).start()
     elif args.channel:
         _setch(args.channel)
@@ -1144,15 +1146,17 @@ def cmd_survey(args) -> int:
             _setch(args.channel)
             print(f"redux survey — passive sweep on {args.iface} ch{args.channel} (≤{args.seconds}s)")
         else:
-            chans = [1, 6, 11]
-            print(f"redux survey — passive sweep on {args.iface}, hopping {chans} (≤{args.seconds}s)")
+            from .radio.channels import all_band_channels, parse_channels
+            chans = parse_channels(args.channels) if getattr(args, "channels", None) else all_band_channels()
+            print(f"redux survey — passive sweep on {args.iface}, {len(chans)} channels "
+                  f"across all bands (≤{args.seconds}s)")
 
             def _hop():
                 i = 0
                 while not stop.is_set():
                     _setch(chans[i % len(chans)])
                     i += 1
-                    stop.wait(2.0)
+                    stop.wait(getattr(args, "dwell", 2.0))
             threading.Thread(target=_hop, daemon=True).start()
         print("  (listening only — no frames transmitted)")
         try:
@@ -2221,14 +2225,18 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--seconds", type=float, default=30.0, help="stop after N seconds (default 30)")
     cl.add_argument("--max", type=int, default=None, help="stop after N frames")
     cl.add_argument("--channel", type=int, default=None, help="park the receiver on this channel (one number)")
-    cl.add_argument("--hop", action="store_true", help="sweep channels 1/6/11 (no need to know the channel)")
+    cl.add_argument("--hop", action="store_true", help="sweep ALL channels across every band (2.4+5GHz); nothing on an off-channel or 5GHz is missed")
+    cl.add_argument("--channels", default=None, help="override the sweep set, e.g. 1,6,11,36,149 (default: all bands)")
+    cl.add_argument("--dwell", type=float, default=2.0, help="seconds to linger on each channel while sweeping (default 2.0)")
     ct.set_defaults(func=cmd_captap)
 
     sv = sub.add_parser("survey", help="passive situational-awareness sweep — inventory APs in earshot (read-only, no transmit)")
     sv.add_argument("--iface", default=None, help="monitor-mode interface (e.g. wlan1mon); omit with --demo")
     sv.add_argument("--seconds", type=float, default=20.0, help="listen for N seconds (default 20)")
     sv.add_argument("--max", type=int, default=None, help="stop after N frames")
-    sv.add_argument("--channel", type=int, default=None, help="park on one channel instead of hopping 1/6/11")
+    sv.add_argument("--channel", type=int, default=None, help="park on one channel instead of sweeping all bands")
+    sv.add_argument("--channels", default=None, help="override the sweep set, e.g. 1,6,11,36,149 (default: all bands)")
+    sv.add_argument("--dwell", type=float, default=2.0, help="seconds to linger on each channel while sweeping (default 2.0)")
     sv.add_argument("--demo", action="store_true", help="synthetic beacons, no radio")
     sv.set_defaults(func=cmd_survey)
 
