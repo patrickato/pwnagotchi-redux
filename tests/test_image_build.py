@@ -774,6 +774,12 @@ def test_overlay_stage_preserves_capture_writes_and_hardens_service(tmp_path):
     assert result.returncode == 0, result.stderr
     fstab = (root / "etc/fstab").read_text()
     assert 'LABEL=REDUXCAP /captures ext4 rw,' in fstab
+    # A missing REDUXCAP must never stall or brick a headless boot: the mount is
+    # non-blocking (nofail), bounded, and fsck pass 0 (does not gate boot).
+    reduxcap = next(l for l in fstab.splitlines() if l.startswith('LABEL=REDUXCAP'))
+    assert 'nofail' in reduxcap
+    assert 'x-systemd.device-timeout=30s' in reduxcap
+    assert reduxcap.split()[-2:] == ['0', '0']
     assert '/boot/firmware vfat ro,' in fstab
     assert 'recurse=0' in (root / "etc/overlayroot.conf").read_text()
     unit = (root / "etc/systemd/system/redux.service").read_text()

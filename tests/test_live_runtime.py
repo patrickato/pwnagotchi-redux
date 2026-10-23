@@ -38,6 +38,15 @@ def test_baked_live_state_is_separate_from_redux_service_owner():
     assert "CAP_FOWNER" not in unit
     assert "ProtectHome=true" in unit
     assert "Environment=HOME=/captures/live" in unit
+    # Soft mount dependency, not a hard RequiresMountsFor directive: the
+    # supervisor must still start (serving a storage-paused Doctor) when REDUXCAP
+    # is absent, rather than fail its mount dependency and leave the screen with
+    # no Doctor. Check directives, so the explanatory comment doesn't count.
+    directives = [l for l in unit.splitlines() if l and not l.startswith("#")]
+    assert not any(l.startswith("RequiresMountsFor=") for l in directives)
+    assert "Wants=redux-regdom.service captures.mount" in directives
+    after = next(l for l in directives if l.startswith("After="))
+    assert "captures.mount" in after
 
 
 def test_select_radio_only_capable_and_preferred():
