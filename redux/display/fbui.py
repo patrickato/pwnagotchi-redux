@@ -27,6 +27,7 @@ from .local_http import open_status
 from . import calibration_file
 
 FB_PATTERN = re.compile(r"/dev/fb[0-9]{1,2}\Z")
+FB_TOUCH_PATTERN = re.compile(r"/dev/input/event[0-9]{1,3}\Z")
 RESOLUTION = (480, 320)
 MAX_STATUS = 65536
 MAX_MEASURED_COUNT = (1 << 63) - 1
@@ -37,6 +38,46 @@ AMBER = (247, 190, 76)
 RED = (255, 111, 107)
 BLUE = (101, 175, 245)
 BACKGROUND = (10, 15, 24)
+
+
+_TOUCH_CONTROLLERS = ("ads7846", "xpt2046")
+
+
+def resolve_touch_device(*, inventory=None):
+    """Return the single XPT2046/ADS7846 touch node, or (None, reason).
+
+    This identifies the resistive touch controller by its kernel name — it does
+    NOT guess an arbitrary /dev/input/eventN. Exactly one matching node is
+    required; zero or several is reported, not picked (matching the display
+    acceptance 'MISSING'/'AMBIGUOUS' policy), so the display still runs without
+    touch rather than opening the wrong device."""
+    if inventory is None:
+        from .acceptance import inventory as collect
+        try:
+            inventory = collect()
+        except OSError as error:
+            return None, f"input inventory unavailable ({type(error).__name__})"
+    devices = inventory.get("input_devices") if isinstance(inventory, dict) else None
+    if not isinstance(devices, list):
+        return None, "input inventory invalid"
+
+    def labels(row):
+        parts = []
+        for key in ("name", "modalias", "compatible"):
+            value = row.get(key)
+            if isinstance(value, str) and len(value) <= 256:
+                parts.append(value.lower())
+        return " ".join(parts)
+
+    matches = [row for row in devices if isinstance(row, dict)
+               and isinstance(row.get("device"), str)
+               and FB_TOUCH_PATTERN.fullmatch(row["device"])
+               and any(kind in labels(row) for kind in _TOUCH_CONTROLLERS)]
+    if not matches:
+        return None, "no XPT2046/ADS7846 touch node present"
+    if len(matches) > 1:
+        return None, "multiple touch nodes; select one explicitly"
+    return matches[0]["device"], "resolved by controller name"
 
 
 def framebuffer_info(device, *, sys_root=Path("/sys/class/graphics"),
@@ -576,6 +617,9 @@ def main(argv=None):
                         help="operator-confirmed software rotation")
     parser.add_argument("--touch-device",
                         help="opt-in, physically verified /dev/input/eventN (run mode only)")
+    parser.add_argument("--touch-auto", action="store_true",
+                        help="resolve the single XPT2046/ADS7846 node by name (run mode only); "
+                             "display continues without touch if zero or several are present")
     parser.add_argument("--calibration-file", help="absolute five-point JSON file; run mode only")
     parser.add_argument("--confirm-touch-calibration", action="store_true",
                         help="operator confirms visible 480x320 panel and physical touch mapping")
@@ -590,6 +634,19 @@ def main(argv=None):
     mode.add_argument("--once", action="store_true", help="paint one measured frame")
     mode.add_argument("--run", action="store_true", help="refresh every two seconds")
     args = parser.parse_args(argv)
+    if args.touch_auto and args.touch_device:
+        parser.error("--touch-auto and --touch-device are mutually exclusive")
+    if args.touch_auto and not args.run:
+        parser.error("--touch-auto requires --run; --once and --check never read touch")
+    # Resolve the touch node by controller name when asked. A miss is not fatal:
+    # the display runs without touch, exactly as an unset --touch-device would.
+    if args.touch_auto and args.run:
+        resolved, reason = resolve_touch_device()
+        if resolved is not None:
+            args.touch_device = resolved
+        else:
+            print(f"Touch auto-detect: {reason}; display continues without touch.",
+                  file=sys.stderr)
     if args.touch_device and not args.run:
         parser.error("--touch-device requires --run; --once and --check never read touch")
     if args.calibration_file and (not args.run or not args.touch_device

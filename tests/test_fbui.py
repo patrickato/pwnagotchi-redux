@@ -392,3 +392,87 @@ def test_overview_retry_duration_rejects_malformed_values(bad):
     report = valid_report(now=100)
     report["runtime"]["retry_in_seconds"] = bad
     assert fbui.status_view(report, now=101)["retry_seconds"] is None
+
+
+# --- touch node auto-resolution (opt-in by controller name, never a guess) ----
+
+def _inv(*names):
+    return {"input_devices": [
+        {"device": f"/dev/input/event{i}", "name": n}
+        for i, n in enumerate(names)]}
+
+
+def test_resolve_touch_device_picks_single_controller_by_name():
+    dev, reason = fbui.resolve_touch_device(
+        inventory=_inv("gpio-keys", "ADS7846 Touchscreen"))
+    assert dev == "/dev/input/event1"
+    assert "controller name" in reason
+
+
+def test_resolve_touch_device_refuses_zero_or_ambiguous():
+    none0, reason0 = fbui.resolve_touch_device(inventory=_inv("gpio-keys"))
+    assert none0 is None and "no XPT2046" in reason0
+    none2, reason2 = fbui.resolve_touch_device(
+        inventory=_inv("ADS7846 Touchscreen", "xpt2046 ts"))
+    assert none2 is None and "multiple" in reason2
+
+
+def test_resolve_touch_device_ignores_malformed_rows():
+    dev, _ = fbui.resolve_touch_device(
+        inventory={"input_devices": [{"device": "nope", "name": "xpt2046"},
+                                     {"name": "xpt2046"},  # no device key
+                                     "not-a-dict"]})
+    assert dev is None
+
+
+def test_touch_auto_requires_run_and_excludes_explicit_device():
+    with pytest.raises(SystemExit):
+        fbui.main(["--framebuffer", "/dev/fb1", "--check", "--touch-auto"])
+    with pytest.raises(SystemExit):
+        fbui.main(["--framebuffer", "/dev/fb1", "--once", "--touch-auto"])
+    with pytest.raises(SystemExit):
+        fbui.main(["--framebuffer", "/dev/fb1", "--run", "--touch-auto",
+                   "--touch-device", "/dev/input/event1"])
+
+
+def test_touch_auto_miss_runs_display_without_opening_touch(monkeypatch):
+    from redux.display import touch_nav
+    monkeypatch.setattr(fbui, "resolve_touch_device",
+                        lambda **_k: (None, "no XPT2046/ADS7846 touch node present"))
+    monkeypatch.setattr(fbui, "framebuffer_info",
+                        lambda *_a: {"ok": True, "stride": 960})
+    monkeypatch.setattr(fbui, "read_status", lambda *_a: valid_report(now=time.time()))
+    monkeypatch.setattr(touch_nav, "open_touch",
+                        lambda *_a, **_k: pytest.fail("auto-miss must not open any touch node"))
+    writes = []
+    def writer(_device, _frame):
+        writes.append(1)
+        raise RuntimeError("synthetic stop")
+    monkeypatch.setattr(fbui, "write_frame", writer)
+    # A run with --touch-auto and no touch node present still paints, never reads touch.
+    with pytest.raises(RuntimeError, match="synthetic stop"):
+        fbui.main(["--framebuffer", "/dev/fb1", "--run", "--touch-auto"])
+    assert writes == [1]
+
+
+def test_touch_auto_hit_opens_resolved_node(monkeypatch):
+    from redux.display import touch_nav
+    monkeypatch.setattr(fbui, "resolve_touch_device",
+                        lambda **_k: ("/dev/input/event7", "resolved by controller name"))
+    monkeypatch.setattr(fbui, "framebuffer_info",
+                        lambda *_a: {"ok": True, "stride": 960})
+    monkeypatch.setattr(fbui, "read_status", lambda *_a: valid_report(now=time.time()))
+    opened = []
+    monkeypatch.setattr(touch_nav, "open_touch", lambda dev: opened.append(dev) or 55)
+    monkeypatch.setattr(touch_nav, "touch_identity", lambda _fd: (b"id", b"phys"))
+    monkeypatch.setattr(fbui.select, "select", lambda *_a: ([], [], []))
+    writes = []
+    def writer(_device, _frame):
+        writes.append(1)
+        raise RuntimeError("synthetic stop")
+    monkeypatch.setattr(fbui, "write_frame", writer)
+    monkeypatch.setattr(fbui.os, "close", lambda *_a: None)
+    with pytest.raises(RuntimeError, match="synthetic stop"):
+        fbui.main(["--framebuffer", "/dev/fb1", "--run", "--touch-auto"])
+    # The node chosen by name — not guessed — is the one opened.
+    assert opened == ["/dev/input/event7"]

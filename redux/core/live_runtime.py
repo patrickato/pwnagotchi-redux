@@ -867,6 +867,27 @@ class LiveRuntime:
             snapshot["ui"] = ui_model(snapshot)
         self._snapshot = snapshot
 
+    def _maintain_web(self, now):
+        """Keep the loopback read-only diagnostics server up, independent of the
+        capture mount. It serves the already-published in-memory snapshot (which
+        carries the Doctor report), so it stays available to explain a storage
+        outage instead of going dark with it."""
+        if self.web is not None and self.web_thread is not None:
+            if not self.web_thread.is_alive():
+                self.web_error = "local dashboard thread stopped unexpectedly"
+                self.web.server_close()
+                self.web = None
+                self.web_thread = None
+                self.web_next_try = now + 30
+                _LOG.warning("%s", self.web_error)
+        if self.config.enable_web and self.web is None and now >= self.web_next_try:
+            try:
+                self._start_web()
+            except (OSError, RuntimeError) as error:
+                self.web_error = f"local dashboard startup failed: {type(error).__name__}"
+                self.web_next_try = now + 30
+                _LOG.warning("%s", self.web_error)
+
     def _start_web(self):
         if not self.config.enable_web or self.web is not None:
             return
@@ -1286,6 +1307,12 @@ class LiveRuntime:
                 self.observer_errors['plugins'] = 'resource publication failed'
 
         now = self.clock()
+        # Bring up read-only diagnostics even without a radio, a working
+        # Bettercap, OR a mounted capture partition. Broken captures must not
+        # make their own cause invisible: the loopback Doctor serves the
+        # storage_paused finding below from memory and never writes to the root
+        # filesystem, so this runs BEFORE the capture-mount guard returns.
+        self._maintain_web(now)
         # A forced/lazy unmount invalidates the original flock/partition
         # identity. Never resume on a newly mounted filesystem under a stale
         # lock: a service restart must re-establish exclusive ownership.
@@ -1322,23 +1349,6 @@ class LiveRuntime:
             self._checkpoint()
             return self.state
         self._enforce_log_limit()
-        # Bring up read-only diagnostics even without a radio or working
-        # Bettercap. Broken captures should not make their own cause invisible.
-        if self.web is not None and self.web_thread is not None:
-            if not self.web_thread.is_alive():
-                self.web_error = "local dashboard thread stopped unexpectedly"
-                self.web.server_close()
-                self.web = None
-                self.web_thread = None
-                self.web_next_try = now + 30
-                _LOG.warning("%s", self.web_error)
-        if self.config.enable_web and self.web is None and now >= self.web_next_try:
-            try:
-                self._start_web()
-            except (OSError, RuntimeError) as error:
-                self.web_error = f"local dashboard startup failed: {type(error).__name__}"
-                self.web_next_try = now + 30
-                _LOG.warning("%s", self.web_error)
         if now - self.last_recovery >= 20:
             self._recover_abandoned()
             self.last_recovery = now
@@ -1574,18 +1584,108 @@ def preflight(config, *, which=shutil.which, radio_probe=probe,
             "capture_radio": iface, "checks": checks}
 
 
-def run_forever(config, *, stop=None, runtime_factory=LiveRuntime, interval=1.0):
+def _storage_unavailable(error):
+    """True when a runtime could not be built because REDUXCAP is not mounted.
+
+    Any other construction error is a real fault we must not paper over with a
+    diagnostics stub — it propagates so systemd surfaces it."""
+    return (isinstance(error, RuntimeError)
+            and "REDUXCAP" in str(error)
+            and "not mounted" in str(error))
+
+
+def degraded_storage_snapshot(now_utc=None):
+    """A valid, honest /api/status snapshot for the pre-mount window.
+
+    The capture partition is not mounted yet, so no LiveRuntime exists. This
+    serves the SAME contract the dashboard and fbui expect — a runtime block and
+    a doctor block — reporting storage as the action item, so Doctor reads
+    'ACTION REQUIRED: capture storage unavailable' instead of being unreachable.
+    It is built entirely in memory and never writes to any filesystem."""
+    now_utc = time.time() if now_utc is None else now_utc
+    health = describe_live_health(
+        "storage_paused", capture_mount_ok=False,
+        last_error=("REDUXCAP ext4 partition is not mounted at /captures; "
+                    "the capture supervisor is waiting for it to appear"),
+        dashboard_enabled=True, dashboard_active=True,
+    )
+    return {
+        "runtime": {"state": "storage_paused", "updated_utc": now_utc,
+                    "iface": "", "capture_mount": False,
+                    "last_error": "REDUXCAP partition is not mounted at /captures",
+                    "dashboard_active": True},
+        "doctor": health,
+        "telemetry": None,
+        "governor": {},
+        "capture_processing": {"available": False,
+                               "reason": "REDUXCAP mount unavailable"},
+    }
+
+
+def _serve_degraded_diagnostics(config):
+    """Start a loopback read-only diagnostics server for the pre-mount window.
+
+    Returns the ThreadingHTTPServer (or None if the web dashboard is disabled or
+    the port could not be bound — e.g. a lingering listener). Serves a fresh
+    storage-paused snapshot per request; writes nothing anywhere."""
+    if not config.enable_web:
+        return None
+    try:
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", config.web_port),
+            make_handler(lambda: degraded_storage_snapshot(), token=None))
+    except OSError as error:
+        _LOG.warning("degraded diagnostics bind failed: %s", type(error).__name__)
+        return None
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    try:
+        thread.start()
+    except Exception:
+        server.server_close()
+        return None
+    _LOG.warning("REDUXCAP not mounted; serving storage-paused Doctor on "
+                 "127.0.0.1:%s until the capture partition appears", config.web_port)
+    return server
+
+
+def run_forever(config, *, stop=None, runtime_factory=LiveRuntime, interval=1.0,
+                mount_retry_seconds=5.0):
     from threading import Event
     signal_stop = stop or Event()
     if interval <= 0:
         raise ValueError("interval must be positive")
-    runtime = runtime_factory(config)
+    # Build the runtime. If the only problem is that REDUXCAP is not mounted
+    # yet, do NOT crash-loop the service (which would leave the operator with a
+    # dead screen and an unreachable Doctor). Instead serve a storage-paused
+    # Doctor on loopback and keep retrying construction until the mount appears.
+    runtime = None
+    degraded = None
     try:
+        while runtime is None and not signal_stop.is_set():
+            try:
+                runtime = runtime_factory(config)
+            except Exception as error:
+                if not _storage_unavailable(error):
+                    raise
+                if degraded is None:
+                    degraded = _serve_degraded_diagnostics(config)
+                signal_stop.wait(mount_retry_seconds)
+        if runtime is None:
+            return
+        # Hand off the loopback port to the real runtime before it starts its own.
+        if degraded is not None:
+            degraded.shutdown()
+            degraded.server_close()
+            degraded = None
         while not signal_stop.is_set():
             runtime.tick()
             signal_stop.wait(interval)
     finally:
-        runtime.close()
+        if degraded is not None:
+            degraded.shutdown()
+            degraded.server_close()
+        if runtime is not None:
+            runtime.close()
 
 
 def main(argv=None):

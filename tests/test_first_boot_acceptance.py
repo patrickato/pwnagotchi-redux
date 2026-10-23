@@ -13,7 +13,10 @@ from redux.hardware_acceptance import evaluate
 
 
 @pytest.mark.parametrize('unit,change',[
-    ('redux.service','duplicate'),('redux-live.service','wrong_section'),
+    # wrong_section misplaces RequiresMountsFor into [Service]; exercise it on
+    # redux.service, which keeps that hard mount requirement. redux-live now uses
+    # a soft captures.mount dependency so its diagnostics can report storage loss.
+    ('redux.service','duplicate'),('redux.service','wrong_section'),
     ('redux.service','cycle'),('redux.service','display'),('redux-live.service','radio'),
     ('redux-capture-ingest.service','writable'),('redux-capture-ingest.service','capabilities'),
     ('redux-capture-ingest.timer','recovery_timer'),('redux.service','ownership'),

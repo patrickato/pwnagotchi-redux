@@ -41,6 +41,13 @@ def test_lite_staging_requires_selected_country_before_unmount(tmp_path):
     assert script.index("redux-root-payload.py") < script.index('unmount "${ROOTFS_DIR}"')
     assert '--root "${ROOTFS_DIR}" --expected-country US' in script
     assert (tree / "export-image/redux-root-payload.py").is_file()
+    # root_payload.py imports unit_readiness by bare name at runtime, so its
+    # dependency must be staged beside it or the finalise step dies with
+    # ModuleNotFoundError: No module named 'unit_readiness'.
+    assert (tree / "export-image/unit_readiness.py").is_file()
+    # It also reads the reviewed pack catalog / native packs from the repo image/
+    # dir, which it can't find from export-image/; the gate passes the real path.
+    assert f'--reviewed-source "{source.resolve()}"' in script
 
 
 def test_ab_staging_requires_country_for_both_mounted_roots(tmp_path):
@@ -48,6 +55,7 @@ def test_ab_staging_requires_country_for_both_mounted_roots(tmp_path):
     gate.prepare(source, tree, "ab", expected_country="CA")
     script = clone.read_text()
     assert '--root "$ROOTFS_DIR" --other-root "$other" --expected-country CA' in script
+    assert f'--reviewed-source "{source.resolve()}"' in script
     assert script.index("redux-root-payload.py") < script.index("redux-boot-payload.py")
 
 
@@ -71,3 +79,33 @@ def test_build_wrapper_passes_country_to_export_gate():
     build = (ROOT / "build.sh").read_text()
     assert 'boot_gate_args+=(--expected-country "$REDUX_REGULATORY_COUNTRY")' in build
     assert '"${boot_gate_args[@]}"' in build
+
+
+def test_staged_root_payload_resolves_its_reviewed_inputs(tmp_path):
+    """Regression: the staged redux-root-payload.py must find its Python import
+    (unit_readiness) AND its reviewed data (pack catalog, native packs) when it
+    runs from export-image/ — not die with ModuleNotFoundError/FileNotFoundError
+    before it ever compares anything. We run the real staged script against an
+    empty rootfs; it must fail on a *contract* error, never on a missing input.
+    """
+    import shutil
+    import subprocess
+    import sys as _sys
+    image = ROOT / "image"
+    staged = tmp_path / "export-image"
+    staged.mkdir()
+    shutil.copyfile(image / "root_payload.py", staged / "redux-root-payload.py")
+    shutil.copyfile(image / "unit_readiness.py", staged / "unit_readiness.py")
+    rootfs = tmp_path / "rootfs"
+    rootfs.mkdir()
+    result = subprocess.run(
+        [_sys.executable, str(staged / "redux-root-payload.py"),
+         "--profile", "lite", "--root", str(rootfs),
+         "--reviewed-source", str(image)],
+        cwd=staged, capture_output=True, text=True, timeout=20)
+    # It must reject the empty rootfs, but never because it couldn't import or
+    # locate its own reviewed inputs.
+    assert result.returncode != 0
+    assert "ModuleNotFoundError" not in result.stderr
+    assert "No such file or directory" not in result.stderr
+    assert "unit_readiness" not in result.stderr

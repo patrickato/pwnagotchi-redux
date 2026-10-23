@@ -38,6 +38,15 @@ def test_baked_live_state_is_separate_from_redux_service_owner():
     assert "CAP_FOWNER" not in unit
     assert "ProtectHome=true" in unit
     assert "Environment=HOME=/captures/live" in unit
+    # Soft mount dependency, not a hard RequiresMountsFor directive: the
+    # supervisor must still start (serving a storage-paused Doctor) when REDUXCAP
+    # is absent, rather than fail its mount dependency and leave the screen with
+    # no Doctor. Check directives, so the explanatory comment doesn't count.
+    directives = [l for l in unit.splitlines() if l and not l.startswith("#")]
+    assert not any(l.startswith("RequiresMountsFor=") for l in directives)
+    assert "Wants=redux-regdom.service captures.mount" in directives
+    after = next(l for l in directives if l.startswith("After="))
+    assert "captures.mount" in after
 
 
 def test_select_radio_only_capable_and_preferred():
@@ -1726,5 +1735,131 @@ def test_failed_launch_backoff_is_capped_without_losing_status(tmp_path, monkeyp
             clock[0] = runtime.next_try
         assert runtime.failure_streak == 7
         assert attempts == []
+    finally:
+        runtime.close()
+
+
+# --- Doctor availability when REDUXCAP is not mounted -------------------------
+
+def test_degraded_storage_snapshot_is_a_valid_doctor_report():
+    snap = live.degraded_storage_snapshot(now_utc=1000.0)
+    # Same contract cmd_live and the fbui validate: runtime + doctor dicts.
+    assert snap["runtime"]["state"] == "storage_paused"
+    assert snap["runtime"]["capture_mount"] is False
+    doctor = snap["doctor"]
+    assert isinstance(doctor, dict)
+    assert isinstance(doctor["findings"], list) and doctor["findings"]
+    assert doctor["overall"] in ("ok", "attention", "degraded", "action", "unknown")
+    # The storage outage is reported, not hidden.
+    assert any("REDUXCAP" in f.get("summary", "") + f.get("reason", "")
+               or "storage" in f.get("summary", "").lower()
+               for f in doctor["findings"])
+    # The fbui's status model must accept it without raising.
+    from redux.display.ui_state import model
+    assert model(snap, now=1000.0)["rows"]
+
+
+def test_storage_unavailable_discriminator():
+    assert live._storage_unavailable(
+        RuntimeError("REDUXCAP ext4 partition is not mounted at /captures"))
+    # Any other construction fault must propagate, not be masked as "storage".
+    assert not live._storage_unavailable(RuntimeError("another live runtime owns the radio"))
+    assert not live._storage_unavailable(ValueError("bad config"))
+    assert not live._storage_unavailable(RuntimeError("REDUXCAP is full"))
+
+
+class _FakeRuntime:
+    def __init__(self):
+        self.ticks = 0
+        self.closed = False
+    def tick(self):
+        self.ticks += 1
+    def close(self):
+        self.closed = True
+
+
+def test_run_forever_serves_doctor_until_captures_mounts(tmp_path):
+    import json
+    import socket
+    import threading
+    import urllib.request
+
+    # Pick a free loopback port for the degraded diagnostics server.
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+
+    conf = cfg(tmp_path, enable_web=True, web_port=port)
+    built = _FakeRuntime()
+    attempts = {"n": 0}
+    served = {"doctor": None}
+    stop = threading.Event()
+
+    def factory(config):
+        attempts["n"] += 1
+        if attempts["n"] <= 2:
+            # While unmounted, the degraded server should be answering. Capture
+            # one Doctor report straight off the loopback on the second miss.
+            if attempts["n"] == 2:
+                with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/api/status", timeout=2) as resp:
+                    served["doctor"] = json.loads(resp.read())["doctor"]
+            raise RuntimeError("REDUXCAP ext4 partition is not mounted at /captures")
+        # Mount has appeared: hand off to the real runtime, then end the loop.
+        stop.set()
+        return built
+
+    live.run_forever(conf, stop=stop, runtime_factory=factory,
+                     interval=0.01, mount_retry_seconds=0.01)
+
+    # The degraded server answered with a valid, honest storage-paused Doctor.
+    assert served["doctor"] is not None
+    assert served["doctor"]["overall"] in ("action", "degraded", "attention")
+    assert attempts["n"] >= 3
+    # The real runtime took over and was cleanly closed on exit.
+    assert built.closed
+    # The degraded port was released for the real runtime (nothing listening now).
+    import socket as _s
+    with _s.socket() as check:
+        assert check.connect_ex(("127.0.0.1", port)) != 0
+
+
+def test_run_forever_propagates_non_storage_construction_errors(tmp_path):
+    import threading
+    conf = cfg(tmp_path, enable_web=False)
+    stop = threading.Event()
+
+    def factory(config):
+        raise RuntimeError("another Redux live runtime already owns the radio")
+
+    with pytest.raises(RuntimeError, match="already owns the radio"):
+        live.run_forever(conf, stop=stop, runtime_factory=factory,
+                         interval=0.01, mount_retry_seconds=0.01)
+
+
+def test_web_comes_up_even_when_capture_mount_is_lost(tmp_path, monkeypatch):
+    # A runtime whose capture mount drops mid-run must still bring up the
+    # read-only diagnostics server so Doctor can report the outage.
+    import socket
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    conf = cfg(tmp_path, enable_web=True, web_port=port)
+    runtime = live.LiveRuntime(conf, radio_probe=lambda: [], clock=lambda: 0)
+    try:
+        # Force the mount-lost condition and prove _start_web is reached before
+        # the early return, via the extracted _maintain_web path.
+        runtime.capture_mount_lost = True
+        started = {"web": False}
+        real_start = runtime._start_web
+        def tracking_start():
+            started["web"] = True
+            real_start()
+        monkeypatch.setattr(runtime, "_start_web", tracking_start)
+        assert runtime.tick() == "storage_paused"
+        assert started["web"] is True
+        assert runtime.web is not None
     finally:
         runtime.close()

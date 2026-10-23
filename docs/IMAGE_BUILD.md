@@ -735,9 +735,49 @@ poweroff, allowing redux's shutdown checkpoint to complete. It does not operate
 the HAT's power-cut/charging pins. Such a cut needs model-specific board support;
 Linux shutdown alone may leave the HAT powered.
 
+### `REDUX_TFT_PROFILE=tft35a` — the working MPI3501 (ILI9486 + XPT2046) screen
+
+This is the profile to use for the goodtft MPI3501 3.5" panel (ILI9486
+controller, XPT2046 resistive touch). It ships the proven goodtft `tft35a`
+overlay — which drives the framebuffer **upright at `rotate=270`** and, unlike
+the generic `fbtft` overlay, **also registers the XPT2046/ADS7846 touch
+controller** so a `/dev/input/eventN` node appears for the fbui.
+
+The overlay blob is hardware-critical and is never reconstructed from source by
+the build. Supply the exact compiled overlay you have validated on the panel:
+
+```
+REDUX_TFT_PROFILE=tft35a \
+REDUX_TFT_OVERLAY=/absolute/path/to/tft35a.dtbo \
+sudo ./build.sh
+```
+
+`REDUX_TFT_OVERLAY` points at goodtft `LCD-show`'s `usr/tft35a-overlay.dtb`
+(copy it to `tft35a.dtbo`). The build verifies the blob's FDT magic and refuses
+to claim a working TFT without it. When selected, the `40-power` stage:
+
+- installs the overlay to `/boot/firmware/overlays/tft35a.dtbo`;
+- comments out any `dtoverlay=vc4-kms-v3d` the base image shipped (so the SPI
+  panel is a real framebuffer — `/dev/fb1` — not a KMS plane) and appends
+  `dtparam=spi=on` + `dtoverlay=tft35a:rotate=270` to `config.txt`;
+- installs a first-boot seeder (`redux-fbui-seed.service`) that copies the
+  validated `fbui.env` (`REDUX_FRAMEBUFFER=/dev/fb1`, `rgb565`, `rotate 0`) onto
+  the persistent `/captures` partition **only if it does not already exist**, so
+  a hand-tuned file is never clobbered;
+- enables `redux-fbui-seed.service` and `redux-fbui.service`.
+
+So a fresh flash of a `tft35a`-profile image boots straight to a working,
+upright screen. A `none`/`mpi3501` image stays headless (`redux-fbui` remains
+installed-but-disabled). Touch is opt-in in the fbui and is wired separately;
+see the touch profile notes in `docs/DISPLAY_ACCEPTANCE.md`.
+
+### `REDUX_TFT_PROFILE=mpi3501` — legacy generic overlay (shears this panel)
+
 Set `REDUX_TFT_PROFILE=mpi3501` to enable the distro's fbtft ILI9486 SPI overlay
 at 16 MHz, reset GPIO25, data/command GPIO24, rotated 90 degrees. These follow
-the [MPI3501 pinout](https://www.lcdwiki.com/3.5inch_RPi_Display). Set `framebuffer`
+the [MPI3501 pinout](https://www.lcdwiki.com/3.5inch_RPi_Display). **Known issue:**
+this generic overlay shears/garbles the MPI3501 panel and ships no touch node;
+it is retained only for continuity. Prefer `tft35a` above. Set `framebuffer`
 in power.json only after identifying that display's actual device. The renderer
 validates 480x320/320x480 truecolor, stride, offsets and memory bounds and reserves
 the top-left 160x48 pixels for a monochrome battery icon, measured percent/voltage

@@ -13,7 +13,10 @@ User=root
 Group=root
 EnvironmentFile=/captures/config/fbui.env
 ExecStartPre=/usr/local/bin/redux-fbui --check --framebuffer ${REDUX_FRAMEBUFFER}
-ExecStart=/usr/local/bin/redux-fbui --run --framebuffer ${REDUX_FRAMEBUFFER} --port ${REDUX_DASHBOARD_PORT} --order ${REDUX_PIXEL_ORDER} --rotate ${REDUX_ROTATE}
+# --touch-auto resolves the single XPT2046/ADS7846 node by controller name and
+# drives swipe navigation. It never guesses: zero or several matches leave the
+# display running without touch. To disable touch, remove the flag.
+ExecStart=/usr/local/bin/redux-fbui --run --touch-auto --framebuffer ${REDUX_FRAMEBUFFER} --port ${REDUX_DASHBOARD_PORT} --order ${REDUX_PIXEL_ORDER} --rotate ${REDUX_ROTATE}
 Restart=on-failure
 RestartSec=8
 TimeoutStopSec=8

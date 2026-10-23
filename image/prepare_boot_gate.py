@@ -22,6 +22,10 @@ def prepare(source, tree, profile, *, expected_country=None):
     if profile not in {"lite", "ab"}:
         raise ValueError("boot gate profile must be lite or ab")
     source, tree = Path(source), Path(tree)
+    # root_payload compares the installed image against the REVIEWED payload in
+    # the repo's image/ dir. When staged into export-image/ it can't find that
+    # from its own location, so pass the real absolute path through.
+    reviewed_arg = f' --reviewed-source "{source.resolve()}"'
     stage = tree / "export-image"
     finalise = stage / "05-finalise/01-run.sh"
     target = stage / "redux-boot-payload.py"
@@ -34,7 +38,7 @@ def prepare(source, tree, profile, *, expected_country=None):
             raise ValueError("Lite boot gate refuses an A/B exporter")
         script = replace_once(
             script, 'unmount "${ROOTFS_DIR}"',
-            f'python3 "${{STAGE_DIR}}/redux-root-payload.py" --profile lite --root "${{ROOTFS_DIR}}"{country_arg}\n'
+            f'python3 "${{STAGE_DIR}}/redux-root-payload.py" --profile lite --root "${{ROOTFS_DIR}}"{country_arg}{reviewed_arg}\n'
             'python3 "${STAGE_DIR}/redux-boot-payload.py" --profile lite --root "${ROOTFS_DIR}"\n'
             'unmount "${ROOTFS_DIR}"')
         finalise.write_text(script)
@@ -47,12 +51,17 @@ def prepare(source, tree, profile, *, expected_country=None):
         # assembled root contract before the existing boot signature gate.
         cloned = replace_once(clone.read_text(),
             'python3 "${STAGE_DIR}/redux-boot-payload.py" --profile ab',
-            'python3 "${STAGE_DIR}/redux-root-payload.py" --profile ab ' 
-            f'--root "$ROOTFS_DIR" --other-root "$other"{country_arg}\n'
+            'python3 "${STAGE_DIR}/redux-root-payload.py" --profile ab '
+            f'--root "$ROOTFS_DIR" --other-root "$other"{country_arg}{reviewed_arg}\n'
             'python3 "${STAGE_DIR}/redux-boot-payload.py" --profile ab')
         clone.write_text(cloned)
     shutil.copyfile(source / "boot_payload.py", target)
     shutil.copyfile(source / "root_payload.py", root_target)
+    # root_payload.py calls unit_readiness.verify() and imports the module by
+    # bare name when run from export-image/. Stage that dependency beside it, or
+    # the finalise step dies with ModuleNotFoundError: No module named
+    # 'unit_readiness'. (boot_payload.py has no such dependency.)
+    shutil.copyfile(source / "unit_readiness.py", stage / "unit_readiness.py")
 
 
 def main(argv=None):

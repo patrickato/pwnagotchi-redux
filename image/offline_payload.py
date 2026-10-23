@@ -93,7 +93,9 @@ def contract_paths(profile):
         'etc/redux/live.toml','etc/redux/pipeline.toml','etc/redux/regulatory-country',
         'etc/overlayroot.conf','etc/fstab', 'etc/systemd/system/bettercap.service',
         'etc/systemd/system/resize2fs_once.service'}
-    optional = {'etc/init.d/resize2fs_once','captures/config/fbui.env'}
+    optional = {'etc/init.d/resize2fs_once','captures/config/fbui.env',
+                'usr/share/redux/fbui.seed.env',
+                'etc/systemd/system/redux-fbui-seed.service'}
     units = dict(root_payload._UNITS)
     if profile == 'ab':
         units.update(root_payload._AB_UNITS)
@@ -110,6 +112,7 @@ def contract_paths(profile):
         required.update(('etc/systemd/system/'+name, 'etc/systemd/system/'+group+'/'+name))
     for group in ('multi-user.target.wants','graphical.target.wants','default.target.wants'):
         optional.add('etc/systemd/system/'+group+'/redux-fbui.service')
+        optional.add('etc/systemd/system/'+group+'/redux-fbui-seed.service')
     return required, optional
 
 
