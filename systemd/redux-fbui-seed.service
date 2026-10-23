@@ -1,0 +1,31 @@
+[Unit]
+Description=Seed /captures/config/fbui.env for the Redux TFT display (first boot only)
+# The persistent REDUXCAP partition must be mounted before we can seed onto it.
+RequiresMountsFor=/captures
+After=local-fs.target
+# redux-fbui refuses to start without this file (ConditionPathExists); run first.
+Before=redux-fbui.service
+# Nothing to do once the operator's own fbui.env exists — stays a one-shot seed.
+ConditionPathExists=!/captures/config/fbui.env
+ConditionPathExists=/usr/share/redux/fbui.seed.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+Group=root
+UMask=0077
+# Create the config dir on the persistent partition, then copy the validated
+# template into place without clobbering (-n) an existing operator file. The
+# ConditionPathExists above already guards this; -n is belt-and-suspenders.
+ExecStart=/usr/bin/install -d -m 0700 /captures/config
+ExecStart=/usr/bin/cp -n /usr/share/redux/fbui.seed.env /captures/config/fbui.env
+ExecStart=/usr/bin/chmod 0600 /captures/config/fbui.env
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/captures
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -650,6 +650,127 @@ def test_unsupported_kiosk_profile_refused(prepared, tmp_path):
     assert "Unsupported REDUX_KIOSK_PROFILE" in result.stderr
 
 
+def _fake_dtbo(path):
+    """Write a minimal file whose first four bytes are the FDT magic."""
+    path.write_bytes(b"\xd0\x0d\xfe\xed" + b"\x00" * 60)
+    return path
+
+
+def _prepare_tft35a(prepared, tmp_path, overlay_bytes=None):
+    """Re-run preparation with the tft35a profile and a supplied overlay blob."""
+    repo, env = prepared
+    overlay = tmp_path / "tft35a.dtbo"
+    if overlay_bytes is None:
+        _fake_dtbo(overlay)
+    else:
+        overlay.write_bytes(overlay_bytes)
+    build = tmp_path / "tft35a-build"
+    env = dict(env, REDUX_TFT_PROFILE="tft35a",
+               REDUX_TFT_OVERLAY=str(overlay), REDUX_BUILD_DIR=str(build))
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    return repo, env, build, result
+
+
+def test_tft35a_profile_requires_overlay_path(prepared, tmp_path):
+    repo, env = prepared
+    env = dict(env, REDUX_TFT_PROFILE="tft35a",
+               REDUX_BUILD_DIR=str(tmp_path / "no-overlay"))
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode != 0
+    assert "REDUX_TFT_OVERLAY" in result.stderr
+
+
+def test_tft35a_profile_rejects_non_dtbo_overlay(prepared, tmp_path):
+    repo, env = prepared
+    bogus = tmp_path / "not-a.dtbo"
+    bogus.write_bytes(b"this is not a device tree blob")
+    env = dict(env, REDUX_TFT_PROFILE="tft35a",
+               REDUX_TFT_OVERLAY=str(bogus), REDUX_BUILD_DIR=str(tmp_path / "bad-overlay"))
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode != 0
+    assert "Device Tree blob" in result.stderr
+
+
+def test_unsupported_tft_profile_refused(prepared, tmp_path):
+    repo, env = prepared
+    env = dict(env, REDUX_TFT_PROFILE="waveshare35",
+               REDUX_BUILD_DIR=str(tmp_path / "invalid-tft"))
+    result = invoke(["bash", str(repo / "build.sh"), "--prepare-only"], env=env)
+    assert result.returncode != 0
+    assert "Unsupported TFT profile" in result.stderr
+
+
+def test_tft35a_profile_stages_overlay_and_seed_assets(prepared, tmp_path):
+    repo, env, build, result = _prepare_tft35a(prepared, tmp_path)
+    assert result.returncode == 0, result.stderr
+    staged = build / "pi-gen/stage-redux/40-power"
+    assert (staged / "files/tft35a").is_file()           # profile marker
+    assert (staged / "files/tft35a.dtbo").read_bytes()[:4] == b"\xd0\x0d\xfe\xed"
+    seed_unit = (staged / "files/redux-fbui-seed.service").read_text()
+    assert "Before=redux-fbui.service" in seed_unit
+    assert "ConditionPathExists=!/captures/config/fbui.env" in seed_unit
+    assert "ReadWritePaths=/captures" in seed_unit
+    seed_env = (staged / "files/fbui.seed.env").read_text()
+    assert "REDUX_FRAMEBUFFER=/dev/fb1" in seed_env
+    assert "REDUX_PIXEL_ORDER=rgb565" in seed_env
+    assert "REDUX_ROTATE=0" in seed_env
+
+
+def test_tft35a_stage_installs_working_overlay_and_enables_fbui(prepared, tmp_path):
+    repo, env, build, result = _prepare_tft35a(prepared, tmp_path)
+    assert result.returncode == 0, result.stderr
+    staged = build / "pi-gen/stage-redux/40-power"
+    root = tmp_path / "tft35a-rootfs"
+    (root / "boot/firmware").mkdir(parents=True)
+    # A stock Pi OS config.txt enables the KMS plane; the SPI panel needs fb1.
+    (root / "boot/firmware/config.txt").write_text(
+        "[all]\narm_64bit=1\ndtoverlay=vc4-kms-v3d\n")
+    chroot = tmp_path / "chroot-input"
+    stage_env = dict(env, ROOTFS_DIR=str(root))
+    run = invoke(["bash", "-c",
+                  'on_chroot() { cat >> "$CHROOT_INPUT"; }; export -f on_chroot; bash ./00-run.sh'],
+                 cwd=staged, env=dict(stage_env, CHROOT_INPUT=str(chroot)))
+    assert run.returncode == 0, run.stderr
+    # The validated overlay is shipped where the firmware looks for it.
+    assert (root / "boot/firmware/overlays/tft35a.dtbo").read_bytes()[:4] == b"\xd0\x0d\xfe\xed"
+    config = (root / "boot/firmware/config.txt").read_text()
+    assert "dtparam=spi=on" in config
+    assert "dtoverlay=tft35a:rotate=270" in config
+    # The generic shearing fbtft overlay must NOT be written for this panel.
+    assert "ili9486" not in config
+    # KMS is commented out so the SPI panel becomes a real framebuffer (fb1).
+    assert "#dtoverlay=vc4-kms-v3d" in config
+    assert "\ndtoverlay=vc4-kms-v3d" not in config
+    # Seed assets land in the rootfs and the services get enabled in the chroot.
+    assert (root / "usr/share/redux/fbui.seed.env").read_text().count("REDUX_FRAMEBUFFER=/dev/fb1") == 1
+    assert (root / "etc/systemd/system/redux-fbui-seed.service").is_file()
+    enabled = chroot.read_text()
+    assert "systemctl enable redux-fbui-seed.service" in enabled
+    assert "systemctl enable redux-fbui.service" in enabled
+
+
+def test_no_tft_profile_leaves_display_disabled(prepared, tmp_path):
+    repo, env = prepared
+    staged = repo / "image/stage-redux/40-power"
+    root = tmp_path / "headless-rootfs"
+    (root / "boot/firmware").mkdir(parents=True)
+    (root / "boot/firmware/config.txt").write_text("[all]\narm_64bit=1\n")
+    # 40-power needs files/boot/*; run from a prepared tree that has them staged.
+    build = tmp_path / "headless-build"
+    prep = invoke(["bash", str(repo / "build.sh"), "--prepare-only"],
+                  env=dict(env, REDUX_BUILD_DIR=str(build)))
+    assert prep.returncode == 0, prep.stderr
+    staged = build / "pi-gen/stage-redux/40-power"
+    chroot = tmp_path / "headless-chroot"
+    run = invoke(["bash", "-c",
+                  'on_chroot() { cat >> "$CHROOT_INPUT"; }; export -f on_chroot; bash ./00-run.sh'],
+                 cwd=staged, env=dict(env, ROOTFS_DIR=str(root), CHROOT_INPUT=str(chroot)))
+    assert run.returncode == 0, run.stderr
+    assert not (root / "boot/firmware/overlays/tft35a.dtbo").exists()
+    assert "tft35a" not in (root / "boot/firmware/config.txt").read_text()
+    assert "redux-fbui.service" not in chroot.read_text()
+
+
 def test_untracked_runtime_code_marks_image_provenance_dirty(prepared, tmp_path):
     repo, env = prepared
     (repo / "dirty").touch()
