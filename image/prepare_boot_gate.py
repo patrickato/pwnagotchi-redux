@@ -53,6 +53,11 @@ def prepare(source, tree, profile, *, expected_country=None):
         clone.write_text(cloned)
     shutil.copyfile(source / "boot_payload.py", target)
     shutil.copyfile(source / "root_payload.py", root_target)
+    # root_payload.py calls unit_readiness.verify() and imports the module by
+    # bare name when run from export-image/. Stage that dependency beside it, or
+    # the finalise step dies with ModuleNotFoundError: No module named
+    # 'unit_readiness'. (boot_payload.py has no such dependency.)
+    shutil.copyfile(source / "unit_readiness.py", stage / "unit_readiness.py")
 
 
 def main(argv=None):
