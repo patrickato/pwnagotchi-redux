@@ -9,10 +9,20 @@ import subprocess
 import sys
 
 import pytest
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes,serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
+# cryptography (with its cffi/_cffi_backend native dependency) can be absent or
+# fail to import on some hosts/CI runners — and when its import raises anything
+# other than a plain ModuleNotFoundError (e.g. a cffi ABI error), an unguarded
+# top-level import crashes COLLECTION, which exits pytest with code 2 and takes
+# the two modules that import from this one down with it. Catch any failure and
+# skip the whole module cleanly instead.
+try:
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+except Exception as _crypto_error:  # noqa: BLE001 - any import-time failure must skip, not crash
+    pytest.skip(f"cryptography unavailable or failed to import: {type(_crypto_error).__name__}",
+                allow_module_level=True)
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'image'))

@@ -2,6 +2,8 @@
 from pathlib import Path
 import subprocess
 
+from conftest import run_field_script_unprivileged
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/field-stdin-fix.sh"
 
@@ -27,8 +29,7 @@ def test_field_stdin_repair_script_is_valid_and_bounded():
 
 
 def test_stdin_repair_requires_root_before_mutation():
-    result = subprocess.run(["bash", str(SCRIPT)],
-                            text=True, capture_output=True, timeout=5)
+    result = run_field_script_unprivileged(SCRIPT)
     assert result.returncode == 2
     assert "sudo" in result.stderr
 
