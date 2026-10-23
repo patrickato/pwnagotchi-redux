@@ -69,9 +69,14 @@ def _norm_bssid(b: str) -> str:
 @dataclass
 class Allowlist:
     """Explicit authorized targets. EMPTY BY DEFAULT — nothing is permitted to be
-    fired at until the operator adds it. Matches on BSSID or SSID."""
+    fired at until the operator adds it. Matches on BSSID or SSID.
+
+    lab_mode mirrors Scope.lab_mode: when set (the operator's own-lab switch), the
+    gate approves any concrete RF target on sight instead of requiring a prior
+    arm. Off by default, so the out-of-box behaviour is unchanged and fail-closed."""
     bssids: set = field(default_factory=set)
     ssids: set = field(default_factory=set)
+    lab_mode: bool = False
 
     def __post_init__(self):
         self.bssids = {_norm_bssid(b) for b in self.bssids}
@@ -82,6 +87,8 @@ class Allowlist:
         return not self.bssids and not self.ssids
 
     def permits(self, bssid: str | None = None, ssid: str | None = None) -> bool:
+        if self.lab_mode and (bssid is not None or ssid is not None):
+            return True
         if bssid is not None and _norm_bssid(bssid) in self.bssids:
             return True
         if ssid is not None and ssid in self.ssids:
@@ -313,6 +320,7 @@ class BettercapDriver:
                 al.add(bssid=val)
             elif kind == "ssid":
                 al.add(ssid=val)
+        al.lab_mode = bool(getattr(scope, "lab_mode", False))
         self.allowlist = al
         return al
 
@@ -385,9 +393,9 @@ class BettercapDriver:
             reason = f"REFUSED deauth: {bssid!r} is not a valid BSSID"
             self._say(reason)
             raise FiringRefused(reason)
-        if self.allowlist.empty:
+        if self.allowlist.empty and not self.allowlist.lab_mode:
             reason = (f"REFUSED deauth of {bssid}: authorized-target allowlist is empty "
-                      f"(add the target explicitly to authorize)")
+                      f"(add the target explicitly, or enable lab mode for your own gear)")
             self._say(reason)
             raise FiringRefused(reason)
         if not self.allowlist.permits(bssid=bssid, ssid=ssid):
