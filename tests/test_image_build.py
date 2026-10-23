@@ -1210,6 +1210,54 @@ def test_regular_build_still_arms_watchdog(tmp_path):
     assert "dtparam=watchdog=on" in (root / "boot/firmware/config.txt").read_text()
 
 
+def test_watchdog_stage_is_idempotent_on_real_shipped_unit(tmp_path):
+    """Regression: the shipped redux.service already carries NotifyAccess=/
+    WatchdogSec=, so the watchdog stage must not append duplicate directives.
+    Earlier watchdog tests used a bare `[Service]\\nType=notify\\n` stub that could
+    never collide, which hid a duplicate-directive build failure in the readiness
+    gate. Drive the REAL committed unit through the REAL 10-overlay + 30-watchdog
+    sed edits, then assert the readiness parser accepts the result and each owned
+    directive appears exactly once."""
+    import os
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "unit_readiness", REPO / "image/unit_readiness.py")
+    unit_readiness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(unit_readiness)
+
+    root = tmp_path / "release-rootfs"
+    (root / "etc/initramfs-tools").mkdir(parents=True)
+    (root / "etc/initramfs-tools/modules").write_text("bcm2835_wdt\n")
+    (root / "etc/systemd/system").mkdir(parents=True)
+    (root / "boot/firmware").mkdir(parents=True)
+    (root / "boot/firmware/config.txt").write_text("[all]\n")
+    (root / "etc/fstab").write_text("")
+    unit = root / "etc/systemd/system/redux.service"
+    # The actual unit the image ships, not a stub.
+    unit.write_text((REPO / "image/stage-redux/00-redux/files/redux.service").read_text())
+
+    # Apply the two 10-overlay seds that touch redux.service (pure sed, no chroot),
+    # then run the real 30-watchdog stage script.
+    invoke(["sed", "-i",
+            r"/^StateDirectory=/d; /\[Unit\]/a RequiresMountsFor=/captures",
+            str(unit)])
+    invoke(["sed", "-i",
+            r"/\[Service\]/a Environment=REDUX_STATE_DIR=/captures/boot\nReadWritePaths=/captures",
+            str(unit)])
+    stage = REPO / "image/stage-redux/30-watchdog"
+    env = dict(os.environ, ROOTFS_DIR=str(root), REDUX_DEV_LOGIN="0")
+    result = invoke(["bash", str(stage / "00-run.sh")], cwd=stage, env=env)
+    assert result.returncode == 0, result.stderr
+
+    staged = unit.read_text()
+    # The readiness gate (what the build runs) must not reject it.
+    unit_readiness.parse(staged)
+    lines = staged.splitlines()
+    for directive in ("NotifyAccess=main", "WatchdogSec=15s",
+                      "TimeoutStartSec=30s", "TimeoutStopSec=15s", "Type=notify"):
+        assert lines.count(directive) == 1, (directive, staged)
+
+
 def test_us_disposable_build_prepares_matching_country_service_and_export(prepared, tmp_path):
     """Full real source-staging flow with fake upstream; no Pi, network or sudo."""
     repo, env = prepared
