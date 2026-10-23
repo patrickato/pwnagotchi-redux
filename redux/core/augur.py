@@ -444,6 +444,16 @@ class Augur:
         caps = {Cap.CAPTURE_HANDSHAKE.value: g.explain(Cap.CAPTURE_HANDSHAKE)["available"]}
         return Operator(self.scope, offense_enabled=self.offense_enabled(), caps=caps)
 
+    def swarm_worker(self, key, node_id: str = "node", *, executors=None):
+        """A SwarmWorker bound to THIS box's live Operator — so a capture task
+        handed to it over the swarm re-clears this device's real posture/Scope/
+        capability gates before it fires. Authorization is never delegated: the
+        assignment says what to work on, the local gates decide if it may."""
+        from ..mesh import SwarmWorker
+        k = key if isinstance(key, (bytes, bytearray)) else str(key).encode()
+        return SwarmWorker(self.operator(), bytes(k), node_id=node_id,
+                           executors=executors or {}, bus=getattr(self, "bus", None))
+
     def campaign_plan(self, targets) -> list:
         """Dry-run plan of the kill-chain for `targets` — glass-box, nothing runs."""
         return [s.to_dict() for s in self.operator().plan(targets)]
