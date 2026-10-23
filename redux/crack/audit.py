@@ -30,7 +30,7 @@ class AuditSettings:
     results_dir: Path
     database: Path
     binary: str = "hashcat"
-    max_runtime_seconds: int = 600
+    max_runtime_seconds: int = 1800
 
     @classmethod
     def load(cls, path):
@@ -62,8 +62,11 @@ class AuditSettings:
         paths = (self.wordlist, self.scope_file, self.results_dir, self.database)
         if not all(p.is_absolute() for p in paths):
             raise ValueError("audit paths must be absolute")
-        if not 30 <= self.max_runtime_seconds <= 3600:
-            raise ValueError("audit maximum runtime must be 30-3600 seconds")
+        # Up to 24h per capture: it's the owner's hardware cracking the owner's
+        # own handshake, so an overnight run is a legitimate choice, not a footgun.
+        # The lower bound and the +30s wall-clock timeout wrapper stay.
+        if not 30 <= self.max_runtime_seconds <= 86400:
+            raise ValueError("audit maximum runtime must be 30-86400 seconds")
 
 
 class AuditWorker:
@@ -201,6 +204,9 @@ class AuditWorker:
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Opt-in Redux audit worker")
     parser.add_argument("--config", required=True)
+    parser.add_argument("--max-jobs", type=int, default=8,
+                        help="drain up to N eligible artifacts this run so a backlog "
+                             "doesn't trickle out one-per-timer (1 = a single job)")
     opts = parser.parse_args(argv)
     settings = AuditSettings.load(opts.config)
     if not settings.enabled:
@@ -208,8 +214,22 @@ def main(argv=None):
         return 0
     from ..core.scope import Scope
     scope = Scope.load(str(settings.scope_file))
+    terminal = {"idle", "disabled", "unavailable"}
     with AuditWorker(settings, scope) as worker:
-        print(json.dumps(worker.once(), sort_keys=True))
+        runs = []
+        for _ in range(max(1, opts.max_jobs)):
+            result = worker.once()
+            runs.append(result)
+            if result.get("status") in terminal:
+                break
+        # Keep the single-run output shape when only one run happened (backward
+        # compatible); summarise when we actually drained several.
+        if len(runs) > 1:
+            processed = [r for r in runs if r.get("status") not in terminal]
+            print(json.dumps({"status": "batch", "processed": len(processed),
+                              "runs": runs}, sort_keys=True))
+        else:
+            print(json.dumps(runs[0], sort_keys=True))
     return 0
 
 
