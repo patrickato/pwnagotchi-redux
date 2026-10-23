@@ -1715,6 +1715,55 @@ def cmd_scope(args) -> int:
     return 0
 
 
+def cmd_wordlist(args) -> int:
+    """Manage the on-device hashcat wordlist registry (list/add/pull/select)."""
+    from .crack.wordlists import WordlistStore
+    import shutil as _shutil
+    store = WordlistStore(args.dir)
+    cmd = args.wordlist_cmd
+    if cmd == "list":
+        items = store.list()
+        if not items:
+            print(f"no wordlists registered in {args.dir}")
+            return 0
+        for w in items:
+            print(f"  {w.id}  [{w.tier:<8}] {w.name}  ({w.size_bytes} bytes)  {w.source}")
+        return 0
+    if cmd == "add":
+        wl, reason = store.register(args.path, name=args.name, tier=args.tier, copy=args.copy)
+        print(reason)
+        return 0 if wl else 3
+    if cmd == "pull":
+        # Built-in fetcher: copy from a path the operator already has mounted
+        # (e.g. the QNAP NAS mounted locally). A network transport can be wired by
+        # calling WordlistStore.pull_from_nas() with a custom fetcher.
+        def _mounted_copy(spec, dest):
+            src = __import__("pathlib").Path(spec)
+            if not src.is_file():
+                raise FileNotFoundError(f"source not found (is the NAS mounted?): {spec}")
+            _shutil.copyfile(src, dest)
+        wl, reason = store.pull_from_nas(args.source, _mounted_copy, name=args.name, tier=args.tier)
+        print(reason)
+        return 0 if wl else 3
+    if cmd == "select":
+        wl, reason = store.select(name=args.name, tier=args.tier)
+        print(reason)
+        return 0 if wl else 3
+    if cmd == "verify":
+        problems = store.verify()
+        if not problems:
+            print("all registered wordlists present and unchanged")
+            return 0
+        for w, why in problems:
+            print(f"  DRIFT {w.id} {w.name}: {why}")
+        return 3
+    if cmd == "remove":
+        ok, reason = store.remove(args.key)
+        print(reason)
+        return 0 if ok else 3
+    return 2
+
+
 def cmd_pipeline(args) -> int:
     """Run or inspect the independent capture artifact workflow."""
     from .crack.ingest import Settings, CaptureIngestor, read_summary
@@ -1919,6 +1968,29 @@ def build_parser() -> argparse.ArgumentParser:
     retention.add_argument("--apply", action="store_true",
                            help="explicitly delete only verified source captures; results preserved")
     pl.set_defaults(func=cmd_pipeline)
+
+    wl = sub.add_parser("wordlist", help="manage the hashcat wordlist registry (list/add/pull/select)")
+    wl.add_argument("--dir", default="/captures/wordlists",
+                    help="wordlist store directory (default /captures/wordlists)")
+    wlc = wl.add_subparsers(dest="wordlist_cmd", required=True)
+    wlc.add_parser("list", help="show registered wordlists (id, tier, size, source)")
+    wla = wlc.add_parser("add", help="register a local wordlist")
+    wla.add_argument("path", help="absolute path to the wordlist file")
+    wla.add_argument("--name", default=None, help="operator label (defaults to the filename)")
+    wla.add_argument("--tier", default="standard", choices=("fast", "standard", "thorough"))
+    wla.add_argument("--copy", action="store_true", help="copy the file into the store dir")
+    wlp = wlc.add_parser("pull", help="pull a wordlist from a mounted NAS path (e.g. a QNAP share)")
+    wlp.add_argument("source", help="path to the file on the mounted NAS share")
+    wlp.add_argument("--name", default=None, help="operator label (defaults to the filename)")
+    wlp.add_argument("--tier", default="thorough", choices=("fast", "standard", "thorough"))
+    wls = wlc.add_parser("select", help="show which wordlist an audit would use (glass-box)")
+    wls.add_argument("--name", default=None, help="select this list by name/id")
+    wls.add_argument("--tier", default=None, choices=("fast", "standard", "thorough"),
+                     help="select the most thorough list in this tier")
+    wlc.add_parser("verify", help="re-hash registered lists and report drift/missing")
+    wlr = wlc.add_parser("remove", help="unregister a list (leaves the file on disk)")
+    wlr.add_argument("key", help="wordlist id or name to remove")
+    wl.set_defaults(func=cmd_wordlist)
 
     ini = sub.add_parser("init", help="first-run setup: write config + swarm key + operator checklist")
     ini.add_argument("--dir", default="/etc/redux", help="config directory (default /etc/redux)")

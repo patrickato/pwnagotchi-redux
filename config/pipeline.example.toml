@@ -13,7 +13,17 @@ min_free_bytes = 67108864 # Keep reserve for runtime/SQLite; report pause when l
 # Disabled until owner provides controlled test scope, wordlist and a working backend.
 [audit]
 enabled = false
+# One wordlist, two ways to name it:
+#  (a) a single explicit path:  wordlist = "/captures/wordlists/rockyou.txt"
+#  (b) the managed registry: point at the store dir + a name or tier and the
+#      audit resolves the list through `redux wordlist` (multi-list, tiers, NAS
+#      pull). Register lists with:  redux wordlist add /path --tier standard
+#      or pull one off a mounted QNAP share:  redux wordlist pull /mnt/qnap/rockyou.txt
+# If both are given, the registry (wordlist_dir + name/tier) wins.
 wordlist = ""
+# wordlist_dir = "/captures/wordlists"
+# wordlist_name = "rockyou"        # pick one specific list by name/id
+# wordlist_tier = "thorough"       # or let the store pick the most thorough in a tier
 # Leave scope_file unset (or "") to use the same default the CLI firing tools
 # arm into — the persistent /captures/config/scope.json on the field image,
 # /etc/pwnagotchi/scope.json off-image, or $REDUX_SCOPE. Set an explicit path

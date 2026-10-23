@@ -37,9 +37,20 @@ class AuditSettings:
         with open(path, "rb") as handle:
             config = tomllib.load(handle)
         opts, pipeline = config.get("audit", {}), config.get("pipeline", {})
+        # Wordlist resolution: if a registry dir + a name/tier are configured, pick
+        # the list through the glass-box WordlistStore; otherwise keep the single
+        # literal `wordlist` path (fully backward-compatible).
+        wordlist = opts.get("wordlist") or "/nonexistent/redux-wordlist"
+        wl_dir = opts.get("wordlist_dir")
+        if wl_dir and (opts.get("wordlist_name") or opts.get("wordlist_tier")):
+            from .wordlists import resolve_wordlist
+            resolved, _reason = resolve_wordlist(
+                wl_dir, name=opts.get("wordlist_name"), tier=opts.get("wordlist_tier"))
+            if resolved:
+                wordlist = resolved
         return cls(
             enabled=opts.get("enabled") is True,
-            wordlist=Path(opts.get("wordlist") or "/nonexistent/redux-wordlist"),
+            wordlist=Path(wordlist),
             scope_file=Path(opts.get("scope_file") or _default_scope_path()),
             results_dir=Path(opts.get("results_dir") or "/captures/audits"),
             database=Path(pipeline.get("database") or "/captures/jobs.db"),
