@@ -21,13 +21,15 @@ jobs:
       - name: Compile check
         run: python -m compileall redux
       - name: Tests
+        # Write pytest's output to a file, then print it — rather than streaming
+        # straight to the Actions step pipe. Streaming to that pipe made pytest
+        # abort with exit code 2 (a broken-pipe/SIGPIPE-class failure: fast, no
+        # test-level detail) on the runner; redirecting to a file is the fix.
         run: |
           set +e
-          python -m pytest -rA -p no:cacheprovider > /tmp/pytest.txt 2>&1
+          python -m pytest -p no:cacheprovider > pytest-output.txt 2>&1
           rc=$?
-          echo "== pytest exit code: $rc =="
-          tail -n 120 /tmp/pytest.txt | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
-          cat /tmp/pytest.txt
+          cat pytest-output.txt
           exit $rc
       - name: Shell syntax
         run: for f in $(git ls-files '*.sh'); do bash -n "$f"; done
