@@ -1,8 +1,13 @@
 [Unit]
 Description=Redux passive live Wi-Fi supervisor (single Bettercap owner)
-After=local-fs.target redux.service redux-regdom.service
-Wants=redux-regdom.service
-RequiresMountsFor=/captures
+After=local-fs.target redux.service redux-regdom.service captures.mount
+Wants=redux-regdom.service captures.mount
+# Soft dependency on the REDUXCAP mount (not RequiresMountsFor): when the
+# partition is present the service still waits for it (After=captures.mount, no
+# race), but when it is absent or fails to mount the service STILL STARTS so the
+# loopback read-only Doctor can report the storage outage instead of the whole
+# supervisor failing to launch. The runtime refuses to create capture state on
+# the root filesystem and serves a storage-paused Doctor until the mount appears.
 ConditionPathExists=/etc/redux/live.toml
 
 [Service]
