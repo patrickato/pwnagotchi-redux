@@ -216,10 +216,26 @@ def unit_contract(root, additional=None):
     if ((root / "captures/config/fbui.env").exists()
             or (root / "captures/config/fbui.env").is_symlink()):
         raise ValueError("image must not preconfigure the operator's TFT")
+    # redux-fbui must not autostart on a headless image. The ONE sanctioned
+    # exception is the turnkey tft35a path: the operator supplied a validated
+    # overlay and the build staged a measured framebuffer seed
+    # (usr/share/redux/fbui.seed.env) AND enabled redux-fbui-seed.service to lay
+    # it down on first boot. On that path the panel is operator-measured, so the
+    # screen is allowed to come up. Even then redux-fbui only actually starts
+    # once its own ConditionPathExists=/captures/config/fbui.env is satisfied
+    # (that file is seeded by redux-fbui-seed, never baked into the image), so an
+    # un-seeded boot still shows nothing. Anything other than this exact turnkey
+    # shape — a bare enable, a graphical/default-target want — stays rejected.
+    seed_env = root / "usr/share/redux/fbui.seed.env"
+    seed_enabled = services / "multi-user.target.wants/redux-fbui-seed.service"
+    turnkey_tft = ((seed_env.exists() or seed_env.is_symlink())
+                   and seed_enabled.is_symlink())
     for want in ("multi-user.target.wants", "graphical.target.wants",
                  "default.target.wants"):
         entry = services / want / "redux-fbui.service"
         if entry.exists() or entry.is_symlink():
+            if want == "multi-user.target.wants" and turnkey_tft:
+                continue
             raise ValueError("native TFT service must not autostart")
     if "REDUX_FRAMEBUFFER=/dev/fbN" not in text(
             root, "usr/share/redux/fbui.example.env"):
