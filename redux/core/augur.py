@@ -76,6 +76,7 @@ class Augur:
         trusted=None,
         recon_channels=None,
         retired_provider: Optional[Callable[[], set]] = None,
+        peripheral_probe: Optional[Callable[[], dict]] = None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
@@ -115,6 +116,10 @@ class Augur:
         self._retired_provider = retired_provider
         self._retired_interval = 30.0
         self._retired_next = float("-inf")
+        # Live snapshot of plugged peripherals (sdr/bluetooth/gps/ups/storage ->
+        # (present, reason)); the capability graph turns it into provider nodes so
+        # the Doctor can report what the box actually has. None -> not probed.
+        self._peripheral_probe = peripheral_probe
 
         # consumers subscribe to the hub
         connect_narrator(self.bus, self.narrator)
@@ -337,10 +342,38 @@ class Augur:
             present=fix is not None,
             reason=("a live position fix is available" if fix is not None
                     else "no position provider / no fix")))
+        # Plugged peripherals: register every one as a provider node so the box
+        # KNOWS what it has and the Doctor reports presence/absence honestly (a box
+        # with no SDR must read differently from one with it — never invisible).
+        periph = {}
+        if self._peripheral_probe is not None:
+            try:
+                periph = self._peripheral_probe() or {}
+            except Exception:
+                periph = {}
+
+        def _periph(key, default_reason):
+            val = periph.get(key)
+            if isinstance(val, (tuple, list)) and len(val) == 2:
+                return bool(val[0]), str(val[1])
+            return False, default_reason
+
+        for name, cap, default in (
+            ("sdr", Cap.SDR_RX, "SDR not probed"),
+            ("bluetooth", Cap.BLE_SCAN, "bluetooth not probed"),
+            ("ups", Cap.POWER_BATTERY, "UPS not probed"),
+            ("storage", Cap.STORAGE_PERSIST, "storage not probed"),
+        ):
+            present, reason = _periph(name, default)
+            g.register(Provider.of(name, provides=[cap], present=present, reason=reason))
+
         # consumers that depend on those capabilities (so blast-radius is real)
-        g.register(Provider.of("capture", requires=[Cap.RADIO_WIFI_MONITOR], reason="handshake capture"))
+        g.register(Provider.of("capture", requires=[Cap.RADIO_WIFI_MONITOR],
+                               optional=[Cap.STORAGE_PERSIST], reason="handshake capture"))
         g.register(Provider.of("coverage-map", requires=[Cap.LOCATION_POSITION], reason="sighting map"))
         g.register(Provider.of("deauth-gate", requires=[Cap.RADIO_WIFI_MONITOR], reason="firing gate"))
+        g.register(Provider.of("sdr-sightings", requires=[Cap.SDR_RX], reason="ISM/ADS-B sightings"))
+        g.register(Provider.of("ble-detectors", requires=[Cap.BLE_SCAN], reason="BLE flood/tracker detectors"))
         # capture engines as CAPTURE_HANDSHAKE providers (AngryOxide preferred when present)
         from ..crack.capture import AngryOxideProvider, register_capture_providers
         register_capture_providers(
@@ -367,9 +400,9 @@ class Augur:
         capture-engine probe (over the live graph's CAPTURE_HANDSHAKE providers) on
         top of the built-ins, so a box with no capture engine present can't read
         clean."""
-        from .doctor import BUILTIN_PROBES, probe_capture_engine
-        return Doctor(probes=list(BUILTIN_PROBES) + [probe_capture_engine]).report(
-            self._doctor_inputs())
+        from .doctor import BUILTIN_PROBES, PERIPHERAL_PROBES, probe_capture_engine
+        return Doctor(probes=list(BUILTIN_PROBES) + list(PERIPHERAL_PROBES)
+                      + [probe_capture_engine]).report(self._doctor_inputs())
 
     def boot_post(self, extra=()) -> dict:
         """The power-on self-test: the Doctor rendered as a gated, streaming boot
