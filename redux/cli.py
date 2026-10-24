@@ -537,6 +537,52 @@ def cmd_dex(args) -> int:
     return 0
 
 
+def cmd_ir(args) -> int:
+    """Infrared: TV-B-Gone power blasting + a loadable IR code library (import
+    Flipper .ir). Transmit is POWER-tier (LAB + --confirm). Needs an IR LED on
+    GPIO + LIRC on the device; this prints the gated command/plan."""
+    from . import ir as IR
+    from .core.mode import read_mode
+    lib = IR.IRLibrary(args.lib)
+    cmd = args.ir_cmd
+    if cmd == "codes":
+        for c in IR.TV_POWER_CODES:
+            print(f"  {c.name:<24} {c.protocol}")
+        return 0
+    if cmd == "list":
+        codes = lib.list()
+        if not codes:
+            print(f"no IR codes saved ({args.lib}) — import with `redux ir import <file.ir>`")
+            return 0
+        for c in codes:
+            print(f"  {c.name:<24} {c.protocol or c.kind}")
+        return 0
+    if cmd == "import":
+        try:
+            n = lib.import_flipper(Path(args.file).read_text(errors="replace"))
+        except OSError as e:
+            print(f"cannot read {args.file}: {e}"); return 3
+        print(f"imported {n} IR code(s) into {args.lib}")
+        return 0
+    lab = read_mode(getattr(args, "scope_file", None)) == "lab"
+    if cmd == "blast":
+        p = IR.blast_plan(lab_mode=lab, confirmed=bool(args.confirm))
+        print(p.reason)
+        if p.runnable:
+            print("\nrun this (cage only):\n  " + " ".join(p.argv))
+        return 0 if p.runnable else 3
+    if cmd == "replay":
+        code = lib.get(args.name)
+        if code is None:
+            print(f"no IR code '{args.name}' (see `redux ir list`)"); return 3
+        p = IR.replay_plan(code, lab_mode=lab, confirmed=bool(args.confirm))
+        print(p.reason)
+        if p.runnable:
+            print("\nrun this:\n  " + " ".join(p.argv))
+        return 0 if p.runnable else 3
+    return 2
+
+
 def cmd_subghz(args) -> int:
     """Sub-GHz signal library: capture/catalog (RX, works with RTL-SDR) and gated
     replay (POWER-tier: LAB + confirm + a TX backend). For junkyard keyfobs,
@@ -2574,6 +2620,22 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    ir = sub.add_parser("ir", help="infrared: TV-B-Gone power blast + loadable IR code library (POWER-tier)")
+    ir.add_argument("--lib", default="/captures/config/ir.json", help="IR code library path")
+    irsub = ir.add_subparsers(dest="ir_cmd", required=True)
+    irsub.add_parser("codes", help="show the built-in TV power codes")
+    irsub.add_parser("list", help="list saved IR codes")
+    iri = irsub.add_parser("import", help="import a Flipper .ir file into the library")
+    iri.add_argument("file", help="path to a .ir file")
+    irb = irsub.add_parser("blast", help="TV-B-Gone: blast all power codes (LAB + --confirm)")
+    irb.add_argument("--confirm", action="store_true", help="per-action opt-in")
+    irb.add_argument("--scope-file", default=None)
+    irr = irsub.add_parser("replay", help="replay one saved IR code (LAB + --confirm)")
+    irr.add_argument("name", help="code name (see `redux ir list`)")
+    irr.add_argument("--confirm", action="store_true", help="per-action opt-in")
+    irr.add_argument("--scope-file", default=None)
+    ir.set_defaults(func=cmd_ir)
 
     sg = sub.add_parser("subghz", help="sub-GHz signal library: capture/catalog (RX) + gated replay (keyfobs, garage, ISM)")
     sg.add_argument("--lib", default="/captures/config/subghz.json", help="signal library path")
