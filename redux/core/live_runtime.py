@@ -1001,10 +1001,14 @@ class LiveRuntime:
             scope = Scope.load(default_scope_path())
         except Exception:
             scope = Scope()
+        # Retire APs that already gave up a verified 4-way (or that the operator
+        # ignores), so lab-mode offense doesn't re-pwn a done target. Fails safe.
+        from ..crack.captured import retired_bssids
         try:
             agent = Augur(radios=radios, intent=Intent.RECON, driver=driver, store=store,
                           scope=scope, resource_monitor=self.resources,
-                          position_provider=_gps_from_env())
+                          position_provider=_gps_from_env(),
+                          retired_provider=lambda: retired_bssids())
         except Exception:
             store.close()
             raise

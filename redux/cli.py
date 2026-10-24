@@ -1915,6 +1915,38 @@ def cmd_pipeline(args) -> int:
     raise ValueError("unknown pipeline command")
 
 
+def cmd_captured(args) -> int:
+    """The already-pwned / ignore list: APs lab-mode offense skips (verified
+    captures, plus any the operator chooses to ignore)."""
+    from .crack.captured import (IgnoreList, captured_from_ingest,
+                                  DEFAULT_JOBS_DB, DEFAULT_IGNORE_PATH)
+    db = getattr(args, "db", None) or DEFAULT_JOBS_DB
+    path = getattr(args, "file", None) or DEFAULT_IGNORE_PATH
+    cmd = args.captured_cmd
+    if cmd == "list":
+        auto = captured_from_ingest(db)
+        manual = IgnoreList(path).items()
+        if not auto and not manual:
+            print("no retired APs yet (none captured, none manually ignored)")
+            return 0
+        for bssid in sorted(set(auto) | set(manual)):
+            tags = ([". captured"] if bssid in auto else []) + \
+                   (["ignored"] if bssid in manual else [])
+            ssid = manual.get(bssid, {}).get("ssid", "")
+            print(f"  {bssid}  [{', '.join(t.lstrip('. ') for t in tags)}]"
+                  + (f"  {ssid}" if ssid else ""))
+        return 0
+    if cmd == "add":
+        ok, reason = IgnoreList(path).add(args.bssid, ssid=getattr(args, "ssid", "") or "")
+        print(("ignoring " if ok else "") + reason)
+        return 0 if ok else 3
+    if cmd == "remove":
+        ok, reason = IgnoreList(path).remove(args.bssid)
+        print(("re-targeting " if ok else "") + reason)
+        return 0 if ok else 3
+    return 2
+
+
 def cmd_live(args) -> int:
     """Inspect actual on-device state without creating synthetic radio records."""
     if args.live_cmd == "doctor":
@@ -2117,6 +2149,19 @@ def build_parser() -> argparse.ArgumentParser:
     wlr = wlc.add_parser("remove", help="unregister a list (leaves the file on disk)")
     wlr.add_argument("key", help="wordlist id or name to remove")
     wl.set_defaults(func=cmd_wordlist)
+
+    cp = sub.add_parser("captured", help="the already-pwned / ignore list (APs offense skips)")
+    cp.add_argument("--db", default=None, help="pipeline DB (default /captures/jobs.db)")
+    cp.add_argument("--file", default=None,
+                    help="manual ignore list (default /captures/config/captured.json)")
+    cpsub = cp.add_subparsers(dest="captured_cmd", required=True)
+    cpsub.add_parser("list", help="show retired APs (verified captures + manual ignores)")
+    cpa = cpsub.add_parser("add", help="manually ignore an AP so offense skips it")
+    cpa.add_argument("bssid", help="AP BSSID to ignore (aa:bb:cc:dd:ee:ff)")
+    cpa.add_argument("--ssid", default="", help="optional label")
+    cpr = cpsub.add_parser("remove", help="re-target an AP (drop it from the manual ignore list)")
+    cpr.add_argument("bssid", help="AP BSSID to stop ignoring")
+    cp.set_defaults(func=cmd_captured)
 
     on = sub.add_parser("online", help="check whether the device currently has internet uplink")
     on.add_argument("--host", default="one.one.one.one", help="reachability host (default one.one.one.one)")
