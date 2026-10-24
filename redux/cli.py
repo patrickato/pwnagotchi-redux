@@ -1873,6 +1873,117 @@ def cmd_wordlist(args) -> int:
     return 2
 
 
+_ATTACK_NAMES = {
+    "straight": 0, "dict": 0, "wordlist": 0,
+    "combinator": 1, "combo": 1,
+    "mask": 3, "brute": 3, "bruteforce": 3,
+    "hybrid-wm": 6, "hybrid": 6,
+    "hybrid-mw": 7,
+}
+
+
+def _resolve_attack(value):
+    """Accept a friendly attack name or a bare int; None -> use recipe default."""
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    if v in _ATTACK_NAMES:
+        return _ATTACK_NAMES[v]
+    if v.isdigit():
+        return int(v)
+    return None
+
+
+def cmd_crack(args) -> int:
+    """Guided, any-hash cracking front-end (not just Wi-Fi): browse hash types,
+    identify a sample, plan the exact hashcat command, and run it (gated by
+    default, unlocked in LAB). Glass-box throughout."""
+    from pathlib import Path
+    from .crack import recipes as R
+    cmd = args.crack_cmd
+
+    if cmd == "modes":
+        rows = R.find(getattr(args, "query", "") or "")
+        if getattr(args, "category", None):
+            rows = [r for r in rows if r.category == args.category]
+        if not rows:
+            print("no hash types match")
+            return 0
+        print(f"{'slug':<16} {'-m':>6}  {'category':<9} label")
+        for r in rows:
+            flag = " (slow)" if r.slow else ""
+            print(f"{r.name:<16} {r.mode:>6}  {r.category:<9} {r.label}{flag}")
+        print(f"\n{len(rows)} type(s). Pick one as --type <slug> for `crack plan`/`crack run`.")
+        return 0
+
+    if cmd == "id":
+        try:
+            blob = Path(args.hashfile).read_text(errors="replace")[:65536]
+        except OSError as e:
+            print(f"cannot read {args.hashfile}: {e}")
+            return 3
+        sample = next((ln.strip() for ln in blob.splitlines()
+                       if ln.strip() and not ln.lstrip().startswith("#")), "")
+        if not sample:
+            print("no hash line found in file")
+            return 3
+        cands = R.identify(sample)
+        if not cands:
+            print("could not recognize the hash shape — browse `redux crack modes` and pick by hand")
+            return 0
+        print(f"sample: {sample[:72]}{'…' if len(sample) > 72 else ''}\n")
+        print("likely hash types (best first):")
+        for r in cands:
+            s = R.suggest(r)
+            print(f"  --type {r.name:<14} -m {r.mode:<6} {r.label}")
+            print(f"       suggest: attack {s.attack}"
+                  + (f" + '{s.rules}' rules" if s.use_rules else " (no rules)")
+                  + f" — {s.reason}")
+        return 0
+
+    # plan / run share option resolution
+    recipe = R.by_name(getattr(args, "type", "") or "")
+    if recipe is None:
+        print(f"unknown hash type '{getattr(args, 'type', '')}' — see `redux crack modes`")
+        return 3
+    atk = _resolve_attack(getattr(args, "attack", None))
+    sug = R.suggest(recipe)
+    # smart default rules: if the user didn't say, use the suggestion (fast hashes only)
+    rules = getattr(args, "rules", None)
+    if rules is None and (atk in (None, 0)) and sug.use_rules:
+        rules = sug.rules
+    # resolve a wordlist from the store (by name, or the persisted pick) unless a direct path was given
+    wl_path = getattr(args, "wordlist_path", None)
+    if wl_path is None and (atk in (None, 0, 1, 6, 7)):
+        from .crack.wordlists import resolve_wordlist
+        wl_path, wl_reason = resolve_wordlist(args.wordlist_dir, name=getattr(args, "wordlist", None))
+        if wl_path is None and cmd == "plan":
+            print(f"note: {wl_reason}")
+    outfile = getattr(args, "outfile", None)
+    cplan = R.plan(recipe, args.hashfile, attack=atk, wordlist=wl_path,
+                   rules=rules, mask=getattr(args, "mask", None),
+                   binary=args.binary, outfile=outfile)
+
+    if cmd == "plan":
+        print(cplan.explanation)
+        if cplan.ok:
+            print("\ncommand:\n  " + " ".join(cplan.argv))
+        return 0 if cplan.ok else 3
+
+    if cmd == "run":
+        from .crack.anycrack import CrackSettings, run_plan
+        from .core.mode import read_mode
+        lab = read_mode(getattr(args, "scope_file", None)) == "lab"
+        settings = CrackSettings(binary=args.binary,
+                                 results_dir=Path(args.results_dir),
+                                 max_runtime_seconds=args.runtime)
+        res = run_plan(cplan, settings, authorized=bool(getattr(args, "authorized", False)),
+                       lab_mode=lab, session="redux-crack-" + recipe.name)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("status") in ("recovered", "exhausted", "completed") else 3
+    return 2
+
+
 def cmd_online(args) -> int:
     """Report whether the device currently has uplink (glass-box; no data leaves)."""
     from .connectivity.online import check_online
@@ -2169,6 +2280,39 @@ def build_parser() -> argparse.ArgumentParser:
     wlr = wlc.add_parser("remove", help="unregister a list (leaves the file on disk)")
     wlr.add_argument("key", help="wordlist id or name to remove")
     wl.set_defaults(func=cmd_wordlist)
+
+    ck = sub.add_parser("crack", help="guided any-hash cracking (not just Wi-Fi): modes/id/plan/run")
+    cksub = ck.add_subparsers(dest="crack_cmd", required=True)
+    ckm = cksub.add_parser("modes", help="browse/search the hash-type catalog")
+    ckm.add_argument("query", nargs="?", default="", help="filter by slug/label/category/mode")
+    ckm.add_argument("--category", default=None,
+                     help="limit to a category (wifi/windows/network/linux/web/generic/archive/document/disk/crypto)")
+    cki = cksub.add_parser("id", help="identify a hash sample and suggest the mode + options")
+    cki.add_argument("hashfile", help="file containing one hash per line")
+
+    def _crack_opts(p, *, running):
+        p.add_argument("hashfile", help="absolute path to the hash file to crack")
+        p.add_argument("--type", required=True, help="hash type slug (see `crack modes`) or a bare -m number")
+        p.add_argument("--attack", default=None,
+                       help="straight|combinator|mask|hybrid-wm|hybrid-mw (default: the type's own)")
+        p.add_argument("--wordlist", default=None, help="registered wordlist name/id (else the persisted pick)")
+        p.add_argument("--wordlist-path", default=None, help="use this absolute wordlist path directly")
+        p.add_argument("--wordlist-dir", default="/captures/wordlists", help="wordlist store dir")
+        p.add_argument("--rules", default=None, help="rule preset name or .rule path (fast hashes only)")
+        p.add_argument("--mask", default=None, help="hashcat mask or a preset (for mask/hybrid attacks)")
+        p.add_argument("--binary", default="hashcat", help="hashcat binary (default: hashcat)")
+        if running:
+            p.add_argument("--authorized", action="store_true",
+                           help="confirm this hash file is yours to crack (not needed in LAB mode)")
+            p.add_argument("--scope-file", default=None,
+                           help="read LAB/FIELD mode from this scope file (default: the device scope)")
+            p.add_argument("--results-dir", default="/captures/crack", help="where recovered results are written (0600)")
+            p.add_argument("--runtime", type=int, default=1800, help="max hashcat runtime seconds (default 1800)")
+        else:
+            p.add_argument("--outfile", default=None, help="show an --outfile in the planned command")
+    _crack_opts(cksub.add_parser("plan", help="show the exact hashcat command that would run (glass-box)"), running=False)
+    _crack_opts(cksub.add_parser("run", help="run the crack (gated by default; unlocked in LAB mode)"), running=True)
+    ck.set_defaults(func=cmd_crack)
 
     cp = sub.add_parser("captured", help="the already-pwned / ignore list (APs offense skips)")
     cp.add_argument("--db", default=None, help="pipeline DB (default /captures/jobs.db)")
