@@ -537,6 +537,61 @@ def cmd_dex(args) -> int:
     return 0
 
 
+def cmd_subghz(args) -> int:
+    """Sub-GHz signal library: capture/catalog (RX, works with RTL-SDR) and gated
+    replay (POWER-tier: LAB + confirm + a TX backend). For junkyard keyfobs,
+    garage remotes, ISM gadgets below 1 GHz."""
+    from .sdr.subghz import (SubGhzLibrary, capture_command, replay_plan,
+                             detect_tx_backend, parse_freq as _parse_freq)
+    lib = SubGhzLibrary(args.lib)
+    cmd = args.subghz_cmd
+    if cmd == "capture":
+        fhz = _parse_freq(args.freq)
+        argv = capture_command(fhz, seconds=args.seconds, out_path=args.out or "",
+                               device=args.device, decode=not args.raw)
+        print(f"capture @ {fhz/1e6:g} MHz ({'raw IQ' if args.raw else 'decode/catalog'}):")
+        print("  " + " ".join(argv))
+        if not args.raw:
+            print("\nthen add decoded signals to the library with `redux subghz add`")
+        return 0
+    if cmd == "list":
+        sigs = lib.list()
+        if not sigs:
+            print(f"no signals in the library ({args.lib})")
+            return 0
+        for s in sigs:
+            roll = " [ROLLING — won't replay]" if s.rolling else ""
+            print(f"  {s.id}  {s.name:<16} {s.freq_hz/1e6:g} MHz  {s.protocol or s.modulation}{roll}")
+        return 0
+    if cmd == "add":
+        s = lib.add(args.name, _parse_freq(args.freq), protocol=args.protocol or "",
+                    capture_path=args.capture or "", note=args.note or "")
+        print(f"added {s.id} '{s.name}' @ {s.freq_hz/1e6:g} MHz"
+              + (" (looks rolling-code — replay won't work)" if s.rolling else ""))
+        return 0
+    if cmd == "remove":
+        print("removed" if lib.remove(args.id) else f"no signal '{args.id}'")
+        return 0
+    if cmd == "replay":
+        from .core.mode import read_mode
+        sig = lib.get(args.id)
+        if sig is None:
+            print(f"no signal '{args.id}' (see `redux subghz list`)")
+            return 3
+        lab = read_mode(getattr(args, "scope_file", None)) == "lab"
+        p = replay_plan(sig, lab_mode=lab, confirmed=bool(args.confirm),
+                        backend=getattr(args, "backend", None))
+        print(p.reason)
+        if p.runnable:
+            print("\nrun this (cage only):\n  " + " ".join(p.argv))
+        else:
+            be = detect_tx_backend()
+            if be is None:
+                print("  (no TX backend detected — capture/catalog still work)")
+        return 0 if p.runnable else 3
+    return 2
+
+
 def cmd_power(args) -> int:
     """Power-tier gate: the strongest tools (RF TX/replay, sub-GHz, IR, BadUSB)
     are hidden in FIELD, LAB-only, and need a per-action confirmation even in LAB.
@@ -2519,6 +2574,29 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    sg = sub.add_parser("subghz", help="sub-GHz signal library: capture/catalog (RX) + gated replay (keyfobs, garage, ISM)")
+    sg.add_argument("--lib", default="/captures/config/subghz.json", help="signal library path")
+    sgsub = sg.add_subparsers(dest="subghz_cmd", required=True)
+    sgc = sgsub.add_parser("capture", help="print the RX capture command for a frequency (works with RTL-SDR)")
+    sgc.add_argument("freq", help="frequency, e.g. 433.92M or 315M")
+    sgc.add_argument("--seconds", type=int, default=10, help="capture duration (default 10)")
+    sgc.add_argument("--raw", action="store_true", help="raw IQ grab (rtl_sdr) for later replay, not decode")
+    sgc.add_argument("--out", default=None, help="raw capture output path")
+    sgc.add_argument("--device", type=int, default=0, help="RTL-SDR device index")
+    sgsub.add_parser("list", help="list catalogued signals")
+    sga = sgsub.add_parser("add", help="add a signal to the library")
+    sga.add_argument("name"); sga.add_argument("freq", help="e.g. 390M")
+    sga.add_argument("--protocol", default=None, help="rtl_433 protocol/model if known")
+    sga.add_argument("--capture", default=None, help="path to a raw IQ/.ook capture file (needed to replay)")
+    sga.add_argument("--note", default=None)
+    sgr = sgsub.add_parser("remove", help="remove a signal"); sgr.add_argument("id")
+    sgrp = sgsub.add_parser("replay", help="replay a signal (POWER-tier: LAB + --confirm + a TX backend)")
+    sgrp.add_argument("id", help="signal id or name")
+    sgrp.add_argument("--confirm", action="store_true", help="the per-action opt-in (required in LAB)")
+    sgrp.add_argument("--backend", default=None, choices=("hackrf", "rpitx", "cc1101"))
+    sgrp.add_argument("--scope-file", default=None, help="read mode from this scope file")
+    sg.set_defaults(func=cmd_subghz)
 
     pw = sub.add_parser("power", help="power-tier gate: the strongest tools (LAB-only + confirm; some forbidden)")
     pw.add_argument("--mode", default=None, choices=("lab", "field"), help="check a specific mode (default: device mode)")
