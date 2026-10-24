@@ -734,6 +734,38 @@ def cmd_push(args) -> int:
                           priority=args.priority, tags=getattr(args, "tags", "") or "")
     print(json.dumps(res, indent=2))
     return 0 if res.get("ok") else 3
+def cmd_help(args) -> int:
+    """In-product guidance for new users: info-bubbles, when-to-use, and how-to
+    for every feature. The same content the TFT/web surfaces show."""
+    from . import guidance as G
+    if getattr(args, "search", None):
+        hits = G.search(args.search)
+        if not hits:
+            print(f"no help topics match '{args.search}'")
+            return 0
+        for t in hits:
+            print(f"  {t.id:<16} {t.bubble}")
+        return 0
+    if getattr(args, "topic", None):
+        t = G.get(args.topic)
+        if t is None:
+            print(f"unknown topic '{args.topic}' — run `redux help` for the list")
+            return 3
+        print(f"# {t.title}\n")
+        print(t.bubble + "\n")
+        print(f"WHEN: {t.when}\n")
+        print("HOW:")
+        print(t.how)
+        if t.command:
+            print(f"\nTRY: {t.command}")
+        if t.related:
+            print(f"\nSEE ALSO: {', '.join(t.related)}")
+        return 0
+    print("Augur help — topics (run `redux help <topic>` for details):\n")
+    for t in G.list_topics():
+        print(f"  {t.id:<16} {t.title}")
+    print("\nTip: `redux help <topic>` for a how-to, or `redux help --search <word>`.")
+    return 0
 
 
 def cmd_doctor(args) -> int:
@@ -3001,6 +3033,10 @@ def build_parser() -> argparse.ArgumentParser:
     pus.add_argument("--priority", type=int, default=3, help="0..5 (default 3)")
     pus.add_argument("--tags", default="", help="optional tags/emoji (ntfy)")
     pu.set_defaults(func=cmd_push)
+    hp = sub.add_parser("help", help="in-product guidance: info-bubbles, when-to-use, how-to for each feature")
+    hp.add_argument("topic", nargs="?", default=None, help="a topic id (run `redux help` for the list)")
+    hp.add_argument("--search", default=None, help="find topics by keyword")
+    hp.set_defaults(func=cmd_help)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
