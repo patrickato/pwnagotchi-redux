@@ -560,6 +560,10 @@ def cmd_oui(args) -> int:
         return 0 if n else 3
     if cmd == "stats":
         print(json.dumps(O.table_stats(O.full_table()), indent=2))
+        return 0
+    return 2
+
+
 def cmd_learn(args) -> int:
     """The experience layer: what has actually worked, with honest sample sizes.
     Real data only — numbers always carry their trial count; untried options are
@@ -591,6 +595,10 @@ def cmd_learn(args) -> int:
         return 0
     if cmd == "reset":
         print(store.reset())
+        return 0
+    return 2
+
+
 def cmd_karma(args) -> int:
     """Probe harvesting (passive) + aimed karma planning (scope-gated). Harvest
     runs in any mode; advertising is aimed only at in-scope clients, never spam."""
@@ -619,6 +627,9 @@ def cmd_karma(args) -> int:
         plan = karma_plan(h, scope)
         print(json.dumps(plan.to_dict(), indent=2))
         return 0
+    return 2
+
+
 def cmd_wps(args) -> int:
     """WPS / Pixie-Dust: passive `wash` discovery + scope-gated attack plan/run.
     Finding WPS APs is passive; attacking is gated (FIELD needs --authorized +
@@ -680,6 +691,9 @@ def cmd_tracker(args) -> int:
     for v in show:
         mark = "⚠ " if v.following else "  "
         print(f"{mark}{v.mac}  {v.reason}")
+    return 0
+
+
 def cmd_crack_distribute(args) -> int:
     """Split one hashcat job across the mesh: partition a wordlist (--skip/--limit)
     or a mask keyspace (-s/-l) into disjoint per-node slices. Glass-box; prints
