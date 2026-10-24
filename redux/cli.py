@@ -537,6 +537,37 @@ def cmd_dex(args) -> int:
     return 0
 
 
+def cmd_karma(args) -> int:
+    """Probe harvesting (passive) + aimed karma planning (scope-gated). Harvest
+    runs in any mode; advertising is aimed only at in-scope clients, never spam."""
+    from .portal.karma import ProbeHarvester, karma_plan
+    h = ProbeHarvester(path=args.store)
+    cmd = args.karma_cmd
+    if cmd == "clients":
+        rows = h.clients()
+        if not rows:
+            print(f"no probes harvested yet ({args.store})")
+            return 0
+        for r in rows:
+            print(f"  {r['client']}  probes={r['probes']:<4} PNL: {', '.join(r['ssids'])}")
+        return 0
+    if cmd == "ssids":
+        rows = h.ssids()
+        if not rows:
+            print(f"no probed SSIDs yet ({args.store})")
+            return 0
+        for r in rows:
+            print(f"  {r['ssid']!r:28} wanted by {r['client_count']} client(s)")
+        return 0
+    if cmd == "plan":
+        from .core.scope import Scope, default_scope_path
+        scope = Scope.load(args.scope_file or default_scope_path())
+        plan = karma_plan(h, scope)
+        print(json.dumps(plan.to_dict(), indent=2))
+        return 0
+    return 2
+
+
 def cmd_doctor(args) -> int:
     """Print the headless, glass-box self-diagnosis from live state."""
     bc = _build(args)
@@ -2490,6 +2521,16 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    km = sub.add_parser("karma", help="probe harvesting (passive) + aimed karma plan (scope-gated)")
+    km.add_argument("--store", default="/captures/live/pnl.json",
+                    help="harvested PNL store (default /captures/live/pnl.json)")
+    kmsub = km.add_subparsers(dest="karma_cmd", required=True)
+    kmsub.add_parser("clients", help="per-client preferred-network list (who's looking for what)")
+    kmsub.add_parser("ssids", help="probed SSIDs ranked by how many clients want them")
+    kmp = kmsub.add_parser("plan", help="aimed advertise plan (only in-scope clients; glass-box)")
+    kmp.add_argument("--scope-file", default=None, help="scope file (default: the device scope)")
+    km.set_defaults(func=cmd_karma)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
