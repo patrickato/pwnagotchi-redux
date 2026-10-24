@@ -217,6 +217,33 @@ def probe_capture_engine(inp: DoctorInputs) -> Finding:
                    "install AngryOxide or bring up the bettercap driver")
 
 
+def probe_sdr(inp: DoctorInputs) -> Finding:
+    return _cap_probe(inp, Cap.SDR_RX, "SDR", needed=False,
+                      hint="plug in an RTL-SDR to collect ISM (rtl_433) and ADS-B sightings")
+
+
+def probe_bluetooth(inp: DoctorInputs) -> Finding:
+    return _cap_probe(inp, Cap.BLE_SCAN, "bluetooth", needed=False,
+                      hint="attach/enable a Bluetooth adapter for BLE scanning and detectors")
+
+
+def probe_ups(inp: DoctorInputs) -> Finding:
+    return _cap_probe(inp, Cap.POWER_BATTERY, "UPS/battery", needed=False,
+                      hint="attach a UPS HAT (I2C) to read battery charge and run on battery")
+
+
+def probe_storage(inp: DoctorInputs) -> Finding:
+    # captures/wordlists/scope all live on this partition -> required
+    return _cap_probe(inp, Cap.STORAGE_PERSIST, "persistent storage", needed=True)
+
+
+# Peripheral-awareness probes need a capability graph (presence comes from the live
+# peripheral snapshot), so they ride the Augur/boot doctor path, not the base set.
+PERIPHERAL_PROBES: List[Callable[[DoctorInputs], Finding]] = [
+    probe_sdr, probe_bluetooth, probe_ups, probe_storage,
+]
+
+
 BUILTIN_PROBES: List[Callable[[DoctorInputs], Finding]] = [
     probe_thermal_power, probe_capture_radio, probe_location, probe_detectors, probe_scope,
 ]

@@ -37,6 +37,7 @@ class Cap(str, Enum):
     NETWORK_INTERNET = "network.internet"
     CAPTURE_HANDSHAKE = "capture.handshake"
     STORAGE_PERSIST = "storage.persist"
+    POWER_BATTERY = "power.battery"       # a UPS/battery HAT the box can read its charge from
 
 
 class CapState(str, Enum):

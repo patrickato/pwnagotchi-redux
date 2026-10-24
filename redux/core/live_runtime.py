@@ -1004,11 +1004,21 @@ class LiveRuntime:
         # Retire APs that already gave up a verified 4-way (or that the operator
         # ignores), so lab-mode offense doesn't re-pwn a done target. Fails safe.
         from ..crack.captured import retired_bssids
+        # Live peripheral snapshot (SDR/BT/GPS/UPS/storage presence) so the graph +
+        # Doctor know what's actually plugged in. Fails safe to an empty snapshot.
+        from .peripherals import detect_peripherals
+
+        def _peripherals():
+            try:
+                return detect_peripherals(mounted=self._capture_mount_ok())
+            except Exception:
+                return {}
         try:
             agent = Augur(radios=radios, intent=Intent.RECON, driver=driver, store=store,
                           scope=scope, resource_monitor=self.resources,
                           position_provider=_gps_from_env(),
-                          retired_provider=lambda: retired_bssids())
+                          retired_provider=lambda: retired_bssids(),
+                          peripheral_probe=_peripherals)
         except Exception:
             store.close()
             raise
