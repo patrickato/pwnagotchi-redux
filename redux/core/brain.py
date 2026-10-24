@@ -42,7 +42,7 @@ class Brain:
     """Rolling-window orchestration advisor. Feed it bus emissions (or call the
     observe_* helpers); ask `recommend()` for a glass-box intent suggestion."""
 
-    def __init__(self, clock=time.time, window_s: float = WINDOW_S):
+    def __init__(self, clock=time.time, window_s: float = WINDOW_S, *, experience=None):
         self._clock = clock
         self._window = window_s
         self._captures: Deque[float] = deque()
@@ -50,6 +50,11 @@ class Brain:
         self._alerts: Deque[float] = deque()
         self._battery: Optional[float] = None
         self._charging: bool = False
+        # Optional ExperienceStore-like object (has .load()). Advisory only: it
+        # enriches the *reason* of orchestration suggestions with honest history
+        # (sample sizes shown); it never changes which intent is chosen, keeping
+        # the proven greedy behavior intact.
+        self._experience = experience
 
     # --- intake ------------------------------------------------------------ #
 
@@ -82,11 +87,32 @@ class Brain:
             while dq and dq[0] < cutoff:
                 dq.popleft()
 
+    def historical_note(self, hour: Optional[int] = None) -> str:
+        """Honest one-liner about how this hour-of-day has historically done, or
+        '' when there's no experience store or no data. Real data only — always
+        shows the sample size, never a bare percentage."""
+        if self._experience is None:
+            return ""
+        try:
+            rows = self._experience.load()
+        except Exception:
+            return ""
+        if not rows:
+            return ""
+        h = hour if hour is not None else int(time.localtime(self._clock()).tm_hour)
+        succ = sum(1 for r in rows if r.context.get("hour") == h and r.success)
+        trials = sum(1 for r in rows if r.context.get("hour") == h)
+        if trials == 0:
+            return f"(no capture history for this hour yet — {len(rows)} total observations)"
+        return f"(history: {succ}/{trials} captures at this hour)"
+
     def recommend(self, current: Optional[Intent] = None) -> Decision:
         """Glass-box intent recommendation. Order matters: safety/power first,
         then productivity, then quiet-area, then default to staying put."""
         self._prune()
         caps, aps = len(self._captures), len(self._new_aps)
+        note = self.historical_note()
+        _h = (" " + note) if note else ""
 
         # 1) power — overrides everything
         if self._battery is not None and not self._charging:
@@ -100,13 +126,13 @@ class Brain:
         # 2) productive spot — keep hunting
         if caps >= PRODUCTIVE_CAPTURES:
             return Decision(Intent.HUNT, f"{caps} captures in the last "
-                            f"{int(self._window/60)} min — productive spot, keep hunting", 0.75,
+                            f"{int(self._window/60)} min — productive spot, keep hunting" + _h, 0.75,
                             keep=(current == Intent.HUNT))
 
         # 3) going quiet — suggest a change (move / survey)
         if aps <= QUIET_NEW_APS and caps == 0:
             return Decision(Intent.SURVEY, f"only {aps} new AP(s) and no captures in "
-                            f"{int(self._window/60)} min — area looks tapped out, suggest moving / survey", 0.6)
+                            f"{int(self._window/60)} min — area looks tapped out, suggest moving / survey" + _h, 0.6)
 
         # 4) default — stay the course
         return Decision(current, "steady activity — no change recommended", 0.5, keep=True)

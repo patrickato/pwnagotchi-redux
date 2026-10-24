@@ -29,6 +29,7 @@ from ..geo import SightingStore, Sighting
 from .supervisor import Supervisor
 from .narrator import Narrator
 from .brain import Brain
+from .experience import CaptureRecorder
 from .governor import Governor, Reading, GovDecision
 from .telemetry import ResourceMonitor
 from .capabilities import Cap, Provider, CapabilityGraph
@@ -40,6 +41,19 @@ from .signals import SignalBus, Signal, connect_narrator
 # driver event type -> sighting kind
 _KIND = {"ap.new": "wifi", "ap.lost": "wifi", "client.new": "wifi",
          "ble.new": "ble", "ble.lost": "ble"}
+
+
+def _band_of_channel(ch):
+    """Coarse band label from a Wi-Fi channel, for experience context. None-safe."""
+    try:
+        c = int(ch)
+    except (TypeError, ValueError):
+        return None
+    if 1 <= c <= 14:
+        return "2.4"
+    if 32 <= c <= 177:
+        return "5"
+    return "6" if c >= 1 else None
 
 
 def _persona_detector_names(spec):
@@ -77,10 +91,15 @@ class Augur:
         recon_channels=None,
         retired_provider: Optional[Callable[[], set]] = None,
         peripheral_probe: Optional[Callable[[], dict]] = None,
+        experience=None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
-        self.brain = brain or Brain()
+        # The optional experience store lets the Brain enrich its orchestration
+        # reasons with honest history, and (in lab mode) a CaptureRecorder log
+        # one real outcome per offense attempt so rates are not fabricated.
+        self._experience = experience
+        self.brain = brain or Brain(experience=experience)
         # trusted: declared-legitimate networks so the rogue-AP/evil-twin detector
         # can fire. Without an injected engine, wire it into the one we build.
         self._trusted = trusted
@@ -106,6 +125,7 @@ class Augur:
         # force a 4-way, skipping any AP retired after capture. Every deauth (and
         # refusal) is logged by the driver — glass-box.
         self._offense_known: dict = {}      # bssid -> ssid, APs seen this session
+        self._offense_channel: dict = {}    # bssid -> channel (for experience context)
         self._offense_last: dict = {}       # bssid -> last deauth timestamp
         self._offense_retired: set = set()  # APs to stop targeting (ignore-list)
         self._offense_interval = 20.0       # min seconds between deauths of one AP
@@ -121,11 +141,18 @@ class Augur:
         # the Doctor can report what the box actually has. None -> not probed.
         self._peripheral_probe = peripheral_probe
 
+        # Lab-mode experience recorder: correlates each offense attempt with its
+        # outcome (one real row per attempt). None unless an experience store was
+        # injected. Subscribed to the bus so handshakes resolve pending attempts.
+        self._recorder = CaptureRecorder(experience) if experience is not None else None
+
         # consumers subscribe to the hub
         connect_narrator(self.bus, self.narrator)
         self.bus.on("*", self.brain.observe)
         self.bus.on(Signal.EVENT, self._geotag)
         self.bus.on(Signal.EVENT, self._offense_note)
+        if self._recorder is not None:
+            self.bus.on(Signal.EVENT, self._recorder.observe)
 
         # the supervisor drives the radios + bettercap and publishes to the hub
         self.supervisor = Supervisor(
@@ -232,6 +259,8 @@ class Augur:
         bssid = (data.get("bssid") or data.get("mac") or data.get("address") or "").strip()
         if bssid:
             self._offense_known[bssid] = data.get("essid") or data.get("ssid") or ""
+            if data.get("channel") is not None:
+                self._offense_channel[bssid] = data.get("channel")
 
     def retire_ap(self, bssid: str) -> None:
         """Stop targeting an AP (e.g. after a verified 4-way). Idempotent; once
@@ -269,6 +298,10 @@ class Augur:
             try:
                 driver.deauth(bssid, ssid=ssid or None)
                 fired += 1
+                if self._recorder is not None:
+                    ch = self._offense_channel.get(bssid)
+                    self._recorder.note_attempt(
+                        bssid, {"channel": ch, "band": _band_of_channel(ch)}, now=now)
             except Exception:
                 # FiringRefused (off-scope / not lab) or a transport hiccup must
                 # never crash the capture pump; the driver already logged why.
@@ -282,6 +315,8 @@ class Augur:
         self.resources.sample()
         alerts = self.supervisor.pump()
         self._drive_offense()
+        if self._recorder is not None:
+            self._recorder.flush_stale(self._offense_clock())
         self.flush_sightings()
         sentinel = getattr(self, "_sentinel", None)
         if sentinel is not None:
