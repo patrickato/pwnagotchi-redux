@@ -1963,7 +1963,18 @@ def cmd_live(args) -> int:
 
     from pathlib import Path
     snapshot = Path(args.file)
-    if snapshot.is_symlink() or not snapshot.is_file():
+    try:
+        # These stat the path (and its parents); when the daemon's capture dir
+        # isn't readable by the invoking user they raise EACCES rather than
+        # returning False. A status command must report that, never traceback.
+        is_link = snapshot.is_symlink()
+        is_regular = snapshot.is_file()
+    except OSError as error:
+        hint = " — try running with sudo" if isinstance(error, PermissionError) else ""
+        print(f"live: cannot read runtime snapshot at {snapshot} "
+              f"({type(error).__name__}){hint}")
+        return 3
+    if is_link or not is_regular:
         print(f"live: no verified runtime snapshot at {snapshot}")
         return 3
     try:
