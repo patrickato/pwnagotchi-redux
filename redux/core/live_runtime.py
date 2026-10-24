@@ -387,7 +387,16 @@ class LiveRuntime:
         self.executor = executor
         self.spawn = spawn
         self.clock = clock
-        self.resources = resource_monitor if resource_monitor is not None else ResourceMonitor()
+        if resource_monitor is not None:
+            self.resources = resource_monitor
+        else:
+            # Back the Governor's battery axis with the UPS HAT (INA219) when one is
+            # present, so low power actually sheds load / enables a safe shutdown.
+            from .telemetry import ResourceCollector
+            from .ups import smbus_reader, battery_probe_from_bus
+            _reader = smbus_reader()
+            _batt = (lambda: battery_probe_from_bus(_reader)) if _reader else None
+            self.resources = ResourceMonitor(collector=ResourceCollector(battery_probe=_batt))
         self.lease_guard = None
         if config.require_usb_lease:
             self.lease_guard = lease_guard or UsbLeaseGuard(

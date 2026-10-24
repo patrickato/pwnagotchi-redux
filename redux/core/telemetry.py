@@ -89,10 +89,13 @@ class ResourceCollector:
     discard the baseline. Sysfs mtime is not sensor freshness: reads happen now.
     """
     def __init__(self, root=Path('/'), *, clock=time.time, monotonic=time.monotonic,
-                 throttle_reader=_throttled):
+                 throttle_reader=_throttled, battery_probe=None):
         self.root = Path(root)
         self.clock, self.monotonic = clock, monotonic
         self.throttle_reader = throttle_reader
+        # battery_probe() -> (battery_pct, on_battery) from a UPS HAT, or None. None
+        # (no probe or a read error) reads as "not on battery" — never a false shed.
+        self.battery_probe = battery_probe
         self.snapshot = None
         self._cpu = None
 
@@ -150,7 +153,17 @@ class ResourceCollector:
             mask = None
         if mask is not None:
             sources['throttled_mask'] = 'firmware:vcgencmd get_throttled'
-        self.snapshot = Snapshot(now, mono, Reading(cpu_temp_c=temp, cpu_load_pct=load, ram_pct=ram),
+        battery_pct, on_battery = None, False
+        if self.battery_probe is not None:
+            try:
+                res = self.battery_probe()
+            except Exception:
+                res = None
+            if res and len(res) == 2 and res[0] is not None:
+                battery_pct, on_battery = float(res[0]), bool(res[1])
+                sources['battery_pct'] = 'i2c:ina219 UPS HAT'
+        self.snapshot = Snapshot(now, mono, Reading(cpu_temp_c=temp, cpu_load_pct=load,
+                                 ram_pct=ram, battery_pct=battery_pct, on_battery=on_battery),
                                  freq, mask, sources)
         return self.snapshot
 
