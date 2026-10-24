@@ -1963,7 +1963,18 @@ def cmd_live(args) -> int:
 
     from pathlib import Path
     snapshot = Path(args.file)
-    if snapshot.is_symlink() or not snapshot.is_file():
+    try:
+        # These stat the path (and its parents); when the daemon's capture dir
+        # isn't readable by the invoking user they raise EACCES rather than
+        # returning False. A status command must report that, never traceback.
+        is_link = snapshot.is_symlink()
+        is_regular = snapshot.is_file()
+    except OSError as error:
+        hint = " — try running with sudo" if isinstance(error, PermissionError) else ""
+        print(f"live: cannot read runtime snapshot at {snapshot} "
+              f"({type(error).__name__}){hint}")
+        return 3
+    if is_link or not is_regular:
         print(f"live: no verified runtime snapshot at {snapshot}")
         return 3
     try:
@@ -2050,8 +2061,9 @@ def build_parser() -> argparse.ArgumentParser:
     lv = sub.add_parser("live", help="real standalone runtime status (no stub radios)")
     lv_sub = lv.add_subparsers(dest="live_cmd", required=True)
     lvs = lv_sub.add_parser("status", help="read actual on-device radio/engine state")
-    lvs.add_argument("--file", default="/captures/redux/live.json",
-                     help="runtime checkpoint file; defaults to /captures/redux/live.json")
+    lvs.add_argument("--file", default="/captures/live/live.json",
+                     help="runtime checkpoint file; defaults to /captures/live/live.json "
+                          "(the live daemon's state_dir, where it writes live.json)")
     lvd = lv_sub.add_parser("doctor", help="actual live Doctor findings from localhost runtime")
     lvd.add_argument("--port", type=int, default=8080,
                      help="local Redux dashboard port (default 8080)")
