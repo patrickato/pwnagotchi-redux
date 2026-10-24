@@ -100,6 +100,17 @@ def test_pump_deauths_seen_aps_in_lab_mode():
     assert ("aa:bb:cc:dd:ee:07", "dad24") in a.supervisor.driver.deauthed
 
 
+def test_offense_skips_aps_from_the_retired_provider():
+    # The persistent retire set (verified captures ∪ manual ignores) is pulled in
+    # via retired_provider and skipped, without an explicit retire_ap() call.
+    a = Augur([ONBOARD, ALFA], intent=Intent.RECON, driver=FakeDriver(),
+              scope=Scope(lab_mode=True), store=SightingStore(":memory:"),
+              retired_provider=lambda: {"aa:bb:cc:dd:ee:01"})
+    a._offense_known = {"aa:bb:cc:dd:ee:01": "done", "aa:bb:cc:dd:ee:02": "live"}
+    a._drive_offense()
+    assert [b for b, _ in a.supervisor.driver.deauthed] == ["aa:bb:cc:dd:ee:02"]
+
+
 def test_pump_is_fully_passive_when_lab_mode_off():
     evs = [normalize_event({"tag": "wifi.ap.new", "time": 1.0,
                             "data": {"mac": "aa:bb:cc:dd:ee:08", "essid": "x"}})]

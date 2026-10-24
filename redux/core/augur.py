@@ -75,6 +75,7 @@ class Augur:
         resource_monitor=None,
         trusted=None,
         recon_channels=None,
+        retired_provider: Optional[Callable[[], set]] = None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
@@ -108,6 +109,12 @@ class Augur:
         self._offense_retired: set = set()  # APs to stop targeting (ignore-list)
         self._offense_interval = 20.0       # min seconds between deauths of one AP
         self._offense_clock: Callable[[], float] = time.time
+        # retired_provider() returns the persistent retire set (verified captures ∪
+        # manual ignores). Refreshed on a cadence so a freshly-captured or manually
+        # ignored AP drops out of the rotation without a restart.
+        self._retired_provider = retired_provider
+        self._retired_interval = 30.0
+        self._retired_next = float("-inf")
 
         # consumers subscribe to the hub
         connect_narrator(self.bus, self.narrator)
@@ -239,6 +246,14 @@ class Augur:
         if driver is None or not hasattr(driver, "deauth"):
             return 0
         now = self._offense_clock()
+        # Refresh the persistent retire set (verified captures ∪ manual ignores)
+        # on a cadence. Union, so an in-session retire_ap() is never undone.
+        if self._retired_provider is not None and now >= self._retired_next:
+            try:
+                self._offense_retired |= set(self._retired_provider())
+            except Exception:
+                pass
+            self._retired_next = now + self._retired_interval
         fired = 0
         for bssid, ssid in list(self._offense_known.items()):
             if bssid in self._offense_retired:
