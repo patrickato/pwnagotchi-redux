@@ -133,7 +133,7 @@ def probe_thermal_power(inp: DoctorInputs) -> Finding:
     return Finding("thermal/power", st, summ, reason, {"mode": mode, "telemetry": telemetry}, rem)
 
 
-def _cap_probe(inp: DoctorInputs, cap: Cap, area: str, *, needed: bool) -> Finding:
+def _cap_probe(inp: DoctorInputs, cap: Cap, area: str, *, needed: bool, hint: str = "") -> Finding:
     if inp.graph is None:
         return Finding(area, Status.UNKNOWN, f"Can't assess {area}.", "no capability graph provided")
     ex = inp.graph.explain(cap)
@@ -142,7 +142,9 @@ def _cap_probe(inp: DoctorInputs, cap: Cap, area: str, *, needed: bool) -> Findi
                        ex["reason"], {"provider": ex["active_provider"]})
     br = inp.graph.blast_radius(cap)
     st = Status.ACTION_REQUIRED if needed else Status.ATTENTION
-    rem = "Plug in / enable a provider for this capability." if needed else ""
+    # A non-required capability still gets an actionable hint so "unavailable"
+    # never dead-ends the operator ("...unavailable" with no idea what fixes it).
+    rem = "Plug in / enable a provider for this capability." if needed else hint
     return Finding(area, st, f"{area} is unavailable.", br["reason"],
                    {"candidates": ex["candidates"], "affected": br["affected"]}, rem)
 
@@ -153,7 +155,9 @@ def probe_capture_radio(inp: DoctorInputs) -> Finding:
 
 def probe_location(inp: DoctorInputs) -> Finding:
     # location is useful but not required for most ops → attention, not action
-    return _cap_probe(inp, Cap.LOCATION_POSITION, "location", needed=False)
+    return _cap_probe(inp, Cap.LOCATION_POSITION, "location", needed=False,
+                      hint="attach a USB GPS and set REDUX_GPS to populate "
+                           "location, the map, and fox-hunt")
 
 
 def probe_detectors(inp: DoctorInputs) -> Finding:
@@ -172,14 +176,24 @@ def probe_scope(inp: DoctorInputs) -> Finding:
         return Finding("scope", Status.UNKNOWN, "Can't assess the authorized-target scope.",
                        "no scope provided")
     s = inp.scope.summary()
+    lab = bool(s.get("lab_mode"))
     if s["empty"]:
+        # In lab mode an empty allowlist is NOT disarmed: scope.authorize approves
+        # any concrete target on sight, so offense fires. Reporting "No targets
+        # armed / will refuse" there is factually wrong — branch on lab_mode.
+        if lab:
+            return Finding("scope", Status.OK, "Lab mode armed — approving targets on sight.",
+                           "lab mode is on: offensive functions fire on your own gear without an explicit allowlist",
+                           {"jobs": s["jobs"], "lab_mode": True})
         return Finding("scope", Status.ATTENTION, "No targets armed.",
-                       "the authorized-target scope is empty — offensive functions will refuse until you arm one",
-                       {"jobs": s["jobs"]}, "redux scope add / import / arm-lab")
+                       "the authorized-target scope is empty — offensive functions will refuse until you arm one, or enable lab mode",
+                       {"jobs": s["jobs"], "lab_mode": False}, "redux scope add / import / arm-lab, or redux mode lab")
     return Finding("scope", Status.OK,
-                   f"{s['active']} authorized target(s) armed" + (f" across jobs {', '.join(s['jobs'])}" if s["jobs"] else "") + ".",
+                   f"{s['active']} authorized target(s) armed"
+                   + (f" across jobs {', '.join(s['jobs'])}" if s["jobs"] else "")
+                   + (" + lab mode (also approving on sight)" if lab else "") + ".",
                    "offensive functions are aimed at your declared scope",
-                   {"active": s["active"], "jobs": s["jobs"]})
+                   {"active": s["active"], "jobs": s["jobs"], "lab_mode": lab})
 
 
 def probe_capture_engine(inp: DoctorInputs) -> Finding:

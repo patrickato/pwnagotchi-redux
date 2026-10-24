@@ -63,6 +63,23 @@ def test_location_unavailable_is_attention_not_action():
     inp = DoctorInputs(graph=_graph(location_present=False))
     f = next(x for x in Doctor().report(inp)["findings"] if x["area"] == "location")
     assert f["status"] == "attention"    # useful but not required -> not action
+    assert "GPS" in f["remediation"]     # and now it tells you how to fix it
+
+
+def test_empty_scope_in_lab_mode_reports_armed_not_refusing():
+    # Regression: lab mode fires on sight with an empty allowlist, so "No targets
+    # armed / will refuse" is factually wrong there.
+    s = Scope(lab_mode=True)
+    f = next(x for x in Doctor().report(DoctorInputs(scope=s))["findings"] if x["area"] == "scope")
+    assert f["status"] == "ok"
+    assert "lab mode" in f["summary"].lower()
+    assert f["detail"]["lab_mode"] is True
+
+
+def test_empty_scope_without_lab_mode_still_warns():
+    s = Scope()   # empty, lab mode off (the field default)
+    f = next(x for x in Doctor().report(DoctorInputs(scope=s))["findings"] if x["area"] == "scope")
+    assert f["status"] == "attention" and "No targets armed" in f["summary"]
 
 
 def test_augur_doctor_report_from_live_state():
