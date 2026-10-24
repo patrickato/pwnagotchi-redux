@@ -1,8 +1,12 @@
-"""Standalone Redux passive live runtime.
+"""Standalone Redux live runtime.
 
 A single supervisor owns its Bettercap child and its selected monitor interface.
-No injection, association, deauth, attacker caplets, or password audits run here.
-The existing Redux capture-ingest timer processes files independently.
+It is PASSIVE by default — no injection, association, deauth, attacker caplets, or
+password audits. The one exception is lab mode (your own gear): when the persisted
+scope has lab_mode on, the pump actively deauths seen APs to force 4-ways (Augur's
+auto-offense), every frame logged with a glass-box reason. Lab mode is off in the
+shipped image, so the default stays fully passive. The existing Redux capture-ingest
+and audit timers process captured files independently.
 """
 from __future__ import annotations
 
@@ -988,9 +992,18 @@ class LiveRuntime:
             raise RuntimeError("capture radio disappeared during startup")
         # Supervisor -> BettercapDriver is the exclusive active radio owner.
         store = SightingStore(self.config.state_dir / "sightings.db")
+        # Load the persisted central Scope so the daemon honours `redux scope add`
+        # and `redux scope lab-mode on`: this arms the driver's deauth allowlist
+        # (and, in lab mode, enables Augur's auto-offense). Missing/unreadable scope
+        # => an empty, non-lab scope => fully passive, exactly as before.
+        from .scope import Scope, default_scope_path
+        try:
+            scope = Scope.load(default_scope_path())
+        except Exception:
+            scope = Scope()
         try:
             agent = Augur(radios=radios, intent=Intent.RECON, driver=driver, store=store,
-                          resource_monitor=self.resources,
+                          scope=scope, resource_monitor=self.resources,
                           position_provider=_gps_from_env())
         except Exception:
             store.close()
