@@ -1061,6 +1061,17 @@ class LiveRuntime:
             store.close()
             raise
         agent.bus.on(Signal.EVENT, self._observe)
+        # Observation history for unwanted-tracker ("is it following me") analysis:
+        # the sighting store collapses to one row per device, so log BLE
+        # observations (tagged with current GPS) to an append-only JSONL that
+        # `redux tracker` reads. Passive; transmits nothing.
+        try:
+            from ..geo.follower import ObservationLog
+            self._obs_log = ObservationLog(self.config.state_dir / "observations.jsonl",
+                                           position=_gps_from_env())
+            agent.bus.on(Signal.EVENT, self._obs_log.observe)
+        except Exception:
+            self._obs_log = None
         _arm_sentinel_from_env(agent)
         self.driver = driver
         self.augur = agent

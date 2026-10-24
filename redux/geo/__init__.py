@@ -10,6 +10,9 @@ from redux.geo.db import DEFAULT_DB_PATH, Sighting, SightingStore
 from redux.geo.dead_reckoning import Fix, fill_gaps
 from redux.geo.estimate import LocationEstimate, estimate_from_coords, estimate_location
 from redux.geo.export_tracks import export_store_gpx, export_store_kml, to_gpx, to_kml
+from redux.geo.follower import (
+    FollowerVerdict, follower_analysis, followers, analyze_mac,
+)
 from redux.geo.geofence import inside_authorized_area, point_in_geojson_polygon
 from redux.geo.geohash import group_by_cell
 from redux.geo.kismet_import import import_kismetdb
@@ -31,6 +34,7 @@ from redux.geo.wigle_upload import UploadReport, upload_when_online
 __all__ = [
     "UploadReport",
     "upload_when_online",
+    "FollowerVerdict", "follower_analysis", "followers", "analyze_mac",
     "CoverageGrid",
     "DEFAULT_DB_PATH",
     "Fix",
