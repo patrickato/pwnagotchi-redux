@@ -72,8 +72,14 @@ class Supervisor:
         detect_engine=None,
         bus=None,
         alert_bus=None,
+        recon_channels=None,
     ):
         self._radios = {r.iface: r for r in (radios or [])}
+        # Optional channel narrowing for recon. None/empty = sweep every channel
+        # across every band (the open default, like pwnagotchi but broader). Set
+        # it only when YOU choose to focus a session on specific channels; it is a
+        # knob you reach for, never a cage.
+        self._recon_channels = list(recon_channels) if recon_channels else []
         self._intent = Intent(intent)
         self._decide = decider
         self._radio_control = radio_control
@@ -181,6 +187,11 @@ class Supervisor:
         self._say(f"pointing bettercap at {iface} and starting recon")
         self._driver.set_interface(iface)
         self._driver.recon(True)
+        # Full-spectrum sweep by default; narrow to the chosen channels only when
+        # the operator asked for it (and only if the driver supports the knob).
+        if self._recon_channels and hasattr(self._driver, "set_channels"):
+            self._say(f"narrowing recon to channels {self._recon_channels} (operator-chosen)")
+            self._driver.set_channels(self._recon_channels)
 
     def tick(self) -> list:
         """One event-pump step: drain driver events (normalized). Empty without a

@@ -694,10 +694,19 @@ def cmd_portal(args) -> int:
         print(f"  page bytes: {len(portal.page())}")
         print("  NOT serving (plan only) — add `serve --authorized` to run an authorized engagement.")
         return 0
-    # serve: refuse unless explicitly authorized
+    # serve: require explicit --authorized, UNLESS lab mode is on. Lab mode is the
+    # own-gear switch (`redux scope lab-mode on`) that already waives pre-arming for
+    # the firing paths, so it waives the portal's per-run --authorized too.
     if not getattr(args, "authorized", False):
-        print("refused: `serve` requires --authorized (authorized client testing only)")
-        return 3
+        from .core.scope import Scope, default_scope_path
+        try:
+            lab = Scope.load(default_scope_path()).lab_mode
+        except Exception:
+            lab = False
+        if not lab:
+            print("refused: `serve` requires --authorized (or turn on lab mode: `redux scope lab-mode on`)")
+            return 3
+        print("lab mode on — `--authorized` waived for your own lab")
     # posture gate: the portal is firing-capable (credential harvest), so a
     # detection-only persona hard-disables it — same invariant as eap/capture.
     if getattr(args, "persona", None):
@@ -1044,15 +1053,20 @@ def _captap_live(args) -> int:
 
     stop = threading.Event()
     if args.hop:
-        chans = [1, 6, 11]
-        print(f"redux captap live — {args.iface}, hopping {chans} (≤{args.seconds}s)")
+        from .radio.channels import all_band_channels, parse_channels
+        if getattr(args, "channels", None):
+            chans = parse_channels(args.channels)
+        else:
+            chans = all_band_channels(bands=tuple(args.bands) if getattr(args, "bands", None) else ("2.4", "5"))
+        print(f"redux captap live — {args.iface}, sweeping {len(chans)} channels "
+              f"across {'/'.join(args.bands) + 'GHz' if getattr(args, 'bands', None) else 'all bands'} (≤{args.seconds}s)")
 
         def _hop():
             i = 0
             while not stop.is_set():
                 _setch(chans[i % len(chans)])
                 i += 1
-                stop.wait(2.0)
+                stop.wait(getattr(args, "dwell", 2.0))
         threading.Thread(target=_hop, daemon=True).start()
     elif args.channel:
         _setch(args.channel)
@@ -1149,15 +1163,20 @@ def cmd_survey(args) -> int:
             _setch(args.channel)
             print(f"redux survey — passive sweep on {args.iface} ch{args.channel} (≤{args.seconds}s)")
         else:
-            chans = [1, 6, 11]
-            print(f"redux survey — passive sweep on {args.iface}, hopping {chans} (≤{args.seconds}s)")
+            from .radio.channels import all_band_channels, parse_channels
+            if getattr(args, "channels", None):
+                chans = parse_channels(args.channels)
+            else:
+                chans = all_band_channels(bands=tuple(args.bands) if getattr(args, "bands", None) else ("2.4", "5"))
+            print(f"redux survey — passive sweep on {args.iface}, {len(chans)} channels "
+                  f"across {'/'.join(args.bands) + 'GHz' if getattr(args, 'bands', None) else 'all bands'} (≤{args.seconds}s)")
 
             def _hop():
                 i = 0
                 while not stop.is_set():
                     _setch(chans[i % len(chans)])
                     i += 1
-                    stop.wait(2.0)
+                    stop.wait(getattr(args, "dwell", 2.0))
             threading.Thread(target=_hop, daemon=True).start()
         print("  (listening only — no frames transmitted)")
         try:
@@ -1207,9 +1226,37 @@ def cmd_tft(args) -> int:
 
 
 def cmd_hunt(args) -> int:
-    if getattr(args, "hunt_cmd", "demo") == "live":
+    hc = getattr(args, "hunt_cmd", "demo")
+    if hc == "live":
         return _hunt_live(args)
+    if hc == "track":
+        return _hunt_track(args)
     return _hunt_demo(args)
+
+
+def _hunt_track(args) -> int:
+    """Scope-bounded location trail demo: fixes are logged over time ONLY for an
+    armed target. A bystander BSSID is refused and never written — the trail is a
+    fox-hunt history of what you're hunting, not a who-was-where log of the air."""
+    from .geo import TrackStore
+    armed = "aa:bb:cc:dd:ee:ff"
+    bystander = "11:22:33:44:55:66"
+    scope = Scope(); scope.add(armed, "bssid", job="hunt")
+    store = TrackStore(":memory:")
+    print("redux hunt track demo — Scope-bounded location trail (in-memory)")
+    # a few fixes on the armed target as you move
+    for i, (la, lo, r) in enumerate([(42.00, -83.00, -70), (42.01, -83.01, -58),
+                                     (42.012, -83.012, -47)]):
+        ok, why = store.record_fix(scope, armed, la, lo, rssi=r, ts=100 + i, now=100 + i)
+        print(f"  armed fix {i+1}: logged={ok}")
+    ok, why = store.record_fix(scope, bystander, 42.02, -83.02, now=110)
+    print(f"  bystander fix: logged={ok} — {why}")
+    print(f"  trail length (armed): {store.count(armed)}   bystander logged: {store.count(bystander)}")
+    est = store.estimate(armed)
+    if est is not None:
+        print(f"  estimate: {est.lat:.5f},{est.lon:.5f} — {est.reason}")
+    print("  → only armed targets accumulate a trail; bystanders are never logged.")
+    return 0
 
 
 def _hunt_live(args) -> int:
@@ -1285,10 +1332,56 @@ def _hunt_demo(args) -> int:
     return 0
 
 
+def _cmd_mesh_swarm(args) -> int:
+    """Coordinated multi-device capture demo (SIMULATED): a coordinator places the
+    capture chain across two nodes by capability, and each node re-gates the
+    assignment against its OWN Scope before firing — the coordinator distributes
+    work, never permission."""
+    from .mesh import NodeProfile, SwarmCoordinator, SwarmWorker
+    from .operator.operator import Operator, Phase
+    key = b"swarm-shared-key"
+    cap = "capture.handshake"
+    target = "00:11:22:33:44:55"
+
+    def armed():
+        s = Scope(); s.add(target, "bssid", job="op"); return s
+
+    print("redux swarm ops demo — coordinated capture across 2 nodes (SIMULATED)")
+    coord = SwarmCoordinator(key, node_id="coordinator")
+    coord.add_node(NodeProfile("alpha", caps={cap: True}))    # has a capture engine
+    coord.add_node(NodeProfile("bravo", caps={cap: False}))   # recon-only
+    for a in coord.plan([target], job="op"):
+        if a.phase is Phase.CAPTURE:
+            print(f"  placement: capture → {a.assignee or 'UNPLACED'} ({a.reason})")
+
+    def captured(_t):
+        return True, "handshake captured"
+
+    # alpha is armed + capable → fires. bravo is armed but a stranger hands IT the
+    # capture task directly; it has no capture engine, so its local gate refuses.
+    alpha = SwarmWorker(Operator(armed(), caps={cap: True}), key, node_id="alpha",
+                        executors={Phase.CAPTURE: captured})
+    msgs = coord.assignments([target], job="op")
+    for m in msgs:
+        r = alpha.accept(m)
+        if r.get("phase") == "capture" and r.get("reason", "") and "not me" not in r["reason"]:
+            print(f"  alpha (armed+capable): fired={r['fired']} — {r.get('result', r['reason'])}")
+
+    # the safety property: an UN-ARMED node refuses a correctly-signed assignment.
+    blank = SwarmWorker(Operator(Scope(), caps={cap: True}), key, node_id="alpha",
+                        executors={Phase.CAPTURE: captured})
+    r = blank.accept(msgs[0])
+    print(f"  un-armed node, VALID signature: fired={r['fired']} — {r['reason']}")
+    print("  → authorization is never delegated: every node re-checks its own Scope.")
+    return 0
+
+
 def cmd_mesh(args) -> int:
     """Mesh demo: a 3-node swarm sharing one authorized Scope over the (simulated)
     LoRa lane — arm on one node, it converges everywhere; a forged delta (wrong
     swarm key) is rejected."""
+    if getattr(args, "mesh_cmd", "demo") == "swarm":
+        return _cmd_mesh_swarm(args)
     from .mesh import ScopeSync, LoopbackMesh, SignedMessage, sign
     key = b"swarm-shared-key"
     mesh = LoopbackMesh()
@@ -1669,12 +1762,22 @@ def cmd_scope(args) -> int:
     function consults. Edits are saved atomically back to the scope file."""
     path = args.file
     scope = Scope.load(path)
+    if args.scope_cmd == "lab-mode":
+        if args.state in ("on", "off"):
+            scope.lab_mode = (args.state == "on")
+            scope.save(path)
+        print("lab mode: " + ("ON — firing is approved on sight for your own gear "
+                              "(RF targets + private networks), each logged"
+                              if scope.lab_mode else
+                              "OFF — targets must be armed before firing (safe default)"))
+        return 0
     if args.scope_cmd == "list":
         s = scope.summary()
         print(f"scope: {s['active']} active / {s['total']} total"
               + (f", {s['expired']} expired" if s["expired"] else "")
               + (f" | jobs: {', '.join(s['jobs'])}" if s["jobs"] else "")
-              + ("  (EMPTY — nothing authorized)" if s["empty"] else ""))
+              + ("  (EMPTY — nothing authorized)" if s["empty"] else "")
+              + ("  [LAB MODE ON]" if s["lab_mode"] else ""))
         now = time.time()
         for e in scope.entries:
             state = "active" if e.active(now) else "EXPIRED"
@@ -1767,6 +1870,14 @@ def cmd_wordlist(args) -> int:
         print(reason)
         return 0 if ok else 3
     return 2
+
+
+def cmd_online(args) -> int:
+    """Report whether the device currently has uplink (glass-box; no data leaves)."""
+    from .connectivity.online import check_online
+    s = check_online(host=args.host, port=args.port, timeout=args.timeout)
+    print(s.reason)
+    return 0 if s.online else 1
 
 
 def cmd_pipeline(args) -> int:
@@ -1997,6 +2108,12 @@ def build_parser() -> argparse.ArgumentParser:
     wlr.add_argument("key", help="wordlist id or name to remove")
     wl.set_defaults(func=cmd_wordlist)
 
+    on = sub.add_parser("online", help="check whether the device currently has internet uplink")
+    on.add_argument("--host", default="one.one.one.one", help="reachability host (default one.one.one.one)")
+    on.add_argument("--port", type=int, default=443, help="reachability port (default 443)")
+    on.add_argument("--timeout", type=float, default=2.0, help="probe timeout seconds (default 2.0)")
+    on.set_defaults(func=cmd_online)
+
     ini = sub.add_parser("init", help="first-run setup: write config + swarm key + operator checklist")
     ini.add_argument("--dir", default="/etc/redux", help="config directory (default /etc/redux)")
     ini.add_argument("--node-id", default=None, help="this device's unique node id")
@@ -2128,14 +2245,20 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--seconds", type=float, default=30.0, help="stop after N seconds (default 30)")
     cl.add_argument("--max", type=int, default=None, help="stop after N frames")
     cl.add_argument("--channel", type=int, default=None, help="park the receiver on this channel (one number)")
-    cl.add_argument("--hop", action="store_true", help="sweep channels 1/6/11 (no need to know the channel)")
+    cl.add_argument("--hop", action="store_true", help="sweep ALL channels across every band (2.4+5GHz); nothing on an off-channel or 5GHz is missed")
+    cl.add_argument("--bands", action="append", choices=("2.4", "5"), help="narrow the sweep to these band(s); repeatable (default: all)")
+    cl.add_argument("--channels", default=None, help="override the sweep set, e.g. 1,6,11,36,149 (default: all bands)")
+    cl.add_argument("--dwell", type=float, default=2.0, help="seconds to linger on each channel while sweeping (default 2.0)")
     ct.set_defaults(func=cmd_captap)
 
     sv = sub.add_parser("survey", help="passive situational-awareness sweep — inventory APs in earshot (read-only, no transmit)")
     sv.add_argument("--iface", default=None, help="monitor-mode interface (e.g. wlan1mon); omit with --demo")
     sv.add_argument("--seconds", type=float, default=20.0, help="listen for N seconds (default 20)")
     sv.add_argument("--max", type=int, default=None, help="stop after N frames")
-    sv.add_argument("--channel", type=int, default=None, help="park on one channel instead of hopping 1/6/11")
+    sv.add_argument("--channel", type=int, default=None, help="park on one channel instead of sweeping all bands")
+    sv.add_argument("--bands", action="append", choices=("2.4", "5"), help="narrow the sweep to these band(s); repeatable (default: all)")
+    sv.add_argument("--channels", default=None, help="override the sweep set, e.g. 1,6,11,36,149 (default: all bands)")
+    sv.add_argument("--dwell", type=float, default=2.0, help="seconds to linger on each channel while sweeping (default 2.0)")
     sv.add_argument("--demo", action="store_true", help="synthetic beacons, no radio")
     sv.set_defaults(func=cmd_survey)
 
@@ -2159,11 +2282,15 @@ def build_parser() -> argparse.ArgumentParser:
     hul.add_argument("--target", required=True, help="target BSSID to hunt (your own gear)")
     hul.add_argument("--channel", type=int, default=None, help="park on the target's channel")
     hul.add_argument("--seconds", type=float, default=60.0, help="run for N seconds (default 60)")
+    husub.add_parser("track", help="scope-bounded location trail: log fixes over time "
+                                   "for ARMED targets only (bystanders never logged)")
     hu.set_defaults(func=cmd_hunt)
 
     me = sub.add_parser("mesh", help="off-grid swarm — authenticated distributed Scope sync")
     mesub = me.add_subparsers(dest="mesh_cmd", required=True)
     mesub.add_parser("demo", help="3-node swarm: propagate an arm + reject a forged delta")
+    mesub.add_parser("swarm", help="coordinated capture: place the chain across nodes, "
+                                   "each re-gates locally before it fires")
     mk = mesub.add_parser("key", help="swarm-key lifecycle: gen/rotate/show/export/import (sealed)")
     mksub = mk.add_subparsers(dest="key_cmd", required=True)
 
@@ -2299,6 +2426,10 @@ def build_parser() -> argparse.ArgumentParser:
     al.add_argument("--auto", action="store_true",
                     help="auto-detect your own kit (own private subnet/radios/AP) and arm it, zero typing")
     al.add_argument("--bssid", action="append"); al.add_argument("--ssid", action="append"); al.add_argument("--cidr", action="append")
+    lm = scsub.add_parser("lab-mode",
+                          help="your-own-lab switch: approve firing on sight (RF + private nets), each logged")
+    lm.add_argument("state", nargs="?", default="status", choices=("on", "off", "status"),
+                    help="on | off | status (default: status)")
     sc.set_defaults(func=cmd_scope)
     return p
 

@@ -14,9 +14,15 @@ from .keyring import (
     SwarmKey, SwarmKeyring, generate_key, export_token, import_token,
     scopesync_keys, save, load,
 )
+from .collector_grid import CollectorGrid, NodeObservation
+from .swarm_ops import (
+    NodeProfile, TaskDelta, Assignment, SwarmCoordinator, SwarmWorker,
+)
 
 __all__ = [
     "ScopeDelta", "SignedMessage", "ScopeSync", "LoopbackMesh", "sign", "verify",
     "SwarmKey", "SwarmKeyring", "generate_key", "export_token", "import_token",
     "scopesync_keys", "save", "load",
+    "CollectorGrid", "NodeObservation",
+    "NodeProfile", "TaskDelta", "Assignment", "SwarmCoordinator", "SwarmWorker",
 ]

@@ -73,6 +73,7 @@ class Augur:
         resource_collector=None,
         resource_monitor=None,
         trusted=None,
+        recon_channels=None,
     ):
         self.bus = bus or SignalBus()
         self.narrator = narrator or Narrator()
@@ -105,6 +106,7 @@ class Augur:
         self.supervisor = Supervisor(
             radios=radios, intent=intent, driver=driver,
             detect_engine=self.engine, bus=self.bus,
+            recon_channels=recon_channels,
         )
         # Now that the driver exists, arm its deauth allowlist from the scope set
         # above (the __init__ scope assignment ran before the driver existed).
@@ -434,6 +436,28 @@ class Augur:
     def scope_sync(self):
         return getattr(self, "_scope_sync", None)
 
+    # --- scope-bounded fox-hunt location trail ----------------------------- #
+
+    def track_store(self, path=None):
+        """The persistent fix-trail store (lazy). Fixes are Scope-gated at write
+        time, so the trail only ever holds location history for armed targets."""
+        ts = getattr(self, "_track_store", None)
+        if ts is None:
+            from ..geo import TrackStore, DEFAULT_TRACKS_PATH
+            ts = TrackStore(path or DEFAULT_TRACKS_PATH)
+            self._track_store = ts
+        return ts
+
+    def record_hunt_fix(self, bssid, lat, lon, *, rssi=None, now=None,
+                        node_id="", job=None):
+        """Log one fox-hunt fix against THIS box's live Scope — authorized targets
+        only. Returns the glass-box (recorded, reason); a bystander is refused and
+        nothing is written."""
+        return self.track_store().record_fix(
+            self.scope, bssid, lat, lon, rssi=rssi, now=now,
+            node_id=node_id or getattr(self, "node_id", ""), job=job,
+            provenance="fox-hunt fix (live)")
+
     # --- autonomous kill-chain operator ------------------------------------ #
 
     def operator(self):
@@ -443,6 +467,16 @@ class Augur:
         g = self.capability_graph()
         caps = {Cap.CAPTURE_HANDSHAKE.value: g.explain(Cap.CAPTURE_HANDSHAKE)["available"]}
         return Operator(self.scope, offense_enabled=self.offense_enabled(), caps=caps)
+
+    def swarm_worker(self, key, node_id: str = "node", *, executors=None):
+        """A SwarmWorker bound to THIS box's live Operator — so a capture task
+        handed to it over the swarm re-clears this device's real posture/Scope/
+        capability gates before it fires. Authorization is never delegated: the
+        assignment says what to work on, the local gates decide if it may."""
+        from ..mesh import SwarmWorker
+        k = key if isinstance(key, (bytes, bytearray)) else str(key).encode()
+        return SwarmWorker(self.operator(), bytes(k), node_id=node_id,
+                           executors=executors or {}, bus=getattr(self, "bus", None))
 
     def campaign_plan(self, targets) -> list:
         """Dry-run plan of the kill-chain for `targets` — glass-box, nothing runs."""
