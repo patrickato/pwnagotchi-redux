@@ -537,6 +537,35 @@ def cmd_dex(args) -> int:
     return 0
 
 
+def cmd_power(args) -> int:
+    """Power-tier gate: the strongest tools (RF TX/replay, sub-GHz, IR, BadUSB)
+    are hidden in FIELD, LAB-only, and need a per-action confirmation even in LAB.
+    `list` shows what's available in a mode; `check` shows the gate decision."""
+    from .core import power_tier as P
+    from .core.mode import read_mode
+    mode = getattr(args, "mode", None) or read_mode(getattr(args, "scope_file", None))
+    if args.power_cmd == "list":
+        vis = P.visible_in(mode)
+        print(f"capabilities available in {mode.upper()} mode:\n")
+        for c in vis:
+            tag = " (needs confirm)" if c.needs_confirmation else ""
+            print(f"  [{c.tier.value:<6}] {c.id:<14} {c.label}{tag}")
+        hidden = [c for c in P._REGISTRY.values() if c not in vis]
+        if hidden:
+            print("\nnot available here:")
+            for c in hidden:
+                why = "FORBIDDEN (never)" if c.tier == P.Tier.FORBIDDEN else "POWER — LAB only"
+                print(f"  [{why}] {c.id:<14} {c.risk}")
+        return 0
+    if args.power_cmd == "check":
+        lab = mode.strip().lower() == "lab"
+        ok, why = P.authorize_power(args.capability, lab_mode=lab,
+                                    confirmed=bool(getattr(args, "confirm", False)))
+        print(("ALLOW: " if ok else "REFUSE: ") + why)
+        return 0 if ok else 3
+    return 2
+
+
 def cmd_doctor(args) -> int:
     """Print the headless, glass-box self-diagnosis from live state."""
     bc = _build(args)
@@ -2490,6 +2519,16 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    pw = sub.add_parser("power", help="power-tier gate: the strongest tools (LAB-only + confirm; some forbidden)")
+    pw.add_argument("--mode", default=None, choices=("lab", "field"), help="check a specific mode (default: device mode)")
+    pw.add_argument("--scope-file", default=None, help="read mode from this scope file")
+    pwsub = pw.add_subparsers(dest="power_cmd", required=True)
+    pwsub.add_parser("list", help="show what's available in a mode (and what's hidden/forbidden)")
+    pwc = pwsub.add_parser("check", help="show the gate decision for a capability")
+    pwc.add_argument("capability", help="capability id (e.g. sdr.replay, ir.blast, badusb.hid)")
+    pwc.add_argument("--confirm", action="store_true", help="the per-action opt-in (press OK)")
+    pw.set_defaults(func=cmd_power)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
