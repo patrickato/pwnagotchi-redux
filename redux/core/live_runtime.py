@@ -1070,6 +1070,15 @@ class LiveRuntime:
             store.close()
             raise
         agent.bus.on(Signal.EVENT, self._observe)
+        # Passive probe harvesting: build each client's PNL from probe-request
+        # events. Transmits nothing (runs in any mode); the aimed karma plan that
+        # consumes it is scope-gated. Persisted so `redux karma` can read it.
+        try:
+            from ..portal.karma import ProbeHarvester
+            self._probe_harvester = ProbeHarvester(path=self.config.state_dir / "pnl.json")
+            agent.bus.on(Signal.EVENT, self._probe_harvester.observe)
+        except Exception:
+            self._probe_harvester = None
         _arm_sentinel_from_env(agent)
         self.driver = driver
         self.augur = agent
