@@ -537,6 +537,44 @@ def cmd_dex(args) -> int:
     return 0
 
 
+def cmd_wps(args) -> int:
+    """WPS / Pixie-Dust: passive `wash` discovery + scope-gated attack plan/run.
+    Finding WPS APs is passive; attacking is gated (FIELD needs --authorized +
+    scope; LAB approves on sight). Glass-box throughout."""
+    from . import wps as W
+    cmd = args.wps_cmd
+    if cmd == "scan":
+        with open(args.file, encoding="utf-8", errors="replace") as f:
+            targets = W.parse_wash(f.read())
+        if not targets:
+            print(f"no WPS APs found in {args.file}")
+            return 0
+        for t in targets:
+            lock = " [LOCKED]" if t.locked else ""
+            print(f"  {t.bssid}  ch{t.channel or '?':<3} {t.ssid or '(hidden)'}{lock}")
+        print(f"\n{len(targets)} WPS-enabled AP(s). Target one with `redux wps plan --bssid <b>`.")
+        return 0
+    # plan / run
+    from .core.scope import Scope, default_scope_path
+    scope = Scope.load(getattr(args, "scope_file", None) or default_scope_path())
+    lab = bool(getattr(scope, "lab_mode", False))
+    p = W.plan(W.WpsTarget(bssid=args.bssid.lower(), channel=args.channel, ssid=args.ssid or ""),
+               scope, tool=args.tool, pixie=not args.no_pixie, iface=args.iface,
+               authorized=bool(getattr(args, "authorized", False)), lab_mode=lab)
+    if cmd == "plan":
+        print(p.reason)
+        if p.runnable:
+            print("\ncommand:\n  " + " ".join(p.argv))
+            if not W.tool_available(p.tool):
+                print(f"\nnote: '{p.tool}' is not installed on this device")
+        return 0 if p.runnable else 3
+    if cmd == "run":
+        res = W.run_plan(p, timeout=args.timeout)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("status") in ("recovered", "completed") else 3
+    return 2
+
+
 def cmd_doctor(args) -> int:
     """Print the headless, glass-box self-diagnosis from live state."""
     bc = _build(args)
@@ -2490,6 +2528,26 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    wp = sub.add_parser("wps", help="WPS / Pixie-Dust: passive wash discovery + scope-gated attack")
+    wpsub = wp.add_subparsers(dest="wps_cmd", required=True)
+    wpscan = wpsub.add_parser("scan", help="list WPS-enabled APs from a `wash` capture (passive)")
+    wpscan.add_argument("file", help="wash output text")
+    for _name, _help in (("plan", "show the exact reaver/bully command (glass-box)"),
+                         ("run", "run the WPS attack (gated; unlocked in LAB)")):
+        w = wpsub.add_parser(_name, help=_help)
+        w.add_argument("--bssid", required=True, help="target AP BSSID")
+        w.add_argument("--channel", type=int, default=None, help="AP channel")
+        w.add_argument("--ssid", default="", help="AP SSID (label only)")
+        w.add_argument("--tool", default="reaver", choices=("reaver", "bully"))
+        w.add_argument("--no-pixie", action="store_true", help="online PIN brute instead of pixie-dust")
+        w.add_argument("--iface", default="wlan1mon", help="monitor interface (default wlan1mon)")
+        w.add_argument("--scope-file", default=None, help="scope file (default: the device scope)")
+        if _name == "run":
+            w.add_argument("--authorized", action="store_true",
+                           help="confirm this AP is yours to test (not needed in LAB mode)")
+            w.add_argument("--timeout", type=int, default=180, help="max attack seconds (default 180)")
+    wp.set_defaults(func=cmd_wps)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
