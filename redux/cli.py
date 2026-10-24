@@ -537,6 +537,28 @@ def cmd_dex(args) -> int:
     return 0
 
 
+def cmd_push(args) -> int:
+    """Push-to-phone alerts via ntfy / Pushover / webhook. `test` sends a hello;
+    `send` sends your title+message. Secrets are passed at call time, never
+    stored. Notifies a short summary — never a content dump."""
+    from .connectivity.push import PushConfig, PushSender
+    cfg = PushConfig(service=args.service, target=args.target,
+                     token=getattr(args, "token", "") or "")
+    ok, reason = cfg.validate()
+    if not ok:
+        print(f"refused: {reason}")
+        return 3
+    sender = PushSender(cfg)
+    if args.push_cmd == "test":
+        res = sender.send("redux", "test notification from your device",
+                          priority=3, tags="white_check_mark")
+    else:  # send
+        res = sender.send(args.title, args.message,
+                          priority=args.priority, tags=getattr(args, "tags", "") or "")
+    print(json.dumps(res, indent=2))
+    return 0 if res.get("ok") else 3
+
+
 def cmd_doctor(args) -> int:
     """Print the headless, glass-box self-diagnosis from live state."""
     bc = _build(args)
@@ -2490,6 +2512,19 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    pu = sub.add_parser("push", help="push-to-phone alerts (ntfy / pushover / webhook)")
+    pu.add_argument("--service", default="ntfy", choices=("ntfy", "pushover", "webhook"))
+    pu.add_argument("--target", required=True, help="ntfy topic URL / pushover user key / webhook URL")
+    pu.add_argument("--token", default="", help="pushover app token (pushover only)")
+    pusub = pu.add_subparsers(dest="push_cmd", required=True)
+    pusub.add_parser("test", help="send a test notification")
+    pus = pusub.add_parser("send", help="send a title + message")
+    pus.add_argument("title", help="notification title")
+    pus.add_argument("message", help="notification body")
+    pus.add_argument("--priority", type=int, default=3, help="0..5 (default 3)")
+    pus.add_argument("--tags", default="", help="optional tags/emoji (ntfy)")
+    pu.set_defaults(func=cmd_push)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
