@@ -19,6 +19,7 @@ fires; any deauth stays behind the driver's empty-by-default allowlist.
 """
 from __future__ import annotations
 
+import time
 from typing import Callable, List, Optional
 
 from ..radio import Intent
@@ -97,10 +98,22 @@ class Augur:
         self._sighting_flush_error = ""
         self._sighting_flush_failures = 0
 
+        # Lab-mode active capture ("auto-offense"): the always-on pump stays
+        # PASSIVE by default and only transmits when the scope's lab_mode is on
+        # (your own gear). It nudges each seen AP with a rate-limited deauth to
+        # force a 4-way, skipping any AP retired after capture. Every deauth (and
+        # refusal) is logged by the driver — glass-box.
+        self._offense_known: dict = {}      # bssid -> ssid, APs seen this session
+        self._offense_last: dict = {}       # bssid -> last deauth timestamp
+        self._offense_retired: set = set()  # APs to stop targeting (ignore-list)
+        self._offense_interval = 20.0       # min seconds between deauths of one AP
+        self._offense_clock: Callable[[], float] = time.time
+
         # consumers subscribe to the hub
         connect_narrator(self.bus, self.narrator)
         self.bus.on("*", self.brain.observe)
         self.bus.on(Signal.EVENT, self._geotag)
+        self.bus.on(Signal.EVENT, self._offense_note)
 
         # the supervisor drives the radios + bettercap and publishes to the hub
         self.supervisor = Supervisor(
@@ -195,11 +208,60 @@ class Augur:
     def remove_radio(self, iface) -> None:
         self.supervisor.remove_radio(iface)
 
+    # --- lab-mode active capture (auto-offense) ---------------------------- #
+
+    def _offense_note(self, em) -> None:
+        """Remember every AP we see so lab-mode offense can target it. Passive on
+        its own — just bookkeeping on the event bus."""
+        ev = em.payload.get("event")
+        if getattr(ev, "type", "") != "ap.new":
+            return
+        data = getattr(ev, "data", {}) or {}
+        bssid = (data.get("bssid") or data.get("mac") or data.get("address") or "").strip()
+        if bssid:
+            self._offense_known[bssid] = data.get("essid") or data.get("ssid") or ""
+
+    def retire_ap(self, bssid: str) -> None:
+        """Stop targeting an AP (e.g. after a verified 4-way). Idempotent; once
+        retired, offense skips it so cycles aren't spent re-pwning a done target."""
+        bssid = (bssid or "").strip()
+        if bssid:
+            self._offense_retired.add(bssid)
+
+    def _drive_offense(self) -> int:
+        """Lab-mode active capture: deauth permitted, non-retired APs to force a
+        4-way. NO-OP unless lab_mode is on, so the shipped (field) default never
+        transmits. Rate-limited per BSSID — a nudge, not a flood. Returns the
+        number fired. The driver logs a glass-box reason per deauth and refusal."""
+        if not getattr(self._scope, "lab_mode", False):
+            return 0
+        driver = getattr(self.supervisor, "driver", None)
+        if driver is None or not hasattr(driver, "deauth"):
+            return 0
+        now = self._offense_clock()
+        fired = 0
+        for bssid, ssid in list(self._offense_known.items()):
+            if bssid in self._offense_retired:
+                continue
+            if now - self._offense_last.get(bssid, 0.0) < self._offense_interval:
+                continue
+            self._offense_last[bssid] = now   # back off even if the deauth is refused
+            try:
+                driver.deauth(bssid, ssid=ssid or None)
+                fired += 1
+            except Exception:
+                # FiringRefused (off-scope / not lab) or a transport hiccup must
+                # never crash the capture pump; the driver already logged why.
+                pass
+        return fired
+
     def pump(self) -> list:
         """One cycle: drain driver events → detect + geo-tag + narrate + advise,
-        then flush the cycle's sightings to the store in one batched write."""
+        then (lab mode only) nudge seen APs with a deauth, then flush the cycle's
+        sightings to the store in one batched write. Passive unless lab_mode is on."""
         self.resources.sample()
         alerts = self.supervisor.pump()
+        self._drive_offense()
         self.flush_sightings()
         sentinel = getattr(self, "_sentinel", None)
         if sentinel is not None:
