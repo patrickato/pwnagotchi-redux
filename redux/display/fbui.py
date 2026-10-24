@@ -333,7 +333,8 @@ def fit_text(draw, value, font, width):
             right = middle - 1
     return value[:left] + "..." if left else ""
 
-def render(report, *, page="overview", now=None, doctor_offset=0, trends=None, system_offset=0, system_detail=None):
+def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
+           system_offset=0, system_detail=None, mode=None, mode_arming=False):
     """Pillow RGB image, no placeholder activity, no radio-facing operations."""
     from PIL import Image, ImageDraw
     data = status_view(report, now=now)
@@ -364,6 +365,16 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None, s
     text_line((260, 18), f"{PAGES.index(page) + 1}/{len(PAGES)}  < >", font=_font(11), fill=SUBTLE)
     draw.ellipse((434, 21, 447, 34), fill=accent)
     text_line((354, 40), data["health"].upper(), font=_font(11, bold=True), fill=accent)
+    # Operating-mode badge (the header strip is the tap-to-switch zone). LAB is the
+    # armed/automatic posture (amber), FIELD the passive lock-down (teal). While
+    # arming, show the confirm prompt so a stray tap can't flip posture.
+    if mode in ("lab", "field"):
+        if mode_arming:
+            other = "FIELD" if mode == "lab" else "LAB"
+            text_line((18, 39), f"SWITCH -> {other}?  tap again", font=_font(11, bold=True), fill=RED)
+        else:
+            text_line((18, 39), f"MODE {mode.upper()}", font=_font(11, bold=True),
+                      fill=AMBER if mode == "lab" else TEAL)
     draw.line((18, 55, 462, 55), fill=(36, 57, 69), width=2)
     text_line((20, 65), "ENGINE  " + data["engine"], font=_font(20, bold=True), fill=accent)
     text_line((20, 98), "RADIO  " + data["iface"], font=_font(13), fill=SUBTLE)
@@ -603,6 +614,18 @@ def write_frame(device, frame, *, opener=os.open, writer=os.write,
         closer(fd)
 
 
+def _spawn_daemon_restart():
+    """Fire-and-forget restart of the live daemon so a mode switch never blocks
+    the display loop. Returns True if the restart was launched."""
+    import subprocess
+    try:
+        subprocess.Popen(["systemctl", "restart", "redux-live.service"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Opt-in Redux native 480x320 framebuffer dashboard")
     parser.add_argument("--framebuffer", required=True,
@@ -711,6 +734,8 @@ def main(argv=None):
         sig = getattr(signal, name)
         previous[sig] = signal.getsignal(sig)
         signal.signal(sig, stop)
+    from ..core.mode import read_mode, toggle_mode
+    mode_arm_until = 0.0          # header-tap mode switch: armed by the first tap
     try:
         while running:
             if reconnect is not None and touch_fd is None:
@@ -726,6 +751,10 @@ def main(argv=None):
                         tracker.desynced = True
             report = read_status(args.port)
             sampled_at = time.time()
+            current_mode = read_mode()
+            # Only consult the clock when a switch is actually armed, so the common
+            # (unarmed) path adds no monotonic() call to the refresh loop.
+            mode_arming = mode_arm_until > 0.0 and time.monotonic() < mode_arm_until
             # Only genuine, independently updated live status counters advance
             # the bounded in-memory chart; the UI never synthesizes activity.
             history.ingest(report, now=sampled_at)
@@ -736,14 +765,18 @@ def main(argv=None):
                 else:
                     doctor_offset = doctor_window(current_doctor, doctor_offset)["start"]
                 image = render(report, page=page, now=sampled_at,
-                               doctor_offset=doctor_offset)
+                               doctor_offset=doctor_offset,
+                               mode=current_mode, mode_arming=mode_arming)
             elif page == "system":
-                image = render(report, page=page, now=sampled_at, system_offset=system_offset, system_detail=system_detail)
+                image = render(report, page=page, now=sampled_at, system_offset=system_offset,
+                               system_detail=system_detail, mode=current_mode, mode_arming=mode_arming)
             elif page == "trends":
                 image = render(report, page=page, now=sampled_at,
-                               trends=history.snapshot(now=sampled_at))
+                               trends=history.snapshot(now=sampled_at),
+                               mode=current_mode, mode_arming=mode_arming)
             else:
-                image = render(report, page=page, now=sampled_at)
+                image = render(report, page=page, now=sampled_at,
+                               mode=current_mode, mode_arming=mode_arming)
             if args.rotate == 180:
                 from PIL import Image
                 image = image.transpose(Image.Transpose.ROTATE_180)
@@ -813,6 +846,15 @@ def main(argv=None):
                             system_detail = None
                             page = touch_nav.navigate(page, value)
                             doctor_offset = 0
+                        elif action == "mode":
+                            # Header tap: first arms, a second within 4s commits
+                            # the LAB<->FIELD switch (and restarts the daemon).
+                            nowm = time.monotonic()
+                            if nowm < mode_arm_until:
+                                mode_arm_until = 0.0
+                                toggle_mode(restart=_spawn_daemon_restart)
+                            else:
+                                mode_arm_until = nowm + 4.0
                         else:
                             continue
                         break  # redraw selected page or Doctor scroll immediately
