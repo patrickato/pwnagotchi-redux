@@ -13,11 +13,13 @@ REC_OTHER = f"WPA*01*{'11'*16}*112233445577*{MAC2}*74657374***"
 
 
 class Scope:
-    def __init__(self, permitted=()):
+    def __init__(self, permitted=(), lab_mode=False):
         self.permitted = permitted
+        self.lab_mode = lab_mode
 
     def permits(self, *, bssid=None):
-        return bssid in self.permitted
+        # Mirrors the real Scope: lab mode approves any target on sight.
+        return self.lab_mode or bssid in self.permitted
 
 
 def make(tmp_path, lines=(REC,)):
@@ -42,6 +44,47 @@ def test_disabled(tmp_path):
     c = AuditSettings(False, c.wordlist, c.scope_file, c.results_dir, c.database)
     with AuditWorker(c, Scope(), which=lambda x: "hashcat") as worker:
         assert worker.once()["status"] == "disabled"
+
+
+def test_lab_mode_runs_even_when_config_opt_in_is_off(tmp_path):
+    # Lab mode makes the crack part of the automatic chain: a disabled config must
+    # still run against an on-sight lab target, and reach hashcat.
+    c = make(tmp_path)
+    c = AuditSettings(False, c.wordlist, c.scope_file, c.results_dir, c.database)
+    calls = []
+    def runner(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1)   # wordlist exhausted
+    with AuditWorker(c, Scope(lab_mode=True), runner=runner,
+                     which=lambda x: "hashcat") as worker:
+        assert worker.once()["status"] == "exhausted"    # ran despite enabled=False
+    assert calls and calls[0][0] == "hashcat"
+
+
+def test_lab_mode_falls_back_to_registry_wordlist(tmp_path):
+    # With no usable configured wordlist, lab mode resolves the fastest list from
+    # the on-device registry so the chain is turnkey.
+    from redux.crack.wordlists import WordlistStore
+    reg = tmp_path / "wordlists"
+    store = WordlistStore(str(reg))
+    src = tmp_path / "list.txt"
+    src.write_text("password123\n")
+    wl, reason = store.register(str(src), name="lab-fast", tier="fast", copy=True)
+    assert wl, reason
+
+    c = make(tmp_path)
+    c = AuditSettings(False, Path("/nonexistent/redux-wordlist"), c.scope_file,
+                      c.results_dir, c.database, wordlist_dir=reg)
+    calls = []
+    def runner(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1)
+    with AuditWorker(c, Scope(lab_mode=True), runner=runner,
+                     which=lambda x: "hashcat") as worker:
+        assert worker.once()["status"] == "exhausted"
+    # hashcat was handed the registry list, not the nonexistent configured path
+    assert calls and "/nonexistent/redux-wordlist" not in calls[0]
+    assert any("lab-fast" in str(a) for a in calls[0])
 
 
 def test_unlisted_target_never_runs_hashcat(tmp_path):
