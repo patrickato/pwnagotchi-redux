@@ -158,3 +158,30 @@ def test_audit_settings_backward_compatible_single_path(tmp_path):
         'scope_file = "/captures/scope.json"\nresults_dir = "/captures/audits"\n')
     settings = AuditSettings.load(cfg_path)
     assert str(settings.wordlist) == "/captures/rockyou.txt"
+
+
+def test_select_persists_and_resolve_honours_it(tmp_path):
+    # "pick one, it sticks": set_selected persists, select()/resolve honour it, an
+    # explicit name still overrides, and clear returns to the fastest default.
+    from redux.crack.wordlists import WordlistStore, resolve_wordlist
+    store = WordlistStore(str(tmp_path))
+    a = tmp_path / "a.txt"; a.write_text("x\n")
+    b = tmp_path / "b.txt"; b.write_text("yyyy\n")
+    store.register(str(a), name="fast-a", tier="fast", copy=True)
+    store.register(str(b), name="thorough-b", tier="thorough", copy=True)
+
+    assert store.select()[0].name == "fast-a"                 # default -> fastest
+    ok, _ = store.set_selected("thorough-b")
+    assert ok is not None
+    assert WordlistStore(str(tmp_path)).select()[0].name == "thorough-b"   # survives a reload
+    path, reason = resolve_wordlist(str(tmp_path))            # what the crack resolves
+    assert "thorough-b" in path and "your pick" in reason
+    assert store.select(name="fast-a")[0].name == "fast-a"    # explicit override still wins
+    store.clear_selected()
+    assert store.select()[0].name == "fast-a"                 # cleared -> fastest again
+
+
+def test_set_selected_refuses_unknown(tmp_path):
+    from redux.crack.wordlists import WordlistStore
+    wl, reason = WordlistStore(str(tmp_path)).set_selected("nope")
+    assert wl is None and "no wordlist" in reason

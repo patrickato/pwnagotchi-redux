@@ -32,6 +32,7 @@ from .ingest import _digest_file
 TIERS: Tuple[str, ...] = ("fast", "standard", "thorough")
 
 _INDEX_NAME = "index.json"
+_SELECTED_NAME = ".selected"      # sidecar holding the operator's persisted pick (a wordlist id)
 
 
 @dataclass(frozen=True)
@@ -195,8 +196,48 @@ class WordlistStore:
                 return None, f"refused: no wordlist in tier '{tier}'"
             w = max(tier_items, key=lambda x: x.size_bytes)
             return w, f"selected '{w.name}' as the most thorough in tier '{tier}' (id={w.id}, {w.size_bytes} bytes)"
+        # The operator's persisted pick wins over the fastest-available default, so
+        # `redux wordlist select --name X` actually sticks for every crack run.
+        pick = self.selected()
+        if pick is not None:
+            return pick, f"using your pick '{pick.name}' (id={pick.id}, {pick.tier}, {pick.size_bytes} bytes)"
         w = min(present, key=lambda x: (TIERS.index(x.tier) if x.tier in TIERS else 99, x.size_bytes))
         return w, f"selected '{w.name}' as the fastest available default (id={w.id}, {w.tier}, {w.size_bytes} bytes)"
+
+    # --- persisted selection ("pick one, it sticks") ---------------------- #
+
+    def _selected_file(self) -> Path:
+        return self.base / _SELECTED_NAME
+
+    def selected(self) -> Optional[Wordlist]:
+        """The operator's persisted pick (set via set_selected), or None if unset or
+        its file has gone missing."""
+        try:
+            wid = self._selected_file().read_text(encoding="utf-8").strip()
+        except (FileNotFoundError, OSError, ValueError):
+            return None
+        w = self.get(wid)
+        return w if (w is not None and Path(w.path).is_file()) else None
+
+    def set_selected(self, key: str) -> Tuple[Optional[Wordlist], str]:
+        """Persist the operator's pick so the crack uses it until changed. Glass-box."""
+        w = self.get(key)
+        if w is None:
+            return None, f"refused: no wordlist named '{key}'"
+        if not Path(w.path).is_file():
+            return None, f"refused: wordlist '{key}' is registered but its file is missing ({w.path})"
+        self.base.mkdir(parents=True, exist_ok=True)
+        tmp = self._selected_file().with_suffix(".tmp")
+        tmp.write_text(w.id, encoding="utf-8")
+        os.replace(tmp, self._selected_file())
+        return w, f"selected '{w.name}' (id={w.id}, {w.tier}, {w.size_bytes} bytes) — the crack will use this list"
+
+    def clear_selected(self) -> str:
+        try:
+            self._selected_file().unlink()
+            return "cleared the persisted wordlist pick (back to the fastest available)"
+        except FileNotFoundError:
+            return "no wordlist pick was set"
 
     def verify(self) -> List[Tuple[Wordlist, str]]:
         """Re-check every registered list: report drift (file missing, or its bytes

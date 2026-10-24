@@ -1849,7 +1849,13 @@ def cmd_wordlist(args) -> int:
         print(reason)
         return 0 if wl else 3
     if cmd == "select":
-        wl, reason = store.select(name=args.name, tier=args.tier)
+        if getattr(args, "clear", False):
+            print(store.clear_selected())
+            return 0
+        if args.name:
+            wl, reason = store.set_selected(args.name)   # persist the pick so it sticks
+        else:
+            wl, reason = store.select(tier=args.tier)    # show the effective pick (honours the persisted one)
         print(reason)
         return 0 if wl else 3
     if cmd == "verify":
@@ -2154,10 +2160,11 @@ def build_parser() -> argparse.ArgumentParser:
     wlp.add_argument("source", help="path to the file on the mounted NAS share")
     wlp.add_argument("--name", default=None, help="operator label (defaults to the filename)")
     wlp.add_argument("--tier", default="thorough", choices=("fast", "standard", "thorough"))
-    wls = wlc.add_parser("select", help="show which wordlist an audit would use (glass-box)")
-    wls.add_argument("--name", default=None, help="select this list by name/id")
+    wls = wlc.add_parser("select", help="pick the wordlist the crack uses (--name sticks); glass-box")
+    wls.add_argument("--name", default=None, help="persist this list (by name/id) as the crack's pick")
     wls.add_argument("--tier", default=None, choices=("fast", "standard", "thorough"),
-                     help="select the most thorough list in this tier")
+                     help="preview the most thorough list in this tier (not persisted)")
+    wls.add_argument("--clear", action="store_true", help="clear the persisted pick (back to fastest)")
     wlc.add_parser("verify", help="re-hash registered lists and report drift/missing")
     wlr = wlc.add_parser("remove", help="unregister a list (leaves the file on disk)")
     wlr.add_argument("key", help="wordlist id or name to remove")
