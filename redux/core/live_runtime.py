@@ -1051,12 +1051,21 @@ class LiveRuntime:
                 return detect_peripherals(mounted=self._capture_mount_ok())
             except Exception:
                 return {}
+        # Experience layer: one honest outcome per lab-mode offense attempt, kept
+        # in the live state dir. Brain reads it for history-aware reasons; the
+        # recorder writes it. Fails safe to no learning.
+        from .experience import ExperienceStore
+        try:
+            experience = ExperienceStore(self.config.state_dir / "experience.jsonl")
+        except Exception:
+            experience = None
         try:
             agent = Augur(radios=radios, intent=Intent.RECON, driver=driver, store=store,
                           scope=scope, resource_monitor=self.resources,
                           position_provider=_gps_from_env(),
                           retired_provider=lambda: retired_bssids(),
-                          peripheral_probe=_peripherals)
+                          peripheral_probe=_peripherals,
+                          experience=experience)
         except Exception:
             store.close()
             raise

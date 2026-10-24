@@ -560,6 +560,37 @@ def cmd_oui(args) -> int:
         return 0 if n else 3
     if cmd == "stats":
         print(json.dumps(O.table_stats(O.full_table()), indent=2))
+def cmd_learn(args) -> int:
+    """The experience layer: what has actually worked, with honest sample sizes.
+    Real data only — numbers always carry their trial count; untried options are
+    flagged (and explored), never fabricated."""
+    from .core.experience import ExperienceStore, DIMENSIONS
+    store = ExperienceStore(args.path)
+    cmd = args.learn_cmd
+    if cmd == "summary":
+        print(json.dumps(store.summary(), indent=2))
+        return 0
+    if cmd in ("stats", "rank"):
+        dim = args.dim
+        if dim not in DIMENSIONS:
+            print(f"unknown dimension '{dim}' (choose {', '.join(DIMENSIONS)})")
+            return 3
+        cands = None
+        if cmd == "rank" and getattr(args, "candidates", None):
+            cands = [c.strip() for c in args.candidates.split(",") if c.strip()]
+            # numeric dims (channel) compare as ints
+            if dim in ("channel",):
+                cands = [int(c) if c.isdigit() else c for c in cands]
+        from .core.experience import rank
+        stats = rank(store.load(), dim, candidates=cands)
+        if not stats:
+            print(f"no experience recorded for '{dim}' yet")
+            return 0
+        for s in stats:
+            print(f"  {s.reason}")
+        return 0
+    if cmd == "reset":
+        print(store.reset())
         return 0
     return 2
 
@@ -2674,6 +2705,18 @@ def build_parser() -> argparse.ArgumentParser:
                       help="where the normalized DB is written (default /captures/config/oui.tsv)")
     ousub.add_parser("stats", help="counts for the active vendor table")
     ou.set_defaults(func=cmd_oui)
+    ln = sub.add_parser("learn", help="experience layer: what actually worked (honest, glass-box)")
+    ln.add_argument("--path", default="/captures/live/experience.jsonl",
+                    help="experience log path (default /captures/live/experience.jsonl)")
+    lnsub = ln.add_subparsers(dest="learn_cmd", required=True)
+    lnsub.add_parser("summary", help="overall totals, success rate, outcomes")
+    lns = lnsub.add_parser("stats", help="ranked stats for a dimension (exploration-aware)")
+    lns.add_argument("--dim", default="channel", help="channel|band|hour|vendor|kind")
+    lnr = lnsub.add_parser("rank", help="rank specific candidate values of a dimension")
+    lnr.add_argument("--dim", default="channel", help="channel|band|hour|vendor|kind")
+    lnr.add_argument("--candidates", default=None, help="comma-separated values to rank (e.g. 1,6,11)")
+    lnsub.add_parser("reset", help="clear the experience log")
+    ln.set_defaults(func=cmd_learn)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
