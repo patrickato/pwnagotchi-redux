@@ -52,3 +52,20 @@ def test_status_prints_a_valid_snapshot(tmp_path):
     rc, out = _run(["live", "status", "--file", str(snap)])
     assert rc == 0
     assert '"state"' in out and "recon" in out
+
+
+def test_default_file_matches_where_the_daemon_actually_writes():
+    """The CLI default must track the live daemon's state_dir, not /captures/redux.
+
+    Regression: the default pointed at /captures/redux/live.json, a path nothing
+    writes, so `redux live status` reported "no verified runtime snapshot" even
+    with the engine live and writing /captures/live/live.json.
+    """
+    from pathlib import Path
+    from redux.cli import build_parser
+    from redux.core.live_runtime import LiveConfig
+
+    args = build_parser().parse_args(["live", "status"])
+    expected = LiveConfig().state_dir / "live.json"   # exactly where it's written
+    assert Path(args.file) == expected
+    assert args.file == "/captures/live/live.json"

@@ -2061,8 +2061,9 @@ def build_parser() -> argparse.ArgumentParser:
     lv = sub.add_parser("live", help="real standalone runtime status (no stub radios)")
     lv_sub = lv.add_subparsers(dest="live_cmd", required=True)
     lvs = lv_sub.add_parser("status", help="read actual on-device radio/engine state")
-    lvs.add_argument("--file", default="/captures/redux/live.json",
-                     help="runtime checkpoint file; defaults to /captures/redux/live.json")
+    lvs.add_argument("--file", default="/captures/live/live.json",
+                     help="runtime checkpoint file; defaults to /captures/live/live.json "
+                          "(the live daemon's state_dir, where it writes live.json)")
     lvd = lv_sub.add_parser("doctor", help="actual live Doctor findings from localhost runtime")
     lvd.add_argument("--port", type=int, default=8080,
                      help="local Redux dashboard port (default 8080)")
