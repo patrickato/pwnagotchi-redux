@@ -834,12 +834,61 @@ def cmd_netrecon(args) -> int:
     return 0
 
 
+def _parse_freq(s):
+    """Parse a frequency like '433.92M', '162.025M', '25k', or bare Hz -> float Hz."""
+    t = str(s).strip().lower()
+    mult = 1.0
+    if t.endswith("m"):
+        mult, t = 1e6, t[:-1]
+    elif t.endswith("k"):
+        mult, t = 1e3, t[:-1]
+    elif t.endswith("g"):
+        mult, t = 1e9, t[:-1]
+    return float(t) * mult
+
+
 def cmd_sdr(args) -> int:
     """Ingest SDR tool output into the sighting store so SDR captures reach geo/Dex:
     rtl_433 ISM records (tagged with the receiver's position) or dump1090 ADS-B
     records (the aircraft's own position). Reads line-delimited JSON, one record
     per line — exactly what `rtl_433 -F json` / `dump1090 --write-json` emit."""
     import json
+    # Guided presets (no store needed): "pick what to listen to -> tuned command".
+    if getattr(args, "sdr_cmd", None) in ("presets", "tune"):
+        from .sdr.presets import list_presets, find_preset
+        if args.sdr_cmd == "presets":
+            for p in list_presets():
+                freq = f" @ {p.to_dict().get('freq', '—')}" if p.freq_hz else ""
+                print(f"  {p.name:<9} {p.label}{freq}")
+                print(f"            {p.what}")
+                if p.region_note:
+                    print(f"            region: {p.region_note}")
+            print("\nTune one with: redux sdr tune <preset> [--device N] [--freq 433.92M] [--scan-range 430M:440M:25k]")
+            return 0
+        preset = find_preset(args.preset)
+        if preset is None:
+            print(f"unknown preset '{args.preset}' — see `redux sdr presets`")
+            return 3
+        fhz = _parse_freq(args.freq) if getattr(args, "freq", None) else None
+        cmd = preset.command(device_index=args.device, freq_hz=fhz,
+                             duration_s=getattr(args, "duration", None),
+                             scan_range=getattr(args, "scan_range", None) or None)
+        print(f"{preset.label} — {preset.what}\n")
+        if preset.help:
+            print(preset.help + "\n")
+        if preset.region_note:
+            print(f"NOTE: {preset.region_note}\n")
+        print("run this:\n  " + cmd.shell())
+        _next = {
+            "rtl433": "redux sdr ingest <file> --rtl433",
+            "adsb": "redux sdr ingest <file> --adsb",
+            "pocsag": "redux sdr ingest <file> --pocsag",
+            "acars": "redux sdr ingest <file> --acars",
+            "spectrum": "redux sdr spectrum <file>",
+        }.get(cmd.decoder)
+        if _next:
+            print(f"\nthen: {_next}")
+        return 0
     from .geo.db import SightingStore, DEFAULT_DB_PATH
     from .sdr import (ingest_rtl433, ingest_adsb, ingest_pocsag, ingest_acars,
                       parse_rtl_power)
@@ -2634,6 +2683,13 @@ def build_parser() -> argparse.ArgumentParser:
     sds.add_argument("file", help="rtl_power CSV output")
     sds.add_argument("--threshold", type=float, default=8.0, help="dB above floor to count as a peak (default 8)")
     sds.add_argument("--max-peaks", type=int, default=20, help="max peaks to report (default 20)")
+    sdsub.add_parser("presets", help="list guided SDR presets (pick what to listen to)")
+    sdt = sdsub.add_parser("tune", help="print the exact tuned command for a preset (Augur sets the frequency)")
+    sdt.add_argument("preset", help="preset name (see `redux sdr presets`)")
+    sdt.add_argument("--device", type=int, default=0, help="RTL-SDR device index (default 0)")
+    sdt.add_argument("--freq", default=None, help="override center frequency (e.g. 433.92M)")
+    sdt.add_argument("--scan-range", default=None, help="for the scan preset: START:STOP:STEP (e.g. 430M:440M:25k)")
+    sdt.add_argument("--duration", type=int, default=None, help="for scan: sweep for N seconds instead of once")
     sd.set_defaults(func=cmd_sdr)
 
     po = sub.add_parser("portal", help="captive/evil-portal for AUTHORIZED client testing")
