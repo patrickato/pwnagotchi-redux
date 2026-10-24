@@ -920,6 +920,21 @@ def cmd_sdr(args) -> int:
         }.get(cmd.decoder)
         if _next:
             print(f"\nthen: {_next}")
+    # Waterfall: make the spectrum visible from an rtl_power sweep (no store).
+    if getattr(args, "sdr_cmd", None) == "waterfall":
+        from .sdr.waterfall import Waterfall
+        with open(args.file, encoding="utf-8", errors="replace") as f:
+            wf = Waterfall.from_rtl_power(f)
+        rows, cols = wf.shape
+        if rows == 0:
+            print(f"no sweeps found in {args.file}")
+            return 0
+        print(wf.to_ascii(width=args.width))
+        print(f"\n{rows} sweep(s) × {cols} bins, {wf.db_min:.0f}..{wf.db_max:.0f} dB")
+        if args.out:
+            with open(args.out, "wb") as fh:
+                fh.write(wf.to_pgm())
+            print(f"wrote grayscale image: {args.out} (PGM)")
         return 0
     from .geo.db import SightingStore, DEFAULT_DB_PATH
     from .sdr import (ingest_rtl433, ingest_adsb, ingest_pocsag, ingest_acars,
@@ -2722,6 +2737,10 @@ def build_parser() -> argparse.ArgumentParser:
     sdt.add_argument("--freq", default=None, help="override center frequency (e.g. 433.92M)")
     sdt.add_argument("--scan-range", default=None, help="for the scan preset: START:STOP:STEP (e.g. 430M:440M:25k)")
     sdt.add_argument("--duration", type=int, default=None, help="for scan: sweep for N seconds instead of once")
+    sdw = sdsub.add_parser("waterfall", help="render an rtl_power sweep as a waterfall (ASCII + optional PGM image)")
+    sdw.add_argument("file", help="rtl_power CSV output (repeated sweeps over time)")
+    sdw.add_argument("--width", type=int, default=64, help="columns in the ASCII waterfall (default 64)")
+    sdw.add_argument("--out", default=None, help="also write a grayscale PGM image to this path")
     sd.set_defaults(func=cmd_sdr)
 
     po = sub.add_parser("portal", help="captive/evil-portal for AUTHORIZED client testing")
