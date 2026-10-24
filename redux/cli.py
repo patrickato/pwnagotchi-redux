@@ -727,31 +727,54 @@ def cmd_sdr(args) -> int:
     per line — exactly what `rtl_433 -F json` / `dump1090 --write-json` emit."""
     import json
     from .geo.db import SightingStore, DEFAULT_DB_PATH
-    from .sdr import ingest_rtl433, ingest_adsb
+    from .sdr import (ingest_rtl433, ingest_adsb, ingest_pocsag, ingest_acars,
+                      parse_rtl_power)
+
+    # `spectrum` is analysis only — no store needed.
+    if getattr(args, "sdr_cmd", None) == "spectrum":
+        with open(args.file, encoding="utf-8", errors="replace") as f:
+            sweep = parse_rtl_power(f, peak_threshold_db=args.threshold, max_peaks=args.max_peaks)
+        d = sweep.to_dict()
+        print(json.dumps(d, indent=2))
+        if sweep.peaks:
+            print("\nactive signals (strongest first):")
+            for p in sweep.peaks:
+                print(f"  {p.describe()}")
+        else:
+            print("\nno signals above the noise floor in this sweep")
+        return 0
+
     cfg = _cfg(args)
     db = args.db or (cfg.cache.db_path if cfg else None) or DEFAULT_DB_PATH
     store = SightingStore(db)
+    pos = (args.lat, args.lon) if args.lat is not None and args.lon is not None else None
 
-    def _records(path):
+    def _lines(path):
         with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(rec, dict):
-                    yield rec
+                yield line.rstrip("\n")
+
+    def _records(path):
+        for line in _lines(path):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(rec, dict):
+                yield rec
 
     if args.adsb:
-        n = ingest_adsb(_records(args.file), store)
-        kind = "ADS-B aircraft"
+        n, kind = ingest_adsb(_records(args.file), store), "ADS-B aircraft"
+    elif getattr(args, "pocsag", False):
+        n = ingest_pocsag(_lines(args.file), store, position=pos)
+        kind = "POCSAG pager (capcode only; messages not stored)"
+    elif getattr(args, "acars", False):
+        n, kind = ingest_acars(_records(args.file), store, position=pos), "ACARS aircraft (text not stored)"
     else:
-        pos = (args.lat, args.lon) if args.lat is not None and args.lon is not None else None
-        n = ingest_rtl433(_records(args.file), store, position=pos)
-        kind = "ISM device"
+        n, kind = ingest_rtl433(_records(args.file), store, position=pos), "ISM device"
     print(f"ingested {n} {kind} sighting(s) from {args.file}")
     return 0
 
@@ -2481,16 +2504,22 @@ def build_parser() -> argparse.ArgumentParser:
     nra.add_argument("--passlist", help="password wordlist to cred-test discovered services")
     nr.set_defaults(func=cmd_netrecon)
 
-    sd = sub.add_parser("sdr", help="ingest SDR output (rtl_433 ISM / dump1090 ADS-B) into the sighting store")
+    sd = sub.add_parser("sdr", help="ingest SDR output (rtl_433/ADS-B/POCSAG/ACARS) or analyze a spectrum sweep")
     sdsub = sd.add_subparsers(dest="sdr_cmd", required=True)
-    sdi = sdsub.add_parser("ingest", help="ingest line-delimited JSON records from a file")
-    sdi.add_argument("file", help="file of line-delimited JSON (rtl_433 -F json / dump1090 --write-json)")
+    sdi = sdsub.add_parser("ingest", help="ingest decoder output into the sighting store")
+    sdi.add_argument("file", help="rtl_433 -F json / dump1090 json / multimon-ng POCSAG text / acarsdec json")
     g = sdi.add_mutually_exclusive_group()
     g.add_argument("--rtl433", action="store_true", help="records are rtl_433 ISM devices (default)")
     g.add_argument("--adsb", action="store_true", help="records are dump1090 ADS-B aircraft")
-    sdi.add_argument("--lat", type=float, help="receiver latitude (tags ISM sightings)")
-    sdi.add_argument("--lon", type=float, help="receiver longitude (tags ISM sightings)")
+    g.add_argument("--pocsag", action="store_true", help="lines are multimon-ng POCSAG (capcode stored, message NOT)")
+    g.add_argument("--acars", action="store_true", help="records are acarsdec JSON (tail stored, text NOT)")
+    sdi.add_argument("--lat", type=float, help="receiver latitude (tags position-less sightings)")
+    sdi.add_argument("--lon", type=float, help="receiver longitude (tags position-less sightings)")
     sdi.add_argument("--db", help="sighting store path")
+    sds = sdsub.add_parser("spectrum", help="analyze an rtl_power CSV sweep: noise floor + active peaks")
+    sds.add_argument("file", help="rtl_power CSV output")
+    sds.add_argument("--threshold", type=float, default=8.0, help="dB above floor to count as a peak (default 8)")
+    sds.add_argument("--max-peaks", type=int, default=20, help="max peaks to report (default 20)")
     sd.set_defaults(func=cmd_sdr)
 
     po = sub.add_parser("portal", help="captive/evil-portal for AUTHORIZED client testing")
