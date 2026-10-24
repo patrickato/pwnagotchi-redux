@@ -680,6 +680,39 @@ def cmd_tracker(args) -> int:
     for v in show:
         mark = "⚠ " if v.following else "  "
         print(f"{mark}{v.mac}  {v.reason}")
+def cmd_crack_distribute(args) -> int:
+    """Split one hashcat job across the mesh: partition a wordlist (--skip/--limit)
+    or a mask keyspace (-s/-l) into disjoint per-node slices. Glass-box; prints
+    the exact command each node runs. Pure planning — dispatch rides the swarm."""
+    from .crack.distributed import distribute, count_lines
+    attack = int(args.attack)
+    base = [args.binary, "-m", str(args.mode), "-a", str(attack), args.hashfile]
+    if attack == 0:
+        if not args.wordlist:
+            print("refused: wordlist attack (-a 0) needs --wordlist")
+            return 3
+        try:
+            total = count_lines(args.wordlist)
+        except OSError as e:
+            print(f"cannot read wordlist: {e}")
+            return 3
+        base.append(args.wordlist)
+    elif attack == 3:
+        if not args.mask or args.keyspace is None:
+            print("refused: mask attack (-a 3) needs --mask and --keyspace "
+                  "(get it from `hashcat -m <m> -a 3 <mask> --keyspace`)")
+            return 3
+        total = int(args.keyspace)
+        base.append(args.mask)
+    else:
+        print(f"refused: distribute supports attack 0 (wordlist) or 3 (mask), not {attack}")
+        return 3
+    jobs = distribute(base, total=total, attack=attack, n_nodes=args.nodes)
+    print(f"splitting {total} units across {args.nodes} node(s):\n")
+    for j in jobs:
+        print(f"  [{j.node_id}] {j.reason}")
+        if j.argv:
+            print("      " + " ".join(j.argv))
     return 0
 
 
@@ -2869,6 +2902,17 @@ def build_parser() -> argparse.ArgumentParser:
     tk.add_argument("--min-span-m", type=float, default=100.0, help="min travel span in meters (default 100)")
     tk.add_argument("--all", action="store_true", help="show every analyzed device, not just followers")
     tk.set_defaults(func=cmd_tracker)
+    cd = sub.add_parser("crack-distribute",
+                        help="split one hashcat job across the mesh (disjoint per-node slices)")
+    cd.add_argument("hashfile", help="hash file (same on every node)")
+    cd.add_argument("--mode", type=int, required=True, help="hashcat -m hash mode")
+    cd.add_argument("--attack", type=int, default=0, choices=(0, 3), help="0=wordlist, 3=mask")
+    cd.add_argument("--wordlist", default=None, help="wordlist path (attack 0; lines counted to partition)")
+    cd.add_argument("--mask", default=None, help="hashcat mask (attack 3)")
+    cd.add_argument("--keyspace", type=int, default=None, help="mask keyspace total (attack 3)")
+    cd.add_argument("--nodes", type=int, required=True, help="number of swarm nodes to split across")
+    cd.add_argument("--binary", default="hashcat", help="hashcat binary name")
+    cd.set_defaults(func=cmd_crack_distribute)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
