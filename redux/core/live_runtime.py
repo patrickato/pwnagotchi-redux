@@ -62,6 +62,11 @@ class LiveConfig:
     api_port: int = 8081
     web_port: int = 8080
     enable_web: bool = True
+    # Where the live dashboard listens. Default localhost (loopback only). A wider
+    # scope (lan/tailscale) lets a phone/laptop reach the REAL daemon dashboard,
+    # but is fail-closed: it is honoured only with a web_token set, else loopback.
+    web_bind_scope: str = "localhost"
+    web_token: str = ""
     enable_native_plugins: bool = False
     retry_seconds: int = 10
     probe_seconds: int = 30
@@ -91,6 +96,8 @@ class LiveConfig:
             api_port=int(values.get("api_port", 8081)),
             web_port=int(values.get("web_port", 8080)),
             enable_web=values.get("enable_web", True),
+            web_bind_scope=str(values.get("web_bind_scope", "localhost")),
+            web_token=str(values.get("web_token", "")),
             enable_native_plugins=values.get("enable_native_plugins", False),
             retry_seconds=int(values.get("retry_seconds", 10)),
             probe_seconds=int(values.get("probe_seconds", 30)),
@@ -158,6 +165,23 @@ class LiveConfig:
             raise ValueError("require_regulatory_country must be a boolean")
         if self.regulatory_country_file != Path("/etc/redux/regulatory-country"):
             raise ValueError("regulatory_country_file must use the baked system path")
+
+
+def resolve_web_bind(bind_scope, token):
+    """(host, token, error) for the daemon dashboard listener.
+
+    FAIL-CLOSED: the dashboard is never exposed off-box without a token. An
+    off-box scope (lan/tailscale) with no token falls back to loopback and returns
+    a human-readable reason; localhost always binds loopback. This mirrors the
+    config-layer rule (config.py: a token is required for an off-box bind)."""
+    from ..web.status_page import _SCOPE_HOST
+    host = _SCOPE_HOST.get(str(bind_scope), "127.0.0.1")
+    tok = str(token) or None
+    if host != "127.0.0.1" and not tok:
+        return "127.0.0.1", None, (
+            f"web.bind_scope={bind_scope} ignored: a web_token is required for an "
+            f"off-box bind — serving on loopback only")
+    return host, tok, ""
 
 
 def free_bytes(path):
@@ -819,9 +843,12 @@ class LiveRuntime:
     def _start_web(self):
         if not self.config.enable_web or self.web is not None:
             return
+        host, token, bind_error = resolve_web_bind(
+            getattr(self.config, "web_bind_scope", "localhost"),
+            getattr(self.config, "web_token", ""))
         server = ThreadingHTTPServer(
-            ("127.0.0.1", self.config.web_port),
-            make_handler(lambda: self._snapshot, token=None,
+            (host, self.config.web_port),
+            make_handler(lambda: self._snapshot, token=token,
                          plugin_runtime=lambda: self.native_plugins.snapshot() if self.native_plugins else {}),
         )
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -833,7 +860,9 @@ class LiveRuntime:
         # Only mark the listener active *after* its server thread launched.
         self.web = server
         self.web_thread = thread
-        self.web_error = ""
+        # Carry the fail-closed note (if an off-box bind was refused for lack of a
+        # token) so the operator can see why the dashboard stayed on loopback.
+        self.web_error = bind_error
 
     def _log_size(self):
         if self.log_handle is None:
