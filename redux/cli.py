@@ -1903,10 +1903,13 @@ def cmd_pipeline(args) -> int:
         from .crack.audit import AuditSettings, AuditWorker
         from .core.scope import Scope
         cfg = AuditSettings.load(args.config)
-        if not cfg.enabled:
-            print(json.dumps({"status": "disabled", "reason": "audit opt-in is off"}))
+        scope = Scope.load(str(cfg.scope_file))
+        # Lab mode makes the crack automatic; otherwise it stays config opt-in.
+        if not cfg.enabled and not bool(getattr(scope, "lab_mode", False)):
+            print(json.dumps({"status": "disabled",
+                              "reason": "audit opt-in is off (enable in config, or turn on lab mode)"}))
             return 0
-        with AuditWorker(cfg, Scope.load(str(cfg.scope_file))) as worker:
+        with AuditWorker(cfg, scope) as worker:
             print(json.dumps(worker.once(), indent=2))
         return 0
     raise ValueError("unknown pipeline command")

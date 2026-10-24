@@ -31,6 +31,10 @@ class AuditSettings:
     database: Path
     binary: str = "hashcat"
     max_runtime_seconds: int = 1800
+    # Registry used only for the lab-mode turnkey fallback below. When lab mode is
+    # on and the configured wordlist isn't usable, the worker resolves the fastest
+    # list registered here so the crack runs without any extra config.
+    wordlist_dir: Path = Path("/captures/wordlists")
 
     @classmethod
     def load(cls, path):
@@ -56,10 +60,12 @@ class AuditSettings:
             database=Path(pipeline.get("database") or "/captures/jobs.db"),
             binary=str(opts.get("binary") or "hashcat"),
             max_runtime_seconds=int(opts.get("max_runtime_seconds") or 600),
+            wordlist_dir=Path(wl_dir or "/captures/wordlists"),
         )
 
     def validate(self):
-        paths = (self.wordlist, self.scope_file, self.results_dir, self.database)
+        paths = (self.wordlist, self.scope_file, self.results_dir,
+                 self.database, self.wordlist_dir)
         if not all(p.is_absolute() for p in paths):
             raise ValueError("audit paths must be absolute")
         # Up to 24h per capture: it's the owner's hardware cracking the owner's
@@ -106,20 +112,33 @@ class AuditWorker:
         self.conn.commit()
 
     def once(self):
-        if not self.cfg.enabled:
-            return {"status": "disabled", "reason": "audit is disabled"}
+        # Lab mode makes the crack part of the automatic chain: the worker runs
+        # even if the config opt-in is off. Every other mode stays opt-in.
+        lab = bool(getattr(self.scope, "lab_mode", False))
+        if not self.cfg.enabled and not lab:
+            return {"status": "disabled",
+                    "reason": "audit is disabled (enable it in config, or turn on lab mode)"}
         if self.conn is None:
             return {"status": "unavailable", "reason": "ingestion database missing"}
-        if self.cfg.wordlist.is_symlink() or not self.cfg.wordlist.is_file():
+        # Turnkey wordlist for lab mode: if the configured list isn't usable, fall
+        # back to the fastest list in the on-device registry so a freshly-armed lab
+        # box cracks without extra config. Other modes keep the configured list.
+        wordlist = self.cfg.wordlist
+        if (wordlist.is_symlink() or not wordlist.is_file()) and lab:
+            from .wordlists import resolve_wordlist
+            resolved, _reason = resolve_wordlist(str(self.cfg.wordlist_dir))
+            if resolved:
+                wordlist = Path(resolved)
+        if wordlist.is_symlink() or not wordlist.is_file():
             return {"status": "unavailable", "reason": "wordlist unavailable"}
         if not self.cfg.scope_file.is_file():
             return {"status": "unavailable", "reason": "Redux Scope file unavailable"}
         if self.which(self.cfg.binary) is None:
             return {"status": "unavailable", "reason": "Hashcat not installed"}
 
-        st = self.cfg.wordlist.stat()
+        st = wordlist.stat()
         wordlist_id = hashlib.sha256(
-            f"{self.cfg.wordlist}:{st.st_size}:{st.st_mtime_ns}".encode()
+            f"{wordlist}:{st.st_size}:{st.st_mtime_ns}".encode()
         ).hexdigest()
         jobs = self.conn.execute("""SELECT DISTINCT output_sha,output_path
             FROM artifacts WHERE status='ready' ORDER BY created_at""").fetchall()
@@ -162,7 +181,7 @@ class AuditWorker:
                 continue
             argv = [
                 self.cfg.binary, "-m", "22000", "-a", "0", str(artifact),
-                str(self.cfg.wordlist), "--potfile-disable", "--outfile",
+                str(wordlist), "--potfile-disable", "--outfile",
                 str(result_path), "--outfile-format", "2",
                 "--runtime", str(self.cfg.max_runtime_seconds),
                 "--session", "redux-" + output_sha[:12] + "-" + wordlist_id[:8],
@@ -209,11 +228,12 @@ def main(argv=None):
                              "doesn't trickle out one-per-timer (1 = a single job)")
     opts = parser.parse_args(argv)
     settings = AuditSettings.load(opts.config)
-    if not settings.enabled:
-        print(json.dumps({"status": "disabled"}))
-        return 0
     from ..core.scope import Scope
     scope = Scope.load(str(settings.scope_file))
+    # Lab mode runs the crack automatically; every other mode is config opt-in.
+    if not settings.enabled and not bool(getattr(scope, "lab_mode", False)):
+        print(json.dumps({"status": "disabled"}))
+        return 0
     terminal = {"idle", "disabled", "unavailable"}
     with AuditWorker(settings, scope) as worker:
         runs = []
