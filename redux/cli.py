@@ -655,6 +655,32 @@ def cmd_wps(args) -> int:
         print(json.dumps(res, indent=2))
         return 0 if res.get("status") in ("recovered", "completed") else 3
     return 2
+def cmd_tracker(args) -> int:
+    """Unwanted-tracker check: which devices have been MOVING WITH YOU (persistent
+    across time AND distance) — the Apple/Google 'is it following me' heuristic."""
+    from .geo import follower_analysis
+    from .geo.follower import ObservationLog
+    rows = ObservationLog(args.log).load()
+    if not rows:
+        print(f"no observation history yet ({args.log}) — the live runtime logs BLE "
+              "observations here as it runs")
+        return 0
+    verdicts = follower_analysis(
+        rows, min_duration_s=args.min_minutes * 60.0, min_span_m=args.min_span_m)
+    flagged = [v for v in verdicts if v.following]
+    if args.all:
+        show = verdicts
+    else:
+        show = flagged
+    if not show:
+        print(f"no devices flagged as following you ({len(verdicts)} device(s) analyzed)")
+        return 0
+    if flagged:
+        print(f"⚠ {len(flagged)} device(s) may be following you:")
+    for v in show:
+        mark = "⚠ " if v.following else "  "
+        print(f"{mark}{v.mac}  {v.reason}")
+    return 0
 
 
 def cmd_doctor(args) -> int:
@@ -2836,6 +2862,13 @@ def build_parser() -> argparse.ArgumentParser:
                            help="confirm this AP is yours to test (not needed in LAB mode)")
             w.add_argument("--timeout", type=int, default=180, help="max attack seconds (default 180)")
     wp.set_defaults(func=cmd_wps)
+    tk = sub.add_parser("tracker", help="unwanted-tracker check: devices moving WITH you (AirTag-style)")
+    tk.add_argument("--log", default="/captures/live/observations.jsonl",
+                    help="observation history log (default /captures/live/observations.jsonl)")
+    tk.add_argument("--min-minutes", type=float, default=10.0, help="min duration to flag (default 10)")
+    tk.add_argument("--min-span-m", type=float, default=100.0, help="min travel span in meters (default 100)")
+    tk.add_argument("--all", action="store_true", help="show every analyzed device, not just followers")
+    tk.set_defaults(func=cmd_tracker)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
