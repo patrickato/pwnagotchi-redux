@@ -526,6 +526,10 @@ def cmd_dex(args) -> int:
     if s["total"]:
         print("  by kind:  " + ", ".join(f"{k}={v}" for k, v in sorted(s["by_kind"].items())))
         print("  by rarity: " + ", ".join(f"{k}={v}" for k, v in sorted(s["by_rarity"].items())))
+        if s.get("by_vendor"):
+            print(f"  identified: {s['identified_vendors']} ({', '.join(f'{k}={v}' for k, v in s['by_vendor'].items())})")
+        if s.get("randomized"):
+            print(f"  randomized MACs (privacy/phone): {s['randomized']}")
         print("  rarest:")
         for e in dex.rarest(limit=args.top):
             print(f"    [{e.rarity.value:9}] {e.kind:4} {e.ssid or e.mac} — known {e.known_days:.0f}d")
@@ -535,6 +539,29 @@ def cmd_dex(args) -> int:
             for e in dep[:args.top]:
                 print(f"    {e.ssid or e.mac} — {e.reason}")
     return 0
+
+
+def cmd_oui(args) -> int:
+    """MAC vendor lookup / device classification / full-DB import (glass-box).
+    Built-in table out of the box; `import` merges a full IEEE/manuf DB on top."""
+    from .geo import oui as O
+    cmd = args.oui_cmd
+    if cmd == "lookup":
+        table = O.full_table()
+        print(O.label_mac(args.mac, table) or "(not a MAC)")
+        return 0
+    if cmd == "classify":
+        c = O.classify(args.mac, O.full_table())
+        print(json.dumps(c.to_dict(), indent=2))
+        return 0
+    if cmd == "import":
+        n, reason = O.import_ieee(args.source, args.dest)
+        print(reason)
+        return 0 if n else 3
+    if cmd == "stats":
+        print(json.dumps(O.table_stats(O.full_table()), indent=2))
+        return 0
+    return 2
 
 
 def cmd_doctor(args) -> int:
@@ -2490,6 +2517,19 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    ou = sub.add_parser("oui", help="MAC vendor lookup / device classification / full-DB import")
+    ousub = ou.add_subparsers(dest="oui_cmd", required=True)
+    oul = ousub.add_parser("lookup", help="vendor for a MAC (built-in + imported DB)")
+    oul.add_argument("mac", help="a MAC address (aa:bb:cc:dd:ee:ff)")
+    ouc = ousub.add_parser("classify", help="vendor + device-class guess + randomized-MAC flag")
+    ouc.add_argument("mac", help="a MAC address")
+    oui_ = ousub.add_parser("import", help="merge a full IEEE oui.txt / Wireshark manuf DB on top of the built-in table")
+    oui_.add_argument("source", help="path to the vendor DB (IEEE oui.txt, manuf, or normalized TSV)")
+    oui_.add_argument("--dest", default="/captures/config/oui.tsv",
+                      help="where the normalized DB is written (default /captures/config/oui.tsv)")
+    ousub.add_parser("stats", help="counts for the active vendor table")
+    ou.set_defaults(func=cmd_oui)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")
