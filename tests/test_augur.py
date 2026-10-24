@@ -183,3 +183,19 @@ def test_dashboard_reuses_one_supplied_pipeline_snapshot(monkeypatch):
     assert status_payload(augur, processing_report=report)["capture_processing"] is report
 
 
+
+
+def test_probe_requests_are_harvested_as_sightings():
+    from redux.geo import SightingStore
+    evs = _evs([
+        {"tag": "wifi.client.probe", "time": 1.0,
+         "data": {"from": "aa:bb:cc:dd:ee:01", "ssid": "HomeNet", "rssi": -55, "channel": 6}},
+        {"tag": "wifi.ap.new", "time": 2.0, "data": {"mac": "aa:bb:cc:dd:ee:02", "essid": "Cafe"}},
+    ])
+    bc = Augur([ONBOARD, ALFA], intent=Intent.HUNT, driver=FakeDriver(evs),
+               store=SightingStore(":memory:"))
+    bc.pump()
+    probes = [r for r in bc.store.query() if r.kind == "probe"]
+    assert len(probes) == 1                                  # the probe-request was harvested
+    assert probes[0].mac == "aa:bb:cc:dd:ee:01"              # the client that leaked it
+    assert probes[0].ssid == "HomeNet"                       # the network it's looking for

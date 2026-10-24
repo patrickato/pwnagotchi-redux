@@ -125,6 +125,7 @@ _EVENT_MAP = {
     "wifi.ap.new": ("ap.new", "new access point seen"),
     "wifi.ap.lost": ("ap.lost", "access point went away"),
     "wifi.client.new": ("client.new", "new client seen"),
+    "wifi.client.probe": ("client.probe", "a client probed for a network"),
     "wifi.client.handshake": ("handshake", "captured a handshake/PMKID"),
     "ble.device.new": ("ble.new", "new BLE device seen"),
     "ble.device.lost": ("ble.lost", "BLE device went away"),
