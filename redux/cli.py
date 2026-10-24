@@ -1947,6 +1947,19 @@ def cmd_captured(args) -> int:
     return 2
 
 
+def cmd_mode(args) -> int:
+    """Operating mode switch: LAB (unlocked, automatic) <-> FIELD (passive, gated).
+    What the TFT mode switch calls under the hood."""
+    from .core.mode import read_mode, set_mode, toggle_mode
+    sub = getattr(args, "mode_cmd", None) or "status"
+    if sub == "status":
+        print(f"mode: {read_mode().upper()}")
+        return 0
+    res = toggle_mode() if sub == "toggle" else set_mode(sub)
+    print(res["reason"])
+    return 0 if res["ok"] else 3
+
+
 def cmd_live(args) -> int:
     """Inspect actual on-device state without creating synthetic radio records."""
     if args.live_cmd == "doctor":
@@ -2162,6 +2175,14 @@ def build_parser() -> argparse.ArgumentParser:
     cpr = cpsub.add_parser("remove", help="re-target an AP (drop it from the manual ignore list)")
     cpr.add_argument("bssid", help="AP BSSID to stop ignoring")
     cp.set_defaults(func=cmd_captured)
+
+    md = sub.add_parser("mode", help="operating mode: LAB (automatic) <-> FIELD (passive, gated)")
+    mdsub = md.add_subparsers(dest="mode_cmd")
+    mdsub.add_parser("status", help="show the current mode")
+    mdsub.add_parser("lab", help="LAB: unlocked, automatic chain (deauth-capture + crack) on your own gear")
+    mdsub.add_parser("field", help="FIELD: passive, authorize-required, no auto-crack (the lock-down)")
+    mdsub.add_parser("toggle", help="flip between LAB and FIELD")
+    md.set_defaults(func=cmd_mode)
 
     on = sub.add_parser("online", help="check whether the device currently has internet uplink")
     on.add_argument("--host", default="one.one.one.one", help="reachability host (default one.one.one.one)")

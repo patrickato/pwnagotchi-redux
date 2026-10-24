@@ -60,6 +60,13 @@ def test_fb_preflight_refuses_incompatible_hardware(tmp_path, size, bpp, stride)
         "/dev/fb1", sys_root=tmp_path, statter=char_device)["ok"]
 
 
+def test_render_draws_mode_badge_without_error():
+    assert fbui.render(valid_report(), now=101, mode="lab").size == fbui.RESOLUTION
+    assert fbui.render(valid_report(), now=101, mode="field",
+                       mode_arming=True).size == fbui.RESOLUTION
+    assert fbui.render(valid_report(), now=101).size == fbui.RESOLUTION   # no mode -> no badge
+
+
 def test_status_truth_and_staleness():
     current = fbui.status_view(valid_report(), now=101)
     assert current["health"] == "ok" and current["engine"] == "ACTIVE"

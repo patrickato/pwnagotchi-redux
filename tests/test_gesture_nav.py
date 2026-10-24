@@ -39,6 +39,23 @@ def test_accepts_prepress_coordinates_but_never_replays_old_contact():
                             ev(EV_KEY, BTN_TOUCH, 0), tracker)[0] == []
 
 
+def test_header_tap_is_the_mode_switch():
+    tracker = NavigationGestures(calibration(), physically_verified=True)
+    actions, tail = consume_gestures(contact((240, 20)), tracker)   # header strip
+    assert actions == [("mode", 0)]
+    assert tail == b""
+
+
+def test_mode_zone_does_not_steal_footer_page_taps():
+    tracker = NavigationGestures(calibration(), physically_verified=True)
+    assert consume_gestures(contact((35, 308)), tracker)[0] == [("page", "overview")]
+
+
+def test_content_area_tap_is_not_a_mode_switch():
+    tracker = NavigationGestures(calibration(), physically_verified=True)
+    assert consume_gestures(contact((240, 120)), tracker)[0] == []   # neither mode nor page
+
+
 @pytest.mark.parametrize("dx,step", [(-160, 1), (160, -1)])
 def test_swipes_have_screen_relative_direction(dx, step):
     tracker = NavigationGestures(calibration(), physically_verified=True)

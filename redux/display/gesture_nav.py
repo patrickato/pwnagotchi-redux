@@ -14,6 +14,10 @@ from .touch_nav import _EVENT, EV_ABS, EV_KEY, EV_SYN, ABS_X, ABS_Y, BTN_TOUCH
 from .ui_state import PAGES, navigation
 TAB_TOP = 276
 TAB_WIDTH = 96
+# The header strip (above all page content and gestures) is the mode switch: a
+# deliberate tap here asks to flip LAB <-> FIELD. The UI loop requires a second
+# confirming tap before it acts, so a stray touch can't change posture.
+MODE_STRIP_BOTTOM = 40
 _SYN_REPORT = 0
 _SYN_DROPPED = 3
 
@@ -105,6 +109,11 @@ class NavigationGestures:
             return ("scroll", 1 if dy < 0 else -1)
         if self.maximum_motion > self.tap_slop_pixels:
             return None
+        # A tap in the header strip is the mode switch (confirmed by a second tap
+        # in the UI loop). Checked before the content zones; it never overlaps the
+        # detail (y>=157) or tab (y>=276) regions.
+        if sy < MODE_STRIP_BOTTOM and ey < MODE_STRIP_BOTTOM:
+            return ("mode", 0)
         if self.page == "system" and 157 <= sy < 259 and 157 <= ey < 259:
             first, last = int(sy - 157) // 34, int(ey - 157) // 34
             if first == last:
