@@ -2715,6 +2715,41 @@ def cmd_loot(args) -> int:
     return 2
 
 
+def cmd_fuse(args) -> int:
+    """Co-occurrence fusion — cluster devices that repeatedly appear in the same
+    time+place window (carried together). Reads the observation time-series log.
+    Radio-agnostic: BLE today, true cross-radio once WiFi is also logged. Read-only;
+    co-presence is correlation, not proof — every group carries its evidence."""
+    from .geo.follower import ObservationLog
+    from .intel.fusion import fuse
+    try:
+        obs = ObservationLog(args.log).load()
+    except Exception:
+        obs = []
+    if not obs:
+        print(f"no observation history yet ({args.log}) — the daemon logs located "
+              "observations there as it runs (BLE today)")
+        return 0
+    groups = fuse(obs, window_s=args.window_seconds, precision=args.precision,
+                  min_co=args.min_co, min_score=args.min_score)
+    if args.json:
+        print(json.dumps([{"macs": list(g.macs), "co_windows": g.co_windows,
+                           "score": g.score, "confidence": g.confidence,
+                           "windows_seen": g.windows_seen} for g in groups], indent=2))
+        return 0
+    seen = len({(o.mac or "").lower() for o in obs})
+    print(f"CO-OCCURRENCE FUSION — {len(groups)} device group(s) that travel together "
+          f"(from {len(obs)} observations of {seen} device(s))")
+    if not groups:
+        print("  (no devices repeatedly co-located — nothing travels together in this history)")
+    for g in groups:
+        print(f"\n  [{g.confidence:6}] {g.summary}")
+        for m in g.macs:
+            print(f"      {m}")
+    print("\nnote: co-presence is correlation, not proof; two devices on the same bus co-occur too.")
+    return 0
+
+
 def cmd_radar(args) -> int:
     """Threat radar — counter-surveillance from the sightings the box already
     records: evil twins, KARMA lures, and suspicious new strong APs. Passive and
@@ -4150,6 +4185,14 @@ def build_parser() -> argparse.ArgumentParser:
     ra.add_argument("--strong-rssi", type=int, default=-50, help="dBm at/above which a new AP is 'close' (default -50)")
     ra.add_argument("--json", action="store_true", help="machine-readable output")
     ra.set_defaults(func=cmd_radar)
+    fu = sub.add_parser("fuse", help="co-occurrence fusion: cluster devices that travel together (time+place)")
+    fu.add_argument("--log", default="/captures/live/observations.jsonl", help="observation time-series log")
+    fu.add_argument("--window-seconds", type=float, default=120.0, help="time-bucket width (default 120s)")
+    fu.add_argument("--precision", type=int, default=7, help="geohash cell precision (7 ~ 150 m)")
+    fu.add_argument("--min-co", type=int, default=2, help="min shared windows to link a pair (default 2)")
+    fu.add_argument("--min-score", type=float, default=0.3, help="min Jaccard overlap to link (default 0.3)")
+    fu.add_argument("--json", action="store_true", help="machine-readable output")
+    fu.set_defaults(func=cmd_fuse)
     lo = sub.add_parser("loot", help="recovered-credential vault + scope-gated network pivot")
     lo.add_argument("--vault", default=None, help="vault file (default: the device loot vault)")
     losub = lo.add_subparsers(dest="loot_cmd", required=True)
