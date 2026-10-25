@@ -22,11 +22,22 @@ fully testable with no radio.
 from __future__ import annotations
 
 import math
+import subprocess
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
 
 # intensity ramp, faint -> strong (for ASCII rendering)
 _RAMP = " .:-=+*#%@"
+
+
+def _heat(inten: float) -> str:
+    """Intensity 0..1 -> a blue→green→red heatmap hex color (cool=faint, hot=strong)."""
+    i = max(0.0, min(1.0, inten))
+    r = int(round(255 * i))
+    g = int(round(255 * (1 - abs(2 * i - 1))))   # peaks green in the middle
+    b = int(round(255 * (1 - i)))
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 @dataclass(frozen=True)
@@ -127,6 +138,32 @@ class Waterfall:
         header = f"{lo:.3f} MHz{'':<{max(0, width - 20)}}{hi:.3f} MHz"
         return header + "\n" + "\n".join(lines)
 
+    def to_svg(self, *, width: int = 240, cell_h: int = 6) -> str:
+        """Render the waterfall as an SVG heatmap (tier-2, for the web dashboard /
+        phone). Pure string output — the live producer that feeds sweeps is wired
+        on-device; this is the view half, testable with no radio. Blue→red ramp,
+        dark background, one row per sweep (newest last)."""
+        rows = self.rows
+        if not rows:
+            return ('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="20">'
+                    '<rect width="100%%" height="100%%" fill="#0b0e13"/>'
+                    '<text x="6" y="14" fill="#8b98a5" font-family="monospace" '
+                    'font-size="11">no sweeps</text></svg>' % width)
+        h = len(rows) * cell_h
+        parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" '
+                 'shape-rendering="crispEdges">' % (width, h),
+                 '<rect width="100%%" height="100%%" fill="#0b0e13"/>']
+        for r, row in enumerate(rows):
+            cols = self._resample_row(row, width)
+            y = r * cell_h
+            for x, inten in enumerate(cols):
+                if inten <= 0.02:
+                    continue
+                parts.append('<rect x="%d" y="%d" width="1" height="%d" fill="%s"/>'
+                             % (x, y, cell_h, _heat(inten)))
+        parts.append('</svg>')
+        return "".join(parts)
+
     def to_pgm(self, *, width: Optional[int] = None) -> bytes:
         """A grayscale PGM (P5) image: rows=time, cols=frequency, value=intensity.
         Pure Python, no deps; viewable in any image viewer or a web <img>."""
@@ -143,3 +180,23 @@ class Waterfall:
         h = len(self.rows)
         header = f"P5\n{w} {h}\n255\n".encode("ascii")
         return header + bytes(pixels)
+
+
+def waterfall_from_scan(scan_range: str = "430M:440M:25k", *, seconds: int = 20,
+                        device: int = 0, out_path: str = "/tmp/_redux_wf.csv",
+                        runner: Callable = subprocess.run) -> Waterfall:
+    """Run rtl_power over a band for `seconds`, then build a Waterfall from the
+    CSV it writes. This is the live-feed producer tiers 2-3 use on-device; the
+    `runner` is injected so it's testable with a fake that writes a CSV and no
+    radio. Returns an empty Waterfall if the scan produced nothing."""
+    argv = ["rtl_power", "-d", str(device), "-f", scan_range, "-i", "1",
+            "-e", f"{seconds}s", out_path]
+    try:
+        runner(argv, capture_output=True, timeout=seconds + 30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return Waterfall((), float("nan"), float("nan"))
+    try:
+        with open(out_path, encoding="utf-8", errors="replace") as f:
+            return Waterfall.from_rtl_power(f)
+    except OSError:
+        return Waterfall((), float("nan"), float("nan"))
