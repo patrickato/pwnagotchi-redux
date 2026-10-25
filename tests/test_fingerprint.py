@@ -97,7 +97,7 @@ def test_summary_counts_reid_and_savings():
 # --- store adapter ----------------------------------------------------------- #
 
 def test_link_store_groups_by_mac_from_sightings():
-    store = SightingStore()
+    store = SightingStore(":memory:")
     # two randomized MACs both seen against the same network name. (The store
     # dedups to one row per (kind,mac), so the best-effort adapter gets one SSID
     # per MAC — a weak-but-real link; rich PNL needs the raw-frame tap.)

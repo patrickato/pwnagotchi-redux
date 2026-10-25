@@ -5,10 +5,14 @@ authorized. The autonomous loop (`autorun`) ranges ONLY over the scope's CIDR
 entries — "auto-hunt everything in your armed scope," never the open wire.
 
 Tools are injected protocols so the logic is pure/testable:
-  - Scanner:    ReplayScanner (canned) / NmapScanner (shells `nmap -sV`)
-  - CredTester: ReplayCredTester (canned) / HydraCredTester (shells `hydra`)
-Both report `available=False` with a reason when their tool is absent — never a
-fabricated "nothing found."
+  - Scanner:    ReplayScanner (canned, tests) / NmapScanner
+  - CredTester: ReplayCredTester (canned, tests) / HydraCredTester
+NOTE: the live NmapScanner / HydraCredTester execution + output parse are NOT yet
+wired. They verify tool presence and run under the scope gate, then report
+`available=False` ("not yet wired") — never a fabricated "nothing found." The
+scope-gating, autorun ranging and loot-book plumbing ARE real; wiring the real
+`nmap -sV` / `hydra` subprocess + parse is a tracked bench item (docs/FINISH_LINE.md).
+Until it lands, `netrecon scan` / `autorun` report no hosts.
 """
 from __future__ import annotations
 
@@ -106,8 +110,9 @@ class NmapScanner:
     def scan(self, cidr: str) -> ScanResult:
         if shutil.which(self.BINARY) is None:
             return ScanResult(False, (), f"{self.BINARY} not installed — enable the Kali pack", tool="")
-        # Live parse is implemented on-device; structure verified by the replay path.
-        return ScanResult(False, (), "live nmap scan is a real-hardware path", tool=self.BINARY)
+        # NOT YET WIRED: the real `nmap -sV` execution + output parse is a tracked
+        # bench item (docs/FINISH_LINE.md). Never fabricate hosts — report unavailable.
+        return ScanResult(False, (), "live nmap execution not yet wired", tool=self.BINARY)
 
 
 class HydraCredTester:
@@ -116,7 +121,9 @@ class HydraCredTester:
     def test(self, ip, port, service, usernames, passwords) -> CredResult:
         if shutil.which(self.BINARY) is None:
             return CredResult(False, None, f"{self.BINARY} not installed — enable the Kali pack", tool="")
-        return CredResult(False, None, "live hydra run is a real-hardware path", tool=self.BINARY)
+        # NOT YET WIRED: the real `hydra` execution + parse is a tracked bench item
+        # (docs/FINISH_LINE.md). Never fabricate a credential — report unavailable.
+        return CredResult(False, None, "live hydra execution not yet wired", tool=self.BINARY)
 
 
 # --- loot -------------------------------------------------------------------- #

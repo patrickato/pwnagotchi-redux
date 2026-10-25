@@ -24,8 +24,11 @@ PathLike = Union[str, Path]
 _FIELDS = ["kind", "mac", "ssid", "lat", "lon", "rssi", "channel",
            "source_radio", "ts", "first_seen", "provenance"]
 
-# Default on-device path (bus convention); tests use :memory: or a temp file.
-DEFAULT_DB_PATH = "/var/lib/redux/geo/sightings.db"
+# Default on-device path: the live daemon's persistent capture partition, where
+# redux-live.service records sightings (LiveConfig.state_dir / "sightings.db").
+# Every read surface (signals/dex/cache/netrecon/TFT) defaults here so it sees the
+# daemon's live store, not an empty one. Tests use :memory: or a temp file.
+DEFAULT_DB_PATH = "/captures/live/sightings.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sightings (
