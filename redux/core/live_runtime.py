@@ -349,6 +349,17 @@ def caplet_text(iface, output, username, password, port):
             "api.rest on\n")
 
 
+def _scope_mtime(path):
+    """Last-modified time of the scope file, or None when it is absent/unreadable.
+    A changed value is the cheap signal that the operator ran `redux scope`."""
+    if not path:
+        return None
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return None
+
+
 class LiveDriver(BettercapDriver):
     """Treat Bettercap REST command errors as startup/recovery failures."""
 
@@ -422,6 +433,8 @@ class LiveRuntime:
         self.process = None
         self.augur = None
         self.driver = None
+        self._scope_path = None     # watched for `redux scope` edits (live reload)
+        self._scope_mtime = None
         self.web = None
         self.web_thread = None
         self.web_next_try = float("-inf")
@@ -1051,10 +1064,12 @@ class LiveRuntime:
         # (and, in lab mode, enables Augur's auto-offense). Missing/unreadable scope
         # => an empty, non-lab scope => fully passive, exactly as before.
         from .scope import Scope, default_scope_path
+        self._scope_path = default_scope_path()
         try:
-            scope = Scope.load(default_scope_path())
+            scope = Scope.load(self._scope_path)
         except Exception:
             scope = Scope()
+        self._scope_mtime = _scope_mtime(self._scope_path)
         # Retire APs that already gave up a verified 4-way (or that the operator
         # ignores), so lab-mode offense doesn't re-pwn a done target. Fails safe.
         from ..crack.captured import retired_bssids
@@ -1301,6 +1316,28 @@ class LiveRuntime:
             )
             _LOG.warning("%s", self.last_handoff_error)
 
+    def _maybe_reload_scope(self):
+        """Re-read the central Scope when scope.json changes, so `redux scope
+        add/remove` and `lab-mode on/off` take effect WITHOUT restarting the
+        daemon. Cheap (one stat per tick) and fail-safe: an unreadable scope
+        reloads as an empty, passive scope, and assigning Augur.scope re-arms the
+        driver's deauth allowlist (and lab_mode) on assignment."""
+        if self.augur is None or self._scope_path is None:
+            return
+        current = _scope_mtime(self._scope_path)
+        if current == self._scope_mtime:
+            return
+        self._scope_mtime = current
+        from .scope import Scope
+        try:
+            new_scope = Scope.load(self._scope_path)
+        except Exception:
+            new_scope = Scope()
+        try:
+            self.augur.scope = new_scope      # setter re-arms the driver allowlist
+        except Exception:
+            pass
+
     def tick(self):
         self.resources.sample()
         if (self.config.enable_native_plugins and self.native_plugins is None
@@ -1383,6 +1420,7 @@ class LiveRuntime:
 
         if self.augur is not None:
             try:
+                self._maybe_reload_scope()   # pick up `redux scope` edits without a restart
                 if free_bytes(self.config.active_dir) < self.config.min_free_bytes:
                     if not self._drop():
                         self._checkpoint()
