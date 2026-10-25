@@ -1170,6 +1170,10 @@ def cmd_sdr(args) -> int:
             with open(args.out, "wb") as fh:
                 fh.write(wf.to_pgm())
             print(f"wrote grayscale image: {args.out} (PGM)")
+        if getattr(args, "svg", None):
+            with open(args.svg, "w", encoding="utf-8") as fh:
+                fh.write(wf.to_svg(width=args.width))
+            print(f"wrote SVG heatmap: {args.svg} (web/phone view)")
         return 0
     from .geo.db import SightingStore, DEFAULT_DB_PATH
     from .sdr import (ingest_rtl433, ingest_adsb, ingest_pocsag, ingest_acars,
@@ -2976,6 +2980,7 @@ def build_parser() -> argparse.ArgumentParser:
     sdw.add_argument("file", help="rtl_power CSV output (repeated sweeps over time)")
     sdw.add_argument("--width", type=int, default=64, help="columns in the ASCII waterfall (default 64)")
     sdw.add_argument("--out", default=None, help="also write a grayscale PGM image to this path")
+    sdw.add_argument("--svg", default=None, help="also write an SVG heatmap (web/phone view) to this path")
     sd.set_defaults(func=cmd_sdr)
 
     po = sub.add_parser("portal", help="captive/evil-portal for AUTHORIZED client testing")
