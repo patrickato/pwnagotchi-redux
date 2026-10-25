@@ -2595,6 +2595,50 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_forge(args) -> int:
+    """Target-aware wordlist/mask forge — turn recon into a targeted candidate
+    list. Read-only; identical in LAB and FIELD. Run these before a generic list."""
+    from .crack.forge import forge
+    pnl_seeds = []
+    if args.pnl:
+        try:
+            from .portal.karma import ProbeHarvester
+            pnl_seeds = [r["ssid"] for r in ProbeHarvester(path=args.pnl).ssids() if r.get("ssid")]
+        except Exception:
+            pnl_seeds = []
+    f = forge(args.ssid or "", tokens=args.token or [], pnl=pnl_seeds,
+              bssid=args.bssid, min_len=args.min_len, max_words=args.max)
+    if args.out:
+        try:
+            with open(args.out, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(f.words) + ("\n" if f.words else ""))
+        except OSError as e:
+            print(f"could not write {args.out}: {e}")
+            return 1
+        print(f"wrote {len(f.words)} candidate(s) to {args.out}  (seeds: {', '.join(f.seeds) or 'none'})")
+        for m in f.masks:
+            print(f"  mask {m.mask}  — {m.note}")
+        return 0
+    if args.json:
+        print(json.dumps({"ssid": f.ssid, "seeds": list(f.seeds), "vendor": f.vendor,
+                          "words": list(f.words),
+                          "masks": [{"mask": m.mask, "note": m.note} for m in f.masks],
+                          "notes": list(f.notes)}, indent=2))
+        return 0
+    print(f"FORGE — {len(f.words)} targeted candidate(s) from seeds: {', '.join(f.seeds) or 'none'}"
+          + (f"  [vendor: {f.vendor}]" if f.vendor else ""))
+    for w in f.words[:40]:
+        print(f"  {w}")
+    if len(f.words) > 40:
+        print(f"  … (+{len(f.words) - 40} more; use --out FILE to save all)")
+    print("masks (hashcat -a 3):")
+    for m in f.masks:
+        print(f"  {m.mask}  — {m.note}")
+    for n in f.notes:
+        print(f"note: {n}")
+    return 0
+
+
 def cmd_preflight(args) -> int:
     """Is this capture crackable, and why? Decodes PMKID/EAPOL completeness
     before you spend GPU time. Read-only; identical in LAB and FIELD."""
@@ -3812,6 +3856,16 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("file", help="a .hc22000 or raw .pcap/.pcapng/.cap")
     pf.add_argument("--json", action="store_true", help="machine-readable output")
     pf.set_defaults(func=cmd_preflight)
+    fg = sub.add_parser("forge", help="target-aware wordlist/mask forge (recon -> targeted candidates)")
+    fg.add_argument("ssid", nargs="?", default="", help="the target SSID (optional)")
+    fg.add_argument("--token", action="append", help="OSINT seed (owner name, pet, street, zip…); repeatable")
+    fg.add_argument("--pnl", default=None, help="harvested PNL store to mine nearby SSIDs as seeds")
+    fg.add_argument("--bssid", default=None, help="target BSSID (adds the AP vendor as a seed via OUI)")
+    fg.add_argument("--out", default=None, help="write the candidate wordlist to this file")
+    fg.add_argument("--min-len", type=int, default=8, help="minimum length (WPA2-PSK is 8+; default 8)")
+    fg.add_argument("--max", type=int, default=2000, help="cap the candidate count (default 2000)")
+    fg.add_argument("--json", action="store_true", help="machine-readable output")
+    fg.set_defaults(func=cmd_forge)
     return p
 
 
