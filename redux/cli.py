@@ -2595,6 +2595,28 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_preflight(args) -> int:
+    """Is this capture crackable, and why? Decodes PMKID/EAPOL completeness
+    before you spend GPU time. Read-only; identical in LAB and FIELD."""
+    from .crack.preflight import assess_capture
+    pf = assess_capture(args.file)
+    if args.json:
+        print(json.dumps({
+            "source": pf.source, "available": pf.available, "crackable": pf.crackable,
+            "pmkid": pf.pmkid, "handshakes": pf.handshakes, "unique_aps": pf.unique_aps,
+            "invalid_lines": pf.invalid_lines, "reason": pf.reason,
+            "frames": [{"bssid": f.bssid, "ssid": f.ssid, "kind": f.kind,
+                        "strong": f.strong, "detail": f.detail} for f in pf.frames],
+        }, indent=2))
+        return 0 if pf.available else 2
+    print(("OK  " if pf.available else "N/A ") + pf.source)
+    print(f"  {pf.reason}")
+    for fr in pf.frames:
+        print(f"    {'*' if fr.strong else '-'} {fr.kind:9} {fr.ssid or '(hidden)'}  {fr.bssid}")
+        print(f"        {fr.detail}")
+    return 0 if pf.available else 2
+
+
 def cmd_triage(args) -> int:
     """Crack ROI triage + passive-capture forecast — a learning aid for where to
     spend effort. Every number is a rough heuristic for ORDERING work, not a
@@ -3786,6 +3808,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="assumed per-client reassociation rate for the forecast (default 0.5/h)")
     tr.add_argument("--json", action="store_true", help="machine-readable output")
     tr.set_defaults(func=cmd_triage)
+    pf = sub.add_parser("preflight", help="is this capture crackable? decode PMKID/EAPOL completeness before spending GPU")
+    pf.add_argument("file", help="a .hc22000 or raw .pcap/.pcapng/.cap")
+    pf.add_argument("--json", action="store_true", help="machine-readable output")
+    pf.set_defaults(func=cmd_preflight)
     return p
 
 
