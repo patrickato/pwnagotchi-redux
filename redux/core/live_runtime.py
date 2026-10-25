@@ -1051,16 +1051,45 @@ class LiveRuntime:
                 return detect_peripherals(mounted=self._capture_mount_ok())
             except Exception:
                 return {}
+        # Experience layer: one honest outcome per lab-mode offense attempt, kept
+        # in the live state dir. Brain reads it for history-aware reasons; the
+        # recorder writes it. Fails safe to no learning.
+        from .experience import ExperienceStore
+        try:
+            experience = ExperienceStore(self.config.state_dir / "experience.jsonl")
+        except Exception:
+            experience = None
         try:
             agent = Augur(radios=radios, intent=Intent.RECON, driver=driver, store=store,
                           scope=scope, resource_monitor=self.resources,
                           position_provider=_gps_from_env(),
                           retired_provider=lambda: retired_bssids(),
-                          peripheral_probe=_peripherals)
+                          peripheral_probe=_peripherals,
+                          experience=experience)
         except Exception:
             store.close()
             raise
         agent.bus.on(Signal.EVENT, self._observe)
+        # Passive probe harvesting: build each client's PNL from probe-request
+        # events. Transmits nothing (runs in any mode); the aimed karma plan that
+        # consumes it is scope-gated. Persisted so `redux karma` can read it.
+        try:
+            from ..portal.karma import ProbeHarvester
+            self._probe_harvester = ProbeHarvester(path=self.config.state_dir / "pnl.json")
+            agent.bus.on(Signal.EVENT, self._probe_harvester.observe)
+        except Exception:
+            self._probe_harvester = None
+        # Observation history for unwanted-tracker ("is it following me") analysis:
+        # the sighting store collapses to one row per device, so log BLE
+        # observations (tagged with current GPS) to an append-only JSONL that
+        # `redux tracker` reads. Passive; transmits nothing.
+        try:
+            from ..geo.follower import ObservationLog
+            self._obs_log = ObservationLog(self.config.state_dir / "observations.jsonl",
+                                           position=_gps_from_env())
+            agent.bus.on(Signal.EVENT, self._obs_log.observe)
+        except Exception:
+            self._obs_log = None
         _arm_sentinel_from_env(agent)
         self.driver = driver
         self.augur = agent

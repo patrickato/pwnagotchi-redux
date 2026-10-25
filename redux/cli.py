@@ -526,6 +526,10 @@ def cmd_dex(args) -> int:
     if s["total"]:
         print("  by kind:  " + ", ".join(f"{k}={v}" for k, v in sorted(s["by_kind"].items())))
         print("  by rarity: " + ", ".join(f"{k}={v}" for k, v in sorted(s["by_rarity"].items())))
+        if s.get("by_vendor"):
+            print(f"  identified: {s['identified_vendors']} ({', '.join(f'{k}={v}' for k, v in s['by_vendor'].items())})")
+        if s.get("randomized"):
+            print(f"  randomized MACs (privacy/phone): {s['randomized']}")
         print("  rarest:")
         for e in dex.rarest(limit=args.top):
             print(f"    [{e.rarity.value:9}] {e.kind:4} {e.ssid or e.mac} — known {e.known_days:.0f}d")
@@ -534,6 +538,247 @@ def cmd_dex(args) -> int:
             print("  departed:")
             for e in dep[:args.top]:
                 print(f"    {e.ssid or e.mac} — {e.reason}")
+    return 0
+
+
+def cmd_oui(args) -> int:
+    """MAC vendor lookup / device classification / full-DB import (glass-box).
+    Built-in table out of the box; `import` merges a full IEEE/manuf DB on top."""
+    from .geo import oui as O
+    cmd = args.oui_cmd
+    if cmd == "lookup":
+        table = O.full_table()
+        print(O.label_mac(args.mac, table) or "(not a MAC)")
+        return 0
+    if cmd == "classify":
+        c = O.classify(args.mac, O.full_table())
+        print(json.dumps(c.to_dict(), indent=2))
+        return 0
+    if cmd == "import":
+        n, reason = O.import_ieee(args.source, args.dest)
+        print(reason)
+        return 0 if n else 3
+    if cmd == "stats":
+        print(json.dumps(O.table_stats(O.full_table()), indent=2))
+        return 0
+    return 2
+
+
+def cmd_learn(args) -> int:
+    """The experience layer: what has actually worked, with honest sample sizes.
+    Real data only — numbers always carry their trial count; untried options are
+    flagged (and explored), never fabricated."""
+    from .core.experience import ExperienceStore, DIMENSIONS
+    store = ExperienceStore(args.path)
+    cmd = args.learn_cmd
+    if cmd == "summary":
+        print(json.dumps(store.summary(), indent=2))
+        return 0
+    if cmd in ("stats", "rank"):
+        dim = args.dim
+        if dim not in DIMENSIONS:
+            print(f"unknown dimension '{dim}' (choose {', '.join(DIMENSIONS)})")
+            return 3
+        cands = None
+        if cmd == "rank" and getattr(args, "candidates", None):
+            cands = [c.strip() for c in args.candidates.split(",") if c.strip()]
+            # numeric dims (channel) compare as ints
+            if dim in ("channel",):
+                cands = [int(c) if c.isdigit() else c for c in cands]
+        from .core.experience import rank
+        stats = rank(store.load(), dim, candidates=cands)
+        if not stats:
+            print(f"no experience recorded for '{dim}' yet")
+            return 0
+        for s in stats:
+            print(f"  {s.reason}")
+        return 0
+    if cmd == "reset":
+        print(store.reset())
+        return 0
+    return 2
+
+
+def cmd_karma(args) -> int:
+    """Probe harvesting (passive) + aimed karma planning (scope-gated). Harvest
+    runs in any mode; advertising is aimed only at in-scope clients, never spam."""
+    from .portal.karma import ProbeHarvester, karma_plan
+    h = ProbeHarvester(path=args.store)
+    cmd = args.karma_cmd
+    if cmd == "clients":
+        rows = h.clients()
+        if not rows:
+            print(f"no probes harvested yet ({args.store})")
+            return 0
+        for r in rows:
+            print(f"  {r['client']}  probes={r['probes']:<4} PNL: {', '.join(r['ssids'])}")
+        return 0
+    if cmd == "ssids":
+        rows = h.ssids()
+        if not rows:
+            print(f"no probed SSIDs yet ({args.store})")
+            return 0
+        for r in rows:
+            print(f"  {r['ssid']!r:28} wanted by {r['client_count']} client(s)")
+        return 0
+    if cmd == "plan":
+        from .core.scope import Scope, default_scope_path
+        scope = Scope.load(args.scope_file or default_scope_path())
+        plan = karma_plan(h, scope)
+        print(json.dumps(plan.to_dict(), indent=2))
+        return 0
+    return 2
+
+
+def cmd_wps(args) -> int:
+    """WPS / Pixie-Dust: passive `wash` discovery + scope-gated attack plan/run.
+    Finding WPS APs is passive; attacking is gated (FIELD needs --authorized +
+    scope; LAB approves on sight). Glass-box throughout."""
+    from . import wps as W
+    cmd = args.wps_cmd
+    if cmd == "scan":
+        with open(args.file, encoding="utf-8", errors="replace") as f:
+            targets = W.parse_wash(f.read())
+        if not targets:
+            print(f"no WPS APs found in {args.file}")
+            return 0
+        for t in targets:
+            lock = " [LOCKED]" if t.locked else ""
+            print(f"  {t.bssid}  ch{t.channel or '?':<3} {t.ssid or '(hidden)'}{lock}")
+        print(f"\n{len(targets)} WPS-enabled AP(s). Target one with `redux wps plan --bssid <b>`.")
+        return 0
+    # plan / run
+    from .core.scope import Scope, default_scope_path
+    scope = Scope.load(getattr(args, "scope_file", None) or default_scope_path())
+    lab = bool(getattr(scope, "lab_mode", False))
+    p = W.plan(W.WpsTarget(bssid=args.bssid.lower(), channel=args.channel, ssid=args.ssid or ""),
+               scope, tool=args.tool, pixie=not args.no_pixie, iface=args.iface,
+               authorized=bool(getattr(args, "authorized", False)), lab_mode=lab)
+    if cmd == "plan":
+        print(p.reason)
+        if p.runnable:
+            print("\ncommand:\n  " + " ".join(p.argv))
+            if not W.tool_available(p.tool):
+                print(f"\nnote: '{p.tool}' is not installed on this device")
+        return 0 if p.runnable else 3
+    if cmd == "run":
+        res = W.run_plan(p, timeout=args.timeout)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("status") in ("recovered", "completed") else 3
+    return 2
+def cmd_tracker(args) -> int:
+    """Unwanted-tracker check: which devices have been MOVING WITH YOU (persistent
+    across time AND distance) — the Apple/Google 'is it following me' heuristic."""
+    from .geo import follower_analysis
+    from .geo.follower import ObservationLog
+    rows = ObservationLog(args.log).load()
+    if not rows:
+        print(f"no observation history yet ({args.log}) — the live runtime logs BLE "
+              "observations here as it runs")
+        return 0
+    verdicts = follower_analysis(
+        rows, min_duration_s=args.min_minutes * 60.0, min_span_m=args.min_span_m)
+    flagged = [v for v in verdicts if v.following]
+    if args.all:
+        show = verdicts
+    else:
+        show = flagged
+    if not show:
+        print(f"no devices flagged as following you ({len(verdicts)} device(s) analyzed)")
+        return 0
+    if flagged:
+        print(f"⚠ {len(flagged)} device(s) may be following you:")
+    for v in show:
+        mark = "⚠ " if v.following else "  "
+        print(f"{mark}{v.mac}  {v.reason}")
+    return 0
+
+
+def cmd_crack_distribute(args) -> int:
+    """Split one hashcat job across the mesh: partition a wordlist (--skip/--limit)
+    or a mask keyspace (-s/-l) into disjoint per-node slices. Glass-box; prints
+    the exact command each node runs. Pure planning — dispatch rides the swarm."""
+    from .crack.distributed import distribute, count_lines
+    attack = int(args.attack)
+    base = [args.binary, "-m", str(args.mode), "-a", str(attack), args.hashfile]
+    if attack == 0:
+        if not args.wordlist:
+            print("refused: wordlist attack (-a 0) needs --wordlist")
+            return 3
+        try:
+            total = count_lines(args.wordlist)
+        except OSError as e:
+            print(f"cannot read wordlist: {e}")
+            return 3
+        base.append(args.wordlist)
+    elif attack == 3:
+        if not args.mask or args.keyspace is None:
+            print("refused: mask attack (-a 3) needs --mask and --keyspace "
+                  "(get it from `hashcat -m <m> -a 3 <mask> --keyspace`)")
+            return 3
+        total = int(args.keyspace)
+        base.append(args.mask)
+    else:
+        print(f"refused: distribute supports attack 0 (wordlist) or 3 (mask), not {attack}")
+        return 3
+    jobs = distribute(base, total=total, attack=attack, n_nodes=args.nodes)
+    print(f"splitting {total} units across {args.nodes} node(s):\n")
+    for j in jobs:
+        print(f"  [{j.node_id}] {j.reason}")
+        if j.argv:
+            print("      " + " ".join(j.argv))
+    return 0
+def cmd_push(args) -> int:
+    """Push-to-phone alerts via ntfy / Pushover / webhook. `test` sends a hello;
+    `send` sends your title+message. Secrets are passed at call time, never
+    stored. Notifies a short summary — never a content dump."""
+    from .connectivity.push import PushConfig, PushSender
+    cfg = PushConfig(service=args.service, target=args.target,
+                     token=getattr(args, "token", "") or "")
+    ok, reason = cfg.validate()
+    if not ok:
+        print(f"refused: {reason}")
+        return 3
+    sender = PushSender(cfg)
+    if args.push_cmd == "test":
+        res = sender.send("redux", "test notification from your device",
+                          priority=3, tags="white_check_mark")
+    else:  # send
+        res = sender.send(args.title, args.message,
+                          priority=args.priority, tags=getattr(args, "tags", "") or "")
+    print(json.dumps(res, indent=2))
+    return 0 if res.get("ok") else 3
+def cmd_help(args) -> int:
+    """In-product guidance for new users: info-bubbles, when-to-use, and how-to
+    for every feature. The same content the TFT/web surfaces show."""
+    from . import guidance as G
+    if getattr(args, "search", None):
+        hits = G.search(args.search)
+        if not hits:
+            print(f"no help topics match '{args.search}'")
+            return 0
+        for t in hits:
+            print(f"  {t.id:<16} {t.bubble}")
+        return 0
+    if getattr(args, "topic", None):
+        t = G.get(args.topic)
+        if t is None:
+            print(f"unknown topic '{args.topic}' — run `redux help` for the list")
+            return 3
+        print(f"# {t.title}\n")
+        print(t.bubble + "\n")
+        print(f"WHEN: {t.when}\n")
+        print("HOW:")
+        print(t.how)
+        if t.command:
+            print(f"\nTRY: {t.command}")
+        if t.related:
+            print(f"\nSEE ALSO: {', '.join(t.related)}")
+        return 0
+    print("Augur help — topics (run `redux help <topic>` for details):\n")
+    for t in G.list_topics():
+        print(f"  {t.id:<16} {t.title}")
+    print("\nTip: `redux help <topic>` for a how-to, or `redux help --search <word>`.")
     return 0
 
 
@@ -635,38 +880,125 @@ def cmd_netrecon(args) -> int:
     return 0
 
 
+def _parse_freq(s):
+    """Parse a frequency like '433.92M', '162.025M', '25k', or bare Hz -> float Hz."""
+    t = str(s).strip().lower()
+    mult = 1.0
+    if t.endswith("m"):
+        mult, t = 1e6, t[:-1]
+    elif t.endswith("k"):
+        mult, t = 1e3, t[:-1]
+    elif t.endswith("g"):
+        mult, t = 1e9, t[:-1]
+    return float(t) * mult
+
+
 def cmd_sdr(args) -> int:
     """Ingest SDR tool output into the sighting store so SDR captures reach geo/Dex:
     rtl_433 ISM records (tagged with the receiver's position) or dump1090 ADS-B
     records (the aircraft's own position). Reads line-delimited JSON, one record
     per line — exactly what `rtl_433 -F json` / `dump1090 --write-json` emit."""
     import json
+    # Guided presets (no store needed): "pick what to listen to -> tuned command".
+    if getattr(args, "sdr_cmd", None) in ("presets", "tune"):
+        from .sdr.presets import list_presets, find_preset
+        if args.sdr_cmd == "presets":
+            for p in list_presets():
+                freq = f" @ {p.to_dict().get('freq', '—')}" if p.freq_hz else ""
+                print(f"  {p.name:<9} {p.label}{freq}")
+                print(f"            {p.what}")
+                if p.region_note:
+                    print(f"            region: {p.region_note}")
+            print("\nTune one with: redux sdr tune <preset> [--device N] [--freq 433.92M] [--scan-range 430M:440M:25k]")
+            return 0
+        preset = find_preset(args.preset)
+        if preset is None:
+            print(f"unknown preset '{args.preset}' — see `redux sdr presets`")
+            return 3
+        fhz = _parse_freq(args.freq) if getattr(args, "freq", None) else None
+        cmd = preset.command(device_index=args.device, freq_hz=fhz,
+                             duration_s=getattr(args, "duration", None),
+                             scan_range=getattr(args, "scan_range", None) or None)
+        print(f"{preset.label} — {preset.what}\n")
+        if preset.help:
+            print(preset.help + "\n")
+        if preset.region_note:
+            print(f"NOTE: {preset.region_note}\n")
+        print("run this:\n  " + cmd.shell())
+        _next = {
+            "rtl433": "redux sdr ingest <file> --rtl433",
+            "adsb": "redux sdr ingest <file> --adsb",
+            "pocsag": "redux sdr ingest <file> --pocsag",
+            "acars": "redux sdr ingest <file> --acars",
+            "spectrum": "redux sdr spectrum <file>",
+        }.get(cmd.decoder)
+        if _next:
+            print(f"\nthen: {_next}")
+    # Waterfall: make the spectrum visible from an rtl_power sweep (no store).
+    if getattr(args, "sdr_cmd", None) == "waterfall":
+        from .sdr.waterfall import Waterfall
+        with open(args.file, encoding="utf-8", errors="replace") as f:
+            wf = Waterfall.from_rtl_power(f)
+        rows, cols = wf.shape
+        if rows == 0:
+            print(f"no sweeps found in {args.file}")
+            return 0
+        print(wf.to_ascii(width=args.width))
+        print(f"\n{rows} sweep(s) × {cols} bins, {wf.db_min:.0f}..{wf.db_max:.0f} dB")
+        if args.out:
+            with open(args.out, "wb") as fh:
+                fh.write(wf.to_pgm())
+            print(f"wrote grayscale image: {args.out} (PGM)")
+        return 0
     from .geo.db import SightingStore, DEFAULT_DB_PATH
-    from .sdr import ingest_rtl433, ingest_adsb
+    from .sdr import (ingest_rtl433, ingest_adsb, ingest_pocsag, ingest_acars,
+                      parse_rtl_power)
+
+    # `spectrum` is analysis only — no store needed.
+    if getattr(args, "sdr_cmd", None) == "spectrum":
+        with open(args.file, encoding="utf-8", errors="replace") as f:
+            sweep = parse_rtl_power(f, peak_threshold_db=args.threshold, max_peaks=args.max_peaks)
+        d = sweep.to_dict()
+        print(json.dumps(d, indent=2))
+        if sweep.peaks:
+            print("\nactive signals (strongest first):")
+            for p in sweep.peaks:
+                print(f"  {p.describe()}")
+        else:
+            print("\nno signals above the noise floor in this sweep")
+        return 0
+
     cfg = _cfg(args)
     db = args.db or (cfg.cache.db_path if cfg else None) or DEFAULT_DB_PATH
     store = SightingStore(db)
+    pos = (args.lat, args.lon) if args.lat is not None and args.lon is not None else None
 
-    def _records(path):
+    def _lines(path):
         with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(rec, dict):
-                    yield rec
+                yield line.rstrip("\n")
+
+    def _records(path):
+        for line in _lines(path):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(rec, dict):
+                yield rec
 
     if args.adsb:
-        n = ingest_adsb(_records(args.file), store)
-        kind = "ADS-B aircraft"
+        n, kind = ingest_adsb(_records(args.file), store), "ADS-B aircraft"
+    elif getattr(args, "pocsag", False):
+        n = ingest_pocsag(_lines(args.file), store, position=pos)
+        kind = "POCSAG pager (capcode only; messages not stored)"
+    elif getattr(args, "acars", False):
+        n, kind = ingest_acars(_records(args.file), store, position=pos), "ACARS aircraft (text not stored)"
     else:
-        pos = (args.lat, args.lon) if args.lat is not None and args.lon is not None else None
-        n = ingest_rtl433(_records(args.file), store, position=pos)
-        kind = "ISM device"
+        n, kind = ingest_rtl433(_records(args.file), store, position=pos), "ISM device"
     print(f"ingested {n} {kind} sighting(s) from {args.file}")
     return 0
 
@@ -1873,6 +2205,117 @@ def cmd_wordlist(args) -> int:
     return 2
 
 
+_ATTACK_NAMES = {
+    "straight": 0, "dict": 0, "wordlist": 0,
+    "combinator": 1, "combo": 1,
+    "mask": 3, "brute": 3, "bruteforce": 3,
+    "hybrid-wm": 6, "hybrid": 6,
+    "hybrid-mw": 7,
+}
+
+
+def _resolve_attack(value):
+    """Accept a friendly attack name or a bare int; None -> use recipe default."""
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    if v in _ATTACK_NAMES:
+        return _ATTACK_NAMES[v]
+    if v.isdigit():
+        return int(v)
+    return None
+
+
+def cmd_crack(args) -> int:
+    """Guided, any-hash cracking front-end (not just Wi-Fi): browse hash types,
+    identify a sample, plan the exact hashcat command, and run it (gated by
+    default, unlocked in LAB). Glass-box throughout."""
+    from pathlib import Path
+    from .crack import recipes as R
+    cmd = args.crack_cmd
+
+    if cmd == "modes":
+        rows = R.find(getattr(args, "query", "") or "")
+        if getattr(args, "category", None):
+            rows = [r for r in rows if r.category == args.category]
+        if not rows:
+            print("no hash types match")
+            return 0
+        print(f"{'slug':<16} {'-m':>6}  {'category':<9} label")
+        for r in rows:
+            flag = " (slow)" if r.slow else ""
+            print(f"{r.name:<16} {r.mode:>6}  {r.category:<9} {r.label}{flag}")
+        print(f"\n{len(rows)} type(s). Pick one as --type <slug> for `crack plan`/`crack run`.")
+        return 0
+
+    if cmd == "id":
+        try:
+            blob = Path(args.hashfile).read_text(errors="replace")[:65536]
+        except OSError as e:
+            print(f"cannot read {args.hashfile}: {e}")
+            return 3
+        sample = next((ln.strip() for ln in blob.splitlines()
+                       if ln.strip() and not ln.lstrip().startswith("#")), "")
+        if not sample:
+            print("no hash line found in file")
+            return 3
+        cands = R.identify(sample)
+        if not cands:
+            print("could not recognize the hash shape — browse `redux crack modes` and pick by hand")
+            return 0
+        print(f"sample: {sample[:72]}{'…' if len(sample) > 72 else ''}\n")
+        print("likely hash types (best first):")
+        for r in cands:
+            s = R.suggest(r)
+            print(f"  --type {r.name:<14} -m {r.mode:<6} {r.label}")
+            print(f"       suggest: attack {s.attack}"
+                  + (f" + '{s.rules}' rules" if s.use_rules else " (no rules)")
+                  + f" — {s.reason}")
+        return 0
+
+    # plan / run share option resolution
+    recipe = R.by_name(getattr(args, "type", "") or "")
+    if recipe is None:
+        print(f"unknown hash type '{getattr(args, 'type', '')}' — see `redux crack modes`")
+        return 3
+    atk = _resolve_attack(getattr(args, "attack", None))
+    sug = R.suggest(recipe)
+    # smart default rules: if the user didn't say, use the suggestion (fast hashes only)
+    rules = getattr(args, "rules", None)
+    if rules is None and (atk in (None, 0)) and sug.use_rules:
+        rules = sug.rules
+    # resolve a wordlist from the store (by name, or the persisted pick) unless a direct path was given
+    wl_path = getattr(args, "wordlist_path", None)
+    if wl_path is None and (atk in (None, 0, 1, 6, 7)):
+        from .crack.wordlists import resolve_wordlist
+        wl_path, wl_reason = resolve_wordlist(args.wordlist_dir, name=getattr(args, "wordlist", None))
+        if wl_path is None and cmd == "plan":
+            print(f"note: {wl_reason}")
+    outfile = getattr(args, "outfile", None)
+    cplan = R.plan(recipe, args.hashfile, attack=atk, wordlist=wl_path,
+                   rules=rules, mask=getattr(args, "mask", None),
+                   binary=args.binary, outfile=outfile)
+
+    if cmd == "plan":
+        print(cplan.explanation)
+        if cplan.ok:
+            print("\ncommand:\n  " + " ".join(cplan.argv))
+        return 0 if cplan.ok else 3
+
+    if cmd == "run":
+        from .crack.anycrack import CrackSettings, run_plan
+        from .core.mode import read_mode
+        lab = read_mode(getattr(args, "scope_file", None)) == "lab"
+        settings = CrackSettings(binary=args.binary,
+                                 results_dir=Path(args.results_dir),
+                                 max_runtime_seconds=args.runtime)
+        res = run_plan(cplan, settings, authorized=bool(getattr(args, "authorized", False)),
+                       lab_mode=lab, session="redux-crack-" + recipe.name)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("status") in ("recovered", "exhausted", "completed") else 3
+    return 2
+
+
 def cmd_online(args) -> int:
     """Report whether the device currently has uplink (glass-box; no data leaves)."""
     from .connectivity.online import check_online
@@ -2170,6 +2613,39 @@ def build_parser() -> argparse.ArgumentParser:
     wlr.add_argument("key", help="wordlist id or name to remove")
     wl.set_defaults(func=cmd_wordlist)
 
+    ck = sub.add_parser("crack", help="guided any-hash cracking (not just Wi-Fi): modes/id/plan/run")
+    cksub = ck.add_subparsers(dest="crack_cmd", required=True)
+    ckm = cksub.add_parser("modes", help="browse/search the hash-type catalog")
+    ckm.add_argument("query", nargs="?", default="", help="filter by slug/label/category/mode")
+    ckm.add_argument("--category", default=None,
+                     help="limit to a category (wifi/windows/network/linux/web/generic/archive/document/disk/crypto)")
+    cki = cksub.add_parser("id", help="identify a hash sample and suggest the mode + options")
+    cki.add_argument("hashfile", help="file containing one hash per line")
+
+    def _crack_opts(p, *, running):
+        p.add_argument("hashfile", help="absolute path to the hash file to crack")
+        p.add_argument("--type", required=True, help="hash type slug (see `crack modes`) or a bare -m number")
+        p.add_argument("--attack", default=None,
+                       help="straight|combinator|mask|hybrid-wm|hybrid-mw (default: the type's own)")
+        p.add_argument("--wordlist", default=None, help="registered wordlist name/id (else the persisted pick)")
+        p.add_argument("--wordlist-path", default=None, help="use this absolute wordlist path directly")
+        p.add_argument("--wordlist-dir", default="/captures/wordlists", help="wordlist store dir")
+        p.add_argument("--rules", default=None, help="rule preset name or .rule path (fast hashes only)")
+        p.add_argument("--mask", default=None, help="hashcat mask or a preset (for mask/hybrid attacks)")
+        p.add_argument("--binary", default="hashcat", help="hashcat binary (default: hashcat)")
+        if running:
+            p.add_argument("--authorized", action="store_true",
+                           help="confirm this hash file is yours to crack (not needed in LAB mode)")
+            p.add_argument("--scope-file", default=None,
+                           help="read LAB/FIELD mode from this scope file (default: the device scope)")
+            p.add_argument("--results-dir", default="/captures/crack", help="where recovered results are written (0600)")
+            p.add_argument("--runtime", type=int, default=1800, help="max hashcat runtime seconds (default 1800)")
+        else:
+            p.add_argument("--outfile", default=None, help="show an --outfile in the planned command")
+    _crack_opts(cksub.add_parser("plan", help="show the exact hashcat command that would run (glass-box)"), running=False)
+    _crack_opts(cksub.add_parser("run", help="run the crack (gated by default; unlocked in LAB mode)"), running=True)
+    ck.set_defaults(func=cmd_crack)
+
     cp = sub.add_parser("captured", help="the already-pwned / ignore list (APs offense skips)")
     cp.add_argument("--db", default=None, help="pipeline DB (default /captures/jobs.db)")
     cp.add_argument("--file", default=None,
@@ -2252,16 +2728,33 @@ def build_parser() -> argparse.ArgumentParser:
     nra.add_argument("--passlist", help="password wordlist to cred-test discovered services")
     nr.set_defaults(func=cmd_netrecon)
 
-    sd = sub.add_parser("sdr", help="ingest SDR output (rtl_433 ISM / dump1090 ADS-B) into the sighting store")
+    sd = sub.add_parser("sdr", help="ingest SDR output (rtl_433/ADS-B/POCSAG/ACARS) or analyze a spectrum sweep")
     sdsub = sd.add_subparsers(dest="sdr_cmd", required=True)
-    sdi = sdsub.add_parser("ingest", help="ingest line-delimited JSON records from a file")
-    sdi.add_argument("file", help="file of line-delimited JSON (rtl_433 -F json / dump1090 --write-json)")
+    sdi = sdsub.add_parser("ingest", help="ingest decoder output into the sighting store")
+    sdi.add_argument("file", help="rtl_433 -F json / dump1090 json / multimon-ng POCSAG text / acarsdec json")
     g = sdi.add_mutually_exclusive_group()
     g.add_argument("--rtl433", action="store_true", help="records are rtl_433 ISM devices (default)")
     g.add_argument("--adsb", action="store_true", help="records are dump1090 ADS-B aircraft")
-    sdi.add_argument("--lat", type=float, help="receiver latitude (tags ISM sightings)")
-    sdi.add_argument("--lon", type=float, help="receiver longitude (tags ISM sightings)")
+    g.add_argument("--pocsag", action="store_true", help="lines are multimon-ng POCSAG (capcode stored, message NOT)")
+    g.add_argument("--acars", action="store_true", help="records are acarsdec JSON (tail stored, text NOT)")
+    sdi.add_argument("--lat", type=float, help="receiver latitude (tags position-less sightings)")
+    sdi.add_argument("--lon", type=float, help="receiver longitude (tags position-less sightings)")
     sdi.add_argument("--db", help="sighting store path")
+    sds = sdsub.add_parser("spectrum", help="analyze an rtl_power CSV sweep: noise floor + active peaks")
+    sds.add_argument("file", help="rtl_power CSV output")
+    sds.add_argument("--threshold", type=float, default=8.0, help="dB above floor to count as a peak (default 8)")
+    sds.add_argument("--max-peaks", type=int, default=20, help="max peaks to report (default 20)")
+    sdsub.add_parser("presets", help="list guided SDR presets (pick what to listen to)")
+    sdt = sdsub.add_parser("tune", help="print the exact tuned command for a preset (Augur sets the frequency)")
+    sdt.add_argument("preset", help="preset name (see `redux sdr presets`)")
+    sdt.add_argument("--device", type=int, default=0, help="RTL-SDR device index (default 0)")
+    sdt.add_argument("--freq", default=None, help="override center frequency (e.g. 433.92M)")
+    sdt.add_argument("--scan-range", default=None, help="for the scan preset: START:STOP:STEP (e.g. 430M:440M:25k)")
+    sdt.add_argument("--duration", type=int, default=None, help="for scan: sweep for N seconds instead of once")
+    sdw = sdsub.add_parser("waterfall", help="render an rtl_power sweep as a waterfall (ASCII + optional PGM image)")
+    sdw.add_argument("file", help="rtl_power CSV output (repeated sweeps over time)")
+    sdw.add_argument("--width", type=int, default=64, help="columns in the ASCII waterfall (default 64)")
+    sdw.add_argument("--out", default=None, help="also write a grayscale PGM image to this path")
     sd.set_defaults(func=cmd_sdr)
 
     po = sub.add_parser("portal", help="captive/evil-portal for AUTHORIZED client testing")
@@ -2490,6 +2983,93 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    ou = sub.add_parser("oui", help="MAC vendor lookup / device classification / full-DB import")
+    ousub = ou.add_subparsers(dest="oui_cmd", required=True)
+    oul = ousub.add_parser("lookup", help="vendor for a MAC (built-in + imported DB)")
+    oul.add_argument("mac", help="a MAC address (aa:bb:cc:dd:ee:ff)")
+    ouc = ousub.add_parser("classify", help="vendor + device-class guess + randomized-MAC flag")
+    ouc.add_argument("mac", help="a MAC address")
+    oui_ = ousub.add_parser("import", help="merge a full IEEE oui.txt / Wireshark manuf DB on top of the built-in table")
+    oui_.add_argument("source", help="path to the vendor DB (IEEE oui.txt, manuf, or normalized TSV)")
+    oui_.add_argument("--dest", default="/captures/config/oui.tsv",
+                      help="where the normalized DB is written (default /captures/config/oui.tsv)")
+    ousub.add_parser("stats", help="counts for the active vendor table")
+    ou.set_defaults(func=cmd_oui)
+    ln = sub.add_parser("learn", help="experience layer: what actually worked (honest, glass-box)")
+    ln.add_argument("--path", default="/captures/live/experience.jsonl",
+                    help="experience log path (default /captures/live/experience.jsonl)")
+    lnsub = ln.add_subparsers(dest="learn_cmd", required=True)
+    lnsub.add_parser("summary", help="overall totals, success rate, outcomes")
+    lns = lnsub.add_parser("stats", help="ranked stats for a dimension (exploration-aware)")
+    lns.add_argument("--dim", default="channel", help="channel|band|hour|vendor|kind")
+    lnr = lnsub.add_parser("rank", help="rank specific candidate values of a dimension")
+    lnr.add_argument("--dim", default="channel", help="channel|band|hour|vendor|kind")
+    lnr.add_argument("--candidates", default=None, help="comma-separated values to rank (e.g. 1,6,11)")
+    lnsub.add_parser("reset", help="clear the experience log")
+    ln.set_defaults(func=cmd_learn)
+    km = sub.add_parser("karma", help="probe harvesting (passive) + aimed karma plan (scope-gated)")
+    km.add_argument("--store", default="/captures/live/pnl.json",
+                    help="harvested PNL store (default /captures/live/pnl.json)")
+    kmsub = km.add_subparsers(dest="karma_cmd", required=True)
+    kmsub.add_parser("clients", help="per-client preferred-network list (who's looking for what)")
+    kmsub.add_parser("ssids", help="probed SSIDs ranked by how many clients want them")
+    kmp = kmsub.add_parser("plan", help="aimed advertise plan (only in-scope clients; glass-box)")
+    kmp.add_argument("--scope-file", default=None, help="scope file (default: the device scope)")
+    km.set_defaults(func=cmd_karma)
+    wp = sub.add_parser("wps", help="WPS / Pixie-Dust: passive wash discovery + scope-gated attack")
+    wpsub = wp.add_subparsers(dest="wps_cmd", required=True)
+    wpscan = wpsub.add_parser("scan", help="list WPS-enabled APs from a `wash` capture (passive)")
+    wpscan.add_argument("file", help="wash output text")
+    for _name, _help in (("plan", "show the exact reaver/bully command (glass-box)"),
+                         ("run", "run the WPS attack (gated; unlocked in LAB)")):
+        w = wpsub.add_parser(_name, help=_help)
+        w.add_argument("--bssid", required=True, help="target AP BSSID")
+        w.add_argument("--channel", type=int, default=None, help="AP channel")
+        w.add_argument("--ssid", default="", help="AP SSID (label only)")
+        w.add_argument("--tool", default="reaver", choices=("reaver", "bully"))
+        w.add_argument("--no-pixie", action="store_true", help="online PIN brute instead of pixie-dust")
+        w.add_argument("--iface", default="wlan1mon", help="monitor interface (default wlan1mon)")
+        w.add_argument("--scope-file", default=None, help="scope file (default: the device scope)")
+        if _name == "run":
+            w.add_argument("--authorized", action="store_true",
+                           help="confirm this AP is yours to test (not needed in LAB mode)")
+            w.add_argument("--timeout", type=int, default=180, help="max attack seconds (default 180)")
+    wp.set_defaults(func=cmd_wps)
+    tk = sub.add_parser("tracker", help="unwanted-tracker check: devices moving WITH you (AirTag-style)")
+    tk.add_argument("--log", default="/captures/live/observations.jsonl",
+                    help="observation history log (default /captures/live/observations.jsonl)")
+    tk.add_argument("--min-minutes", type=float, default=10.0, help="min duration to flag (default 10)")
+    tk.add_argument("--min-span-m", type=float, default=100.0, help="min travel span in meters (default 100)")
+    tk.add_argument("--all", action="store_true", help="show every analyzed device, not just followers")
+    tk.set_defaults(func=cmd_tracker)
+    cd = sub.add_parser("crack-distribute",
+                        help="split one hashcat job across the mesh (disjoint per-node slices)")
+    cd.add_argument("hashfile", help="hash file (same on every node)")
+    cd.add_argument("--mode", type=int, required=True, help="hashcat -m hash mode")
+    cd.add_argument("--attack", type=int, default=0, choices=(0, 3), help="0=wordlist, 3=mask")
+    cd.add_argument("--wordlist", default=None, help="wordlist path (attack 0; lines counted to partition)")
+    cd.add_argument("--mask", default=None, help="hashcat mask (attack 3)")
+    cd.add_argument("--keyspace", type=int, default=None, help="mask keyspace total (attack 3)")
+    cd.add_argument("--nodes", type=int, required=True, help="number of swarm nodes to split across")
+    cd.add_argument("--binary", default="hashcat", help="hashcat binary name")
+    cd.set_defaults(func=cmd_crack_distribute)
+    pu = sub.add_parser("push", help="push-to-phone alerts (ntfy / pushover / webhook)")
+    pu.add_argument("--service", default="ntfy", choices=("ntfy", "pushover", "webhook"))
+    pu.add_argument("--target", required=True, help="ntfy topic URL / pushover user key / webhook URL")
+    pu.add_argument("--token", default="", help="pushover app token (pushover only)")
+    pusub = pu.add_subparsers(dest="push_cmd", required=True)
+    pusub.add_parser("test", help="send a test notification")
+    pus = pusub.add_parser("send", help="send a title + message")
+    pus.add_argument("title", help="notification title")
+    pus.add_argument("message", help="notification body")
+    pus.add_argument("--priority", type=int, default=3, help="0..5 (default 3)")
+    pus.add_argument("--tags", default="", help="optional tags/emoji (ntfy)")
+    pu.set_defaults(func=cmd_push)
+    hp = sub.add_parser("help", help="in-product guidance: info-bubbles, when-to-use, how-to for each feature")
+    hp.add_argument("topic", nargs="?", default=None, help="a topic id (run `redux help` for the list)")
+    hp.add_argument("--search", default=None, help="find topics by keyword")
+    hp.set_defaults(func=cmd_help)
 
     sc = sub.add_parser("scope", help="manage the central authorized-target list")
     sc.add_argument("--file", default=_DEFAULT_SCOPE_PATH, help="scope store path")

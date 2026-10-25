@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
 
+from redux.geo import oui as _oui_mod
+
 _DAY = 86400.0
 
 
@@ -47,6 +49,9 @@ class DexEntry:
     mac: str
     ssid: str
     oui: str
+    vendor: Optional[str]      # resolved manufacturer, or None (never guessed)
+    randomized: bool           # locally-administered/private MAC (e.g. a phone)
+    device_class: Optional[str]  # coarse guess from the vendor, or None
     first_seen: float
     last_seen: float
     known_days: float
@@ -85,6 +90,9 @@ def build_dex(store, *, now: Optional[float] = None, departed_after_days: float 
     if ref is None:
         ref = max((s.ts for s in sightings), default=time.time())
 
+    # Resolve vendors once (built-in table + any operator-imported full DB).
+    vendor_table = _oui_mod.full_table()
+
     oui_counts: Dict[str, int] = {}
     for s in sightings:
         o = _oui(s.mac)
@@ -100,13 +108,17 @@ def build_dex(store, *, now: Optional[float] = None, departed_after_days: float 
         known_days = max(0.0, (last - first) / _DAY)
         located = s.lat is not None and s.lon is not None
         departed = (ref - last) > departed_after_days * _DAY
-        label = s.ssid or s.mac or "(unknown)"
+        cls = _oui_mod.classify(s.mac, vendor_table)
+        who = cls.vendor or ("randomized MAC" if cls.randomized else None)
+        label = s.ssid or (f"{s.mac} [{who}]" if who else s.mac) or "(unknown)"
         if departed:
             reason = f"departed: {label}, known {known_days:.0f}d, last seen {(ref - last)/_DAY:.0f}d ago"
         else:
-            reason = f"{label} — {rarity.value}, known {known_days:.0f}d" + (", located" if located else "")
+            tail = f" — {rarity.value}, known {known_days:.0f}d" + (", located" if located else "")
+            reason = label + tail
         entries.append(DexEntry(
             kind=s.kind, mac=s.mac, ssid=s.ssid, oui=o,
+            vendor=cls.vendor, randomized=cls.randomized, device_class=cls.device_class,
             first_seen=first, last_seen=last, known_days=known_days,
             located=located, channel=s.channel, rarity=rarity,
             departed=departed, reason=reason,
@@ -114,15 +126,21 @@ def build_dex(store, *, now: Optional[float] = None, departed_after_days: float 
 
     by_kind: Dict[str, int] = {}
     by_rarity: Dict[str, int] = {}
+    by_vendor: Dict[str, int] = {}
     for e in entries:
         by_kind[e.kind] = by_kind.get(e.kind, 0) + 1
         by_rarity[e.rarity.value] = by_rarity.get(e.rarity.value, 0) + 1
+        if e.vendor:
+            by_vendor[e.vendor] = by_vendor.get(e.vendor, 0) + 1
     summary = {
         "total": len(entries),
         "by_kind": by_kind,
         "by_rarity": by_rarity,
+        "by_vendor": dict(sorted(by_vendor.items(), key=lambda kv: -kv[1])[:10]),
         "located": sum(1 for e in entries if e.located),
         "departed": sum(1 for e in entries if e.departed),
+        "identified_vendors": sum(1 for e in entries if e.vendor),
+        "randomized": sum(1 for e in entries if e.randomized),
         "unique_vendors": len([o for o in oui_counts if o]),
     }
     return DexView(entries=entries, summary=summary)

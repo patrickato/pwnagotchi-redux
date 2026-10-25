@@ -125,6 +125,7 @@ _EVENT_MAP = {
     "wifi.ap.new": ("ap.new", "new access point seen"),
     "wifi.ap.lost": ("ap.lost", "access point went away"),
     "wifi.client.new": ("client.new", "new client seen"),
+    "wifi.client.probe": ("client.probe", "a client probed for a network"),
     "wifi.client.handshake": ("handshake", "captured a handshake/PMKID"),
     "ble.device.new": ("ble.new", "new BLE device seen"),
     "ble.device.lost": ("ble.lost", "BLE device went away"),
@@ -145,6 +146,10 @@ def normalize_event(raw: dict) -> Event:
         name = data.get("hostname") or data.get("essid") or data.get("mac") or ""
         if name:
             reason = f"{reason}: {name}"
+    elif norm == "client.probe" and isinstance(data, dict):
+        ssid = data.get("essid") or data.get("ssid") or ""
+        if ssid:
+            reason = f"a client probed for {ssid!r}"
     at = _parse_time(raw.get("time"))
     return Event(type=norm, at=at, data=data, reason=reason, raw_tag=tag)
 
