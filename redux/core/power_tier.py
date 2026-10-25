@@ -81,6 +81,9 @@ def _seed():
                         "blasts many on/off IR codes — would affect any IR device in line of sight"),
         PowerCapability("ir.replay", "IR code replay", Tier.POWER,
                         "replays a saved IR remote code"),
+        PowerCapability("campaign.unleashed", "Unleashed cage autopilot", Tier.POWER,
+                        "runs the whole offensive chain autonomously across every in-scope target, "
+                        "on a loop — LAB / your own closed cage only"),
         # --- FORBIDDEN: never available (bystander harm; illegal to transmit) ---
         PowerCapability("rf.jam", "RF jamming", Tier.FORBIDDEN,
                         "indiscriminate denial of a band — illegal to transmit, always hits bystanders"),

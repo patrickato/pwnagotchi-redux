@@ -1226,6 +1226,28 @@ def cmd_campaign(args) -> int:
     offense = _persona.get(args.persona).offense_available if args.persona else True
     targets = args.targets or ["00:11:22:33:44:55", "aa:bb:cc:dd:ee:ff"]
 
+    if args.campaign_cmd == "unleashed":
+        from .operator import autopilot
+        from .core.authlog import record_event
+        armed = args.targets or [e.value for e in scope.active_entries() if e.kind == "bssid"]
+        if not armed:
+            armed = ["00:11:22:33:44:55"]        # nothing armed -> a single demo target
+        def _ok(name):
+            return lambda t: (True, f"{name} ok on {t}")
+        execs = {Phase.CAPTURE: _ok("capture"), Phase.CRACK: _ok("crack"),
+                 Phase.PIVOT_SCAN: _ok("scan"), Phase.PIVOT_CRED: _ok("cred-test"),
+                 Phase.LOOT: _ok("loot")}
+        rep = autopilot(scope, target_source=lambda: armed, executors=execs,
+                        recon=lambda: (True, f"{len(armed)} target(s) in cage"),
+                        max_cycles=args.cycles, confirmed=args.confirm, logger=record_event)
+        if not rep.ran:
+            print(f"UNLEASHED — not run [{rep.mode.upper()}]: {rep.reason}")
+            return 2
+        print(f"UNLEASHED [{rep.mode.upper()}] — {rep.reason}  "
+              f"(executed {rep.total_executed}, blocked {rep.total_blocked} across {len(rep.cycles)} cycle(s))")
+        print("  note: CLI run uses fake executors to prove the loop + gate; real RF runs under the daemon.")
+        return 0
+
     if args.campaign_cmd == "plan":
         op = Operator(scope, offense_enabled=offense, caps={"capture.handshake": not args.no_engine})
         print(f"kill-chain plan (persona={args.persona or 'none'}, offense={offense}, "
@@ -3625,6 +3647,10 @@ def build_parser() -> argparse.ArgumentParser:
     cap_.add_argument("--no-engine", action="store_true", help="plan as if no capture engine present")
     cad_ = casub.add_parser("demo", help="run the chain with fake executors + render the report")
     cad_.add_argument("--targets", nargs="*", help="targets to run the chain against")
+    cau_ = casub.add_parser("unleashed", help="LAB-only: turn the full chain loose on every in-scope target (POWER)")
+    cau_.add_argument("--cycles", type=int, default=1, help="how many sweep cycles to run")
+    cau_.add_argument("--targets", nargs="*", help="override the target set (default: armed scope BSSIDs)")
+    cau_.add_argument("--confirm", action="store_true", help="required in LAB to actually run")
     ca.set_defaults(func=cmd_campaign)
 
     nr = sub.add_parser("netrecon", help="network-layer kill-chain over the armed scope (scan/cred/loot)")
