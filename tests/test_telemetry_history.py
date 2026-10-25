@@ -160,8 +160,8 @@ def test_chart_rejects_corrupted_input_without_partial_curve(mutation):
 def test_extensible_page_swipe_wraps_correctly():
     assert touch_nav.navigate("radios", 1) == "trends"
     assert touch_nav.navigate("trends", 1) == "system"
-    assert touch_nav.navigate("system", 1) == "overview"
-    assert touch_nav.navigate("overview", -1) == "system"
+    assert touch_nav.navigate("system", 1) == "signals"
+    assert touch_nav.navigate("overview", -1) == "menu"
 
 
 def test_native_refresh_loop_accumulates_real_status_samples(monkeypatch):

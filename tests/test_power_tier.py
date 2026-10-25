@@ -11,7 +11,7 @@ from redux.core.power_tier import (
 def test_seeded_tiers():
     assert tier_of("sdr.replay") == Tier.POWER
     assert tier_of("rf.jam") == Tier.FORBIDDEN
-    assert tier_of("badusb.hid") == Tier.POWER
+    assert tier_of("ir.replay") == Tier.POWER
     assert tier_of("unknown.cap") == Tier.NORMAL      # default
 
 
@@ -25,13 +25,13 @@ def test_power_caps_flagged():
 def test_field_hides_power_and_forbidden():
     vis = {c.id for c in visible_in("field")}
     assert "sdr.replay" not in vis                    # POWER hidden in FIELD
-    assert "badusb.hid" not in vis
+    assert "ir.replay" not in vis
     assert "rf.jam" not in vis                         # FORBIDDEN never shown
 
 
 def test_lab_shows_power_but_never_forbidden():
     vis = {c.id for c in visible_in("lab")}
-    assert "sdr.replay" in vis and "badusb.hid" in vis   # POWER available in LAB
+    assert "sdr.replay" in vis and "ir.replay" in vis   # POWER available in LAB
     assert "rf.jam" not in vis and "beacon.spam" not in vis   # FORBIDDEN never
 
 

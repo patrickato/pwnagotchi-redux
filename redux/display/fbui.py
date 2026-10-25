@@ -333,9 +333,28 @@ def fit_text(draw, value, font, width):
             right = middle - 1
     return value[:left] + "..." if left else ""
 
+# The on-screen map of everything Augur can do, grouped for a 3.5" panel. Static
+# data (cheap to draw); the menu page renders it so every capability is
+# discoverable from the screen even when its action runs via CLI/web.
+_MENU_GROUPS = (
+    ("STATUS", "overview captures radios", "system trends doctor"),
+    ("RECON", "survey dex signals", "tracker tpms netrecon"),
+    ("CRACK", "crack wordlist", "pipeline distribute"),
+    ("SDR / RF", "sdr spectrum waterfall", "subghz ir  (TX=LAB)"),
+    ("OPS", "mode scope karma", "wps eap portal"),
+    ("SYSTEM", "gps toolbox learn", "oui push notebook"),
+)
+
+
 def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
-           system_offset=0, system_detail=None, mode=None, mode_arming=False):
-    """Pillow RGB image, no placeholder activity, no radio-facing operations."""
+           system_offset=0, system_detail=None, mode=None, mode_arming=False,
+           panels=None):
+    """Pillow RGB image, no placeholder activity, no radio-facing operations.
+
+    `panels` is an optional dict of pre-sampled snapshots for the data-backed new
+    pages (e.g. {'signals': {...}}). It's sampled by the loop on its cadence, not
+    per-render, so render stays pure/cheap; a page degrades to a clean hint when
+    its panel is absent."""
     from PIL import Image, ImageDraw
     data = status_view(report, now=now)
     doctor = doctor_window(data, doctor_offset) if page == "doctor" else None
@@ -489,6 +508,62 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
             if len(extras) > 4:
                 label += " +" + str(len(extras) - 4)
             text_line((20, 296), label[:60], font=_font(8), fill=SUBTLE)
+    elif page == "menu":
+        text_line((20, 149), "MENU / everything Augur can do", font=_font(12, bold=True), fill=INK)
+        # two-column grid of capability groups; a static map, cheap to draw
+        col_x = (20, 246)
+        for index, (name, line1, line2) in enumerate(_MENU_GROUPS):
+            cx = col_x[index % 2]
+            cy = 166 + (index // 2) * 42
+            draw.rectangle((cx, cy, cx + 214, cy + 38), outline=(36, 57, 69), width=1)
+            text_line((cx + 8, cy + 2), name, font=_font(11, bold=True), fill=TEAL)
+            text_line((cx + 8, cy + 15), line1, font=_font(9), fill=SUBTLE)
+            text_line((cx + 8, cy + 26), line2, font=_font(9), fill=SUBTLE)
+    elif page == "power":
+        from redux.core import power_tier as _pt
+        m = (mode or "field").lower()
+        is_lab = m == "lab"
+        text_line((20, 150), "POWER TIER / " + m.upper(),
+                  font=_font(12, bold=True), fill=AMBER if is_lab else TEAL)
+        text_line((20, 170),
+                  "LAB: strong tools UNLOCKED (confirm each)" if is_lab
+                  else "FIELD: strong tools HIDDEN (switch to LAB on your gear)",
+                  font=_font(9), fill=SUBTLE)
+        powers = [c for c in _pt._REGISTRY.values() if c.tier == _pt.Tier.POWER]
+        forbidden = [c for c in _pt._REGISTRY.values() if c.tier == _pt.Tier.FORBIDDEN]
+        y = 190
+        for c in powers[:6]:
+            dot = AMBER if is_lab else RED
+            draw.ellipse((20, y + 4, 27, y + 11), fill=dot)
+            state = "unlocked (confirm)" if is_lab else "LAB only"
+            text_line((34, y), fit_text(draw, c.label, _font(10), 230) + " - " + state,
+                      font=_font(10), fill=INK if is_lab else SUBTLE)
+            y += 17
+        if forbidden:
+            names = ", ".join(c.label.split("(")[0].strip() for c in forbidden)
+            text_line((20, y + 2), "FORBIDDEN (never): " + names,
+                      font=_font(8), fill=RED)
+    elif page == "signals":
+        text_line((20, 150), "SIGNAL DEX / everything seen or captured",
+                  font=_font(12, bold=True), fill=INK)
+        sig = (panels or {}).get("signals") if isinstance(panels, dict) else None
+        if not isinstance(sig, dict) or not sig.get("total"):
+            text_line((20, 180),
+                      "0 catalogued yet" if isinstance(sig, dict) else "sampling...",
+                      font=_font(13), fill=SUBTLE)
+            text_line((20, 205), "WiFi/BLE/ISM/ADS-B/sub-GHz/IR fold in here",
+                      font=_font(9), fill=SUBTLE)
+            text_line((20, 222), "full list: `redux signals` (CLI) / web UI",
+                      font=_font(9), fill=SUBTLE)
+        else:
+            text_line((20, 176), str(sig.get("total", 0)) + " SIGNALS", font=_font(20, bold=True), fill=TEAL)
+            by = sig.get("by_domain", {}) if isinstance(sig.get("by_domain"), dict) else {}
+            y = 206
+            for medium, count in list(by.items())[:6]:
+                text_line((20, y), fit_text(draw, str(medium).upper(), _font(11), 150),
+                          font=_font(11), fill=SUBTLE)
+                text_line((180, y), str(count), font=_font(12, bold=True), fill=INK)
+                y += 18
     else:
         text_line((20, 160), "DOCTOR / ACTIONABLE FINDINGS",
                   font=_font(12, bold=True), fill=SUBTLE)
@@ -626,6 +701,24 @@ def _spawn_daemon_restart():
         return False
 
 
+def _sample_signals_panel():
+    """Sample the Signal Dex summary for the signals page. Bounded + fail-safe:
+    any error returns None (the page then shows a clean hint). Called at most
+    every 15s, only while that page is viewed, so it never affects idle heat."""
+    try:
+        from redux.dex.signal_dex import build_signal_dex
+        from redux.geo import SightingStore, DEFAULT_DB_PATH
+        from redux.sdr.subghz import SubGhzLibrary
+        from redux.ir import IRLibrary
+        view = build_signal_dex(
+            sighting_store=SightingStore(DEFAULT_DB_PATH),
+            subghz_lib=SubGhzLibrary("/captures/config/subghz.json"),
+            ir_lib=IRLibrary("/captures/config/ir.json"))
+        return view.summary
+    except Exception:
+        return None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Opt-in Redux native 480x320 framebuffer dashboard")
     parser.add_argument("--framebuffer", required=True,
@@ -736,6 +829,8 @@ def main(argv=None):
         signal.signal(sig, stop)
     from ..core.mode import read_mode, toggle_mode
     mode_arm_until = 0.0          # header-tap mode switch: armed by the first tap
+    signals_panel = None          # Signal Dex snapshot for the signals page
+    signals_panel_at = 0.0        # last sample time (refreshed slowly, only when viewed)
     try:
         while running:
             if reconnect is not None and touch_fd is None:
@@ -775,7 +870,14 @@ def main(argv=None):
                                trends=history.snapshot(now=sampled_at),
                                mode=current_mode, mode_arming=mode_arming)
             else:
-                image = render(report, page=page, now=sampled_at,
+                # Live Signal Dex count for the signals page: sample at most every
+                # 15s, and ONLY while that page is on screen, so the catalog read
+                # never touches idle heat/CPU.
+                if page == "signals" and (sampled_at - signals_panel_at) >= 15.0:
+                    signals_panel = _sample_signals_panel()
+                    signals_panel_at = sampled_at
+                panels = {"signals": signals_panel} if signals_panel is not None else None
+                image = render(report, page=page, now=sampled_at, panels=panels,
                                mode=current_mode, mode_arming=mode_arming)
             if args.rotate == 180:
                 from PIL import Image

@@ -81,10 +81,6 @@ def _seed():
                         "blasts many on/off IR codes — would affect any IR device in line of sight"),
         PowerCapability("ir.replay", "IR code replay", Tier.POWER,
                         "replays a saved IR remote code"),
-        PowerCapability("badusb.hid", "BadUSB / HID injection", Tier.POWER,
-                        "emulates a keyboard and types/injects keystrokes into a host"),
-        PowerCapability("bt.hid", "Bluetooth HID control", Tier.POWER,
-                        "emulates/drives a Bluetooth input device"),
         # --- FORBIDDEN: never available (bystander harm; illegal to transmit) ---
         PowerCapability("rf.jam", "RF jamming", Tier.FORBIDDEN,
                         "indiscriminate denial of a band — illegal to transmit, always hits bystanders"),
