@@ -28,9 +28,24 @@ from typing import Dict, List, Optional, Tuple
 
 from .db import SightingStore
 from .geohash import encode as geohash_encode
+from .reid import reidentify
 
 DEFAULT_MEMORY_PATH = "/captures/live/location_memory.json"
 Key = Tuple[str, str]        # (kind, mac)
+
+
+def build_entity_map(clients: list) -> Dict[str, str]:
+    """From harvested probe PNLs (ProbeHarvester.clients()), group randomized MACs
+    that are one physical device (via redux.geo.reid) into a mac->entity-id map.
+    Only MACs that reid links to at least one other get an id; everything else is
+    left alone. Used to make the temporal diff see one returning device instead of
+    a GONE+NEW pair when it rotates its MAC."""
+    out: Dict[str, str] = {}
+    for ent in reidentify(clients or []):
+        eid = "entity:" + ent.macs[0]          # stable: first (sorted) MAC in the group
+        for mac in ent.macs:
+            out[mac.lower()] = eid
+    return out
 
 
 @dataclass(frozen=True)
@@ -158,9 +173,16 @@ def _rssi_moved(a: Optional[int], b: Optional[int], delta: int) -> bool:
 
 def rf_diff(store: SightingStore, memory: LocationMemory, *, key: str,
             precision: int = 7, rssi_delta: int = 18, since: Optional[float] = None,
-            now: Optional[float] = None, save: bool = True) -> RFDiff:
+            now: Optional[float] = None, save: bool = True,
+            entities: Optional[Dict[str, str]] = None) -> RFDiff:
     """Diff the devices seen at `key` now against the last snapshot, then (unless
-    save=False) record this visit as the new snapshot."""
+    save=False) record this visit as the new snapshot.
+
+    `entities` (mac->entity-id, from build_entity_map) collapses the randomized
+    MACs of one physical device so a device that returns under a fresh MAC is
+    recognised as the same device, not a GONE+NEW pair. The snapshot is still
+    stored by raw MAC, so resolution uses whatever grouping is known at diff
+    time; with no map, behaviour is unchanged."""
     now = time.time() if now is None else now
     current = devices_here(store, key, precision=precision, since=since)
     prior = memory.last(key)
@@ -171,23 +193,40 @@ def rf_diff(store: SightingStore, memory: LocationMemory, *, key: str,
                       here_count=len(current),
                       summary=f"first visit to {key} — {len(current)} device(s) recorded as the baseline")
 
-    prior_devices = prior.get("devices", {})
-    prior_keys = set()
-    prior_attr: Dict[Key, dict] = {}
-    for comp, attr in prior_devices.items():
-        kind, _, mac = comp.partition("|")
-        prior_attr[(kind, mac)] = attr if isinstance(attr, dict) else {}
-        prior_keys.add((kind, mac))
+    def _resolve(kind: str, mac: str):
+        if entities and kind == "wifi":
+            eid = entities.get((mac or "").lower())
+            if eid:
+                return ("entity", eid)
+        return (kind, mac)
 
-    cur_keys = set(current.keys())
-    new = tuple(current[k] for k in sorted(cur_keys - prior_keys))
-    gone = tuple(DeviceHere(kind=k, mac=m, ssid=str(prior_attr[(k, m)].get("ssid", "")),
-                            channel=prior_attr[(k, m)].get("channel"),
-                            rssi=prior_attr[(k, m)].get("rssi"))
-                 for (k, m) in sorted(prior_keys - cur_keys))
+    # current: one representative DeviceHere per resolved key (sorted → stable)
+    cur_map: Dict[tuple, DeviceHere] = {}
+    for (k, m) in sorted(current):
+        cur_map.setdefault(_resolve(k, m), current[(k, m)])
+
+    prior_devices = prior.get("devices", {})
+    prior_attr: Dict[tuple, dict] = {}
+    prior_rep: Dict[tuple, Key] = {}
+    for comp in sorted(prior_devices):
+        attr = prior_devices[comp] if isinstance(prior_devices[comp], dict) else {}
+        kind, _, mac = comp.partition("|")
+        rk = _resolve(kind, mac)
+        if rk not in prior_attr:
+            prior_attr[rk] = attr
+            prior_rep[rk] = (kind, mac)
+
+    cur_keys = set(cur_map)
+    prior_keys = set(prior_attr)
+    new = tuple(cur_map[k] for k in sorted(cur_keys - prior_keys))
+    gone = tuple(DeviceHere(kind=prior_rep[k][0], mac=prior_rep[k][1],
+                            ssid=str(prior_attr[k].get("ssid", "")),
+                            channel=prior_attr[k].get("channel"),
+                            rssi=prior_attr[k].get("rssi"))
+                 for k in sorted(prior_keys - cur_keys))
     changed: List[DeviceChange] = []
     for k in sorted(cur_keys & prior_keys):
-        cur = current[k]
+        cur = cur_map[k]
         old = prior_attr.get(k, {})
         reasons = []
         if cur.channel is not None and old.get("channel") is not None and cur.channel != old["channel"]:
@@ -203,7 +242,7 @@ def rf_diff(store: SightingStore, memory: LocationMemory, *, key: str,
 
     last_ts = prior.get("ts") if isinstance(prior.get("ts"), (int, float)) else None
     if save:
-        memory.save(key, current, ts=now)
+        memory.save(key, current, ts=now)        # snapshot stays RAW (by mac)
     ago = ""
     if last_ts is not None:
         secs = max(0, int(now - last_ts))

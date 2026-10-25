@@ -814,7 +814,7 @@ def cmd_here(args) -> int:
     Counter-surveillance in a box; glass-box throughout.
     """
     from .geo.db import SightingStore, DEFAULT_DB_PATH
-    from .geo.location_memory import LocationMemory, rf_diff, location_key, DEFAULT_MEMORY_PATH
+    from .geo.location_memory import LocationMemory, rf_diff, location_key, build_entity_map, DEFAULT_MEMORY_PATH
     lat, lon, label = getattr(args, "lat", None), getattr(args, "lon", None), getattr(args, "label", None)
     if not label and (lat is None or lon is None):
         try:
@@ -832,10 +832,22 @@ def cmd_here(args) -> int:
     if getattr(args, "window_hours", None):
         import time as _t
         since = _t.time() - args.window_hours * 3600
+    # Optional: de-randomize via the probe PNL so a device returning under a fresh
+    # MAC isn't miscounted as GONE+NEW (reid entity resolution).
+    entities = None
+    pnl = getattr(args, "pnl", None)
+    if pnl:
+        try:
+            from .portal.karma import ProbeHarvester
+            entities = build_entity_map(ProbeHarvester(path=pnl).clients())
+        except Exception:
+            entities = None
     d = rf_diff(SightingStore(args.db or DEFAULT_DB_PATH),
                 LocationMemory(args.memory or DEFAULT_MEMORY_PATH),
                 key=key, precision=args.precision, rssi_delta=args.rssi_delta,
-                since=since, save=not args.no_save)
+                since=since, save=not args.no_save, entities=entities)
+    if entities:
+        print(f"(de-randomized via {len(set(entities.values()))} known device identity/ies from the probe PNL)")
     print(d.summary)
     if d.first_visit:
         return 0
@@ -3825,6 +3837,7 @@ def build_parser() -> argparse.ArgumentParser:
     hr.add_argument("--window-hours", type=float, default=None, help="only count devices seen in the last N hours")
     hr.add_argument("--db", default=None, help="sightings DB (default: the device store)")
     hr.add_argument("--memory", default=None, help="location-memory file (default: /captures/live/location_memory.json)")
+    hr.add_argument("--pnl", default=None, help="probe PNL store to de-randomize returning devices (reid); e.g. /captures/live/pnl.json")
     hr.add_argument("--no-save", action="store_true", help="peek only — don't update the baseline for this place")
     hr.add_argument("--host", default="127.0.0.1", help="gpsd host for an auto position fix")
     hr.add_argument("--port", type=int, default=2947, help="gpsd port")
