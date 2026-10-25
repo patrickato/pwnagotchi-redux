@@ -4,23 +4,48 @@ set -euo pipefail
 REPO_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 usage() {
     cat <<'EOF'
-Usage: ./build.sh [--prepare-only|--check-host]
+Usage: ./build.sh [--prepare-only|--check-host|--fresh]
 Build an arm64 Raspberry Pi 4/5 image on a Debian/Ubuntu Linux host as root.
 --prepare-only stages pinned sources and configuration without building an image.
 --check-host reports read-only build-host prerequisites as JSON and exits.
+--fresh safely removes an existing build directory first (unmounts any leftover
+        pi-gen loop/bind mounts, then deletes it) so you never have to rm by hand.
+        Same as REDUX_BUILD_FRESH=1.
 Optional: REDUX_BUILD_DIR (default build/image), REDUX_IMAGE_CONFIG (local config).
 See docs/IMAGE_BUILD.md for host dependencies and the physical boot gate.
 EOF
 }
 PREPARE_ONLY=0
+FRESH=${REDUX_BUILD_FRESH:-0}
 [[ $# -le 1 ]] || { usage >&2; exit 2; }
 case ${1:-} in
     --help|-h) usage; exit 0 ;;
     --prepare-only) PREPARE_ONLY=1 ;;
+    --fresh) FRESH=1 ;;
     --check-host) exec python3 "$REPO_DIR/image/host_preflight.py" --workspace "${REDUX_BUILD_DIR:-$REPO_DIR/build/image}" ;;
     '') ;;
     *) usage >&2; exit 2 ;;
 esac
+
+# Safely tear down a previous build directory: pi-gen leaves root-owned files and,
+# after an interrupted run, loop/bind mounts underneath it — so unmount deepest-first
+# before removing, or the delete fails (the usual cause of a "stuck" build dir).
+cleanup_build_dir() {
+    local dir=$1
+    [[ $dir == /* ]] || { echo "refusing to clean a non-absolute build dir: $dir" >&2; exit 1; }
+    case $dir in
+        /|"$HOME"|"$REPO_DIR") echo "refusing to remove unsafe build path: $dir" >&2; exit 1 ;;
+    esac
+    if [[ -r /proc/mounts ]]; then
+        # deepest paths last in /proc/mounts → reverse to unmount children first
+        tac /proc/mounts | awk '{print $2}' | while read -r mp; do
+            case $mp in
+                "$dir"|"$dir"/*) umount -lf -- "$mp" 2>/dev/null || true ;;
+            esac
+        done
+    fi
+    rm -rf --one-file-system -- "$dir"
+}
 [[ $(uname -s) == Linux ]] || { echo 'Build on Linux with an ext4 workspace; see docs/IMAGE_BUILD.md.' >&2; exit 1; }
 if [[ $PREPARE_ONLY == 0 && $EUID != 0 ]]; then
     echo 'Image creation needs root for chroot and loop mounts. Run sudo ./build.sh.' >&2
@@ -31,7 +56,16 @@ for tool in git realpath install tar python3; do
 done
 BUILD_DIR=$(realpath -m -- "${REDUX_BUILD_DIR:-$REPO_DIR/build/image}")
 [[ $BUILD_DIR != *' '* ]] || { echo 'pi-gen requires a build path without spaces.' >&2; exit 1; }
-[[ ! -e $BUILD_DIR ]] || { echo "Build directory already exists: $BUILD_DIR. Choose a fresh REDUX_BUILD_DIR." >&2; exit 1; }
+if [[ -e $BUILD_DIR ]]; then
+    if [[ $FRESH == 1 ]]; then
+        echo "Removing existing build directory first (--fresh): $BUILD_DIR" >&2
+        cleanup_build_dir "$BUILD_DIR"
+    else
+        echo "Build directory already exists: $BUILD_DIR" >&2
+        echo "Re-run with --fresh (or REDUX_BUILD_FRESH=1) to clear it automatically, or set a fresh REDUX_BUILD_DIR." >&2
+        exit 1
+    fi
+fi
 [[ $REPO_DIR != *' '* ]] || { echo 'Use a repository path without spaces for pi-gen.' >&2; exit 1; }
 if [[ $PREPARE_ONLY == 0 ]]; then
     # Fail before fetching sources, creating build directories or using loop mounts.
