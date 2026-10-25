@@ -2239,7 +2239,8 @@ def cmd_report(args) -> int:
     """Engagement report. `demo` builds a sample (incl. one out-of-scope action to
     show the integrity flag); `build` reads a scope file + actions JSON
     ([{ts,action,target,reason,result}]) and renders Markdown."""
-    from .report import EngagementAction, build_report, render_markdown
+    from .report import (EngagementAction, build_report, render_markdown,
+                         render_html, actions_from_authlog)
     from .frameworks import run_exercise, range_report
     if args.report_cmd == "demo":
         scope = Scope()
@@ -2261,16 +2262,37 @@ def cmd_report(args) -> int:
                            range_report=cov, sanitize=args.sanitize)
     else:
         scope = Scope.load(args.scope_file)
-        raw = json.loads(open(args.actions).read())
-        acts = [EngagementAction(float(e.get("ts", 0.0)), e.get("action", ""),
-                                 e.get("target", ""), e.get("reason", ""), e.get("result", ""))
-                for e in raw]
-        rep = build_report(args.engagement, args.operator, scope, acts, sanitize=args.sanitize)
+        authlog_integrity = None
+        if getattr(args, "from_authlog", False):
+            from .core import authlog as A
+            log = A.AuthLog(args.authlog or A.default_authlog_path(),
+                            key=A.load_key(args.key or A.default_key_path()))
+            acts = actions_from_authlog(log.entries())
+            vr = log.verify()
+            authlog_integrity = {"ok": vr.ok, "reason": vr.reason,
+                                 "signed": vr.signed, "count": vr.count}
+        elif args.actions:
+            raw = json.loads(open(args.actions).read())
+            acts = [EngagementAction(float(e.get("ts", 0.0)), e.get("action", ""),
+                                     e.get("target", ""), e.get("reason", ""), e.get("result", ""))
+                    for e in raw]
+        else:
+            print("report build: pass --actions <file> or --from-authlog")
+            return 2
+        rep = build_report(args.engagement, args.operator, scope, acts,
+                           sanitize=args.sanitize, authlog_integrity=authlog_integrity)
     md = render_markdown(rep)
+    wrote = []
     if getattr(args, "out", None):
         with open(args.out, "w") as f:
             f.write(md)
-        print(f"wrote {args.out}  (integrity: {rep['integrity']}, "
+        wrote.append(args.out)
+    if getattr(args, "html", None):
+        with open(args.html, "w") as f:
+            f.write(render_html(rep))
+        wrote.append(args.html)
+    if wrote:
+        print(f"wrote {', '.join(wrote)}  (integrity: {rep['integrity']}, "
               f"{rep['unauthorized_count']} out-of-scope)")
     else:
         print(md)
@@ -3566,12 +3588,17 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--operator", default="operator", help="who ran the engagement")
     rp.add_argument("--sanitize", action="store_true", help="pseudonymize identifiers for sharing")
     rp.add_argument("--out", help="write Markdown to this path instead of stdout")
+    rp.add_argument("--html", help="also write a dark-themed HTML report to this path")
     rpsub = rp.add_subparsers(dest="report_cmd", required=True)
     rpsub.add_parser("demo", help="build a sample report (includes an out-of-scope action)")
-    rpb = rpsub.add_parser("build", help="build from a scope file + actions JSON")
+    rpb = rpsub.add_parser("build", help="build from a scope file + actions JSON or the signed auth log")
     rpb.add_argument("--engagement", default="engagement")
     rpb.add_argument("--scope-file", default=_DEFAULT_SCOPE_PATH)
-    rpb.add_argument("--actions", required=True, help="actions JSON: [{ts,action,target,reason,result}]")
+    rpb.add_argument("--actions", default=None, help="actions JSON: [{ts,action,target,reason,result}]")
+    rpb.add_argument("--from-authlog", action="store_true",
+                     help="build the timeline from the signed chain-of-authorization log (+ integrity proof)")
+    rpb.add_argument("--authlog", default=None, help="auth-log path (with --from-authlog)")
+    rpb.add_argument("--key", default=None, help="signing-key path (to verify signatures)")
     rp.set_defaults(func=cmd_report)
 
     rg = sub.add_parser("range", help="purple Range mode — grade your detectors vs ATT&CK (and D3FEND)")
