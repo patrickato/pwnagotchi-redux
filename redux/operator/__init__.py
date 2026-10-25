@@ -9,6 +9,7 @@ and whose `run()` executes via injected executors (testable with no radio).
 """
 from .operator import Operator, Phase, Step, CHAIN
 from .autopilot import autopilot, AutopilotReport, AutopilotCycle
+from .adaptive import by_vendor_success
 
 __all__ = ["Operator", "Phase", "Step", "CHAIN",
-           "autopilot", "AutopilotReport", "AutopilotCycle"]
+           "autopilot", "AutopilotReport", "AutopilotCycle", "by_vendor_success"]
