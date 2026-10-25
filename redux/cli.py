@@ -2471,12 +2471,14 @@ def cmd_post(args) -> int:
 def cmd_scope(args) -> int:
     """Manage the central authorized-target Scope — the one list every firing
     function consults. Edits are saved atomically back to the scope file."""
+    from .core.authlog import record_event
     path = args.file
     scope = Scope.load(path)
     if args.scope_cmd == "lab-mode":
         if args.state in ("on", "off"):
             scope.lab_mode = (args.state == "on")
             scope.save(path)
+            record_event("scope.lab_mode", {"state": args.state})
         print("lab mode: " + ("ON — firing is approved on sight for your own gear "
                               "(RF targets + private networks), each logged"
                               if scope.lab_mode else
@@ -2502,19 +2504,24 @@ def cmd_scope(args) -> int:
         exp = (time.time() + args.expires_days * 86400) if args.expires_days else None
         e = scope.add(args.target, kind=args.kind, label=args.label or "", job=args.job or "", expires=exp)
         scope.save(path)
+        record_event("scope.add", {"kind": e.kind, "value": e.value, "job": e.job,
+                                   "label": e.label, "expires": e.expires})
         print(f"armed: {e.kind} {e.value}" + (f" [{e.job}]" if e.job else "") + f"  (scope now has {len(scope.active_entries())} active)")
     elif args.scope_cmd == "remove":
         n = scope.remove(args.target, job=args.job)
         scope.save(path)
+        record_event("scope.remove", {"target": args.target, "job": args.job, "removed": n})
         print(f"removed {n} entr{'y' if n == 1 else 'ies'}")
     elif args.scope_cmd == "clear":
         n = scope.clear(job=args.job)
         scope.save(path)
+        record_event("scope.clear", {"job": args.job, "removed": n})
         print(f"cleared {n} entr{'y' if n == 1 else 'ies'}" + (f" from job '{args.job}'" if args.job else " (whole scope)"))
     elif args.scope_cmd == "import":
         with open(args.listfile) as f:
             n = scope.bulk_load(f.read(), job=args.job or "")
         scope.save(path)
+        record_event("scope.import", {"job": args.job, "added": n, "file": args.listfile})
         print(f"imported {n} target(s)" + (f" into job '{args.job}'" if args.job else "") + f"; scope now has {len(scope.active_entries())} active")
     elif args.scope_cmd == "arm-lab":
         if args.auto:
@@ -2525,13 +2532,67 @@ def cmd_scope(args) -> int:
             if not proposals:
                 print("  (nothing detected — are `ip`/`iw` available on this host?)")
             scope.save(path)
+            record_event("scope.arm_lab", {"auto": True, "armed": n})
             print(f"lab armed (auto): {n} of your own target(s) pre-authorized; "
                   f"scope now has {len(scope.active_entries())} active")
         else:
             n = scope.arm_lab(bssids=args.bssid or [], ssids=args.ssid or [], cidrs=args.cidr or [])
             scope.save(path)
+            record_event("scope.arm_lab", {"auto": False, "armed": n})
             print(f"lab armed: {n} target(s) pre-authorized (no expiry); scope now has {len(scope.active_entries())} active")
     return 0
+
+
+def cmd_authlog(args) -> int:
+    """Chain-of-authorization log — tamper-evident, provable engagement record.
+    Every scope change is recorded here automatically; `record` adds a manual
+    note, `verify` proves the chain is intact (and signatures, with a key)."""
+    from .core import authlog as A
+    path = args.log or A.default_authlog_path()
+    key_path = args.key or A.default_key_path()
+    cmd = args.authlog_cmd
+    if cmd == "init-key":
+        try:
+            A.generate_key(key_path, overwrite=args.force)
+        except FileExistsError:
+            print(f"a signing key already exists at {key_path}\n"
+                  "  (use --force to replace it — WARNING: that invalidates every "
+                  "existing signature, so past entries will no longer verify)")
+            return 1
+        print(f"signing key created at {key_path} (owner-only). New auth-log entries "
+              "will be signed; back this key up — it proves the log came from this device.")
+        return 0
+    if cmd == "record":
+        detail = {}
+        for kv in (args.detail or []):
+            k, _, v = kv.partition("=")
+            if k:
+                detail[k] = v
+        entry = A.AuthLog(path, key=A.load_key(key_path)).record(args.event, detail)
+        print(f"recorded #{entry.seq} {entry.event}  hash={entry.hash[:12]}…"
+              + ("  (signed)" if entry.sig else "  (unsigned — run `redux authlog init-key` to sign)"))
+        return 0
+    if cmd == "verify":
+        r = A.AuthLog(path, key=A.load_key(key_path)).verify()
+        print(("OK    " if r.ok else "FAIL  ") + r.reason)
+        return 0 if r.ok else 1
+    if cmd == "show":
+        entries = A.AuthLog(path).entries()
+        if args.json:
+            print(json.dumps([{"seq": e.seq, "ts": e.ts, "event": e.event,
+                               "detail": e.detail, "hash": e.hash,
+                               "signed": bool(e.sig)} for e in entries], indent=2))
+            return 0
+        if not entries:
+            print(f"auth log is empty ({path})")
+            return 0
+        for e in entries:
+            when = time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(e.ts))
+            det = "  ".join(f"{k}={v}" for k, v in sorted(e.detail.items()))
+            mark = "✓" if e.sig else "·"
+            print(f"  #{e.seq:<4} {when}  {mark} {e.event:18} {det}")
+        return 0
+    return 2
 
 
 def cmd_wordlist(args) -> int:
@@ -3652,6 +3713,19 @@ def build_parser() -> argparse.ArgumentParser:
     lm.add_argument("state", nargs="?", default="status", choices=("on", "off", "status"),
                     help="on | off | status (default: status)")
     sc.set_defaults(func=cmd_scope)
+    ag = sub.add_parser("authlog", help="tamper-evident chain-of-authorization log (scope changes + fire actions)")
+    ag.add_argument("--log", default=None, help="auth-log path (default: the device auth log)")
+    ag.add_argument("--key", default=None, help="signing-key path (default: the device key)")
+    agsub = ag.add_subparsers(dest="authlog_cmd", required=True)
+    agsub.add_parser("verify", help="prove the chain is intact (and signatures, if a key exists)")
+    ags = agsub.add_parser("show", help="print the log")
+    ags.add_argument("--json", action="store_true", help="machine-readable output")
+    agr = agsub.add_parser("record", help="append a manual note to the log")
+    agr.add_argument("event", help="event name, e.g. engagement.start")
+    agr.add_argument("--detail", action="append", help="key=value (repeatable)")
+    agk = agsub.add_parser("init-key", help="create the device signing key (entries become signed)")
+    agk.add_argument("--force", action="store_true", help="replace an existing key (invalidates past signatures)")
+    ag.set_defaults(func=cmd_authlog)
     return p
 
 
