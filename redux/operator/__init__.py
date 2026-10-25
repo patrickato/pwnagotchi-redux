@@ -8,5 +8,7 @@ scope-gated operator whose dry-run `plan()` shows exactly what it would do and w
 and whose `run()` executes via injected executors (testable with no radio).
 """
 from .operator import Operator, Phase, Step, CHAIN
+from .autopilot import autopilot, AutopilotReport, AutopilotCycle
 
-__all__ = ["Operator", "Phase", "Step", "CHAIN"]
+__all__ = ["Operator", "Phase", "Step", "CHAIN",
+           "autopilot", "AutopilotReport", "AutopilotCycle"]
