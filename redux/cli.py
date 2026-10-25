@@ -1237,9 +1237,20 @@ def cmd_campaign(args) -> int:
         execs = {Phase.CAPTURE: _ok("capture"), Phase.CRACK: _ok("crack"),
                  Phase.PIVOT_SCAN: _ok("scan"), Phase.PIVOT_CRED: _ok("cred-test"),
                  Phase.LOOT: _ok("loot")}
+        prioritize = None
+        if getattr(args, "adaptive", False):
+            try:
+                from .operator import by_vendor_success
+                from .core.experience import ExperienceStore
+                from .geo.oui import lookup_oui
+                rows = ExperienceStore(getattr(args, "experience", None) or "/captures/live/experience.jsonl").load()
+                prioritize = by_vendor_success(rows, lookup_oui)
+            except Exception:
+                prioritize = None
         rep = autopilot(scope, target_source=lambda: armed, executors=execs,
                         recon=lambda: (True, f"{len(armed)} target(s) in cage"),
-                        max_cycles=args.cycles, confirmed=args.confirm, logger=record_event)
+                        max_cycles=args.cycles, confirmed=args.confirm, logger=record_event,
+                        prioritize=prioritize)
         if not rep.ran:
             print(f"UNLEASHED — not run [{rep.mode.upper()}]: {rep.reason}")
             return 2
@@ -3800,6 +3811,8 @@ def build_parser() -> argparse.ArgumentParser:
     cau_ = casub.add_parser("unleashed", help="LAB-only: turn the full chain loose on every in-scope target (POWER)")
     cau_.add_argument("--cycles", type=int, default=1, help="how many sweep cycles to run")
     cau_.add_argument("--targets", nargs="*", help="override the target set (default: armed scope BSSIDs)")
+    cau_.add_argument("--adaptive", action="store_true", help="order targets by learned capture success (experience)")
+    cau_.add_argument("--experience", default=None, help="experience store (with --adaptive)")
     cau_.add_argument("--confirm", action="store_true", help="required in LAB to actually run")
     ca.set_defaults(func=cmd_campaign)
 

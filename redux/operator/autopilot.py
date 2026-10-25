@@ -56,12 +56,14 @@ def autopilot(scope, *, target_source: Callable[[], Sequence[str]],
               executors: Dict, recon: Optional[Callable] = None,
               crack_fn: Optional[Callable[[Sequence[dict]], int]] = None,
               max_cycles: int = 1, confirmed: bool = False,
-              logger=None) -> AutopilotReport:
+              logger=None, prioritize: Optional[Callable[[Sequence[str]], Sequence[str]]] = None) -> AutopilotReport:
     """Run the operator over `target_source()` for up to `max_cycles`. LAB-gated
     via power_tier (refused+hidden in FIELD; needs confirmation in LAB).
 
     `crack_fn(loot_credentials) -> count` auto-cracks what a cycle captured (the
-    recovered creds / loot entries); injected so the loop is testable."""
+    recovered creds / loot entries); injected so the loop is testable.
+    `prioritize(targets) -> ordered` reorders each cycle's targets (adaptive mode:
+    learned success order); injected and fail-safe."""
     from ..core.power_tier import authorize_power
     mode = LAB if getattr(scope, "lab_mode", False) else FIELD
     ok, why = authorize_power("campaign.unleashed",
@@ -73,6 +75,11 @@ def autopilot(scope, *, target_source: Callable[[], Sequence[str]],
     cycles: List[AutopilotCycle] = []
     for _ in range(max(1, int(max_cycles))):
         targets = list(target_source() or [])
+        if prioritize and targets:
+            try:
+                targets = list(prioritize(targets))
+            except Exception:
+                pass                       # fail-safe: keep the original order
         if not targets:
             cycles.append(AutopilotCycle(0, 0, 0, 0))
             continue
