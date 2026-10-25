@@ -2761,6 +2761,41 @@ def cmd_loot(args) -> int:
     return 2
 
 
+def cmd_firehose(args) -> int:
+    """Glass-box firehose — one time-ordered stream of every decision (auth log)
+    and every device seen (sightings). A LAB-only diagnostic: too noisy/revealing
+    for FIELD, so it's refused there. Read-only."""
+    from .core.mode import read_mode
+    mode = read_mode(getattr(args, "scope_file", None))
+    if mode != "lab":
+        print("firehose is a LAB-only diagnostic — not available in FIELD (switch to LAB on your own gear)")
+        return 2
+    from .intel.firehose import firehose
+    from .core import authlog as A
+    entries, sights = [], []
+    try:
+        entries = A.AuthLog(args.authlog or A.default_authlog_path()).entries()
+    except Exception:
+        entries = []
+    try:
+        from .geo.db import SightingStore, DEFAULT_DB_PATH
+        sights = SightingStore(args.db or DEFAULT_DB_PATH).query(limit=args.tail)
+    except Exception:
+        sights = []
+    lines = firehose(entries, sights, limit=args.tail)
+    if args.json:
+        print(json.dumps([{"ts": l.ts, "source": l.source, "text": l.text} for l in lines], indent=2))
+        return 0
+    import time as _t
+    print(f"GLASS-BOX FIREHOSE [LAB] — {len(lines)} event(s), oldest first")
+    for l in lines:
+        when = _t.strftime("%H:%M:%S", _t.gmtime(l.ts)) if l.ts else "--:--:--"
+        print(f"  {when}  {l.source:8} {l.text}")
+    if not lines:
+        print("  (nothing recorded yet — run the daemon / some scope actions first)")
+    return 0
+
+
 def cmd_fuse(args) -> int:
     """Co-occurrence fusion — cluster devices that repeatedly appear in the same
     time+place window (carried together). Reads the observation time-series log.
@@ -4248,6 +4283,13 @@ def build_parser() -> argparse.ArgumentParser:
     fu.add_argument("--min-score", type=float, default=0.3, help="min Jaccard overlap to link (default 0.3)")
     fu.add_argument("--json", action="store_true", help="machine-readable output")
     fu.set_defaults(func=cmd_fuse)
+    fh = sub.add_parser("firehose", help="LAB-only glass-box stream: every decision + every device seen, by time")
+    fh.add_argument("--scope-file", default=None, help="scope store (decides LAB vs FIELD)")
+    fh.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
+    fh.add_argument("--db", default=None, help="sightings DB (default: the device store)")
+    fh.add_argument("--tail", type=int, default=200, help="show the most recent N events (default 200)")
+    fh.add_argument("--json", action="store_true", help="machine-readable output")
+    fh.set_defaults(func=cmd_firehose)
     lo = sub.add_parser("loot", help="recovered-credential vault + scope-gated network pivot")
     lo.add_argument("--vault", default=None, help="vault file (default: the device loot vault)")
     losub = lo.add_subparsers(dest="loot_cmd", required=True)
