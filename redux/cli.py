@@ -805,6 +805,57 @@ def cmd_gps(args) -> int:
     return 0
 
 
+def cmd_here(args) -> int:
+    """Temporal RF diff — what changed at this location since your last visit.
+
+    A 'location' is a manual --label (works indoors / without GPS) or a geohash
+    cell from --lat/--lon or a live gpsd fix. Reports NEW / GONE / CHANGED devices
+    vs the last visit here, built from the sightings the device already recorded.
+    Counter-surveillance in a box; glass-box throughout.
+    """
+    from .geo.db import SightingStore, DEFAULT_DB_PATH
+    from .geo.location_memory import LocationMemory, rf_diff, location_key, DEFAULT_MEMORY_PATH
+    lat, lon, label = getattr(args, "lat", None), getattr(args, "lon", None), getattr(args, "label", None)
+    if not label and (lat is None or lon is None):
+        try:
+            from .geo.gpsd import GpsdClient
+            fix = GpsdClient(args.host, args.port, timeout=args.timeout).poll_fix()
+            if fix is not None:
+                lat, lon = fix.lat, fix.lon
+        except Exception:
+            pass
+    key = location_key(lat=lat, lon=lon, label=label, precision=args.precision)
+    if key is None:
+        print("no location — pass --label <name>, or --lat/--lon, or run gpsd with a fix")
+        return 2
+    since = None
+    if getattr(args, "window_hours", None):
+        import time as _t
+        since = _t.time() - args.window_hours * 3600
+    d = rf_diff(SightingStore(args.db or DEFAULT_DB_PATH),
+                LocationMemory(args.memory or DEFAULT_MEMORY_PATH),
+                key=key, precision=args.precision, rssi_delta=args.rssi_delta,
+                since=since, save=not args.no_save)
+    print(d.summary)
+    if d.first_visit:
+        return 0
+    if d.new:
+        print(f"\nNEW ({len(d.new)}):")
+        for x in d.new:
+            print("  + " + x.label())
+    if d.gone:
+        print(f"\nGONE ({len(d.gone)}):")
+        for x in d.gone:
+            print("  - " + x.label())
+    if d.changed:
+        print(f"\nCHANGED ({len(d.changed)}):")
+        for c in d.changed:
+            print(f"  ~ {c.kind} {c.ssid or c.mac}: {c.why}")
+    if not (d.new or d.gone or d.changed):
+        print("  (nothing changed since last visit)")
+    return 0
+
+
 def cmd_power(args) -> int:
     """Power-tier gate: the strongest tools (RF TX/replay, sub-GHz, IR, BadUSB)
     are hidden in FIELD, LAB-only, and need a per-action confirmation even in LAB.
@@ -3381,6 +3432,21 @@ def build_parser() -> argparse.ArgumentParser:
     gp.add_argument("--port", type=int, default=2947, help="gpsd port (default 2947)")
     gp.add_argument("--timeout", type=float, default=5.0, help="read timeout seconds")
     gp.set_defaults(func=cmd_gps)
+
+    hr = sub.add_parser("here", help="temporal RF diff: what changed at this location since your last visit")
+    hr.add_argument("--label", default=None, help="name this place (works indoors / without GPS)")
+    hr.add_argument("--lat", type=float, default=None, help="latitude (else a gpsd fix is tried)")
+    hr.add_argument("--lon", type=float, default=None, help="longitude (else a gpsd fix is tried)")
+    hr.add_argument("--precision", type=int, default=7, help="geohash cell precision (7 ~ 150 m)")
+    hr.add_argument("--rssi-delta", type=int, default=18, help="dBm shift that flags a device CHANGED")
+    hr.add_argument("--window-hours", type=float, default=None, help="only count devices seen in the last N hours")
+    hr.add_argument("--db", default=None, help="sightings DB (default: the device store)")
+    hr.add_argument("--memory", default=None, help="location-memory file (default: /captures/live/location_memory.json)")
+    hr.add_argument("--no-save", action="store_true", help="peek only — don't update the baseline for this place")
+    hr.add_argument("--host", default="127.0.0.1", help="gpsd host for an auto position fix")
+    hr.add_argument("--port", type=int, default=2947, help="gpsd port")
+    hr.add_argument("--timeout", type=float, default=3.0, help="gpsd read timeout seconds")
+    hr.set_defaults(func=cmd_here)
 
     ir = sub.add_parser("ir", help="infrared: TV-B-Gone power blast + loadable IR code library (POWER-tier)")
     ir.add_argument("--lib", default="/captures/config/ir.json", help="IR code library path")
