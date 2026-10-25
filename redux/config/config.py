@@ -33,7 +33,7 @@ _PERSONAS = ("recon", "red", "blue", "purple", "mesh", "sigint")
 
 @dataclass
 class CacheCfg:
-    db_path: str = "/var/lib/redux/geo/sightings.db"
+    db_path: str = "/captures/live/sightings.db"
     retention_days: float = 30.0      # prune sightings older than this (0 = keep forever)
     max_rows: int = 500_000           # hard cap; oldest beyond this are pruned
 
@@ -158,7 +158,7 @@ def template() -> str:
 # Fields marked {MARKER} must be set before the feature that uses them.
 
 [cache]
-db_path = "/var/lib/redux/geo/sightings.db"
+db_path = "/captures/live/sightings.db"
 retention_days = 30          # prune sightings older than N days (0 = keep forever)
 max_rows = 500000            # hard cap; oldest rows beyond this are pruned
 
