@@ -642,6 +642,30 @@ def cmd_subghz(args) -> int:
     return 2
 
 
+def cmd_signals(args) -> int:
+    """The Signal Dex: one catalog of everything seen or captured across every
+    radio/medium — WiFi/BLE/ISM/ADS-B/pager/ACARS sightings + sub-GHz + IR."""
+    from .dex.signal_dex import build_signal_dex
+    from .geo import SightingStore, DEFAULT_DB_PATH
+    from .sdr.subghz import SubGhzLibrary
+    from .ir import IRLibrary
+    store = SightingStore(args.db or DEFAULT_DB_PATH)
+    sg = SubGhzLibrary(args.subghz_lib)
+    ir = IRLibrary(args.ir_lib)
+    view = build_signal_dex(sighting_store=store, subghz_lib=sg, ir_lib=ir)
+    s = view.summary
+    print(f"Signal Dex: {s['total']} signal(s) across {len(s['by_domain'])} medium(s)")
+    if s["total"]:
+        print("  by medium: " + ", ".join(f"{k}={v}" for k, v in s["by_domain"].items()))
+    only = getattr(args, "domain", None)
+    shown = view.by_domain(only) if only else view.entries
+    for e in shown[:args.limit]:
+        print(f"  [{e.domain:<7}] {e.identifier:<20} {e.label[:24]:<24} {e.detail}")
+    if not shown:
+        print("  (nothing catalogued yet)")
+    return 0
+
+
 def cmd_gps(args) -> int:
     """Read the current position from gpsd (the standard Linux GPS daemon).
     Works for USB/serial/Bluetooth GPS once gpsd owns it. Glass-box."""
@@ -3126,6 +3150,14 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    sx = sub.add_parser("signals", help="the Signal Dex: one catalog across WiFi/BLE/ISM/ADS-B/sub-GHz/IR")
+    sx.add_argument("--db", default=None, help="sighting store path")
+    sx.add_argument("--subghz-lib", default="/captures/config/subghz.json", help="sub-GHz library")
+    sx.add_argument("--ir-lib", default="/captures/config/ir.json", help="IR library")
+    sx.add_argument("--domain", default=None, help="show only one medium (wifi/ble/ism/adsb/pocsag/acars/subghz/ir)")
+    sx.add_argument("--limit", type=int, default=50, help="max entries to print (default 50)")
+    sx.set_defaults(func=cmd_signals)
 
     gp = sub.add_parser("gps", help="read the current position from gpsd (USB/serial/BT GPS)")
     gp.add_argument("--host", default="127.0.0.1", help="gpsd host (default 127.0.0.1)")
