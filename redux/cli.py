@@ -2365,6 +2365,30 @@ def cmd_range(args) -> int:
     """Purple Range mode: `techniques` lists the ATT&CK→D3FEND map; `demo` runs a
     SIMULATED attack set and grades your detectors, naming the coverage gaps."""
     from .frameworks import attack_defend_pairs, run_exercise, range_report
+    if args.range_cmd == "livefire":
+        from .core.scope import Scope
+        from .operator import Operator, Phase
+        from .intel.livefire import live_fire
+        scope = Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)
+        targets = args.targets or [e.value for e in scope.active_entries() if e.kind == "bssid"] or ["00:11:22:33:44:55"]
+        op = Operator(scope, offense_enabled=True, caps={"capture.handshake": True})
+        out = op.run(targets, {ph: (lambda t: (True, "ok")) for ph in Phase if ph is not Phase.RECON},
+                     recon=lambda: (True, "seen"))
+        executed = [s["action"] for s in out["steps"] if s.get("executed") and s["phase"] != "recon"]
+        fired = {a: (args.fired or []) for a in executed}        # blue detections (from --fired / sentinel)
+        rep = live_fire(scope, executed_actions=executed, fired_by_action=fired, confirmed=args.confirm)
+        if not rep.ran:
+            print(f"LIVE-FIRE — not run [{rep.mode.upper()}]: {rep.reason}")
+            return 2
+        print(f"LIVE-FIRE [{rep.mode.upper()}] — {rep.reason}")
+        for r in rep.results:
+            print(f"  [{r['verdict'].upper():10}] {r['label']:28} {','.join(r['attack_ids'])}")
+            if r["verdict"] in ("missed", "partial"):
+                print(f"              {r['reason']}")
+        c = rep.coverage or {}
+        print(f"\nblue coverage: {c.get('reason', '(none)')}")
+        print("note: CLI uses fake red executors + --fired for blue; a cage run wires the Operator + Sentinel.")
+        return 0
     if args.range_cmd == "techniques":
         print("redux framework map — action: ATT&CK → D3FEND (PTES phase)")
         for p in attack_defend_pairs():
@@ -3866,6 +3890,11 @@ def build_parser() -> argparse.ArgumentParser:
     rgsub = rg.add_subparsers(dest="range_cmd", required=True)
     rgsub.add_parser("techniques", help="list the ATT&CK→D3FEND framework map")
     rgsub.add_parser("demo", help="run a simulated attack set and score detector coverage")
+    rglf = rgsub.add_parser("livefire", help="LAB-only: fire REAL attacks at your own gear and score blue (POWER)")
+    rglf.add_argument("--scope-file", default=None, help="scope store (default: the device scope)")
+    rglf.add_argument("--targets", nargs="*", help="targets (default: armed scope BSSIDs)")
+    rglf.add_argument("--fired", action="append", help="detector that blue reports firing (repeatable)")
+    rglf.add_argument("--confirm", action="store_true", help="required in LAB to actually run")
     rg.set_defaults(func=cmd_range)
 
     cap = sub.add_parser("capture", help="show the capture plan (engine selection, Scope-aimed)")
