@@ -2761,6 +2761,68 @@ def cmd_loot(args) -> int:
     return 2
 
 
+def cmd_graph(args) -> int:
+    """Entity graph — the whole cage as one picture: physical-device nodes (reid
+    merges a device's randomized MACs), 'travels-with' edges (co-occurrence
+    fusion), annotated with where/when/vendor and whether its key was recovered.
+    Read-only; the payoff of reid + fusion + sightings + loot + OUI."""
+    from .intel.graph import build_graph
+    from .geo.reid import reidentify
+    from .geo.oui import lookup_oui
+    reid_entities, fusion_groups, by_mac, cracked = [], [], {}, set()
+    try:
+        from .portal.karma import ProbeHarvester
+        reid_entities = reidentify(ProbeHarvester(path=args.pnl).clients())
+    except Exception:
+        reid_entities = []
+    try:
+        from .geo.follower import ObservationLog
+        from .intel.fusion import fuse
+        fusion_groups = fuse(ObservationLog(args.obs).load())
+    except Exception:
+        fusion_groups = []
+    try:
+        from .geo.db import SightingStore
+        for s in SightingStore(args.db).query():
+            by_mac.setdefault((s.mac or "").lower(), []).append(s)
+    except Exception:
+        by_mac = {}
+    try:
+        from .loot.vault import LootVault
+        for e in LootVault(args.loot).entries():
+            if e.target:
+                cracked.add(e.target.lower())
+    except Exception:
+        cracked = set()
+    g = build_graph(reid_entities=reid_entities, fusion_groups=fusion_groups,
+                    sightings_by_mac=by_mac, cracked_macs=cracked, vendor_lookup=lookup_oui)
+    if args.json:
+        print(json.dumps({
+            "summary": g.summary,
+            "nodes": [{"id": n.id, "macs": list(n.macs), "randomized": n.randomized,
+                       "vendor": n.vendor, "sightings": n.sightings, "last_seen": n.last_seen,
+                       "strongest_rssi": n.strongest_rssi, "places": list(n.places),
+                       "cracked": n.cracked, "linked_by": list(n.linked_by)} for n in g.nodes],
+            "edges": [{"a": e.a, "b": e.b, "relation": e.relation,
+                       "confidence": e.confidence, "evidence": e.evidence} for e in g.edges]},
+            indent=2))
+        return 0
+    print(f"ENTITY GRAPH — {g.summary}")
+    for n in g.nodes:
+        tag = "*" if n.cracked else " "
+        print(f"\n {tag}{n.id}")
+        print(f"    {n.summary}")
+        for m in n.macs:
+            print(f"      {m}")
+    if g.edges:
+        print("\n  travels-with:")
+        for e in g.edges:
+            print(f"    {e.a}  <->  {e.b}   [{e.confidence}, {e.evidence} shared window(s)]")
+    if not g.nodes:
+        print("  (nothing observed yet — run the daemon to populate sightings/probes)")
+    return 0
+
+
 def cmd_firehose(args) -> int:
     """Glass-box firehose — one time-ordered stream of every decision (auth log)
     and every device seen (sightings). A LAB-only diagnostic: too noisy/revealing
@@ -4290,6 +4352,13 @@ def build_parser() -> argparse.ArgumentParser:
     fh.add_argument("--tail", type=int, default=200, help="show the most recent N events (default 200)")
     fh.add_argument("--json", action="store_true", help="machine-readable output")
     fh.set_defaults(func=cmd_firehose)
+    gr = sub.add_parser("graph", help="entity graph: devices (reid) + travels-with (fusion) + sightings/vendor/loot")
+    gr.add_argument("--pnl", default="/captures/live/pnl.json", help="harvested PNL store (reid identity)")
+    gr.add_argument("--obs", default="/captures/live/observations.jsonl", help="observation log (co-travel edges)")
+    gr.add_argument("--db", default="/captures/live/sightings.db", help="sightings DB (annotations)")
+    gr.add_argument("--loot", default="/captures/loot/vault.json", help="loot vault (key-recovered flag)")
+    gr.add_argument("--json", action="store_true", help="machine-readable output")
+    gr.set_defaults(func=cmd_graph)
     lo = sub.add_parser("loot", help="recovered-credential vault + scope-gated network pivot")
     lo.add_argument("--vault", default=None, help="vault file (default: the device loot vault)")
     losub = lo.add_subparsers(dest="loot_cmd", required=True)
