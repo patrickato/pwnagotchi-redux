@@ -642,6 +642,60 @@ def cmd_subghz(args) -> int:
     return 2
 
 
+def cmd_toolbox(args) -> int:
+    """Curated catalog of useful, safe tools and the exact command to add each —
+    the easy 'wire in C' path. `install` prints the command (--run executes it)."""
+    from . import toolbox as TB
+    cmd = args.toolbox_cmd
+    if cmd == "list":
+        rows = TB.find(getattr(args, "query", "") or "", category=getattr(args, "category", None))
+        if not rows:
+            print("no matching tools")
+            return 0
+        for t in rows:
+            en = f"  -> {t.enables}" if t.enables else ""
+            print(f"  [{t.category:<9}] {t.name:<13} {t.summary}{en}")
+        return 0
+    if cmd == "show":
+        t = TB.get(args.name)
+        if t is None:
+            print(f"unknown tool '{args.name}' (see `redux toolbox list`)")
+            return 3
+        print(f"{t.name} — {t.summary}\n  category: {t.category}")
+        if t.enables:
+            print(f"  enables:  {t.enables}")
+        if t.needs_hw:
+            print(f"  needs:    {t.needs_hw}")
+        if t.note:
+            print(f"  note:     {t.note}")
+        print("  install:")
+        for c in t.install:
+            print(f"    {c}")
+        return 0
+    if cmd == "install":
+        cmds = TB.install_commands(args.name)
+        if cmds is None:
+            print(f"unknown tool '{args.name}' (see `redux toolbox list`)")
+            return 3
+        if not getattr(args, "run", False):
+            print(f"to add {args.name}, run:")
+            for c in cmds:
+                print(f"  {c}")
+            print("\n(or re-run with --run to execute on this device)")
+            return 0
+        import subprocess
+        for c in cmds:
+            if c.strip().startswith("#"):
+                continue
+            print(f"$ {c}")
+            rc = subprocess.run(c, shell=True).returncode
+            if rc != 0:
+                print(f"command failed (exit {rc}) — stopping")
+                return 3
+        return 0
+    return 2
+
+
 def cmd_signals(args) -> int:
     """The Signal Dex: one catalog of everything seen or captured across every
     radio/medium — WiFi/BLE/ISM/ADS-B/pager/ACARS sightings + sub-GHz + IR."""
@@ -3150,6 +3204,18 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    tb = sub.add_parser("toolbox", help="curated catalog of useful tools + the exact command to add each")
+    tbsub = tb.add_subparsers(dest="toolbox_cmd", required=True)
+    tbl = tbsub.add_parser("list", help="list tools (optionally filter)")
+    tbl.add_argument("query", nargs="?", default="", help="filter by name/summary/feature")
+    tbl.add_argument("--category", default=None, help="sdr/wifi/crack/gps/ir/tx/recon/companion")
+    tbs = tbsub.add_parser("show", help="full detail + install command for one tool")
+    tbs.add_argument("name")
+    tbi = tbsub.add_parser("install", help="print (or --run) the install command for a tool")
+    tbi.add_argument("name")
+    tbi.add_argument("--run", action="store_true", help="execute the install on this device (needs root)")
+    tb.set_defaults(func=cmd_toolbox)
 
     sx = sub.add_parser("signals", help="the Signal Dex: one catalog across WiFi/BLE/ISM/ADS-B/sub-GHz/IR")
     sx.add_argument("--db", default=None, help="sighting store path")
