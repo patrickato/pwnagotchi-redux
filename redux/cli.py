@@ -541,6 +541,134 @@ def cmd_dex(args) -> int:
     return 0
 
 
+def cmd_ir(args) -> int:
+    """Infrared: TV-B-Gone power blasting + a loadable IR code library (import
+    Flipper .ir). Transmit is POWER-tier (LAB + --confirm). Needs an IR LED on
+    GPIO + LIRC on the device; this prints the gated command/plan."""
+    from . import ir as IR
+    from .core.mode import read_mode
+    lib = IR.IRLibrary(args.lib)
+    cmd = args.ir_cmd
+    if cmd == "codes":
+        for c in IR.TV_POWER_CODES:
+            print(f"  {c.name:<24} {c.protocol}")
+        return 0
+    if cmd == "list":
+        codes = lib.list()
+        if not codes:
+            print(f"no IR codes saved ({args.lib}) — import with `redux ir import <file.ir>`")
+            return 0
+        for c in codes:
+            print(f"  {c.name:<24} {c.protocol or c.kind}")
+        return 0
+    if cmd == "import":
+        try:
+            n = lib.import_flipper(Path(args.file).read_text(errors="replace"))
+        except OSError as e:
+            print(f"cannot read {args.file}: {e}"); return 3
+        print(f"imported {n} IR code(s) into {args.lib}")
+        return 0
+    lab = read_mode(getattr(args, "scope_file", None)) == "lab"
+    if cmd == "blast":
+        p = IR.blast_plan(lab_mode=lab, confirmed=bool(args.confirm))
+        print(p.reason)
+        if p.runnable:
+            print("\nrun this (cage only):\n  " + " ".join(p.argv))
+        return 0 if p.runnable else 3
+    if cmd == "replay":
+        code = lib.get(args.name)
+        if code is None:
+            print(f"no IR code '{args.name}' (see `redux ir list`)"); return 3
+        p = IR.replay_plan(code, lab_mode=lab, confirmed=bool(args.confirm))
+        print(p.reason)
+        if p.runnable:
+            print("\nrun this:\n  " + " ".join(p.argv))
+        return 0 if p.runnable else 3
+    return 2
+
+
+def cmd_subghz(args) -> int:
+    """Sub-GHz signal library: capture/catalog (RX, works with RTL-SDR) and gated
+    replay (POWER-tier: LAB + confirm + a TX backend). For junkyard keyfobs,
+    garage remotes, ISM gadgets below 1 GHz."""
+    from .sdr.subghz import (SubGhzLibrary, capture_command, replay_plan,
+                             detect_tx_backend, parse_freq as _parse_freq)
+    lib = SubGhzLibrary(args.lib)
+    cmd = args.subghz_cmd
+    if cmd == "capture":
+        fhz = _parse_freq(args.freq)
+        argv = capture_command(fhz, seconds=args.seconds, out_path=args.out or "",
+                               device=args.device, decode=not args.raw)
+        print(f"capture @ {fhz/1e6:g} MHz ({'raw IQ' if args.raw else 'decode/catalog'}):")
+        print("  " + " ".join(argv))
+        if not args.raw:
+            print("\nthen add decoded signals to the library with `redux subghz add`")
+        return 0
+    if cmd == "list":
+        sigs = lib.list()
+        if not sigs:
+            print(f"no signals in the library ({args.lib})")
+            return 0
+        for s in sigs:
+            roll = " [ROLLING — won't replay]" if s.rolling else ""
+            print(f"  {s.id}  {s.name:<16} {s.freq_hz/1e6:g} MHz  {s.protocol or s.modulation}{roll}")
+        return 0
+    if cmd == "add":
+        s = lib.add(args.name, _parse_freq(args.freq), protocol=args.protocol or "",
+                    capture_path=args.capture or "", note=args.note or "")
+        print(f"added {s.id} '{s.name}' @ {s.freq_hz/1e6:g} MHz"
+              + (" (looks rolling-code — replay won't work)" if s.rolling else ""))
+        return 0
+    if cmd == "remove":
+        print("removed" if lib.remove(args.id) else f"no signal '{args.id}'")
+        return 0
+    if cmd == "replay":
+        from .core.mode import read_mode
+        sig = lib.get(args.id)
+        if sig is None:
+            print(f"no signal '{args.id}' (see `redux subghz list`)")
+            return 3
+        lab = read_mode(getattr(args, "scope_file", None)) == "lab"
+        p = replay_plan(sig, lab_mode=lab, confirmed=bool(args.confirm),
+                        backend=getattr(args, "backend", None))
+        print(p.reason)
+        if p.runnable:
+            print("\nrun this (cage only):\n  " + " ".join(p.argv))
+        else:
+            be = detect_tx_backend()
+            if be is None:
+                print("  (no TX backend detected — capture/catalog still work)")
+        return 0 if p.runnable else 3
+    return 2
+
+
+def cmd_power(args) -> int:
+    """Power-tier gate: the strongest tools (RF TX/replay, sub-GHz, IR, BadUSB)
+    are hidden in FIELD, LAB-only, and need a per-action confirmation even in LAB.
+    `list` shows what's available in a mode; `check` shows the gate decision."""
+    from .core import power_tier as P
+    from .core.mode import read_mode
+    mode = getattr(args, "mode", None) or read_mode(getattr(args, "scope_file", None))
+    if args.power_cmd == "list":
+        vis = P.visible_in(mode)
+        print(f"capabilities available in {mode.upper()} mode:\n")
+        for c in vis:
+            tag = " (needs confirm)" if c.needs_confirmation else ""
+            print(f"  [{c.tier.value:<6}] {c.id:<14} {c.label}{tag}")
+        hidden = [c for c in P._REGISTRY.values() if c not in vis]
+        if hidden:
+            print("\nnot available here:")
+            for c in hidden:
+                why = "FORBIDDEN (never)" if c.tier == P.Tier.FORBIDDEN else "POWER — LAB only"
+                print(f"  [{why}] {c.id:<14} {c.risk}")
+        return 0
+    if args.power_cmd == "check":
+        lab = mode.strip().lower() == "lab"
+        ok, why = P.authorize_power(args.capability, lab_mode=lab,
+                                    confirmed=bool(getattr(args, "confirm", False)))
+        print(("ALLOW: " if ok else "REFUSE: ") + why)
+        return 0 if ok else 3
+    return 2
 def cmd_oui(args) -> int:
     """MAC vendor lookup / device classification / full-DB import (glass-box).
     Built-in table out of the box; `import` merges a full IEEE/manuf DB on top."""
@@ -2984,6 +3112,54 @@ def build_parser() -> argparse.ArgumentParser:
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
 
+    ir = sub.add_parser("ir", help="infrared: TV-B-Gone power blast + loadable IR code library (POWER-tier)")
+    ir.add_argument("--lib", default="/captures/config/ir.json", help="IR code library path")
+    irsub = ir.add_subparsers(dest="ir_cmd", required=True)
+    irsub.add_parser("codes", help="show the built-in TV power codes")
+    irsub.add_parser("list", help="list saved IR codes")
+    iri = irsub.add_parser("import", help="import a Flipper .ir file into the library")
+    iri.add_argument("file", help="path to a .ir file")
+    irb = irsub.add_parser("blast", help="TV-B-Gone: blast all power codes (LAB + --confirm)")
+    irb.add_argument("--confirm", action="store_true", help="per-action opt-in")
+    irb.add_argument("--scope-file", default=None)
+    irr = irsub.add_parser("replay", help="replay one saved IR code (LAB + --confirm)")
+    irr.add_argument("name", help="code name (see `redux ir list`)")
+    irr.add_argument("--confirm", action="store_true", help="per-action opt-in")
+    irr.add_argument("--scope-file", default=None)
+    ir.set_defaults(func=cmd_ir)
+
+    sg = sub.add_parser("subghz", help="sub-GHz signal library: capture/catalog (RX) + gated replay (keyfobs, garage, ISM)")
+    sg.add_argument("--lib", default="/captures/config/subghz.json", help="signal library path")
+    sgsub = sg.add_subparsers(dest="subghz_cmd", required=True)
+    sgc = sgsub.add_parser("capture", help="print the RX capture command for a frequency (works with RTL-SDR)")
+    sgc.add_argument("freq", help="frequency, e.g. 433.92M or 315M")
+    sgc.add_argument("--seconds", type=int, default=10, help="capture duration (default 10)")
+    sgc.add_argument("--raw", action="store_true", help="raw IQ grab (rtl_sdr) for later replay, not decode")
+    sgc.add_argument("--out", default=None, help="raw capture output path")
+    sgc.add_argument("--device", type=int, default=0, help="RTL-SDR device index")
+    sgsub.add_parser("list", help="list catalogued signals")
+    sga = sgsub.add_parser("add", help="add a signal to the library")
+    sga.add_argument("name"); sga.add_argument("freq", help="e.g. 390M")
+    sga.add_argument("--protocol", default=None, help="rtl_433 protocol/model if known")
+    sga.add_argument("--capture", default=None, help="path to a raw IQ/.ook capture file (needed to replay)")
+    sga.add_argument("--note", default=None)
+    sgr = sgsub.add_parser("remove", help="remove a signal"); sgr.add_argument("id")
+    sgrp = sgsub.add_parser("replay", help="replay a signal (POWER-tier: LAB + --confirm + a TX backend)")
+    sgrp.add_argument("id", help="signal id or name")
+    sgrp.add_argument("--confirm", action="store_true", help="the per-action opt-in (required in LAB)")
+    sgrp.add_argument("--backend", default=None, choices=("hackrf", "rpitx", "cc1101"))
+    sgrp.add_argument("--scope-file", default=None, help="read mode from this scope file")
+    sg.set_defaults(func=cmd_subghz)
+
+    pw = sub.add_parser("power", help="power-tier gate: the strongest tools (LAB-only + confirm; some forbidden)")
+    pw.add_argument("--mode", default=None, choices=("lab", "field"), help="check a specific mode (default: device mode)")
+    pw.add_argument("--scope-file", default=None, help="read mode from this scope file")
+    pwsub = pw.add_subparsers(dest="power_cmd", required=True)
+    pwsub.add_parser("list", help="show what's available in a mode (and what's hidden/forbidden)")
+    pwc = pwsub.add_parser("check", help="show the gate decision for a capability")
+    pwc.add_argument("capability", help="capability id (e.g. sdr.replay, ir.blast, badusb.hid)")
+    pwc.add_argument("--confirm", action="store_true", help="the per-action opt-in (press OK)")
+    pw.set_defaults(func=cmd_power)
     ou = sub.add_parser("oui", help="MAC vendor lookup / device classification / full-DB import")
     ousub = ou.add_subparsers(dest="oui_cmd", required=True)
     oul = ousub.add_parser("lookup", help="vendor for a MAC (built-in + imported DB)")
