@@ -2595,6 +2595,58 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_triage(args) -> int:
+    """Crack ROI triage + passive-capture forecast — a learning aid for where to
+    spend effort. Every number is a rough heuristic for ORDERING work, not a
+    guarantee. Reads real captured artifacts and real harvested probe counts."""
+    from pathlib import Path
+    from .crack import triage as T
+    # --- crack ROI over the captured .hc22000 queue ---------------------- #
+    files = [Path(args.file)] if args.file else (
+        sorted(Path(args.dir).rglob("*.hc22000")) if Path(args.dir).is_dir() else [])
+    tuples = []
+    for fp in files:
+        try:
+            tuples.extend(T.parse_22000_targets(fp.read_text(encoding="utf-8", errors="replace")))
+        except OSError:
+            continue
+    rows = T.triage_crack_queue(tuples)
+    # --- passive-capture forecast from harvested PNL --------------------- #
+    forecasts = []
+    try:
+        from .portal.karma import ProbeHarvester
+        forecasts = T.triage_capture(ProbeHarvester(path=args.pnl).ssids(),
+                                     reassoc_per_hour=args.reassoc_per_hour)
+    except Exception:
+        forecasts = []
+    if args.json:
+        print(json.dumps({
+            "crack_queue": [{"ssid": r.ssid, "bssid": r.bssid, "artifacts": list(r.artifacts),
+                             "prob": r.prob, "priority": r.priority, "tier": r.tier,
+                             "wordlist": r.wordlist_hint, "why": r.rationale} for r in rows],
+            "capture_forecast": [{"ssid": c.ssid, "clients": c.clients,
+                                  "mean_hours": c.mean_hours, "eta": c.eta,
+                                  "recommend": c.recommend} for c in forecasts],
+        }, indent=2))
+        return 0
+    src = args.file or args.dir
+    print(f"CRACK ROI — {len(rows)} captured target(s) in {src}  (heuristic order, not a success rate)")
+    if not rows:
+        print("  (no .hc22000 artifacts found — capture a handshake/PMKID first)")
+    for r in rows:
+        print(f"  [{r.tier:6}] p≈{r.prob:.2f}  {r.ssid or '(hidden)'}  {r.bssid}  {{{','.join(r.artifacts)}}}")
+        print(f"            wordlist: {r.wordlist_hint}")
+        print(f"            {r.rationale}")
+    print(f"\nCAPTURE FORECAST — {len(forecasts)} probed SSID(s) from {args.pnl}  "
+          f"(~{args.reassoc_per_hour}/h per-client reassoc assumption; rough estimate)")
+    if not forecasts:
+        print("  (no harvested probes yet)")
+    for c in forecasts:
+        print(f"  {c.ssid!r}  clients={c.clients}  passive ETA: {c.eta}")
+        print(f"            -> {c.recommend}")
+    return 0
+
+
 def cmd_wordlist(args) -> int:
     """Manage the on-device hashcat wordlist registry (list/add/pull/select)."""
     from .crack.wordlists import WordlistStore
@@ -3726,6 +3778,14 @@ def build_parser() -> argparse.ArgumentParser:
     agk = agsub.add_parser("init-key", help="create the device signing key (entries become signed)")
     agk.add_argument("--force", action="store_true", help="replace an existing key (invalidates past signatures)")
     ag.set_defaults(func=cmd_authlog)
+    tr = sub.add_parser("triage", help="crack ROI triage + passive-capture forecast (learning aid; heuristic)")
+    tr.add_argument("--dir", default="/captures/ready", help="dir of captured .hc22000 artifacts to rank")
+    tr.add_argument("--file", default=None, help="a single .hc22000 file instead of --dir")
+    tr.add_argument("--pnl", default="/captures/live/pnl.json", help="harvested PNL store for the capture forecast")
+    tr.add_argument("--reassoc-per-hour", type=float, default=0.5,
+                    help="assumed per-client reassociation rate for the forecast (default 0.5/h)")
+    tr.add_argument("--json", action="store_true", help="machine-readable output")
+    tr.set_defaults(func=cmd_triage)
     return p
 
 
