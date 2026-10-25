@@ -2617,6 +2617,56 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_radar(args) -> int:
+    """Threat radar — counter-surveillance from the sightings the box already
+    records: evil twins, KARMA lures, and suspicious new strong APs. Passive and
+    defensive; identical in LAB and FIELD. Honest about its frame-level blind spot."""
+    from .intel.radar import scan_sightings
+    trusted = list(args.trusted or [])
+    # armed BSSIDs in the scope count as your own gear (trusted)
+    if args.scope_file is not None or not trusted:
+        try:
+            from .core.scope import Scope
+            scope = Scope.load(args.scope_file or _DEFAULT_SCOPE_PATH)
+            trusted += [e.value for e in scope.active_entries() if e.kind == "bssid"]
+        except Exception:
+            pass
+    pnl_ssids = []
+    if args.pnl:
+        try:
+            from .portal.karma import ProbeHarvester
+            pnl_ssids = [r["ssid"] for r in ProbeHarvester(path=args.pnl).ssids() if r.get("ssid")]
+        except Exception:
+            pnl_ssids = []
+    rows = []
+    try:
+        from .geo.db import SightingStore
+        rows = SightingStore(args.db or "/captures/live/sightings.db").query(kind="wifi")
+    except Exception:
+        rows = []
+    rep = scan_sightings(rows, pnl_ssids=pnl_ssids, trusted_bssids=trusted,
+                         new_window_s=args.new_window_hours * 3600.0, strong_rssi=args.strong_rssi)
+    if args.json:
+        print(json.dumps({
+            "scanned_aps": rep.scanned_aps,
+            "alerts": [{"kind": a.kind, "severity": a.severity, "ssid": a.ssid,
+                        "bssids": list(a.bssids), "detail": a.detail, "advice": a.advice}
+                       for a in rep.alerts],
+            "notes": list(rep.notes)}, indent=2))
+        return 0
+    print(f"THREAT RADAR — {len(rep.alerts)} alert(s) across {rep.scanned_aps} AP(s) seen")
+    for a in rep.alerts:
+        print(f"\n  [{a.severity.upper():6}] {a.kind}  {a.ssid!r}")
+        print(f"    {a.detail}")
+        print(f"    BSSIDs: {', '.join(a.bssids)}")
+        print(f"    -> {a.advice}")
+    if not rep.alerts:
+        print("  (nothing suspicious in the stored sightings)")
+    for n in rep.notes:
+        print(f"\nnote: {n}")
+    return 0
+
+
 def cmd_explain(args) -> int:
     """Purple-team explain & defend — for a technique Augur can run, how a
     defender detects it and how they stop it. Informational; mode-agnostic."""
@@ -3929,6 +3979,15 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("technique", nargs="?", default="", help="technique key (omit to list all)")
     ex.add_argument("--json", action="store_true", help="machine-readable output")
     ex.set_defaults(func=cmd_explain)
+    ra = sub.add_parser("radar", help="threat radar: counter-surveillance (evil twins, KARMA lures) from sightings")
+    ra.add_argument("--db", default=None, help="sightings DB (default /captures/live/sightings.db)")
+    ra.add_argument("--pnl", default=None, help="harvested PNL store (flags lures for networks you seek)")
+    ra.add_argument("--trusted", action="append", help="a BSSID you own/recognise (repeatable); armed scope BSSIDs are trusted too")
+    ra.add_argument("--scope-file", default=None, help="treat this scope's armed BSSIDs as trusted (default: the device scope)")
+    ra.add_argument("--new-window-hours", type=float, default=1.0, help="how recent a 'new' AP is (default 1h)")
+    ra.add_argument("--strong-rssi", type=int, default=-50, help="dBm at/above which a new AP is 'close' (default -50)")
+    ra.add_argument("--json", action="store_true", help="machine-readable output")
+    ra.set_defaults(func=cmd_radar)
     return p
 
 
