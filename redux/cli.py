@@ -2617,6 +2617,64 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_loot(args) -> int:
+    """Recovered-credential vault + scope-gated network pivot. The vault is
+    owner-only on-device storage, auth-log-linked (never the secret). `pivot`
+    is a firing path: FIELD plans unless --authorized and every target must be
+    armed; LAB runs end-to-end on your own private subnets."""
+    from .loot import LootVault, LootEntry, pivot, default_loot_path
+    vault = LootVault(args.vault or default_loot_path())
+    cmd = args.loot_cmd
+    if cmd == "add":
+        newly = vault.add(LootEntry(kind="wifi-psk", target=(args.bssid or "").lower(),
+                                    secret=args.psk, ssid=args.ssid or "",
+                                    source=args.source or "manual"))
+        who = args.bssid or args.ssid or "(unspecified)"
+        print(f"{'added' if newly else 'updated'} wifi-psk for {who}  (vault holds {len(vault)})")
+        return 0
+    if cmd == "list":
+        ents = vault.entries()
+        if args.json:
+            rows = []
+            for e in ents:
+                d = e.to_dict()
+                if not args.reveal:
+                    red = f"[redacted — {len(e.secret)} chars]"
+                    d["secret"] = red
+                    if "psk" in d:
+                        d["psk"] = red
+                rows.append(d)
+            print(json.dumps(rows, indent=2))
+            return 0
+        if not ents:
+            print(f"loot vault is empty ({vault.path})")
+            return 0
+        for e in ents:
+            sec = e.secret if args.reveal else f"[redacted — {len(e.secret)} chars]"
+            print(f"  {e.kind:12} {(e.target or e.ssid or '-'):22} {e.service or '-':6} "
+                  f"{e.username or '-':10} {sec}  [{e.source}]")
+        if not args.reveal:
+            print("  (secrets redacted; pass --reveal to show)")
+        return 0
+    if cmd == "pivot":
+        from .core.scope import Scope
+        scope = Scope.load(args.scope_file or _DEFAULT_SCOPE_PATH)
+        usernames = args.user or ["admin", "root"]
+        passwords = list(args.pw or []) + vault.psk_list()
+        res = pivot(scope, authorized=args.authorized, subnet=args.subnet,
+                    usernames=usernames, passwords=passwords, vault=vault)
+        if not res.executed:
+            print(f"PIVOT [{res.mode.upper()}] — NOT fired: {res.reason}")
+            for s in res.planned_steps:
+                print(f"  plan: {s}")
+            return 0
+        print(f"PIVOT [{res.mode.upper()}] — {res.reason}; {res.vault_added} new credential(s) vaulted")
+        for n in res.notes:
+            print(f"  {n}")
+        return 0
+    return 2
+
+
 def cmd_radar(args) -> int:
     """Threat radar — counter-surveillance from the sightings the box already
     records: evil twins, KARMA lures, and suspicious new strong APs. Passive and
@@ -3988,6 +4046,24 @@ def build_parser() -> argparse.ArgumentParser:
     ra.add_argument("--strong-rssi", type=int, default=-50, help="dBm at/above which a new AP is 'close' (default -50)")
     ra.add_argument("--json", action="store_true", help="machine-readable output")
     ra.set_defaults(func=cmd_radar)
+    lo = sub.add_parser("loot", help="recovered-credential vault + scope-gated network pivot")
+    lo.add_argument("--vault", default=None, help="vault file (default: the device loot vault)")
+    losub = lo.add_subparsers(dest="loot_cmd", required=True)
+    la = losub.add_parser("add", help="store a recovered WPA PSK")
+    la.add_argument("psk", help="the recovered passphrase")
+    la.add_argument("--bssid", default=None, help="AP BSSID the PSK belongs to")
+    la.add_argument("--ssid", default=None, help="network name")
+    la.add_argument("--source", default="manual", help="where it came from (crack/manual/…)")
+    ll = losub.add_parser("list", help="list vaulted credentials (secrets redacted by default)")
+    ll.add_argument("--reveal", action="store_true", help="show the actual secrets")
+    ll.add_argument("--json", action="store_true", help="machine-readable output")
+    lp = losub.add_parser("pivot", help="recon + credential-reuse into a subnet (FIELD: plan unless --authorized; LAB: runs)")
+    lp.add_argument("--subnet", default=None, help="CIDR to pivot into (else the armed CIDRs in scope)")
+    lp.add_argument("--user", action="append", help="username to try (repeatable; default: admin, root)")
+    lp.add_argument("--pw", action="append", help="extra password to try (vaulted PSKs are included automatically)")
+    lp.add_argument("--authorized", action="store_true", help="FIELD only: actually fire (targets must be armed in scope)")
+    lp.add_argument("--scope-file", default=None, help="scope store (default: the device scope)")
+    lo.set_defaults(func=cmd_loot)
     return p
 
 
