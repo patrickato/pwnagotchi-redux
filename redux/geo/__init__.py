@@ -13,6 +13,9 @@ from redux.geo.export_tracks import export_store_gpx, export_store_kml, to_gpx, 
 from redux.geo.follower import (
     FollowerVerdict, follower_analysis, followers, analyze_mac,
 )
+from redux.geo.gpsd import (
+    GpsdClient, gpsd_position_provider, parse_tpv,
+)
 from redux.geo.geofence import inside_authorized_area, point_in_geojson_polygon
 from redux.geo.geohash import group_by_cell
 from redux.geo.kismet_import import import_kismetdb
@@ -35,6 +38,7 @@ __all__ = [
     "UploadReport",
     "upload_when_online",
     "FollowerVerdict", "follower_analysis", "followers", "analyze_mac",
+    "GpsdClient", "gpsd_position_provider", "parse_tpv",
     "CoverageGrid",
     "DEFAULT_DB_PATH",
     "Fix",

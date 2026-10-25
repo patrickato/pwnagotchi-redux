@@ -642,6 +642,21 @@ def cmd_subghz(args) -> int:
     return 2
 
 
+def cmd_gps(args) -> int:
+    """Read the current position from gpsd (the standard Linux GPS daemon).
+    Works for USB/serial/Bluetooth GPS once gpsd owns it. Glass-box."""
+    from .geo.gpsd import GpsdClient
+    host, port = args.host, args.port
+    c = GpsdClient(host, port, timeout=args.timeout)
+    fix = c.poll_fix()
+    if fix is None:
+        print(f"no fix from gpsd at {host}:{port} "
+              "(is gpsd running and does it have a GPS lock?)")
+        return 1
+    print(f"fix: {fix.lat:.6f}, {fix.lon:.6f}  (via gpsd {host}:{port})")
+    return 0
+
+
 def cmd_power(args) -> int:
     """Power-tier gate: the strongest tools (RF TX/replay, sub-GHz, IR, BadUSB)
     are hidden in FIELD, LAB-only, and need a per-action confirmation even in LAB.
@@ -3111,6 +3126,12 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
     dx.set_defaults(func=cmd_dex)
+
+    gp = sub.add_parser("gps", help="read the current position from gpsd (USB/serial/BT GPS)")
+    gp.add_argument("--host", default="127.0.0.1", help="gpsd host (default 127.0.0.1)")
+    gp.add_argument("--port", type=int, default=2947, help="gpsd port (default 2947)")
+    gp.add_argument("--timeout", type=float, default=5.0, help="read timeout seconds")
+    gp.set_defaults(func=cmd_gps)
 
     ir = sub.add_parser("ir", help="infrared: TV-B-Gone power blast + loadable IR code library (POWER-tier)")
     ir.add_argument("--lib", default="/captures/config/ir.json", help="IR code library path")

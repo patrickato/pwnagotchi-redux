@@ -190,9 +190,25 @@ def free_bytes(path):
 
 
 def _gps_from_env():
-    """A position_provider from a serial GPS named by $REDUX_GPS (e.g.
-    /dev/ttyUSB0), or None when unset — so geo features light up when a GPS puck
-    is present, with no behavior change when it isn't. Best-effort, never raises."""
+    """A position_provider from gpsd or a serial GPS, or None when neither is
+    configured — so geo features light up when a GPS is present, with no behavior
+    change when it isn't. Best-effort, never raises.
+
+    gpsd takes precedence (the standard Linux way, works for USB/serial/BT GPS):
+    set $REDUX_GPSD=1 (localhost:2947) or $REDUX_GPSD=host:port. Otherwise a
+    serial device named by $REDUX_GPS (e.g. /dev/ttyUSB0)."""
+    gpsd = os.environ.get("REDUX_GPSD")
+    if gpsd:
+        try:
+            from ..geo.gpsd import gpsd_position_provider
+            host, port = "127.0.0.1", 2947
+            spec = gpsd.strip()
+            if spec not in ("1", "true", "on", "yes") and ":" in spec:
+                host, _, p = spec.rpartition(":")
+                port = int(p)
+            return gpsd_position_provider(host, port)
+        except Exception:
+            return None
     dev = os.environ.get("REDUX_GPS")
     if not dev:
         return None
