@@ -31,13 +31,21 @@ FB_TOUCH_PATTERN = re.compile(r"/dev/input/event[0-9]{1,3}\Z")
 RESOLUTION = (480, 320)
 MAX_STATUS = 65536
 MAX_MEASURED_COUNT = (1 << 63) - 1
-INK = (223, 236, 242)
-SUBTLE = (126, 153, 171)
-TEAL = (64, 218, 186)
-AMBER = (247, 190, 76)
-RED = (255, 111, 107)
-BLUE = (101, 175, 245)
-BACKGROUND = (10, 15, 24)
+INK = (220, 232, 239)
+SUBTLE = (128, 150, 164)
+TEAL = (49, 210, 230)        # primary accent (now cyan, matching the Augur skin)
+AMBER = (255, 178, 60)
+RED = (255, 107, 130)
+BLUE = (120, 170, 255)
+BACKGROUND = (6, 9, 13)
+# --- Augur skin tokens (dark instrument theme) ---
+PANEL = (14, 22, 30)
+PANEL2 = (11, 18, 26)
+STROKE = (28, 44, 56)
+CY2 = (138, 242, 255)
+GRN = (90, 224, 170)
+MAG = (189, 123, 255)
+MUT = (74, 92, 106)
 
 
 _TOUCH_CONTROLLERS = ("ads7846", "xpt2046")
@@ -333,6 +341,83 @@ def fit_text(draw, value, font, width):
             right = middle - 1
     return value[:left] + "..." if left else ""
 
+# --- Augur skin drawing helpers (pure Pillow; cheap, no per-pixel loops) ---
+def _spaced(draw, pos, text, font, fill, track):
+    """Letter-spaced wordmark; returns the x past the last glyph."""
+    x, y = pos
+    for ch in text:
+        draw.text((x, y), ch, font=font, fill=fill)
+        x += draw.textlength(ch, font=font) + track
+    return x
+
+
+def _aperture(draw, cx, cy, r, color):
+    """The Augur mark — an aperture/eye: faint outer ring, a lens, a bright core."""
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(40, 70, 86), width=1)
+    lens = (cx - r, cy - int(r * 0.6), cx + r, cy + int(r * 0.6))
+    draw.arc(lens, 200, 340, fill=color, width=2)
+    draw.arc(lens, 20, 160, fill=color, width=2)
+    draw.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=color)
+    for a in range(0, 360, 45):
+        px = cx + int((r - 3) * math.cos(math.radians(a)))
+        py = cy + int((r - 3) * math.sin(math.radians(a)))
+        draw.point((px, py), fill=(70, 130, 160))
+
+
+def _panel(draw, box, *, radius=8, fill=PANEL, outline=STROKE, width=1):
+    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+
+
+def _stat_value(rows, label):
+    """Compact a live evidence row's value for a header chip ('47.0 C' -> '47°')."""
+    for row in rows:
+        if row.get("label") == label:
+            value = row.get("value")
+            if not isinstance(value, str) or value in ("Unavailable", ""):
+                return "--"
+            return value.replace(".0", "").replace(" C", "°").replace(" ", "")
+    return "--"
+
+
+def _arc_gauge(draw, cx, cy, r, frac, color, big, small):
+    """A ring gauge with a centered figure, for the system/health pages."""
+    box = (cx - r, cy - r, cx + r, cy + r)
+    draw.arc(box, 0, 360, fill=(31, 45, 56), width=5)
+    try:
+        frac = max(0.0, min(1.0, float(frac)))
+    except (TypeError, ValueError):
+        frac = 0.0
+    if frac > 0:
+        draw.arc(box, -90, -90 + int(360 * frac), fill=color, width=5)
+    bf = _font(13, bold=True)
+    bb = draw.textbbox((0, 0), big, font=bf)
+    draw.text((cx - (bb[2] - bb[0]) / 2, cy - (bb[3] - bb[1]) / 2 - 3), big, font=bf, fill=INK)
+    sf = _font(8)
+    sb = draw.textbbox((0, 0), small, font=sf)
+    draw.text((cx - (sb[2] - sb[0]) / 2, cy + 9), small, font=sf, fill=SUBTLE)
+
+
+def _mode_dial(draw, cx, cy, r, is_lab):
+    """The FIELD/LAB selector dial — the signature control from the Augur skin."""
+    box = (cx - r, cy - r, cx + r, cy + r)
+    draw.arc(box, 95, 265, fill=AMBER if not is_lab else (74, 58, 30), width=6)   # FIELD (left)
+    draw.arc(box, -85, 85, fill=TEAL if is_lab else (28, 66, 80), width=6)         # LAB (right)
+    for a in range(0, 360, 15):
+        r1, r2 = r - 11, r - 17
+        draw.line((cx + int(r1 * math.cos(math.radians(a))), cy + int(r1 * math.sin(math.radians(a))),
+                   cx + int(r2 * math.cos(math.radians(a))), cy + int(r2 * math.sin(math.radians(a)))),
+                  fill=(58, 76, 90), width=1)
+    for rr, col in ((r - 22, (20, 30, 40)), (r - 30, (13, 21, 29))):
+        draw.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=col, outline=(36, 54, 66), width=1)
+    acc = TEAL if is_lab else AMBER
+    draw.ellipse((cx - 9, cy - 9, cx + 9, cy + 9), fill=acc)
+    draw.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=(8, 14, 20))
+    pa = 0 if is_lab else 180
+    px = cx + int((r - 3) * math.cos(math.radians(pa)))
+    py = cy + int((r - 3) * math.sin(math.radians(pa)))
+    draw.ellipse((px - 4, py - 4, px + 4, py + 4), fill=(255, 255, 255))
+
+
 # The on-screen map of everything Augur can do, grouped for a 3.5" panel. Static
 # data (cheap to draw); the menu page renders it so every capability is
 # discoverable from the screen even when its action runs via CLI/web.
@@ -344,6 +429,12 @@ _MENU_GROUPS = (
     ("OPS", "mode scope karma", "wps eap portal"),
     ("SYSTEM", "gps toolbox learn", "oui push notebook"),
 )
+
+# Friendly dock labels for the footer (cosmetic only; navigation uses the page keys).
+_DOCK_LABELS = {
+    "overview": "HOME", "captures": "CACHE", "doctor": "HEALTH", "radios": "RADIO",
+    "trends": "TREND", "system": "SYS", "signals": "AIR", "power": "MODE", "menu": "MENU",
+}
 
 
 def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
@@ -363,12 +454,12 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
         raise ValueError("unknown framebuffer page")
     img = Image.new("RGB", RESOLUTION, BACKGROUND)
     px = img.load()
-    # Subtle, ambient header glow; the layout is intentionally not a tile grid.
+    # Header band — a subtle vertical gradient, brightest at the very top.
     for y in range(0, 124):
+        t = 1 - y / 124.0
+        row = (int(7 + 7 * t), int(12 + 11 * t), int(17 + 15 * t))
         for x in range(480):
-            falloff = max(0, 100 - ((x - 65) ** 2 // 320 + (y - 28) ** 2 // 110))
-            if falloff:
-                px[x, y] = (10, 15 + falloff // 9, 24 + falloff // 6)
+            px[x, y] = row
     draw = ImageDraw.Draw(img)
 
     def text_line(position, message, *, font, fill):
@@ -379,34 +470,45 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
     colors = {"ok": TEAL, "attention": AMBER, "degraded": RED,
               "action": RED, "unknown": BLUE}
     accent = colors[data["health"]]
-    text_line((18, 12), "REDUX", font=_font(21, bold=True), fill=INK)
-    text_line((108, 18), "AUGUR / LIVE", font=_font(11), fill=SUBTLE)
-    text_line((260, 18), f"{PAGES.index(page) + 1}/{len(PAGES)}  < >", font=_font(11), fill=SUBTLE)
-    draw.ellipse((434, 21, 447, 34), fill=accent)
-    text_line((354, 40), data["health"].upper(), font=_font(11, bold=True), fill=accent)
-    # Operating-mode badge (the header strip is the tap-to-switch zone). LAB is the
-    # armed/automatic posture (amber), FIELD the passive lock-down (teal). While
-    # arming, show the confirm prompt so a stray tap can't flip posture.
-    if mode in ("lab", "field"):
+    # --- identity header (the mark, the wordmark, the mode pill, live stats) ---
+    _aperture(draw, 27, 24, 11, TEAL)
+    endx = _spaced(draw, (46, 11), "AUGUR", _font(20, bold=True), INK, 3)
+    text_line((int(endx) + 6, 23), "REDUX", font=_font(9), fill=MUT)
+    # Operating-mode pill. The whole header strip (y<40) is the tap-to-switch zone:
+    # LAB is the armed/automatic posture (amber), FIELD the passive lock-down (cyan).
+    # While arming, the pill shows a confirm prompt so a stray tap can't flip posture.
+    is_lab = mode == "lab"
+    label = "LAB" if is_lab else "FIELD" if mode == "field" else None
+    if label:
+        pill = AMBER if is_lab else TEAL
         if mode_arming:
-            other = "FIELD" if mode == "lab" else "LAB"
-            text_line((18, 39), f"SWITCH -> {other}?  tap again", font=_font(11, bold=True), fill=RED)
-        else:
-            text_line((18, 39), f"MODE {mode.upper()}", font=_font(11, bold=True),
-                      fill=AMBER if mode == "lab" else TEAL)
-    draw.line((18, 55, 462, 55), fill=(36, 57, 69), width=2)
-    text_line((20, 65), "ENGINE  " + data["engine"], font=_font(20, bold=True), fill=accent)
-    text_line((20, 98), "RADIO  " + data["iface"], font=_font(13), fill=SUBTLE)
+            pill, label = RED, "TAP AGAIN"
+        _panel(draw, (196, 12, 196 + len(label) * 9 + 26, 34), radius=11,
+               fill=(13, 21, 29), outline=pill, width=1)
+        draw.ellipse((205, 19, 212, 26), fill=pill)
+        text_line((217, 15), label, font=_font(11, bold=True), fill=pill)
+    # Live header stats pulled from the same fresh evidence model, plus a health dot.
+    rows = evidence["rows"]
+    temp = _stat_value(rows, "CPU temperature")
+    text_line((360, 13), temp, font=_font(13, bold=True), fill=AMBER if temp != "--" else SUBTLE)
+    text_line((360, 31), "TEMP", font=_font(7), fill=MUT)
+    cpu_util = _stat_value(rows, "CPU utilization")
+    text_line((410, 13), cpu_util, font=_font(13, bold=True), fill=INK)
+    text_line((410, 31), "CPU", font=_font(7), fill=MUT)
+    draw.ellipse((456, 17, 467, 28), fill=accent)
+    draw.line((18, 43, 462, 43), fill=STROKE, width=1)
+    text_line((20, 50), "ENGINE  " + data["engine"], font=_font(19, bold=True), fill=accent)
+    text_line((20, 80), "RADIO  " + data["iface"], font=_font(12), fill=SUBTLE)
     # Link-layer compatibility is not evidence of received RF frames.
     rf_color = RED if data["rf_link_type"] == 1 else SUBTLE
-    text_line((180, 98), data["rf_label"], font=_font(10, bold=True), fill=rf_color)
-    draw.line((18, 123, 462, 123), fill=(36, 57, 69), width=1)
+    text_line((180, 80), data["rf_label"], font=_font(10, bold=True), fill=rf_color)
+    draw.line((18, 123, 462, 123), fill=STROKE, width=1)
 
     if page != "radios":
         cpu, load, memory = evidence["rows"][:3]
         summary = "CPU " + cpu["value"] + " / " + load["value"] + " / RAM " + memory["value"]
         summary += " / " + evidence["sensors"]["state"].upper()
-        text_line((20, 112), summary, font=_font(9), fill=TEAL if cpu["state"] == "fresh" else AMBER)
+        text_line((20, 101), summary, font=_font(9), fill=TEAL if cpu["state"] == "fresh" else AMBER)
 
     def metric(x, label, value):
         text_line((x, 164), label, font=_font(11), fill=SUBTLE)
@@ -523,25 +625,26 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
         from redux.core import power_tier as _pt
         m = (mode or "field").lower()
         is_lab = m == "lab"
-        text_line((20, 150), "POWER TIER / " + m.upper(),
-                  font=_font(12, bold=True), fill=AMBER if is_lab else TEAL)
-        text_line((20, 170),
-                  "LAB: strong tools UNLOCKED (confirm each)" if is_lab
-                  else "FIELD: strong tools HIDDEN (switch to LAB on your gear)",
-                  font=_font(9), fill=SUBTLE)
+        # The signature FIELD/LAB selector dial on the left.
+        _mode_dial(draw, 106, 214, 54, is_lab)
+        text_line((62, 276), "FIELD", font=_font(11, bold=True), fill=AMBER if not is_lab else MUT)
+        text_line((138, 276), "LAB", font=_font(11, bold=True), fill=TEAL if is_lab else MUT)
+        # Power-tier truth on the right.
+        text_line((196, 150), "POWER TIER", font=_font(12, bold=True), fill=INK)
+        text_line((196, 169), "LAB unlocks (confirm each)" if is_lab
+                  else "FIELD hides strong tools", font=_font(8), fill=SUBTLE)
         powers = [c for c in _pt._REGISTRY.values() if c.tier == _pt.Tier.POWER]
         forbidden = [c for c in _pt._REGISTRY.values() if c.tier == _pt.Tier.FORBIDDEN]
-        y = 190
-        for c in powers[:6]:
-            dot = AMBER if is_lab else RED
-            draw.ellipse((20, y + 4, 27, y + 11), fill=dot)
-            state = "unlocked (confirm)" if is_lab else "LAB only"
-            text_line((34, y), fit_text(draw, c.label, _font(10), 230) + " - " + state,
-                      font=_font(10), fill=INK if is_lab else SUBTLE)
-            y += 17
+        y = 188
+        for c in powers[:5]:
+            draw.ellipse((198, y + 3, 205, y + 10), fill=AMBER if is_lab else RED)
+            tail = " unlocked" if is_lab else " LAB only"
+            text_line((212, y), fit_text(draw, c.label, _font(9), 170) + " -" + tail,
+                      font=_font(9), fill=INK if is_lab else SUBTLE)
+            y += 16
         if forbidden:
             names = ", ".join(c.label.split("(")[0].strip() for c in forbidden)
-            text_line((20, y + 2), "FORBIDDEN (never): " + names,
+            text_line((196, y + 3), "FORBIDDEN: " + fit_text(draw, names, _font(8), 190),
                       font=_font(8), fill=RED)
     elif page == "signals":
         text_line((20, 150), "SIGNAL DEX / everything seen or captured",
@@ -565,28 +668,48 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
                 text_line((180, y), str(count), font=_font(12, bold=True), fill=INK)
                 y += 18
     else:
-        text_line((20, 160), "DOCTOR / ACTIONABLE FINDINGS",
-                  font=_font(12, bold=True), fill=SUBTLE)
+        # HEALTH: live ring gauges over the doctor's glass-box findings.
+        def _gnum(label, cap):
+            for row in evidence["rows"]:
+                if row.get("label") == label:
+                    match = re.search(r"[-+]?\d*\.?\d+", row.get("value") or "")
+                    if match:
+                        val = float(match.group())
+                        return val, max(0.0, min(1.0, val / cap))
+            return None, 0.0
+        tval, tf = _gnum("CPU temperature", 85)
+        cval, cf = _gnum("CPU utilization", 100)
+        mval, mf = _gnum("Memory utilization", 100)
+        for cx, lbl, val, frac, col, unit in (
+                (70, "TEMP", tval, tf, AMBER, "°"), (176, "CPU", cval, cf, GRN, "%"),
+                (282, "MEM", mval, mf, TEAL, "%")):
+            big = f"{val:.0f}{unit}" if val is not None else "--"
+            _arc_gauge(draw, cx, 180, 25, frac, col, big, lbl)
+        storage = data["storage_mb"]
+        _arc_gauge(draw, 388, 180, 25, min(1.0, (storage or 0) / 4096), MAG,
+                   str(storage) if storage is not None else "--", "FREE")
+        draw.line((18, 214, 462, 214), fill=STROKE, width=1)
+        text_line((20, 219), "DOCTOR / glass-box findings", font=_font(10, bold=True), fill=CY2)
         if data["stale"]:
-            text_line((20, 194), "REPORT STALE / NO VERIFIED FINDINGS",
-                      font=_font(12), fill=AMBER)
+            text_line((20, 244), "REPORT STALE / NO VERIFIED FINDINGS", font=_font(11), fill=AMBER)
         elif doctor["rows"]:
             for index, finding in enumerate(doctor["rows"]):
-                y = 190 + index * 30
+                y = 240 + index * 20
                 color = colors[finding["status"]]
-                draw.ellipse((20, y + 5, 28, y + 13), fill=color)
-                text_line((35, y), finding["status"].upper() + " / " + finding["summary"],
-                          font=_font(11), fill=INK)
+                badge = finding["status"].upper()
+                _panel(draw, (20, y, 68, y + 15), radius=4, fill=None, outline=color, width=1)
+                bw = draw.textlength(badge, font=_font(8, bold=True))
+                draw.text((44 - bw / 2, y + 3), badge, font=_font(8, bold=True), fill=color)
+                text_line((76, y + 2), finding["summary"], font=_font(10), fill=INK)
             if doctor["total"] > 3:
                 visible = doctor["start"] + len(doctor["rows"])
-                text_line((35, 282),
-                          f"FINDINGS {doctor['start'] + 1}-{visible} / {doctor['total']}"
-                          "  SWIPE UP/DOWN",
-                          font=_font(9), fill=SUBTLE)
+                text_line((20, 296),
+                          f"FINDINGS {doctor['start'] + 1}-{visible} / {doctor['total']}  SWIPE UP/DOWN",
+                          font=_font(8), fill=SUBTLE)
         else:
             message = ("No actionable findings" if data["health"] == "ok"
                        else "No verified findings")
-            text_line((20, 194), message, font=_font(12), fill=SUBTLE)
+            text_line((20, 244), message, font=_font(11), fill=SUBTLE)
 
     if page == "doctor" and any(row["label"] == "Plugin diagnostics" for row in evidence["rows"]):
         text_line((20, 140), "PLUGIN INVENTORY UNAVAILABLE / SEE SYSTEM", font=_font(9), fill=AMBER)
@@ -633,20 +756,21 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
     content = img.crop((0, 147, 480, 296))
     draw.rectangle((0, 124, 479, 319), fill=BACKGROUND)
     img.paste(content, (0, 127))
-    draw.rectangle((0, TAB_TOP, 479, 319), fill=(15, 24, 35))
+    draw.rectangle((0, TAB_TOP, 479, 319), fill=(9, 15, 21))
+    draw.line((0, TAB_TOP, 479, TAB_TOP), fill=STROKE, width=1)
     for index, tab in enumerate(navigation(page)):
         left = index * TAB_WIDTH
         selected = tab == page
         if selected:
-            draw.rectangle((left + 2, TAB_TOP, left + TAB_WIDTH - 3, 319),
-                           fill=(30, 60, 67))
-            draw.rectangle((left + 6, TAB_TOP, left + TAB_WIDTH - 7, TAB_TOP + 2),
-                           fill=TEAL)
-        label = tab.upper()
-        text_line((left + 12, TAB_TOP + 14), label,
-                  font=_font(11, bold=selected), fill=INK if selected else SUBTLE)
+            draw.rectangle((left + 2, TAB_TOP + 1, left + TAB_WIDTH - 3, 319), fill=(16, 28, 36))
+            draw.rectangle((left + 16, TAB_TOP, left + TAB_WIDTH - 17, TAB_TOP + 2), fill=TEAL)
+        label = _DOCK_LABELS.get(tab, tab.upper())
+        font = _font(10, bold=selected)
+        width = draw.textlength(label, font=font)
+        draw.text((left + (TAB_WIDTH - width) / 2, TAB_TOP + 15), label,
+                  font=font, fill=CY2 if selected else SUBTLE)
     if data["stale"]:
-        text_line((185, 43), "NOT VERIFIED", font=_font(10, bold=True), fill=AMBER)
+        text_line((330, 50), "NOT VERIFIED", font=_font(10, bold=True), fill=AMBER)
     return img
 
 
