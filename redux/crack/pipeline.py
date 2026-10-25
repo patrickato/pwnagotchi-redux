@@ -9,6 +9,13 @@ rather than pretending, and every outcome carries a human-readable reason.
 The cracker is a small protocol so the pipeline is pure/testable:
   - ReplayCracker   — canned results, no tools (tests / dry runs)
   - AircrackCracker — shells out to aircrack-ng on the device; honest tool-absent
+
+NOTE (not dead code): this is the **aircrack-ng** crack path, exposed at the API
+level and fully tested, but intentionally not the CLI default. The wired
+on-device cracker reached by `redux crack` is the hashcat path
+(`redux.crack.anycrack.run_plan` + the ingest/audit services), which covers the
+full range of hash modes. Keep this as the aircrack-ng alternative; wire it to a
+CLI engine flag if/when that cracker is wanted from the command line.
 """
 from __future__ import annotations
 

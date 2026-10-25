@@ -57,3 +57,55 @@ def test_aircrack_absent_reports_unavailable_not_fake_failure(tmp_path, monkeypa
     r = AircrackCracker().run(cap, wl, bssid="aa:bb:cc:dd:ee:ff")
     assert r.cracked is False and r.available is False
     assert "not installed" in r.reason and "Kali pack" in r.reason
+
+
+# --- CLI: the aircrack-ng engine (`redux crack wifi`) ----------------------- #
+
+def _wifi_args(**over):
+    from types import SimpleNamespace
+    base = dict(crack_cmd="wifi", capture=None, bssid="AA:BB:CC:DD:EE:FF",
+                wordlist=None, wordlist_path=None, wordlist_dir="/captures/wordlists",
+                run=False, authorized=False, scope_file=None)
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def test_crack_wifi_plan_shows_aircrack_command(tmp_path, capsys):
+    from redux.cli import cmd_crack
+    cap = tmp_path / "hs.cap"; cap.write_bytes(b"\x00")
+    wl = tmp_path / "wl.txt"; wl.write_text("password\n")
+    rc = cmd_crack(_wifi_args(capture=str(cap), wordlist_path=str(wl)))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "aircrack-ng" in out and "AA:BB:CC:DD:EE:FF" in out and str(wl) in out
+
+
+def test_crack_wifi_run_refused_without_lab_or_authorized(tmp_path, capsys):
+    from redux.cli import cmd_crack
+    from redux.core.scope import Scope
+    cap = tmp_path / "hs.cap"; cap.write_bytes(b"\x00")
+    wl = tmp_path / "wl.txt"; wl.write_text("password\n")
+    scope_file = tmp_path / "scope.json"; Scope().save(str(scope_file))   # FIELD (passive)
+    rc = cmd_crack(_wifi_args(capture=str(cap), wordlist_path=str(wl), run=True,
+                              scope_file=str(scope_file)))
+    out = capsys.readouterr().out
+    assert rc == 3 and "gated" in out.lower()
+
+
+def test_crack_wifi_run_refuses_out_of_scope_bssid(tmp_path, capsys):
+    from redux.cli import cmd_crack
+    from redux.core.scope import Scope
+    cap = tmp_path / "hs.cap"; cap.write_bytes(b"\x00")
+    wl = tmp_path / "wl.txt"; wl.write_text("password\n")
+    scope_file = tmp_path / "scope.json"
+    s = Scope(); s.add("11:22:33:44:55:66", job="lab"); s.save(str(scope_file))  # a DIFFERENT bssid
+    rc = cmd_crack(_wifi_args(capture=str(cap), wordlist_path=str(wl), run=True,
+                              authorized=True, scope_file=str(scope_file)))
+    out = capsys.readouterr().out
+    assert rc == 3 and "refused" in out.lower()
+
+
+def test_crack_wifi_missing_capture_is_honest(tmp_path, capsys):
+    from redux.cli import cmd_crack
+    rc = cmd_crack(_wifi_args(capture=str(tmp_path / "nope.cap"), wordlist_path="x"))
+    assert rc == 3 and "not found" in capsys.readouterr().out.lower()

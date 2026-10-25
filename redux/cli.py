@@ -1144,9 +1144,9 @@ def _wordlist(path):
 def cmd_netrecon(args) -> int:
     """The network-layer kill-chain over the ARMED Scope (the second half of the
     chain the RF side can't do): scan one authorized subnet, or autorun the whole
-    armed scope (scan -> optional cred-test -> loot). Scope decides WHERE, always —
-    nothing off-scope runs. NOTE: the live nmap/hydra execution is not yet wired
-    (the scope-gating + loot plumbing are real); until then scan/autorun report no hosts."""
+    armed scope (scan -> optional cred-test -> loot). Runs real nmap/hydra when
+    installed (Kali pack), honest tool-absence otherwise. Scope decides WHERE,
+    always — nothing off-scope runs; hydra cred-testing is active and scope-gated."""
     import json
     from .netrecon import recon_subnet, autorun, ReconRefused
     scope = Scope.load(args.scope_file)
@@ -2569,6 +2569,49 @@ def cmd_crack(args) -> int:
                   + f" — {s.reason}")
         return 0
 
+    if cmd == "wifi":
+        # Alternative crack engine: aircrack-ng run DIRECTLY against a .cap/.pcap
+        # WPA/WPA2 handshake (the hashcat path above converts to -m 22000 first;
+        # this skips the conversion). Same scope posture as `crack run`: refused
+        # unless LAB mode or --authorized, and crack()/scope.authorize(bssid)
+        # refuses a BSSID that isn't in scope. Glass-box, honest tool-absence.
+        cap = args.capture
+        if not Path(cap).is_file():
+            print(f"capture not found: {cap}")
+            return 3
+        wl_path = getattr(args, "wordlist_path", None)
+        if wl_path is None:
+            from .crack.wordlists import resolve_wordlist
+            wl_path, wl_reason = resolve_wordlist(args.wordlist_dir, name=getattr(args, "wordlist", None))
+            if wl_path is None:
+                print(f"no wordlist: {wl_reason}")
+                return 3
+        argv = ["aircrack-ng", "-w", wl_path, "-b", args.bssid, cap]
+        if not args.run:
+            print("aircrack-ng plan (glass-box):\n  " + " ".join(argv))
+            print("\nengine: aircrack-ng — the alternative to the hashcat -m 22000 path"
+                  " (skips the pcap->22000 conversion).")
+            print(f"bssid {args.bssid} is scope-gated; --run needs LAB mode or --authorized.")
+            return 0
+        from .core.mode import read_mode
+        if not (read_mode(getattr(args, "scope_file", None)) == "lab" or args.authorized):
+            print("refused: cracking is gated — enable LAB mode or pass --authorized")
+            return 3
+        from .core.scope import Scope, default_scope_path
+        try:
+            scope = Scope.load(args.scope_file or default_scope_path())
+        except Exception:
+            scope = Scope()
+        from .crack import crack, CrackRefused, AircrackCracker
+        try:
+            res = crack(cap, wl_path, bssid=args.bssid, scope=scope, cracker=AircrackCracker())
+        except CrackRefused as refusal:
+            print(f"refused: {refusal}")
+            return 3
+        print(json.dumps({"cracked": res.cracked, "target": res.target, "reason": res.reason,
+                          "psk": res.psk, "tool": res.tool, "available": res.available}, indent=2))
+        return 0 if (res.cracked or res.available) else 3
+
     # plan / run share option resolution
     recipe = R.by_name(getattr(args, "type", "") or "")
     if recipe is None:
@@ -2909,7 +2952,8 @@ def build_parser() -> argparse.ArgumentParser:
     wlr.add_argument("key", help="wordlist id or name to remove")
     wl.set_defaults(func=cmd_wordlist)
 
-    ck = sub.add_parser("crack", help="guided any-hash cracking (not just Wi-Fi): modes/id/plan/run")
+    ck = sub.add_parser("crack", help="guided any-hash cracking (not just Wi-Fi): modes/id/plan/run; "
+                                      "plus `wifi` for the aircrack-ng engine on WPA handshakes")
     cksub = ck.add_subparsers(dest="crack_cmd", required=True)
     ckm = cksub.add_parser("modes", help="browse/search the hash-type catalog")
     ckm.add_argument("query", nargs="?", default="", help="filter by slug/label/category/mode")
@@ -2940,6 +2984,19 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--outfile", default=None, help="show an --outfile in the planned command")
     _crack_opts(cksub.add_parser("plan", help="show the exact hashcat command that would run (glass-box)"), running=False)
     _crack_opts(cksub.add_parser("run", help="run the crack (gated by default; unlocked in LAB mode)"), running=True)
+    cwf = cksub.add_parser("wifi", help="crack a WPA/WPA2 handshake with aircrack-ng "
+                                        "(alternative engine to the hashcat -m 22000 path)")
+    cwf.add_argument("capture", help="absolute path to the handshake .cap/.pcap")
+    cwf.add_argument("--bssid", required=True, help="target AP BSSID (scope-gated on --run)")
+    cwf.add_argument("--wordlist", default=None, help="registered wordlist name/id (else the persisted pick)")
+    cwf.add_argument("--wordlist-path", default=None, help="use this absolute wordlist path directly")
+    cwf.add_argument("--wordlist-dir", default="/captures/wordlists", help="wordlist store dir")
+    cwf.add_argument("--run", action="store_true",
+                     help="actually run it (gated: LAB mode or --authorized, plus the BSSID in scope)")
+    cwf.add_argument("--authorized", action="store_true",
+                     help="confirm this capture is yours to crack (not needed in LAB mode)")
+    cwf.add_argument("--scope-file", default=None,
+                     help="read LAB/FIELD mode + scope from this file (default: the device scope)")
     ck.set_defaults(func=cmd_crack)
 
     cp = sub.add_parser("captured", help="the already-pwned / ignore list (APs offense skips)")
