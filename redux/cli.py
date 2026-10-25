@@ -2841,6 +2841,58 @@ def cmd_forge(args) -> int:
     return 0
 
 
+def cmd_crackprep(args) -> int:
+    """Crack-prep: chain preflight -> triage -> forge over the capture queue into a
+    single ranked work order (crack these first; here's the wordlist for each).
+    Read-only; identical in LAB and FIELD."""
+    from pathlib import Path
+    from .crack.preflight import assess_capture
+    from .crack.triage import parse_22000_targets, triage_crack_queue
+    from .crack.forge import forge
+    from .crack.prep import crack_prep
+    files = [Path(args.file)] if args.file else (
+        sorted(Path(args.dir).rglob("*.hc22000")) if Path(args.dir).is_dir() else [])
+    tuples, strong = [], set()
+    for fp in files:
+        try:
+            text = fp.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        tuples.extend(parse_22000_targets(text))
+        for fr in assess_capture(str(fp)).frames:
+            if fr.strong:
+                strong.add(fr.bssid)
+    triaged = triage_crack_queue(tuples)
+    items = crack_prep(triaged, strong, forge_fn=forge,
+                       limit=(args.top or None), tokens=args.token or [])
+    wrote = {}
+    if args.out_dir and items:
+        try:
+            Path(args.out_dir).mkdir(parents=True, exist_ok=True)
+            for it in items:
+                if it.forged_words:
+                    p = Path(args.out_dir) / f"{it.bssid.replace(':', '')}.txt"
+                    p.write_text("\n".join(it.forged_words) + "\n", encoding="utf-8")
+                    wrote[it.bssid] = str(p)
+        except OSError as e:
+            print(f"could not write wordlists: {e}")
+            return 1
+    if args.json:
+        print(json.dumps([{"ssid": it.ssid, "bssid": it.bssid, "artifacts": list(it.artifacts),
+                           "tier": it.tier, "prob": it.prob, "strong": it.strong,
+                           "wordlist_hint": it.wordlist_hint, "forged": len(it.forged_words),
+                           "wordlist_file": wrote.get(it.bssid)} for it in items], indent=2))
+        return 0
+    src = args.file or args.dir
+    print(f"CRACK-PREP — {len(items)} target(s) to work, best first, from {src}")
+    if not items:
+        print("  (no crackable captures found — capture a handshake/PMKID first)")
+    for it in items:
+        print(f"  {it.summary}")
+        print(f"      wordlist: {it.wordlist_hint}" + (f"  -> {wrote[it.bssid]}" if it.bssid in wrote else ""))
+    return 0
+
+
 def cmd_preflight(args) -> int:
     """Is this capture crackable, and why? Decodes PMKID/EAPOL completeness
     before you spend GPU time. Read-only; identical in LAB and FIELD."""
@@ -4067,6 +4119,14 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("file", help="a .hc22000 or raw .pcap/.pcapng/.cap")
     pf.add_argument("--json", action="store_true", help="machine-readable output")
     pf.set_defaults(func=cmd_preflight)
+    cpp = sub.add_parser("crack-prep", help="chain preflight+triage+forge into one ranked crack work order")
+    cpp.add_argument("--dir", default="/captures/ready", help="dir of captured .hc22000 artifacts")
+    cpp.add_argument("--file", default=None, help="a single .hc22000 file instead of --dir")
+    cpp.add_argument("--top", type=int, default=0, help="only prep the top N targets (0 = all)")
+    cpp.add_argument("--token", action="append", help="OSINT seed passed to forge (repeatable)")
+    cpp.add_argument("--out-dir", default=None, help="write each target's forged wordlist to this dir")
+    cpp.add_argument("--json", action="store_true", help="machine-readable output")
+    cpp.set_defaults(func=cmd_crackprep)
     fg = sub.add_parser("forge", help="target-aware wordlist/mask forge (recon -> targeted candidates)")
     fg.add_argument("ssid", nargs="?", default="", help="the target SSID (optional)")
     fg.add_argument("--token", action="append", help="OSINT seed (owner name, pet, street, zip…); repeatable")
