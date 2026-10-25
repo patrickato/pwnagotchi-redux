@@ -115,3 +115,70 @@ def reidentify(clients: Sequence[dict], *, min_link_weight: float = 0.5,
             probes=sum(probes[m] for m in member_list), confidence=confidence))
     entities.sort(key=lambda e: (-len(e.macs), -e.probes))
     return entities
+
+
+# --- device dossier: reid entity × sightings × OUI (feed fusion) ------------ #
+
+@dataclass(frozen=True)
+class Dossier:
+    """A re-identified device enriched with where/when it was seen and (where
+    knowable) its vendor. The join is on the client MAC, which the daemon records
+    in BOTH the sightings store (client.new) and the probe PNL (client.probe)."""
+    macs: Tuple[str, ...]
+    randomized: int
+    confidence: str
+    shared_ssids: Tuple[str, ...]
+    vendor: Optional[str]            # None for a fully-randomized device (OUI is meaningless)
+    sightings: int
+    last_seen: Optional[float]
+    strongest_rssi: Optional[int]
+    places: Tuple[str, ...]          # geohash cells where it was seen (empty if no GPS fix)
+    summary: str
+
+
+def enrich_entities(entities: Sequence[Entity], sightings_by_mac: Dict[str, list], *,
+                    vendor_lookup=None, precision: int = 7) -> List[Dossier]:
+    """Turn reid entities into dossiers using sightings indexed by lower-case MAC.
+    `vendor_lookup(mac)->Optional[str]` is applied only to non-randomized MACs (a
+    randomized MAC's OUI is noise). Pure: pass rows in, get dossiers out."""
+    from .geohash import encode as _gh
+    out: List[Dossier] = []
+    for e in entities:
+        sights = []
+        for m in e.macs:
+            sights.extend(sightings_by_mac.get(m.lower(), []))
+        tss = [s.ts for s in sights if getattr(s, "ts", None) is not None]
+        rssis = [s.rssi for s in sights if getattr(s, "rssi", None) is not None]
+        places = set()
+        for s in sights:
+            lat, lon = getattr(s, "lat", None), getattr(s, "lon", None)
+            if lat is not None and lon is not None:
+                try:
+                    places.add(_gh(float(lat), float(lon), precision))
+                except (TypeError, ValueError):
+                    pass
+        vendor = None
+        if vendor_lookup:
+            for m in e.macs:
+                if not is_locally_administered(m):
+                    v = vendor_lookup(m)
+                    if v:
+                        vendor = v
+                        break
+        last_seen = max(tss) if tss else None
+        strongest = max(rssis) if rssis else None
+        bits = [f"{len(e.macs)} MACs", vendor or ("randomized — vendor unknown" if e.randomized == len(e.macs) else "vendor unknown")]
+        if sights:
+            bits.append(f"seen {len(sights)}×")
+            if strongest is not None:
+                bits.append(f"strongest {strongest} dBm")
+            if places:
+                bits.append(f"{len(places)} place(s)")
+        else:
+            bits.append("not yet in the sightings store (probe-only)")
+        out.append(Dossier(
+            macs=e.macs, randomized=e.randomized, confidence=e.confidence,
+            shared_ssids=e.shared_ssids, vendor=vendor, sightings=len(sights),
+            last_seen=last_seen, strongest_rssi=strongest,
+            places=tuple(sorted(places)), summary=" · ".join(bits)))
+    return out

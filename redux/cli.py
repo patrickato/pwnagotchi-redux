@@ -998,11 +998,36 @@ def cmd_reid(args) -> int:
         return 0
     entities = reidentify(clients, min_link_weight=args.min_weight,
                           max_common_fraction=args.max_common_fraction)
+    # Enrich into dossiers by joining each entity's MACs to the sightings store
+    # (where/when/signal) and OUI (vendor). Fail-safe: absent/empty store -> no dossier.
+    dossiers = {}
+    db = getattr(args, "db", None)
+    if db and entities:
+        try:
+            from .geo.db import SightingStore
+            from .geo.reid import enrich_entities
+            from .geo.oui import lookup_oui
+            by_mac = {}
+            for s in SightingStore(db).query():
+                by_mac.setdefault((s.mac or "").lower(), []).append(s)
+            for e, d in zip(entities, enrich_entities(entities, by_mac, vendor_lookup=lookup_oui,
+                                                       precision=getattr(args, "precision", 7))):
+                dossiers[e.macs] = d
+        except Exception:
+            dossiers = {}
     if args.json:
-        print(json.dumps([{
-            "macs": list(e.macs), "randomized": e.randomized,
-            "shared_ssids": list(e.shared_ssids), "probes": e.probes,
-            "confidence": e.confidence} for e in entities], indent=2))
+        rows = []
+        for e in entities:
+            row = {"macs": list(e.macs), "randomized": e.randomized,
+                   "shared_ssids": list(e.shared_ssids), "probes": e.probes,
+                   "confidence": e.confidence}
+            d = dossiers.get(e.macs)
+            if d:
+                row["dossier"] = {"vendor": d.vendor, "sightings": d.sightings,
+                                  "last_seen": d.last_seen, "strongest_rssi": d.strongest_rssi,
+                                  "places": list(d.places)}
+            rows.append(row)
+        print(json.dumps(rows, indent=2))
         return 0
     if not entities:
         print(f"{len(clients)} client MAC(s) seen — no cross-MAC links "
@@ -1014,6 +1039,9 @@ def cmd_reid(args) -> int:
     for e in entities:
         print(f"\n  device: {len(e.macs)} MACs, {e.randomized} randomized  "
               f"[{e.confidence}]  {e.probes} probes")
+        d = dossiers.get(e.macs)
+        if d:
+            print(f"    dossier: {d.summary}")
         print("    linked by PNL: " + (", ".join(e.shared_ssids[:8]) or "(chained)"))
         for m in e.macs:
             tag = " (randomized)" if is_locally_administered(m) else ""
@@ -3932,6 +3960,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="link-strength threshold (sum of 1/rarity over shared SSIDs; default 0.5)")
     rd.add_argument("--max-common-fraction", type=float, default=0.5,
                     help="SSIDs probed by more than this fraction of MACs are noise, not evidence")
+    rd.add_argument("--db", default="/captures/live/sightings.db",
+                    help="sightings DB to build a dossier (where/when/signal + vendor) per device")
+    rd.add_argument("--precision", type=int, default=7, help="geohash cell precision for places (7 ~ 150 m)")
     rd.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     rd.set_defaults(func=cmd_reid)
     wp = sub.add_parser("wps", help="WPS / Pixie-Dust: passive wash discovery + scope-gated attack")
