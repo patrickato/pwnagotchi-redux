@@ -42,6 +42,15 @@ def test_hunt_with_offense_but_empty_scope_stays_passive():
     assert cap.armed_targets == 0
 
 
+def test_hunt_in_lab_goes_active_on_sight_without_pre_arming():
+    # LAB (your cage): Scope approves on sight, so active capture needs no pre-arm.
+    from redux.core import Scope as _Scope
+    cap = plan_capstone(sample_inventory(), "hunt", _Scope(lab_mode=True), offense_enabled=True)
+    assert cap.posture == "active" and cap.transmit is True
+    assert cap.armed_targets == 0           # nothing armed, yet active because LAB
+    assert any("LAB mode" in s.reason for s in cap.steps if s.step == "posture")
+
+
 def test_hunt_with_offense_and_armed_target_goes_active():
     scope = Scope()
     scope.add("00:11:22:33:44:55", job="lab")
