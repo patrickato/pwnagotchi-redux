@@ -131,31 +131,56 @@ class Operator:
 
     def run(self, targets: Sequence[str],
             executors: Dict[Phase, Callable[[str], Tuple[bool, str]]],
-            *, recon: Optional[Callable[[], Tuple[bool, str]]] = None) -> dict:
+            *, recon: Optional[Callable[[], Tuple[bool, str]]] = None,
+            logger: Optional[Callable[[str, dict], None]] = None) -> dict:
         """Execute the chain. `executors[phase](target) -> (ok, result)`; a missing
         executor for a needed phase stops that target honestly. Advances only while
-        the previous step succeeded. Returns steps + an action log for the report."""
+        the previous step succeeded. Returns steps + an action log for the report.
+
+        Every step (run or blocked) is recorded to the signed chain-of-authorization
+        log via `logger` (defaults to the device auth log), so the autonomous chain
+        leaves the same tamper-evident trail a manual run does. The log carries the
+        phase/target/decision only — never an executor's result, which may hold a
+        recovered secret."""
+        if logger is None:
+            try:
+                from ..core.authlog import record_event as logger   # type: ignore
+            except Exception:
+                logger = None
+
+        def _rec(s: "Step") -> None:
+            if not logger:
+                return
+            try:
+                logger(f"campaign.{s.action}", {"target": s.target, "phase": s.phase.value,
+                                                "allowed": s.allowed, "authorized": s.authorized,
+                                                "executed": s.executed})
+            except Exception:
+                pass
+
         steps: List[Step] = []
         # recon first (passive)
         rok, rres = (recon() if recon else (True, "recon skipped (no executor)"))
-        steps.append(Step("(all)", Phase.RECON, "wifi_recon", True, True,
-                          "passive discovery", result=rres, executed=recon is not None))
+        r = Step("(all)", Phase.RECON, "wifi_recon", True, True,
+                 "passive discovery", result=rres, executed=recon is not None)
+        steps.append(r); _rec(r)
         for t in targets:
             for phase in CHAIN:
                 action = _PHASE_META[phase][0]
                 allowed, authorized, reason = self._gate(t, phase)
                 if not allowed:
-                    steps.append(Step(t, phase, action, False, authorized, reason))
+                    s = Step(t, phase, action, False, authorized, reason)
+                    steps.append(s); _rec(s)
                     break      # gate closed → stop this target's chain
                 ex = executors.get(phase)
                 if ex is None:
-                    steps.append(Step(t, phase, action, True, authorized,
-                                      reason + f"; no executor for {phase.value} — stopping",
-                                      executed=False))
+                    s = Step(t, phase, action, True, authorized,
+                             reason + f"; no executor for {phase.value} — stopping", executed=False)
+                    steps.append(s); _rec(s)
                     break
                 ok, res = ex(t)
-                steps.append(Step(t, phase, action, True, authorized, reason,
-                                  result=res, executed=True))
+                s = Step(t, phase, action, True, authorized, reason, result=res, executed=True)
+                steps.append(s); _rec(s)
                 if not ok:
                     break      # step failed → no point continuing this target
         return {
