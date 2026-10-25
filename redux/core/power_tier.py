@@ -84,6 +84,9 @@ def _seed():
         PowerCapability("campaign.unleashed", "Unleashed cage autopilot", Tier.POWER,
                         "runs the whole offensive chain autonomously across every in-scope target, "
                         "on a loop — LAB / your own closed cage only"),
+        PowerCapability("range.livefire", "Live-fire purple range", Tier.POWER,
+                        "fires REAL attacks at your own armed gear and scores what your detectors "
+                        "caught — only your own cage"),
         # --- FORBIDDEN: never available (bystander harm; illegal to transmit) ---
         PowerCapability("rf.jam", "RF jamming", Tier.FORBIDDEN,
                         "indiscriminate denial of a band — illegal to transmit, always hits bystanders"),
