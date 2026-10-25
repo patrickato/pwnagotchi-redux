@@ -18,10 +18,24 @@ from .ingest import (
     ingest_rtl433,
     ingest_adsb,
 )
+from .decoders import (
+    parse_pocsag_line,
+    pocsag_to_sighting,
+    ingest_pocsag,
+    acars_to_sighting,
+    ingest_acars,
+)
+from .spectrum import parse_rtl_power, SpectrumSweep, Peak, Bin
 
 __all__ = [
     "rtl433_to_sighting",
     "adsb_to_sighting",
     "ingest_rtl433",
     "ingest_adsb",
+    "parse_pocsag_line",
+    "pocsag_to_sighting",
+    "ingest_pocsag",
+    "acars_to_sighting",
+    "ingest_acars",
+    "parse_rtl_power", "SpectrumSweep", "Peak", "Bin",
 ]

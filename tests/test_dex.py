@@ -57,3 +57,22 @@ def test_rarest_orders_by_rarity():
 def test_empty_store_is_empty_dex():
     dex = build_dex(SightingStore(":memory:"))
     assert dex.summary["total"] == 0 and dex.entries == []
+
+
+def test_dex_enriches_vendor_and_randomized():
+    from redux.geo import SightingStore, Sighting
+    s = SightingStore(":memory:")
+    # a Raspberry Pi (known vendor, global MAC) + a randomized/private MAC
+    s.insert(Sighting(kind="wifi", mac="b8:27:eb:11:22:33", ssid="pi-ap",
+                      ts=2000.0, first_seen=2000.0, provenance="t"))
+    s.insert(Sighting(kind="client", mac="da:a1:19:44:55:66", ssid="",
+                      ts=2001.0, first_seen=2001.0, provenance="t"))
+    dex = build_dex(s, now=2001.0)
+    by_mac = {e.mac: e for e in dex.entries}
+    pi = by_mac["b8:27:eb:11:22:33"]
+    assert pi.vendor == "RaspberryPi" and pi.device_class == "sbc" and not pi.randomized
+    rnd = by_mac["da:a1:19:44:55:66"]
+    assert rnd.randomized and rnd.vendor is None
+    assert dex.summary["randomized"] == 1
+    assert dex.summary["identified_vendors"] == 1
+    assert dex.summary["by_vendor"].get("RaspberryPi") == 1

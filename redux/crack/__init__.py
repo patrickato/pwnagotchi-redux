@@ -19,8 +19,16 @@ from .capture import (
     BettercapProvider, select_capture_provider, register_capture_providers,
 )
 from .wordlists import TIERS, Wordlist, WordlistStore, resolve_wordlist
+from .recipes import (
+    Recipe, CrackPlan, RECIPES, CATEGORIES, ATTACKS,
+    by_name, find, identify, suggest, plan,
+)
+from .anycrack import CrackSettings, authorize, run_plan
 
 __all__ = [
+    "Recipe", "CrackPlan", "RECIPES", "CATEGORIES", "ATTACKS",
+    "by_name", "find", "identify", "suggest", "plan",
+    "CrackSettings", "authorize", "run_plan",
     "CrackResult",
     "Cracker",
     "ReplayCracker",
