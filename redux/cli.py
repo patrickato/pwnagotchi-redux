@@ -1144,9 +1144,9 @@ def _wordlist(path):
 def cmd_netrecon(args) -> int:
     """The network-layer kill-chain over the ARMED Scope (the second half of the
     chain the RF side can't do): scan one authorized subnet, or autorun the whole
-    armed scope (scan -> optional cred-test -> loot). Scope decides WHERE, always —
-    nothing off-scope runs. NOTE: the live nmap/hydra execution is not yet wired
-    (the scope-gating + loot plumbing are real); until then scan/autorun report no hosts."""
+    armed scope (scan -> optional cred-test -> loot). Runs real nmap/hydra when
+    installed (Kali pack), honest tool-absence otherwise. Scope decides WHERE,
+    always — nothing off-scope runs; hydra cred-testing is active and scope-gated."""
     import json
     from .netrecon import recon_subnet, autorun, ReconRefused
     scope = Scope.load(args.scope_file)
