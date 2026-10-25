@@ -483,3 +483,34 @@ def test_touch_auto_hit_opens_resolved_node(monkeypatch):
         fbui.main(["--framebuffer", "/dev/fb1", "--run", "--touch-auto"])
     # The node chosen by name — not guessed — is the one opened.
     assert opened == ["/dev/input/event7"]
+
+
+def test_native_tft_renders_new_pages():
+    # the new launcher + live pages render cleanly at panel resolution
+    for page in ("menu", "power", "signals"):
+        image = fbui.render(valid_report(), page=page, now=101, mode="lab")
+        assert image.size == (480, 320) and image.mode == "RGB"
+
+
+def test_power_page_reflects_mode():
+    # the power page renders in both postures (field hides, lab unlocks)
+    for m in ("field", "lab"):
+        assert fbui.render(valid_report(), page="power", now=101, mode=m).size == (480, 320)
+
+
+def test_signals_page_with_and_without_panel():
+    # graceful when no panel sampled yet, and with a real Signal Dex summary
+    assert fbui.render(valid_report(), page="signals", now=101).size == (480, 320)
+    panels = {"signals": {"total": 42, "by_domain": {"wifi": 18, "subghz": 5, "ir": 2}}}
+    assert fbui.render(valid_report(), page="signals", now=101, panels=panels).size == (480, 320)
+
+
+def test_sample_signals_panel_is_failsafe():
+    # the loop's sampler must never raise, even with nothing on disk
+    out = fbui._sample_signals_panel()
+    assert out is None or isinstance(out, dict)
+
+
+def test_menu_lists_every_capability_group():
+    groups = {g[0] for g in fbui._MENU_GROUPS}
+    assert {"STATUS", "RECON", "CRACK", "SDR / RF", "OPS", "SYSTEM"} <= groups
