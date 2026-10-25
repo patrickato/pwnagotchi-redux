@@ -2595,6 +2595,38 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_explain(args) -> int:
+    """Purple-team explain & defend — for a technique Augur can run, how a
+    defender detects it and how they stop it. Informational; mode-agnostic."""
+    from .intel.defend import explain, list_techniques
+    if not args.technique:
+        print("techniques (redux explain <key>):")
+        for key, name in list_techniques():
+            print(f"  {key:14} {name}")
+        return 0
+    t = explain(args.technique)
+    if t is None:
+        print(f"unknown technique {args.technique!r}. Try: "
+              + ", ".join(k for k, _ in list_techniques()))
+        return 2
+    if args.json:
+        print(json.dumps({"key": t.key, "name": t.name, "what": t.what,
+                          "detection": list(t.detection), "mitigation": list(t.mitigation),
+                          "standards": list(t.standards)}, indent=2))
+        return 0
+    print(f"{t.name}  ({t.key})")
+    print(f"\n  WHAT\n    {t.what}")
+    print("\n  HOW IT'S DETECTED")
+    for d in t.detection:
+        print(f"    - {d}")
+    print("\n  HOW TO DEFEND")
+    for m in t.mitigation:
+        print(f"    - {m}")
+    if t.standards:
+        print(f"\n  CLOSES IT: {', '.join(t.standards)}")
+    return 0
+
+
 def cmd_forge(args) -> int:
     """Target-aware wordlist/mask forge — turn recon into a targeted candidate
     list. Read-only; identical in LAB and FIELD. Run these before a generic list."""
@@ -3866,6 +3898,10 @@ def build_parser() -> argparse.ArgumentParser:
     fg.add_argument("--max", type=int, default=2000, help="cap the candidate count (default 2000)")
     fg.add_argument("--json", action="store_true", help="machine-readable output")
     fg.set_defaults(func=cmd_forge)
+    ex = sub.add_parser("explain", help="purple-team: how a technique is detected and defended")
+    ex.add_argument("technique", nargs="?", default="", help="technique key (omit to list all)")
+    ex.add_argument("--json", action="store_true", help="machine-readable output")
+    ex.set_defaults(func=cmd_explain)
     return p
 
 
