@@ -972,6 +972,43 @@ def cmd_karma(args) -> int:
     return 2
 
 
+def cmd_reid(args) -> int:
+    """Re-identify physical devices across randomized MACs from harvested probe
+    PNLs. Links MACs that share distinctive saved-network names (weighted by
+    rarity) — the PNL belongs to the device, not the rotating MAC. Glass-box:
+    every linked device prints the exact SSID evidence and a confidence."""
+    from .portal.karma import ProbeHarvester
+    from .geo.reid import reidentify
+    from .geo.mac_normalize import is_locally_administered
+    clients = ProbeHarvester(path=args.store).clients()
+    if not clients:
+        print(f"no probes harvested yet ({args.store}) — run passive probe harvesting first")
+        return 0
+    entities = reidentify(clients, min_link_weight=args.min_weight,
+                          max_common_fraction=args.max_common_fraction)
+    if args.json:
+        print(json.dumps([{
+            "macs": list(e.macs), "randomized": e.randomized,
+            "shared_ssids": list(e.shared_ssids), "probes": e.probes,
+            "confidence": e.confidence} for e in entities], indent=2))
+        return 0
+    if not entities:
+        print(f"{len(clients)} client MAC(s) seen — no cross-MAC links "
+              "(no shared distinctive probe SSIDs)")
+        return 0
+    linked = sum(len(e.macs) for e in entities)
+    print(f"{len(entities)} re-identified device(s) spanning {linked} MACs "
+          f"(of {len(clients)} seen):")
+    for e in entities:
+        print(f"\n  device: {len(e.macs)} MACs, {e.randomized} randomized  "
+              f"[{e.confidence}]  {e.probes} probes")
+        print("    linked by PNL: " + (", ".join(e.shared_ssids[:8]) or "(chained)"))
+        for m in e.macs:
+            tag = " (randomized)" if is_locally_administered(m) else ""
+            print(f"      {m}{tag}")
+    return 0
+
+
 def cmd_wps(args) -> int:
     """WPS / Pixie-Dust: passive `wash` discovery + scope-gated attack plan/run.
     Finding WPS APs is passive; attacking is gated (FIELD needs --authorized +
@@ -3529,6 +3566,15 @@ def build_parser() -> argparse.ArgumentParser:
     kmp = kmsub.add_parser("plan", help="aimed advertise plan (only in-scope clients; glass-box)")
     kmp.add_argument("--scope-file", default=None, help="scope file (default: the device scope)")
     km.set_defaults(func=cmd_karma)
+    rd = sub.add_parser("reid", help="re-identify devices across randomized MACs from harvested probe PNLs")
+    rd.add_argument("--store", default="/captures/live/pnl.json",
+                    help="harvested PNL store (default /captures/live/pnl.json)")
+    rd.add_argument("--min-weight", type=float, default=0.5,
+                    help="link-strength threshold (sum of 1/rarity over shared SSIDs; default 0.5)")
+    rd.add_argument("--max-common-fraction", type=float, default=0.5,
+                    help="SSIDs probed by more than this fraction of MACs are noise, not evidence")
+    rd.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    rd.set_defaults(func=cmd_reid)
     wp = sub.add_parser("wps", help="WPS / Pixie-Dust: passive wash discovery + scope-gated attack")
     wpsub = wp.add_subparsers(dest="wps_cmd", required=True)
     wpscan = wpsub.add_parser("scan", help="list WPS-enabled APs from a `wash` capture (passive)")
