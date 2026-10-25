@@ -117,21 +117,25 @@ def plan_capstone(radios, intent, scope, *, offense_enabled: bool = False,
                           if engine_available
                           else "install bettercap (or the AngryOxide pack) for the capture engine"))
 
-    # 5. posture: transmit only with offense enabled AND an armed target
+    # 5. posture: transmit with offense enabled AND (an armed target, OR LAB mode —
+    #    your own cage, where Scope approves on sight so no pre-arm is needed).
     armed = _armed_wifi_targets(scope)
     cap.armed_targets = len(armed)
+    lab = bool(getattr(scope, "lab_mode", False))
     intent_active = intent is Intent.HUNT
-    active = intent_active and offense_enabled and bool(armed)
+    active = intent_active and offense_enabled and (bool(armed) or lab)
     cap.posture = "active" if active else "passive"
     cap.transmit = active
     if not intent_active:
         reason = f"{intent.value} is a passive intent; capture is listen-only (--notransmit)"
     elif not offense_enabled:
         reason = "offense not enabled (detection-only posture); capture stays passive (--notransmit)"
-    elif not armed:
-        reason = "Scope has no armed Wi-Fi target; nothing to aim at, so capture stays passive (--notransmit)"
-    else:
+    elif armed:
         reason = f"offense enabled and {len(armed)} target(s) armed in Scope; active capture permitted"
+    elif lab:
+        reason = "LAB mode — your own cage; active capture approved on sight (no pre-arm needed)"
+    else:
+        reason = "Scope has no armed Wi-Fi target; nothing to aim at, so capture stays passive (--notransmit)"
     cap.steps.append(Step("posture", True, cap.posture, reason))
 
     # 6. the bounded capture plan (planned only; execution is the live/on-Pi path)
