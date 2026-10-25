@@ -2761,6 +2761,35 @@ def cmd_loot(args) -> int:
     return 2
 
 
+def cmd_narrate(args) -> int:
+    """Explain-as-it-goes — replay the auth log with each offensive action paired
+    to how blue detects and stops it (the purple learning view). Read-only; works
+    in any mode."""
+    from .intel.narrate import narrate
+    from .core import authlog as A
+    try:
+        entries = A.AuthLog(args.authlog or A.default_authlog_path()).entries()
+    except Exception:
+        entries = []
+    lines = narrate(entries)
+    if args.json:
+        print(json.dumps([{"ts": l.ts, "event": l.event, "detail": l.detail,
+                           "technique": l.technique, "detection": l.detection,
+                           "mitigation": l.mitigation} for l in lines], indent=2))
+        return 0
+    import time as _t
+    print(f"NARRATE — {len(lines)} logged action(s), red action + blue answer")
+    for l in lines:
+        when = _t.strftime("%H:%M:%S", _t.gmtime(l.ts)) if l.ts else "--:--:--"
+        print(f"\n  {when}  {l.event}  {l.detail}")
+        if l.technique:
+            print(f"      blue sees:  {l.detection}")
+            print(f"      blue stops: {l.mitigation}")
+    if not lines:
+        print("  (auth log empty — run some scope/campaign actions first)")
+    return 0
+
+
 def cmd_graph(args) -> int:
     """Entity graph — the whole cage as one picture: physical-device nodes (reid
     merges a device's randomized MACs), 'travels-with' edges (co-occurrence
@@ -4359,6 +4388,10 @@ def build_parser() -> argparse.ArgumentParser:
     gr.add_argument("--loot", default="/captures/loot/vault.json", help="loot vault (key-recovered flag)")
     gr.add_argument("--json", action="store_true", help="machine-readable output")
     gr.set_defaults(func=cmd_graph)
+    nr = sub.add_parser("narrate", help="explain-as-it-goes: the auth log with each action's detection + mitigation")
+    nr.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
+    nr.add_argument("--json", action="store_true", help="machine-readable output")
+    nr.set_defaults(func=cmd_narrate)
     lo = sub.add_parser("loot", help="recovered-credential vault + scope-gated network pivot")
     lo.add_argument("--vault", default=None, help="vault file (default: the device loot vault)")
     losub = lo.add_subparsers(dest="loot_cmd", required=True)
