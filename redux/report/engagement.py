@@ -25,6 +25,17 @@ from typing import List, Optional, Sequence
 
 from ..core.scope import classify_target
 from ..frameworks import REGISTRY
+from ..intel.defend import explain
+
+# map engagement action names to purple-team knowledge-base keys (for remediation)
+_ACTION_TO_DEFEND = {
+    "handshake_capture": "handshake", "handshake": "handshake",
+    "pmkid_capture": "pmkid", "pmkid": "pmkid",
+    "deauth": "deauth", "evil_twin": "evil_twin", "captive_portal": "evil_portal",
+    "evil_portal": "evil_portal", "karma": "karma", "wps": "wps", "wps_attack": "wps",
+    "net_scan": "netrecon", "netrecon": "netrecon", "cred_spray": "cred_spray",
+    "credential_spray": "cred_spray",
+}
 
 
 @dataclass(frozen=True)
@@ -84,8 +95,13 @@ def build_report(engagement: str, operator: str, scope,
                  range_report: Optional[dict] = None,
                  window: Optional[tuple] = None,
                  sanitize: bool = False,
+                 authlog_integrity: Optional[dict] = None,
                  now: Optional[float] = None) -> dict:
-    """Assemble the report as a structured dict (render with render_markdown)."""
+    """Assemble the report as a structured dict (render with render_markdown).
+
+    `authlog_integrity`, when given, is the verify() result of the signed
+    chain-of-authorization log ({ok, reason, signed, count}); it is surfaced as
+    the tamper-evidence proof. Remediation is derived from the actions present."""
     now = time.time() if now is None else now
 
     mapper = None
@@ -121,6 +137,7 @@ def build_report(engagement: str, operator: str, scope,
                           "expires": e.expires})
 
     techniques = sorted({tid for l in lines for tid in l.attack_ids})
+    remediation = _remediation_for_actions(l.action for l in lines)
     return {
         "engagement": engagement,
         "operator": operator,
@@ -133,11 +150,48 @@ def build_report(engagement: str, operator: str, scope,
         "techniques_exercised": techniques,
         "findings": dex_summary or {},
         "coverage": range_report or {},
+        "remediation": remediation,
+        "authlog": dict(authlog_integrity) if authlog_integrity else None,
         "sanitized": bool(sanitize),
         "integrity_note": ("all recorded actions were within the authorized scope"
                            if not unauthorized else
                            f"{len(unauthorized)} action(s) were OUT OF SCOPE — see ⚠ rows"),
     }
+
+
+def _remediation_for_actions(action_names) -> List[dict]:
+    """De-duplicated [{technique, mitigations}] for the actions present, from the
+    purple-team knowledge base. Empty when nothing maps — never fabricated."""
+    out: List[dict] = []
+    seen = set()
+    for name in action_names:
+        key = _ACTION_TO_DEFEND.get((name or "").strip().lower(), name)
+        t = explain(key)
+        if t and t.key not in seen:
+            seen.add(t.key)
+            out.append({"technique": t.name, "mitigations": list(t.mitigation)})
+    return out
+
+
+def actions_from_authlog(entries) -> List[EngagementAction]:
+    """Build the activity list from signed auth-log entries. Only entries that
+    name a concrete target become activity rows (admin toggles like lab_mode are
+    proven by the log's integrity, not re-listed as aimed actions)."""
+    acts: List[EngagementAction] = []
+    for e in entries:
+        detail = getattr(e, "detail", {}) or {}
+        target = (detail.get("value") or detail.get("bssid") or detail.get("ip")
+                  or detail.get("cidr") or detail.get("ssid") or "")
+        if not target:
+            continue
+        result = "  ".join(f"{k}={v}" for k, v in sorted(detail.items())
+                           if k not in ("value", "bssid", "ip", "cidr", "ssid"))
+        acts.append(EngagementAction(ts=float(getattr(e, "ts", 0.0)),
+                                     action=str(getattr(e, "event", "")),
+                                     target=str(target),
+                                     reason=f"auth-log #{getattr(e, 'seq', '?')}",
+                                     result=result))
+    return acts
 
 
 def _fmt_ts(ts: float) -> str:
@@ -175,6 +229,15 @@ def render_markdown(report: dict) -> str:
         out.append("_No targets were armed._")
     out.append("")
 
+    if r.get("authlog"):
+        a = r["authlog"]
+        proof = "intact" if a.get("ok") else "BROKEN — do not trust this log"
+        signed = "cryptographically signed" if a.get("signed") else "hash-chained (unsigned)"
+        out.append("## Chain-of-authorization log (tamper-evidence)")
+        out.append(f"- Integrity: **{proof}** — {a.get('reason', '')}")
+        out.append(f"- {a.get('count', 0)} entries, {signed}")
+        out.append("")
+
     out.append("## Activity (chain of authorization)")
     out.append("| Time | Action | ATT&CK | Phase | Target | Authorized | Result |")
     out.append("|---|---|---|---|---|---|---|")
@@ -206,7 +269,94 @@ def render_markdown(report: dict) -> str:
                 out.append(f"- {g['action']} ({','.join(g.get('attack', []))}) — no expected detector fired")
         out.append("")
 
+    if r.get("remediation"):
+        out.append("## Remediation")
+        for rec in r["remediation"]:
+            out.append(f"**{rec['technique']}**")
+            for m in rec["mitigations"]:
+                out.append(f"- {m}")
+            out.append("")
+
     out.append("---")
     out.append("_Generated by redux. Real data only; every action carries its "
                "authorization check and reason. Out-of-scope actions are flagged, not hidden._")
     return "\n".join(out)
+
+
+_HTML_CSS = (
+    ":root{color-scheme:dark}"
+    "body{background:#06090d;color:#dce8ef;font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;"
+    "max-width:880px;margin:0 auto;padding:32px 16px}"
+    "h1{color:#31d2e6;border-bottom:1px solid #1c2c38;padding-bottom:.3em}"
+    "h2{color:#8af2ff;margin-top:1.6em}"
+    "table{border-collapse:collapse;width:100%;margin:1em 0}"
+    "th,td{border:1px solid #1c2c38;padding:6px 10px;text-align:left}"
+    "th{background:#0e161e;color:#8af2ff}code{background:#0e161e;color:#5ae0aa;padding:1px 5px;border-radius:4px}"
+    "strong{color:#ffb23c}.flag{color:#ff6b82;font-weight:bold}"
+)
+
+
+def render_html(report: dict) -> str:
+    """Render the report dict as a dark-themed, self-contained HTML deliverable."""
+    import html as _h
+    r = report
+    e = _h.escape
+    H: List[str] = ["<!doctype html>", "<html lang=en><head><meta charset=utf-8>",
+                    "<meta name=viewport content='width=device-width,initial-scale=1'>",
+                    f"<title>Engagement report — {e(r['engagement'])}</title>",
+                    f"<style>{_HTML_CSS}</style></head><body>"]
+    H.append(f"<h1>Engagement report — {e(r['engagement'])}</h1>")
+    H.append(f"<p><strong>Operator:</strong> {e(r['operator'])}<br>"
+             f"<strong>Generated:</strong> {e(_fmt_ts(r['generated_at']))}<br>"
+             f"<strong>Integrity:</strong> {e(r['integrity'])} — {e(r['integrity_note'])}</p>")
+
+    H.append("<h2>Authorization (central Scope)</h2>")
+    armed = r["authorization"]["armed"]
+    if armed:
+        H.append("<table><tr><th>Kind</th><th>Target</th><th>Job</th><th>Expires</th></tr>")
+        for en in armed:
+            exp = "never" if not en.get("expires") else _fmt_ts(en["expires"])
+            H.append(f"<tr><td>{e(en['kind'])}</td><td>{e(en['value'])}</td>"
+                     f"<td>{e(en.get('job') or '—')}</td><td>{e(exp)}</td></tr>")
+        H.append("</table>")
+    else:
+        H.append("<p>No targets were armed.</p>")
+
+    if r.get("authlog"):
+        a = r["authlog"]
+        cls = "" if a.get("ok") else " class=flag"
+        proof = "intact" if a.get("ok") else "BROKEN — do not trust this log"
+        signed = "cryptographically signed" if a.get("signed") else "hash-chained (unsigned)"
+        H.append("<h2>Chain-of-authorization log (tamper-evidence)</h2>")
+        H.append(f"<p>Integrity: <span{cls}>{e(proof)}</span> — {e(a.get('reason', ''))} "
+                 f"({a.get('count', 0)} entries, {signed}).</p>")
+
+    H.append("<h2>Activity (chain of authorization)</h2>")
+    H.append("<table><tr><th>Time</th><th>Action</th><th>ATT&amp;CK</th><th>Phase</th>"
+             "<th>Target</th><th>Authorized</th><th>Result</th></tr>")
+    for l in r["activity"]:
+        auth = "yes" if l["authorized"] else "<span class=flag>UNAUTHORIZED</span>"
+        atk = e(",".join(l["attack_ids"]) or "—")
+        H.append(f"<tr><td>{e(_fmt_ts(l['ts']))}</td><td>{e(l['action'])}</td><td>{atk}</td>"
+                 f"<td>{e(l['phase'])}</td><td>{e(l['target'])}</td><td>{auth}</td>"
+                 f"<td>{e(l['result'] or '—')}</td></tr>")
+    H.append("</table>")
+
+    if r.get("findings"):
+        H.append("<h2>Findings</h2><ul>")
+        for k, v in r["findings"].items():
+            H.append(f"<li><strong>{e(str(k))}:</strong> {e(str(v))}</li>")
+        H.append("</ul>")
+
+    if r.get("remediation"):
+        H.append("<h2>Remediation</h2>")
+        for rec in r["remediation"]:
+            H.append(f"<p><strong>{e(rec['technique'])}</strong></p><ul>")
+            for m in rec["mitigations"]:
+                H.append(f"<li>{e(m)}</li>")
+            H.append("</ul>")
+
+    H.append("<hr><p><em>Generated by redux. Real data only; every action carries its "
+             "authorization check and reason. Out-of-scope actions are flagged, not hidden.</em></p>")
+    H.append("</body></html>")
+    return "\n".join(H)

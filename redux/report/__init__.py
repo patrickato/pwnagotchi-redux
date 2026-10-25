@@ -9,6 +9,8 @@ real targets.
 """
 from .engagement import (
     EngagementAction, ReportLine, build_report, render_markdown,
+    render_html, actions_from_authlog,
 )
 
-__all__ = ["EngagementAction", "ReportLine", "build_report", "render_markdown"]
+__all__ = ["EngagementAction", "ReportLine", "build_report", "render_markdown",
+           "render_html", "actions_from_authlog"]
