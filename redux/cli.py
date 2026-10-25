@@ -696,6 +696,76 @@ def cmd_toolbox(args) -> int:
     return 2
 
 
+def cmd_notebook(args) -> int:
+    """Lab notebook: a session journal for learning — log what you did and render
+    a clean report of the session."""
+    from .notebook import LabNotebook
+    nb = LabNotebook(args.path)
+    cmd = args.notebook_cmd
+    if cmd == "log":
+        e = nb.record(args.kind, args.summary)
+        print(f"logged [{e.kind}] {e.summary}")
+        return 0
+    if cmd == "show":
+        import time as _t
+        es = nb.entries()
+        if not es:
+            print(f"notebook empty ({args.path})")
+            return 0
+        for e in es:
+            ts = _t.strftime("%H:%M:%S", _t.localtime(e.ts))
+            print(f"  {ts}  [{e.kind:<8}] {e.summary}")
+        return 0
+    if cmd == "report":
+        rep = nb.report(title=args.title)
+        if getattr(args, "out", None):
+            with open(args.out, "w", encoding="utf-8") as f:
+                f.write(rep)
+            print(f"wrote report: {args.out}")
+        else:
+            print(rep)
+        return 0
+    if cmd == "clear":
+        print(nb.clear())
+        return 0
+    return 2
+
+
+def cmd_tpms(args) -> int:
+    """Re-identify returning vehicles by their tire-pressure sensor IDs, from an
+    rtl_433 JSON capture (receive-only recon)."""
+    import json as _json
+    from .sdr.tpms import reidentify
+    recs = []
+    try:
+        with open(args.file, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = _json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(r, dict):
+                    recs.append(r)
+    except OSError as e:
+        print(f"cannot read {args.file}: {e}")
+        return 3
+    vehicles = reidentify(recs, min_gap_s=args.min_gap)
+    if not vehicles:
+        print(f"no TPMS sensors found in {args.file}")
+        return 0
+    returning = [v for v in vehicles if v.returning]
+    if returning:
+        print(f"⚠ {len(returning)} returning vehicle(s):")
+    for v in vehicles:
+        mark = "⚠ " if v.returning else "  "
+        p = f"  {v.last_pressure_kpa:.0f} kPa" if v.last_pressure_kpa else ""
+        print(f"{mark}{v.sensor_id:<12} {v.model:<16} ×{v.count}{p}  — {v.reason}")
+    return 0
+
+
 def cmd_signals(args) -> int:
     """The Signal Dex: one catalog of everything seen or captured across every
     radio/medium — WiFi/BLE/ISM/ADS-B/pager/ACARS sightings + sub-GHz + IR."""
@@ -3221,6 +3291,24 @@ def build_parser() -> argparse.ArgumentParser:
     tbi.add_argument("name")
     tbi.add_argument("--run", action="store_true", help="execute the install on this device (needs root)")
     tb.set_defaults(func=cmd_toolbox)
+
+    nb = sub.add_parser("notebook", help="lab session journal — log activity + render a report")
+    nb.add_argument("--path", default="/captures/live/notebook.jsonl", help="notebook path")
+    nbsub = nb.add_subparsers(dest="notebook_cmd", required=True)
+    nbl = nbsub.add_parser("log", help="record an entry")
+    nbl.add_argument("kind", help="recon/capture/crack/signal/mode/offense/scan/note")
+    nbl.add_argument("summary", help="what happened")
+    nbsub.add_parser("show", help="print the session timeline")
+    nbr = nbsub.add_parser("report", help="render a Markdown session report")
+    nbr.add_argument("--title", default="Lab session")
+    nbr.add_argument("--out", default=None, help="write the report to this file")
+    nbsub.add_parser("clear", help="clear the notebook")
+    nb.set_defaults(func=cmd_notebook)
+
+    tp = sub.add_parser("tpms", help="re-identify returning vehicles by tire-sensor IDs (from rtl_433 JSON)")
+    tp.add_argument("file", help="rtl_433 -F json capture")
+    tp.add_argument("--min-gap", type=float, default=300.0, help="seconds between sightings to count as a 'return' (default 300)")
+    tp.set_defaults(func=cmd_tpms)
 
     sx = sub.add_parser("signals", help="the Signal Dex: one catalog across WiFi/BLE/ISM/ADS-B/sub-GHz/IR")
     sx.add_argument("--db", default=None, help="sighting store path")
