@@ -139,6 +139,7 @@ class _Obs:
     ts: float
     lat: Optional[float] = None
     lon: Optional[float] = None
+    rssi: Optional[int] = None
 
 
 class ObservationLog:
@@ -155,7 +156,7 @@ class ObservationLog:
         self._pos = position          # callable() -> (lat, lon) | None
         self._max = max_rows
 
-    def record(self, mac: str, ts: float, *, lat=None, lon=None) -> None:
+    def record(self, mac: str, ts: float, *, lat=None, lon=None, rssi=None) -> None:
         if not mac:
             return
         if (lat is None or lon is None) and callable(self._pos):
@@ -166,6 +167,8 @@ class ObservationLog:
             if fix and len(fix) >= 2:
                 lat, lon = fix[0], fix[1]
         row = {"mac": mac, "ts": float(ts or 0.0), "lat": lat, "lon": lon}
+        if rssi is not None:
+            row["rssi"] = rssi          # receiver signal strength — enables direction-finding
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.path, "a", encoding="utf-8") as f:
@@ -184,7 +187,7 @@ class ObservationLog:
         data = getattr(ev, "data", {}) or {}
         mac = (data.get("mac") or data.get("address") or data.get("bssid") or "")
         if mac:
-            self.record(mac, getattr(ev, "at", 0.0) or 0.0)
+            self.record(mac, getattr(ev, "at", 0.0) or 0.0, rssi=data.get("rssi"))
 
     def load(self) -> List[_Obs]:
         out: List[_Obs] = []
@@ -199,7 +202,7 @@ class ObservationLog:
             try:
                 d = json.loads(line)
                 out.append(_Obs(mac=d["mac"], ts=float(d.get("ts", 0.0)),
-                                lat=d.get("lat"), lon=d.get("lon")))
+                                lat=d.get("lat"), lon=d.get("lon"), rssi=d.get("rssi")))
             except (ValueError, KeyError, TypeError):
                 continue
         return out

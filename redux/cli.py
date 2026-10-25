@@ -2898,6 +2898,42 @@ def cmd_firehose(args) -> int:
     return 0
 
 
+def cmd_locate(args) -> int:
+    """Direction-find a signal to its origin from positioned RSSI (fox-hunt). Shows
+    warmer/colder, a best-guess source location, and a compass heading. Re-run as
+    you move to track in real time. Read-only."""
+    from .geo.follower import ObservationLog
+    from .intel.locate import locate
+    from .geo.oui import lookup_oui
+    try:
+        obs = ObservationLog(args.obs).load()
+    except Exception:
+        obs = []
+    target = (args.target or "").strip()
+    tl = target.lower()
+    rows = [o for o in obs if (not tl or (o.mac or "").lower() == tl)]
+    res = locate(rows, target=target or "source", window=args.window)
+    vendor = lookup_oui(target) if target else None
+    if args.json:
+        print(json.dumps({"target": res.target, "vendor": vendor, "readings": res.readings,
+                          "trend": res.trend, "strongest_rssi": res.strongest_rssi,
+                          "strongest_at": res.strongest_at, "est_lat": res.est_lat,
+                          "est_lon": res.est_lon, "bearing": res.bearing,
+                          "confidence": res.confidence, "guidance": res.guidance}, indent=2))
+        return 0
+    print(f"LOCATING {res.target}" + (f"  ({vendor})" if vendor else "")
+          + f"  — {res.readings} positioned reading(s)")
+    if res.readings == 0:
+        print("  no readings with RSSI + GPS yet — move around near the source while the box"
+              " logs BLE/Wi-Fi observations (needs a GPS fix)")
+        return 0
+    print(f"  trend: {res.trend}   strongest: {res.strongest_rssi} dBm")
+    print(f"  {res.guidance}")
+    print(f"  confidence: {res.confidence}")
+    print("  (re-run as you move — the estimate sharpens with spread; a 2nd node would let it multilaterate)")
+    return 0
+
+
 def cmd_fuse(args) -> int:
     """Co-occurrence fusion — cluster devices that repeatedly appear in the same
     time+place window (carried together). Reads the observation time-series log.
@@ -4387,6 +4423,12 @@ def build_parser() -> argparse.ArgumentParser:
     fu.add_argument("--min-score", type=float, default=0.3, help="min Jaccard overlap to link (default 0.3)")
     fu.add_argument("--json", action="store_true", help="machine-readable output")
     fu.set_defaults(func=cmd_fuse)
+    loc = sub.add_parser("locate", help="direction-find a signal to its origin from positioned RSSI (fox-hunt)")
+    loc.add_argument("target", nargs="?", default="", help="MAC to hunt (omit = all observations pooled)")
+    loc.add_argument("--obs", default="/captures/live/observations.jsonl", help="observation time-series log")
+    loc.add_argument("--window", type=int, default=3, help="recent-readings window for warmer/colder (default 3)")
+    loc.add_argument("--json", action="store_true", help="machine-readable output")
+    loc.set_defaults(func=cmd_locate)
     fh = sub.add_parser("firehose", help="LAB-only glass-box stream: every decision + every device seen, by time")
     fh.add_argument("--scope-file", default=None, help="scope store (decides LAB vs FIELD)")
     fh.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
