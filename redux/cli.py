@@ -858,6 +858,26 @@ def cmd_simulate(args) -> int:
     return 0
 
 
+def cmd_stealth(args) -> int:
+    """Stealth / OPSEC for Augur's OWN device. `mac` randomizes a radio's MAC so
+    the box doesn't present a stable fingerprint (vendor-plausible by default).
+    Dry by default (prints the new MAC + the exact commands); --apply executes."""
+    from .radio.macrand import MacRandomizer, random_mac, set_mac_commands
+    cmd = args.stealth_cmd
+    if cmd == "mac":
+        if not getattr(args, "apply", False):
+            mac = random_mac(mode=args.mode)
+            print(f"would set {args.iface} -> {mac}  ({args.mode})")
+            for c in set_mac_commands(args.iface, mac):
+                print("  " + " ".join(c))
+            print("\n(re-run with --apply to change it on this device; needs root)")
+            return 0
+        res = MacRandomizer(mode=args.mode).randomize(args.iface)
+        print(res.reason)
+        return 0 if res.ok else 3
+    return 2
+
+
 def cmd_notebook(args) -> int:
     """Lab notebook: a session journal for learning — log what you did and render
     a clean report of the session."""
@@ -4398,6 +4418,15 @@ def build_parser() -> argparse.ArgumentParser:
                      help="tick a few times, print the status snapshot JSON, and exit")
     sim.add_argument("--ticks", type=int, default=14, help="with --once: how many tick steps to run")
     sim.set_defaults(func=cmd_simulate)
+
+    st = sub.add_parser("stealth", help="OPSEC for Augur's own device (MAC randomization, …)")
+    stsub = st.add_subparsers(dest="stealth_cmd", required=True)
+    stm = stsub.add_parser("mac", help="randomize a radio's MAC so the box doesn't present a stable fingerprint")
+    stm.add_argument("iface", help="interface to randomize (e.g. wlan0)")
+    stm.add_argument("--mode", choices=["vendor", "laa"], default="vendor",
+                     help="vendor = plausible real OUI (blend in, default); laa = locally-administered random")
+    stm.add_argument("--apply", action="store_true", help="actually change it on this device (needs root)")
+    st.set_defaults(func=cmd_stealth)
 
     nb = sub.add_parser("notebook", help="lab session journal — log activity + render a report")
     nb.add_argument("--path", default="/captures/live/notebook.jsonl", help="notebook path")
