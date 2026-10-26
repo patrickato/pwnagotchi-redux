@@ -3090,6 +3090,37 @@ def cmd_loot(args) -> int:
                     first = (info.get("metadata") or info.get("signatures") or "").splitlines()
                     print(f"  {tool:9} — {first[0] if first else 'no output'}")
         return 0
+    if cmd == "files":
+        # Scope-gated SMB file-loot: with a recovered credential, pull the
+        # interesting files off a host straight into forensic triage. A firing
+        # path — the host must be armed (or LAB), same gate as pivot.
+        from .core.scope import Scope
+        from .loot.files import SmbLooter
+        scope = Scope.load(args.scope_file or _DEFAULT_SCOPE_PATH)
+        ok, reason = scope.authorize(ip=args.host)
+        if not ok:
+            print(f"file-loot — NOT fired: {reason}")
+            return 0
+        print(f"file-loot {args.host} — {reason}")
+        looter = SmbLooter(max_files=args.max_files)
+        pulled, notes = looter.loot_host(args.host, args.user, args.pw, dest=args.dest)
+        for n in notes:
+            print(f"  {n}")
+        if not pulled:
+            print("  no files pulled")
+            return 0
+        print(f"  pulled {len(pulled)} file(s) into {args.dest}")
+        for p in pulled:
+            print(f"    {p}")
+        if args.triage:
+            from .loot import triage as _triage
+            results = _triage(pulled)
+            flagged = [p for p, r in results.items() if r.get("flagged")]
+            print(f"  triaged {len(results)} file(s)" +
+                  (f", {len(flagged)} FLAGGED" if flagged else ""))
+            for p in flagged:
+                print(f"    ⚑ {p}")
+        return 0
     return 2
 
 
@@ -4849,6 +4880,14 @@ def build_parser() -> argparse.ArgumentParser:
     lt = losub.add_parser("triage", help="forensic triage of pulled files (exiftool/binwalk/steghide/secrets)")
     lt.add_argument("files", nargs="+", help="files to triage")
     lt.add_argument("--json", action="store_true", help="machine-readable output")
+    lf = losub.add_parser("files", help="scope-gated SMB file-loot: pull interesting files off a host with a recovered credential")
+    lf.add_argument("host", help="target host (IP or name); must be armed in scope")
+    lf.add_argument("--user", required=True, help="username for the recovered credential")
+    lf.add_argument("--pw", required=True, help="password for the recovered credential")
+    lf.add_argument("--dest", default="/captures/loot/files", help="where to drop pulled files")
+    lf.add_argument("--max-files", type=int, default=25, help="cap on files pulled (default: 25)")
+    lf.add_argument("--triage", action="store_true", help="run forensic triage on the pulled files")
+    lf.add_argument("--scope-file", default=None, help="scope store (default: the device scope)")
     lo.set_defaults(func=cmd_loot)
     return p
 
