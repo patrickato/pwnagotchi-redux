@@ -850,6 +850,33 @@ def cmd_capabilities(args) -> int:
               f"{c['planned']} still planned")
         print(f"  {c['summary']}")
         return 0
+    if cmd == "qualified":
+        # The readiness spine: one truth layering manifest + hardware-present +
+        # benchpass attestation. Reads the real bench ledger if present.
+        from .core import readiness_spine as RS
+        passed = frozenset()
+        if getattr(args, "ledger", None):
+            try:
+                from .benchpass import Ledger
+                passed = RS.passed_gates_from_ledger(Ledger.load(args.ledger))
+            except Exception:
+                passed = frozenset()
+        comp = RS.spine_completion(passed_gates=passed)
+        if getattr(args, "json", False):
+            print(_json.dumps(comp, indent=2))
+            return 0
+        glyph = {"qualified": "★", "present": "✓", "needs-hardware": "◐",
+                 "tool-missing": "○", "planned": "·"}
+        print("Augur readiness spine — one truth (manifest + hardware-present + benchpass)\n")
+        for row in comp["rows"]:
+            g = glyph.get(row["rung"], " ")
+            print(f"  {g} [{row['rung']:14}] {row['feature']:16} {row['title']}")
+            if row["rung"] in ("present", "needs-hardware", "tool-missing"):
+                print(f"       └─ {row['reason']}")
+        print(f"\n  {comp['summary']}")
+        if not passed:
+            print("  (no bench ledger given — pass --ledger <file> to fold in hardware attestation)")
+        return 0
     return 2
 
 
@@ -4864,6 +4891,10 @@ def build_parser() -> argparse.ArgumentParser:
     caps_.add_argument("--json", action="store_true")
     capc = capsub.add_parser("completion", help="evidence-based completion picture (no subjective %)")
     capc.add_argument("--json", action="store_true")
+    capq = capsub.add_parser("qualified",
+                             help="readiness spine: one truth (manifest + hardware-present + benchpass)")
+    capq.add_argument("--ledger", default=None, help="benchpass ledger JSON to fold in hardware attestation")
+    capq.add_argument("--json", action="store_true")
     cap.set_defaults(func=cmd_capabilities)
     sim = sub.add_parser("simulate",
                          help="boot the whole live stack with no Pi (fake engine replaying a scenario)")
