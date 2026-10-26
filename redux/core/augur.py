@@ -40,7 +40,7 @@ from .signals import SignalBus, Signal, connect_narrator
 
 # driver event type -> sighting kind
 _KIND = {"ap.new": "wifi", "ap.lost": "wifi", "client.new": "wifi",
-         "ble.new": "ble", "ble.lost": "ble"}
+         "client.probe": "probe", "ble.new": "ble", "ble.lost": "ble"}
 
 
 def _band_of_channel(ch):
@@ -195,7 +195,11 @@ class Augur:
         if kind is None:
             return
         data = getattr(ev, "data", {}) or {}
-        mac = data.get("mac") or data.get("bssid") or data.get("address") or ""
+        # Probe-requests carry the client in "from"/"station"; APs/clients in
+        # mac/bssid/address. Harvest all of them so the SSID history phones leak
+        # (where a device has been) becomes a stored, mappable sighting.
+        mac = (data.get("mac") or data.get("bssid") or data.get("address")
+               or data.get("from") or data.get("station") or "")
         if not mac:
             return
         lat = lon = None
