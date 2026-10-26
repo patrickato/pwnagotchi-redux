@@ -123,7 +123,15 @@ FEATURES: Tuple[Feature, ...] = (
             "scan → scope-gated cred-test → loot over an authorized network.",
             "net", implemented=True, binaries=("nmap", "hydra"),
             toolbox="nmap", guidance="netrecon",
-            note="real nmap + hydra runners; needs access to a network in Scope"),
+            note="real nmap + hydra runners; needs access to a network in Scope",
+            related=("net.responder", "wifi.crack")),
+    Feature("net.responder", "NetNTLM hash harvest",
+            "on the joined LAN, poison LLMNR/NBT-NS/mDNS to harvest NetNTLMv1/v2 "
+            "hashes → the crack queue (hashcat -m 5500/5600).",
+            "net", implemented=True, binaries=("responder",), toolbox="responder",
+            note="firing path: FIELD needs the LAN armed + authorization, LAB unleashed; "
+                 "the parser is pure (verified with no tool); analyze-only mode is passive",
+            related=("net.recon", "wifi.crack")),
     Feature("sdr.rx", "SDR receive / decode",
             "spectrum/waterfall + ISM/ADS-B/POCSAG decoders from an RTL-SDR.",
             "sdr", implemented=True, needs_hardware="an RTL-SDR dongle",
