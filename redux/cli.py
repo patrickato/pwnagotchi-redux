@@ -3077,6 +3077,38 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_scenario(args) -> int:
+    """Scenario library — runnable playbooks that chain capabilities toward an
+    outcome. `list`/`show` are tutorials + the capability map; `check` cross-refs
+    the manifest to tell you if a scenario is runnable on THIS box right now."""
+    from .core import scenarios as S
+    cmd = args.scenario_cmd
+    if cmd == "list":
+        print("scenarios — playbooks that tie the toolkit together:")
+        for sc in S.list_scenarios():
+            print(f"  {sc.name:22} [{sc.posture:6}] {sc.goal}")
+        return 0
+    sc = S.get(args.name)
+    if sc is None:
+        print(f"no such scenario: {args.name}  (try `redux scenario list`)")
+        return 2
+    if cmd == "show":
+        print(f"{sc.name} — {sc.goal}")
+        print(f"  posture: {sc.posture}  |  teaches: {sc.teaches}")
+        for i, st in enumerate(sc.steps, 1):
+            print(f"  {i}. {st.title}   [{st.capability}]")
+            print(f"       $ {st.command}")
+            print(f"         {st.why}")
+        return 0
+    if cmd == "check":
+        rep = S.validate(sc)
+        print(f"{sc.name} — {rep['note']}  ({rep['ready']} ready / {rep['blocked']} blocked)")
+        for r in rep["steps"]:
+            print(f"  [{r['state']:13}] {r['step']}  ({r['capability']}) — {r['reason']}")
+        return 0
+    return 2
+
+
 def cmd_scrub(args) -> int:
     """Secure-wipe / panic-scrub of the device's OWN collected data — never a
     target's. `status` shows your on-disk exposure; `plan` is a dry-run of what a
@@ -5189,6 +5221,14 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
     nr.add_argument("--json", action="store_true", help="machine-readable output")
     nr.set_defaults(func=cmd_narrate)
+    scn = sub.add_parser("scenario", help="runnable playbooks that chain capabilities (tutorial + manifest readiness check)")
+    scnsub = scn.add_subparsers(dest="scenario_cmd", required=True)
+    scnsub.add_parser("list", help="list the scenarios")
+    scns = scnsub.add_parser("show", help="show a scenario's steps + exact commands")
+    scns.add_argument("name", help="scenario name (see `scenario list`)")
+    scnc = scnsub.add_parser("check", help="is this scenario runnable on THIS box right now?")
+    scnc.add_argument("name", help="scenario name")
+    scn.set_defaults(func=cmd_scenario)
     sc = sub.add_parser("scrub", help="secure-wipe the device's OWN data (scrub keeps the brain; panic burns it all)")
     sc.add_argument("--root", default=None, help="captures root (default: /captures)")
     sc.add_argument("--panic", action="store_true", help="full burn: wipe brain + geo + target list too (keeps the box bootable)")
