@@ -542,6 +542,34 @@ def cmd_dex(args) -> int:
     """Print the Field Dex — the recon ledger over recorded sightings."""
     from .dex import build_dex, link_store
     from .geo import SightingStore
+    if getattr(args, "dna", False):
+        # Device DNA (#85): behavioral re-id past MAC randomization. Extends the
+        # exact-match reid above to a SIMILARITY match, catching devices that
+        # rotated MAC AND sent no PNL. Live traces come from the raw-frame tap;
+        # --demo proves the linker over synthetic behavior.
+        from .dex import DnaLinker, BehaviorTrace
+        link = DnaLinker()
+        if getattr(args, "demo", False):
+            common = dict(timestamps=(0.0, 10.0, 20.0, 30.0), rates=(1, 2, 5, 11),
+                          channels=(1, 6, 11), ie_hash="cafebabe")
+            link.add(BehaviorTrace("a2:11:11:11:11:11", **common))
+            link.add(BehaviorTrace("de:22:22:22:22:22", **common))   # same device, new MAC
+            link.add(BehaviorTrace("ff:00:00:00:00:99", rates=(6, 9, 12, 54),
+                                   channels=(36,), ie_hash="0ther", timestamps=(0.0, 60.0)))
+            print("redux dex --dna — SYNTHETIC behavioral traces (no radio)")
+        else:
+            print("redux dex --dna — live behavioral DNA needs the raw-frame tap feeding "
+                  "traces (timing/rates/IE); run with --demo to see the linker.")
+            return 0
+        s = link.summary()
+        print(f"Device DNA: {s['macs_seen']} MAC(s) → {s['devices']} device(s) · "
+              f"{s['reidentified']} re-identified by behavior")
+        for d in link.identities():
+            if d.reidentified:
+                print(f"  [DEVICE conf={d.confidence:.2f}] {len(d.macs)} MACs → one device "
+                      f"(matched on {', '.join(d.matched_on)}): {', '.join(sorted(d.macs))}")
+        print(f"  {s['note']}")
+        return 0
     store = SightingStore(args.store) if args.store else SightingStore()
     if getattr(args, "identities", False):
         linker = link_store(store)
@@ -4672,6 +4700,9 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--top", type=int, default=10, help="how many rarest/departed to show")
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
+    dx.add_argument("--dna", action="store_true",
+                    help="behavioral re-id: link MACs by probing behavior (timing/rates/IE), not just PNL/IE equality")
+    dx.add_argument("--demo", action="store_true", help="with --dna: synthetic traces (no radio)")
     dx.set_defaults(func=cmd_dex)
 
     tb = sub.add_parser("toolbox", help="curated catalog of useful tools + the exact command to add each")

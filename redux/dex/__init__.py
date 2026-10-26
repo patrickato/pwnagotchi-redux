@@ -16,9 +16,15 @@ from .fingerprint import (
     DeviceObservation, Fingerprint, DeviceIdentity, DeviceLinker,
     fingerprint, is_randomized, observations_from_store, link_store,
 )
+from .device_dna import (
+    BehaviorTrace, DeviceDNA, DnaIdentity, DnaLinker,
+    device_dna, dna_similarity,
+)
 
 __all__ = [
     "DexEntry", "DexView", "Rarity", "build_dex",
     "DeviceObservation", "Fingerprint", "DeviceIdentity", "DeviceLinker",
     "fingerprint", "is_randomized", "observations_from_store", "link_store",
+    "BehaviorTrace", "DeviceDNA", "DnaIdentity", "DnaLinker",
+    "device_dna", "dna_similarity",
 ]

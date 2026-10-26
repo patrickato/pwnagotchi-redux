@@ -187,6 +187,13 @@ FEATURES: Tuple[Feature, ...] = (
             "is a BLE tracker following me? — the personal-safety sweep.",
             "blue", implemented=True, needs_hardware="a Bluetooth adapter",
             guidance="tracker"),
+    Feature("wifi.dna", "Device DNA (behavioral re-id)",
+            "link a device across MAC rotation by HOW it probes (timing cadence, "
+            "supported-rate set, channels, IE template) — works even with no PNL.",
+            "wifi", implemented=True, needs_hardware="a monitor-mode Wi-Fi radio",
+            note="similarity-based re-id that extends the exact-match fingerprint; "
+                 "the engine is pure (verified with no radio), live traces need the tap",
+            related=("blue.tracker",)),
     Feature("eap.enterprise", "Enterprise EAP assessment",
             "hostapd-mana/-wpe enterprise client-behavior assessment.",
             "wifi", implemented=False, needs_hardware="a monitor/injection Wi-Fi radio",
