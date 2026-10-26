@@ -4540,7 +4540,23 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _ensure_tool_path() -> None:
+    """iw / ip / rfkill live in /usr/sbin (and /sbin) on Debian / Raspberry Pi OS,
+    which a non-root login PATH omits. redux invokes them by bare name, so without
+    this the CLI reports installed radio tools as MISSING — the "iw: command not
+    found" trap that makes a working radio look dead (and a healthy benchpass gate
+    read as a failure). Append the system sbin dirs so they resolve, never
+    shadowing anything already on PATH. The root daemon already gets them from
+    systemd's PATH; this is for the interactive / non-root CLI."""
+    parts = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    for d in ("/usr/sbin", "/sbin"):
+        if d not in parts:
+            parts.append(d)
+    os.environ["PATH"] = os.pathsep.join(parts)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
+    _ensure_tool_path()
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
         return args.func(args)
