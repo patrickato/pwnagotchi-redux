@@ -3077,6 +3077,56 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_scrub(args) -> int:
+    """Secure-wipe / panic-scrub of the device's OWN collected data — never a
+    target's. `status` shows your on-disk exposure; `plan` is a dry-run of what a
+    mode would wipe vs keep; `run` executes (requires --apply). scrub keeps the
+    brain (experience/wordlists/graph); panic burns it all but leaves the box
+    bootable. DRY-RUN by default."""
+    from .core.scrub import SecureWipe
+    sw = SecureWipe(root=getattr(args, "root", None) or "/captures")
+    mode = "panic" if getattr(args, "panic", False) else "scrub"
+    cmd = args.scrub_cmd
+    try:
+        if cmd == "status":
+            exp = sw.exposure()
+            print(f"on-disk exposure — {exp['note']}")
+            for tier, v in sorted(exp["by_tier"].items()):
+                print(f"  {tier:17} {v['items']} item(s)  {v['bytes']} bytes")
+            return 0
+        if cmd == "plan":
+            plan = sw.plan(mode)
+            w = [i for i in plan["wipe"] if i.exists]
+            print(f"scrub plan [{mode.upper()}] — would wipe {len(w)} item(s), keep the rest:")
+            for i in w:
+                print(f"  WIPE  [{i.tier:16}] {i.path}  ({i.size} B) — {i.reason}")
+            for i in plan["keep"]:
+                if i.exists:
+                    print(f"  keep  [{i.tier:16}] {i.path}")
+            print(f"  ({'panic burns the brain too; ' if mode == 'panic' else 'brain preserved; '}"
+                  "run `redux scrub run" + (" --panic" if mode == 'panic' else "") + " --apply` to execute)")
+            return 0
+        if cmd == "run":
+            res = sw.execute(mode, apply=getattr(args, "apply", False),
+                             overwrite=not getattr(args, "no_overwrite", False))
+            if not res["applied"]:
+                print(f"scrub [{mode.upper()}] DRY RUN — would wipe {len(res['would_wipe'])} item(s); "
+                      f"pass --apply to execute")
+                for i in res["would_wipe"]:
+                    print(f"  WIPE [{i['tier']}] {i['path']}")
+                return 0
+            print(f"scrub [{mode.upper()}] — wiped {res['wiped']} item(s); kept {len(res['kept'])}")
+            for r in res["results"]:
+                if not r["ok"]:
+                    print(f"  ! {r['path']}: {r['result']}")
+            print(f"  note: {res['flash_caveat']}")
+            return 0
+    except ValueError as e:
+        print(str(e))
+        return 2
+    return 2
+
+
 def cmd_airwave(args) -> int:
     """Airwave DVR — scrub back through RF history. An append-only timeline of
     what was on the air, so you can rewind and ask 'what was here at 3:42pm?'.
@@ -5139,6 +5189,16 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
     nr.add_argument("--json", action="store_true", help="machine-readable output")
     nr.set_defaults(func=cmd_narrate)
+    sc = sub.add_parser("scrub", help="secure-wipe the device's OWN data (scrub keeps the brain; panic burns it all)")
+    sc.add_argument("--root", default=None, help="captures root (default: /captures)")
+    sc.add_argument("--panic", action="store_true", help="full burn: wipe brain + geo + target list too (keeps the box bootable)")
+    scsub = sc.add_subparsers(dest="scrub_cmd", required=True)
+    scsub.add_parser("status", help="show on-disk sensitive-data exposure")
+    scsub.add_parser("plan", help="dry-run: what this mode would wipe vs keep")
+    scr = scsub.add_parser("run", help="execute the scrub (DRY-RUN unless --apply)")
+    scr.add_argument("--apply", action="store_true", help="actually wipe (otherwise dry-run)")
+    scr.add_argument("--no-overwrite", action="store_true", help="unlink without the best-effort overwrite pass")
+    sc.set_defaults(func=cmd_scrub)
     aw = sub.add_parser("airwave", help="Airwave DVR — scrub back through RF history (timeline/scrub/track)")
     aw.add_argument("--dvr", default=None, help="DVR JSONL file (default: the device airwave log)")
     aw.add_argument("--demo", action="store_true", help="synthetic RF timeline (no radio)")

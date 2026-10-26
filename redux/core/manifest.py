@@ -226,6 +226,14 @@ FEATURES: Tuple[Feature, ...] = (
             "stable fingerprint.",
             "stealth", implemented=True, needs_hardware="a Wi-Fi radio",
             related=("stealth.quiet",)),
+    Feature("stealth.scrub", "Secure-wipe / panic-scrub",
+            "wipe the device's OWN sensitive loot/captures/creds on demand — scrub "
+            "keeps the brain (experience/wordlists/graph), panic burns it all but "
+            "leaves the box bootable. Dry-run by default; own-device only.",
+            "stealth", implemented=True,
+            note="best-effort overwrite+unlink; honest that FDE is the real guarantee on flash. "
+                 "Never target anti-forensics — refuses any root outside the captures tree",
+            related=("stealth.quiet",)),
 )
 
 _BY_ID: Dict[str, Feature] = {f.id: f for f in FEATURES}
