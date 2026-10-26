@@ -3218,6 +3218,49 @@ def cmd_engagement(args) -> int:
     return 2
 
 
+def cmd_targets(args) -> int:
+    """Target-value radar — rank APs by how worth attacking each is (crackability,
+    a free PMKID, signal, clients, WPS), juiciest first. Glass-box: every point
+    carries a reason. `--demo` shows it; live reads the passive-PMKID harvest."""
+    from .intel.target_radar import rank, summary, TargetObservation
+    retired = set()
+    try:
+        from .crack.captured import retired_bssids
+        retired = retired_bssids()
+    except Exception:
+        retired = set()
+    obs = []
+    if getattr(args, "demo", False):
+        obs = [
+            TargetObservation("aa:00:00:00:00:01", "HomeNet", "wpa2-psk", -48, 6, clients=2, pmkid_seen=True),
+            TargetObservation("bb:00:00:00:00:02", "Guest", "wpa2-psk", -72, 11, wps=True),
+            TargetObservation("cc:00:00:00:00:03", "CoffeeWiFi", "open", -50, 1),
+            TargetObservation("dd:00:00:00:00:04", "Neighbor", "wpa2-psk", -80, 6),
+        ]
+        print("redux targets — SYNTHETIC radar (no radio)")
+    else:
+        try:
+            from .crack.passive_pmkid import load_state
+            for h in load_state().get("hits", []):
+                obs.append(TargetObservation(
+                    h.get("bssid", ""), h.get("ssid", ""), h.get("security") or "wpa2-psk",
+                    h.get("rssi"), h.get("channel"), pmkid_seen=True))
+        except Exception:
+            pass
+        if not obs:
+            print("no targets yet — run `redux pmkid sweep` first, or `redux targets --demo`")
+            return 0
+    ranked = rank(obs, retired=retired)
+    s = summary(ranked)
+    print(f"  {s['note']}")
+    for t in ranked:
+        tag = "OWNED" if t.already_owned else (f"{t.score:>3}" if t.score else "  -")
+        print(f"  [{tag}] {t.bssid}  {(t.ssid or '<hidden>'):20} {t.method if t.crackable else 'no offline path'}")
+        if t.score:
+            print(f"          {'; '.join(t.reasons)}")
+    return 0
+
+
 def cmd_arsenal(args) -> int:
     """The arsenal — one place listing everything the box can do and the exact
     command to run it. `--search` filters by command, title or group."""
@@ -5530,6 +5573,9 @@ def build_parser() -> argparse.ArgumentParser:
     ar = sub.add_parser("arsenal", help="one-place index of everything the box can do + the command to run it")
     ar.add_argument("--search", default=None, help="filter by a term (command / title / group)")
     ar.set_defaults(func=cmd_arsenal)
+    tg = sub.add_parser("targets", help="target-value radar — rank APs by how worth attacking each is")
+    tg.add_argument("--demo", action="store_true", help="synthetic radar (no radio)")
+    tg.set_defaults(func=cmd_targets)
     ph = sub.add_parser("phone", help="phone UI over Bluetooth PAN — tether a phone (no Wi-Fi/cable) and serve the dashboard")
     ph.add_argument("--adapter", default="hci0", help="Bluetooth adapter")
     ph.add_argument("--iface", default="pan0", help="PAN interface")

@@ -49,6 +49,7 @@ _RAW: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
         ("tracker", "is a BLE tag following me? (counter-surveillance)"),
     )),
     ("CAPTURE & CRACK", (
+        ("targets", "rank APs by how worth attacking (crackability x value x signal)"),
         ("capture plan", "engine selection, Scope-aimed"),
         ("pmkid sweep", "zero-transmit PMKID loot — harvest + rank"),
         ("crack run", "convert captures and crack them (hashcat)"),

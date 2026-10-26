@@ -222,6 +222,13 @@ FEATURES: Tuple[Feature, ...] = (
             "is a BLE tracker following me? — the personal-safety sweep.",
             "blue", implemented=True, needs_hardware="a Bluetooth adapter",
             guidance="tracker"),
+    Feature("wifi.target_radar", "Target-value radar",
+            "rank APs by how worth attacking each is — crackability, a free PMKID, "
+            "signal, clients, WPS — minus what's already owned; juiciest first.",
+            "wifi", implemented=True,
+            note="pure (composes crackability + captured-list + PMKID state); feeds "
+                 "capture planning and autopilot priority",
+            related=("wifi.pmkid", "wifi.capture", "wifi.crack")),
     Feature("wifi.dna", "Device DNA (behavioral re-id)",
             "link a device across MAC rotation by HOW it probes (timing cadence, "
             "supported-rate set, channels, IE template) — works even with no PNL.",
