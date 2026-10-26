@@ -3486,8 +3486,45 @@ def cmd_forge(args) -> int:
             pnl_seeds = [r["ssid"] for r in ProbeHarvester(path=args.pnl).ssids() if r.get("ssid")]
         except Exception:
             pnl_seeds = []
-    f = forge(args.ssid or "", tokens=args.token or [], pnl=pnl_seeds,
-              bssid=args.bssid, min_len=args.min_len, max_words=args.max)
+    # Environment-grown mode (#91): mine seeds from everything the box observed —
+    # the PNLs above, the SSIDs the passive-PMKID sweep logged, and the strings in
+    # any looted files — then grow the wordlist from THIS place. A+B+C → one list.
+    if getattr(args, "environment", False):
+        from .crack.environment import EnvironmentHarvester
+        harv = EnvironmentHarvester()
+        harv.add_pnl(pnl_seeds)
+        for tok in (args.token or []):
+            harv.add_ssid(tok)
+        grown = 0
+        # SSIDs the zero-transmit PMKID sweep already harvested (live-state file)
+        try:
+            from .crack.passive_pmkid import load_state as _pmkid_state
+            for h in _pmkid_state().get("hits", []):
+                if h.get("ssid"):
+                    harv.add_ssid(h["ssid"]); grown += 1
+                if h.get("bssid"):
+                    harv.add_vendor(h["bssid"])
+        except Exception:
+            pass
+        # strings/metadata/filenames from looted files (triage #2 over the loot dir)
+        if getattr(args, "loot_dir", None):
+            try:
+                import os as _os
+                from .loot.triage import triage as _triage
+                files = []
+                for root, _d, names in _os.walk(args.loot_dir):
+                    files.extend(_os.path.join(root, n) for n in names)
+                if files:
+                    harv.learn_triage(_triage(files)); grown += len(files)
+            except Exception:
+                pass
+        f = harv.grow(args.ssid or "", bssid=args.bssid,
+                      min_len=args.min_len, max_words=args.max)
+        summ = harv.summary()
+        print(f"ENVIRONMENT-GROWN — {summ['note']}  (sources: {summ['by_source'] or 'none'})")
+    else:
+        f = forge(args.ssid or "", tokens=args.token or [], pnl=pnl_seeds,
+                  bssid=args.bssid, min_len=args.min_len, max_words=args.max)
     if args.out:
         try:
             with open(args.out, "w", encoding="utf-8") as fh:
@@ -4885,6 +4922,10 @@ def build_parser() -> argparse.ArgumentParser:
     fg.add_argument("--out", default=None, help="write the candidate wordlist to this file")
     fg.add_argument("--min-len", type=int, default=8, help="minimum length (WPA2-PSK is 8+; default 8)")
     fg.add_argument("--max", type=int, default=2000, help="cap the candidate count (default 2000)")
+    fg.add_argument("--environment", action="store_true",
+                    help="grow seeds from everything the box observed (PNLs + passive-PMKID SSIDs + looted-file strings)")
+    fg.add_argument("--loot-dir", default=None,
+                    help="with --environment: triage looted files here and mine their strings/metadata")
     fg.add_argument("--json", action="store_true", help="machine-readable output")
     fg.set_defaults(func=cmd_forge)
     ex = sub.add_parser("explain", help="purple-team: how a technique is detected and defended")
