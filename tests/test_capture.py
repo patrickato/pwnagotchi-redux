@@ -149,3 +149,20 @@ def test_augur_doctor_reports_capture_engine_health():
     up = Augur(radios=[r], intent=Intent.RECON, driver=_FakeDriver())
     areas2 = {f["area"]: f["status"] for f in up.doctor_report()["findings"]}
     assert areas2.get("capture engine") == "ok"
+
+
+# --- F08: captures land on the persistent /captures broker, not ephemeral /etc -- #
+
+def test_angryoxide_default_output_is_on_persistent_captures():
+    """Regression for F08: the AngryOxide default output dir must be on the
+    persistent /captures volume the ingest pipeline watches — NOT /etc, which is
+    on the ephemeral overlayroot and watched by nothing (captures lost on reboot)."""
+    from redux.crack.capture import DEFAULT_CAPTURE_DIR
+    assert DEFAULT_CAPTURE_DIR.startswith("/captures"), "must live on the persistent volume"
+    assert "/etc/" not in DEFAULT_CAPTURE_DIR, "must not sit on the ephemeral overlay root"
+    # the plan's -o argument and its advertised outputs both point there
+    p = AngryOxideProvider(which=lambda b: "/usr/bin/angryoxide")
+    plan = p.plan(_armed_scope(), active=True)
+    assert plan.argv[plan.argv.index("-o") + 1].startswith("/captures")
+    assert plan.outputs["dir"].startswith("/captures")
+    assert "/captures" in plan.outputs["hashline"]  # the .hc22000 → crack handoff

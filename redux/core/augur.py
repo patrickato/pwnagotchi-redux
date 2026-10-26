@@ -276,6 +276,12 @@ class Augur:
         number fired. The driver logs a glass-box reason per deauth and refusal."""
         if not getattr(self._scope, "lab_mode", False):
             return 0
+        # Posture is an EXTRA gate, never looser: a detection-only persona
+        # hard-disables firing even in lab mode. apply_persona() promises exactly
+        # this ("a detection-only persona hard-disables firing"), so the offense
+        # pump must honor it — lab_mode alone is not authority to transmit.
+        if not self.offense_enabled():
+            return 0
         driver = getattr(self.supervisor, "driver", None)
         if driver is None or not hasattr(driver, "deauth"):
             return 0
