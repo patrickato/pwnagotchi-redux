@@ -3218,6 +3218,25 @@ def cmd_engagement(args) -> int:
     return 2
 
 
+def cmd_arsenal(args) -> int:
+    """The arsenal — one place listing everything the box can do and the exact
+    command to run it. `--search` filters by command, title or group."""
+    from .core import arsenal
+    if getattr(args, "search", None):
+        hits = arsenal.search(args.search)
+        print(f"arsenal — {len(hits)} match(es) for '{args.search}':")
+        for e in hits:
+            print(f"  redux {e.command:30} {e.title}   [{e.group}]")
+        return 0
+    print("ARSENAL — everything Augur can do:\n")
+    for name, entries in arsenal.groups().items():
+        print(f"  {name}")
+        for e in entries:
+            print(f"    redux {e.command:30} {e.title}")
+        print()
+    return 0
+
+
 def cmd_phone(args) -> int:
     """Phone UI over Bluetooth PAN — the responsive web dashboard, reachable with
     no Wi-Fi and no cable. `plan` shows the bring-up + the URL to browse; `up`
@@ -5439,6 +5458,9 @@ def build_parser() -> argparse.ArgumentParser:
     enc.add_argument("id", nargs="?", default=None, help="engagement id (default: the active one)")
     enc.add_argument("--report-out", default=None, help="write the frozen report as Markdown here")
     en.set_defaults(func=cmd_engagement)
+    ar = sub.add_parser("arsenal", help="one-place index of everything the box can do + the command to run it")
+    ar.add_argument("--search", default=None, help="filter by a term (command / title / group)")
+    ar.set_defaults(func=cmd_arsenal)
     ph = sub.add_parser("phone", help="phone UI over Bluetooth PAN — tether a phone (no Wi-Fi/cable) and serve the dashboard")
     ph.add_argument("--adapter", default="hci0", help="Bluetooth adapter")
     ph.add_argument("--iface", default="pan0", help="PAN interface")

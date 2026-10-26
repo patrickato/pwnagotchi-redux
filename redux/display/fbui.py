@@ -641,16 +641,22 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
                 label += " +" + str(len(extras) - 4)
             text_line((20, 296), label[:60], font=_font(8), fill=SUBTLE)
     elif page == "menu":
-        text_line((20, 149), "MENU / everything Augur can do", font=_font(12, bold=True), fill=INK)
-        # two-column grid of capability groups; a static map, cheap to draw
+        text_line((20, 143), "MENU / everything Augur can do  (redux <cmd>)", font=_font(11, bold=True), fill=INK)
+        # two-column grid of capability groups, derived from the arsenal so it is
+        # always current with the real toolkit (never a stale hand-kept list).
+        try:
+            from redux.core.arsenal import menu_groups as _menu_groups
+            rows = _menu_groups(max_groups=8)
+        except Exception:
+            rows = list(_MENU_GROUPS)
         col_x = (20, 246)
-        for index, (name, line1, line2) in enumerate(_MENU_GROUPS):
+        for index, (name, line1, line2) in enumerate(rows):
             cx = col_x[index % 2]
-            cy = 166 + (index // 2) * 42
-            draw.rectangle((cx, cy, cx + 214, cy + 38), outline=(36, 57, 69), width=1)
-            text_line((cx + 8, cy + 2), name, font=_font(11, bold=True), fill=TEAL)
-            text_line((cx + 8, cy + 15), line1, font=_font(9), fill=SUBTLE)
-            text_line((cx + 8, cy + 26), line2, font=_font(9), fill=SUBTLE)
+            cy = 157 + (index // 2) * 31
+            draw.rectangle((cx, cy, cx + 214, cy + 27), outline=(36, 57, 69), width=1)
+            text_line((cx + 8, cy + 1), name, font=_font(10, bold=True), fill=TEAL)
+            text_line((cx + 8, cy + 13), fit_text(draw, line1 + "  " + line2, _font(8), 200),
+                      font=_font(8), fill=SUBTLE)
     elif page == "power":
         from redux.core import power_tier as _pt
         m = (mode or "field").lower()

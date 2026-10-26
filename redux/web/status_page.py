@@ -97,6 +97,11 @@ button{font:12px var(--mono);background:#18222d;color:var(--fg);border:1px solid
 border-radius:7px;padding:5px 10px;min-height:42px;cursor:pointer;touch-action:manipulation}button.on{border-color:var(--acc);color:var(--acc)}
 main{max-width:900px;margin:0 auto;padding:16px;display:grid;gap:13px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.arsenal{display:grid;gap:10px;margin-top:8px}
+.arsenal .agn{color:var(--acc);font-size:11px;letter-spacing:.6px;margin-bottom:3px}
+.arsenal .ae{display:flex;flex-wrap:wrap;gap:8px;padding:2px 0;border-top:1px solid var(--line)}
+.arsenal .ae code{color:var(--wifi);white-space:nowrap}
+.arsenal .ae span{color:var(--mut);flex:1 1 180px}
 .row{display:flex;flex-wrap:wrap;gap:12px}.kv{flex:1 1 120px}
 .k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
 .v{font-size:17px;margin-top:2px}.creature{font-size:19px;color:var(--acc)}
@@ -287,6 +292,10 @@ body[data-skin="plain"] .hero::before{display:none}
  </section>
  <section class="card" data-page="ops" hidden aria-label="Capability readiness">
   <div class="k">capabilities · readiness (what the box can do, how ready)</div><div id="opscaps" aria-live="polite">capability map unavailable</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Arsenal">
+  <div class="k">arsenal · everything you can run (redux &lt;command&gt;)</div>
+  <div id="opsarsenal" class="arsenal"><!--ARSENAL--></div>
  </section>
  <div class="card hero" data-page="overview" aria-label="Live Augur persona">
   <div class="hero-top"><span class="hero-overline">AUGUR / LIVE OBSERVATIONS</span>
@@ -878,7 +887,21 @@ document.addEventListener('visibilitychange',function(){if(!document.hidden)tick
 
 
 def render_page() -> str:
-    return PAGE
+    # Inject the arsenal (static — the full toolkit + the command for each) once at
+    # page build, so it doesn't ride every status refresh.
+    import html as _h
+    try:
+        from ..core import arsenal
+        parts = []
+        for name, entries in arsenal.groups().items():
+            parts.append('<div class="ag"><div class="agn">' + _h.escape(name) + '</div>')
+            for e in entries:
+                parts.append('<div class="ae"><code>redux ' + _h.escape(e.command) + '</code>'
+                             '<span>' + _h.escape(e.title) + '</span></div>')
+            parts.append('</div>')
+        return PAGE.replace("<!--ARSENAL-->", "".join(parts))
+    except Exception:
+        return PAGE
 
 
 # A tiny, self-contained unlock page shown when a token is required and absent.
