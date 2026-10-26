@@ -832,6 +832,15 @@ class Augur:
             status["capabilities"] = _cap_completion()
         except Exception:
             pass
+        # Stealth posture (Quiet/Ghost mode) + live footprint, so every UI shows
+        # at a glance whether the box is going dark and how detectable it is.
+        try:
+            import os as _os
+            from .stealth import QuietConfig, status as _stealth_status
+            _sp = _os.environ.get("REDUX_STEALTH") or "/captures/live/stealth.json"
+            status["stealth"] = _stealth_status(QuietConfig.load(_sp))
+        except Exception:
+            pass
         if processing_report is None:
             from ..crack.ingest import read_summary
             processing_report = read_summary()

@@ -864,6 +864,28 @@ def cmd_stealth(args) -> int:
     Dry by default (prints the new MAC + the exact commands); --apply executes."""
     from .radio.macrand import MacRandomizer, random_mac, set_mac_commands
     cmd = args.stealth_cmd
+    if cmd == "quiet":
+        from .core.stealth import QuietConfig
+        path = getattr(args, "file", None) or "/captures/live/stealth.json"
+        q = QuietConfig.load(path)
+        sub = args.quiet_cmd
+        if sub == "on":
+            q.enabled = True
+            if getattr(args, "budget", None) is not None:
+                q.frame_budget = max(0, args.budget)
+            q.save(path)
+            print(f"QUIET/GHOST mode ON — passive-first, frame budget {q.frame_budget}, "
+                  f"MAC randomize {'on' if q.randomize_mac else 'off'}; transmit needs confirm")
+            return 0
+        if sub == "off":
+            q.enabled = False
+            q.save(path)
+            print("QUIET/GHOST mode OFF — existing scope/power gates apply as normal")
+            return 0
+        # status
+        print(f"quiet: {'ON' if q.enabled else 'off'}  (prefer_passive={q.prefer_passive}, "
+              f"frame_budget={q.frame_budget}, randomize_mac={q.randomize_mac})")
+        return 0
     if cmd == "mac":
         if not getattr(args, "apply", False):
             mac = random_mac(mode=args.mode)
@@ -4426,6 +4448,10 @@ def build_parser() -> argparse.ArgumentParser:
     stm.add_argument("--mode", choices=["vendor", "laa"], default="vendor",
                      help="vendor = plausible real OUI (blend in, default); laa = locally-administered random")
     stm.add_argument("--apply", action="store_true", help="actually change it on this device (needs root)")
+    stq = stsub.add_parser("quiet", help="Quiet/Ghost mode — go dark (LAB): passive-first + frame budget + MAC rotate")
+    stq.add_argument("quiet_cmd", choices=["on", "off", "status"], nargs="?", default="status")
+    stq.add_argument("--budget", type=int, default=None, help="max frames to emit while quiet (0 = fully passive)")
+    stq.add_argument("--file", default=None, help="stealth config path (default: the device stealth state)")
     st.set_defaults(func=cmd_stealth)
 
     nb = sub.add_parser("notebook", help="lab session journal — log activity + render a report")
