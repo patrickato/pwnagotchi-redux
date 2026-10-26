@@ -55,7 +55,7 @@ def test_left_and_right_swipes_switch_pages_only_when_complete():
     tracker = t.SwipeTracker()
     moves, rem = t.consume(swipe(2900, 900), tracker)
     assert rem == b"" and moves == [1]
-    assert t.navigate("overview", moves[0]) == "captures"
+    assert t.navigate("overview", moves[0]) == "ops"
     moves, rem = t.consume(swipe(900, 2900), tracker)
     assert moves == [-1]
     assert t.navigate("overview", moves[0]) == "menu"

@@ -432,7 +432,7 @@ _MENU_GROUPS = (
 
 # Friendly dock labels for the footer (cosmetic only; navigation uses the page keys).
 _DOCK_LABELS = {
-    "overview": "HOME", "captures": "CACHE", "doctor": "HEALTH", "radios": "RADIO",
+    "overview": "HOME", "ops": "OPS", "captures": "CACHE", "doctor": "HEALTH", "radios": "RADIO",
     "trends": "TREND", "system": "SYS", "signals": "AIR", "power": "MODE", "menu": "MENU",
 }
 
@@ -525,6 +525,36 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
         metric(20, "PREPARED", compact_count(capture["ready"]))
         metric(180, "FAILED", compact_count(capture["errors"]))
         metric(350, "HASH ROWS", compact_count(capture["hash_records"]))
+    elif page == "ops":
+        # Real-time operations: what the box is doing + how detectable it is now.
+        rpt = report if isinstance(report, dict) else {}
+        st = rpt.get("stealth") or {}
+        fp = st.get("footprint") or {}
+        pl = rpt.get("passive_loot") or {}
+        eng = rpt.get("engagement") or None
+        caps = (rpt.get("capabilities") or {}).get("by_state") or {}
+        metric(20, "FOOTPRINT", str(fp.get("label") or "--").upper())
+        metric(180, "PMKID NEW", value(pl.get("new_loot")))
+        metric(352, "READY", value(caps.get("ready")))
+        quiet = "ON" if st.get("quiet") else "off"
+        mac = "on" if st.get("randomize_mac") else "off"
+        score = fp.get("score")
+        text_line((20, 228),
+                  "STEALTH  quiet " + quiet + " / score " + (str(score) if score is not None else "--")
+                  + " / budget " + str(st.get("frame_budget", 0)) + " / MAC " + mac,
+                  font=_font(10), fill=TEAL if st.get("quiet") else SUBTLE)
+        if pl:
+            loot = ("LOOT  " + str(pl.get("new_loot", 0)) + " new / " + str(pl.get("aps_leaking_pmkid", 0))
+                    + " leaking / " + str(pl.get("footprint", "silent")))
+        else:
+            loot = "LOOT  no passive sweep recorded"
+        text_line((20, 246), loot, font=_font(10), fill=SUBTLE)
+        if eng:
+            case = ("CASE  " + str(eng.get("name", "?")) + " [" + str(eng.get("status", "?")) + "] / "
+                    + str(eng.get("authorization", "")))
+        else:
+            case = "CASE  no active engagement"
+        text_line((20, 264), case, font=_font(10), fill=AMBER if eng else SUBTLE)
     elif page == "system":
         system = evidence
         rows = system["rows"]
