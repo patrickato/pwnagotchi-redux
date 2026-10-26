@@ -746,6 +746,85 @@ def cmd_toolbox(args) -> int:
     return 2
 
 
+def cmd_capabilities(args) -> int:
+    """The honest option-space: every capability Augur ships, what each needs, and
+    a live readiness state (ready / needs-hardware / tool-missing / planned). Reads
+    the manifest and probes the real environment; links to toolbox (install) and
+    guidance (how-to) rather than duplicating them."""
+    import json as _json
+    from .core import manifest as M
+    cmd = args.capabilities_cmd
+    if cmd == "list":
+        feats = [f for f in M.list_features()
+                 if not getattr(args, "category", None) or f.category == args.category]
+        if not feats:
+            print("no matching capabilities")
+            return 0
+        if getattr(args, "json", False):
+            print(_json.dumps([M.readiness_record(f) for f in feats], indent=2))
+            return 0
+        print("  ✓ ready   ◐ needs hardware   ○ tool missing   · planned          🔒 = LAB power-tier")
+        counts = {r: 0 for r in M.Readiness}
+        for f in feats:
+            state, reason = M.readiness(f)
+            counts[state] += 1
+            lock = " 🔒" if f.power_tier else "   "
+            print(f"  {M.GLYPH[state]}{lock} [{f.category:<7}] {f.id:<16} {f.title}")
+            if state in (M.Readiness.TOOL_MISSING, M.Readiness.PLANNED):
+                print(f"          └─ {reason}")
+        c = M.completion(feats)
+        print(f"\n  {c['summary']}")
+        return 0
+    if cmd == "show":
+        f = M.get(args.id)
+        if f is None:
+            print(f"unknown capability '{args.id}' (see `redux capabilities list`)")
+            return 3
+        if getattr(args, "json", False):
+            print(_json.dumps(M.readiness_record(f), indent=2))
+            return 0
+        state, reason = M.readiness(f)
+        print(f"{f.id} — {f.title}   [{M.GLYPH[state]} {state.value}]")
+        print(f"  {f.summary}")
+        print(f"  category: {f.category}" + ("   🔒 LAB power-tier (per-action confirm)" if f.power_tier else ""))
+        print(f"  status:   {reason}")
+        if f.needs_hardware:
+            print(f"  hardware: {f.needs_hardware}")
+        if f.binaries:
+            print(f"  binaries: {', '.join(f.binaries)}")
+        if f.imports:
+            print(f"  python:   {', '.join(f.imports)}")
+        if f.note and f.note != reason:
+            print(f"  note:     {f.note}")
+        if f.toolbox:
+            from . import toolbox as TB
+            cmds = TB.install_commands(f.toolbox)
+            if cmds:
+                print(f"  install:  {cmds[0]}" + ("  …" if len(cmds) > 1 else ""))
+        if f.guidance:
+            from . import guidance as G
+            topic = G.get(f.guidance)
+            if topic:
+                print(f"  how-to:   `redux help {f.guidance}` — {topic.command or topic.title}")
+        if f.related:
+            print(f"  related:  {', '.join(f.related)}")
+        return 0
+    if cmd == "completion":
+        c = M.completion()
+        if getattr(args, "json", False):
+            print(_json.dumps(c, indent=2))
+            return 0
+        print("Augur capability completion (evidence-based — a plan is never counted as ready)\n")
+        order = [M.Readiness.READY, M.Readiness.NEEDS_HARDWARE, M.Readiness.TOOL_MISSING, M.Readiness.PLANNED]
+        for r in order:
+            print(f"  {M.GLYPH[r]} {r.value:<14} {c['by_state'][r.value]}")
+        print(f"\n  {c['implemented']}/{c['total']} capabilities have a real code path; "
+              f"{c['planned']} still planned")
+        print(f"  {c['summary']}")
+        return 0
+    return 2
+
+
 def cmd_notebook(args) -> int:
     """Lab notebook: a session journal for learning — log what you did and render
     a clean report of the session."""
@@ -4221,6 +4300,20 @@ def build_parser() -> argparse.ArgumentParser:
     tbi.add_argument("name")
     tbi.add_argument("--run", action="store_true", help="execute the install on this device (needs root)")
     tb.set_defaults(func=cmd_toolbox)
+
+    cap = sub.add_parser("capabilities", aliases=["caps"],
+                         help="the honest catalog of everything Augur can do + how ready each is")
+    capsub = cap.add_subparsers(dest="capabilities_cmd", required=True)
+    capl = capsub.add_parser("list", help="every capability with its readiness state")
+    capl.add_argument("--category", default=None,
+                      help="wifi/net/sdr/rf/bt/gps/power/sense/mesh/blue/storage")
+    capl.add_argument("--json", action="store_true", help="machine-readable records")
+    caps_ = capsub.add_parser("show", help="full detail + what it needs + how to use one capability")
+    caps_.add_argument("id")
+    caps_.add_argument("--json", action="store_true")
+    capc = capsub.add_parser("completion", help="evidence-based completion picture (no subjective %)")
+    capc.add_argument("--json", action="store_true")
+    cap.set_defaults(func=cmd_capabilities)
 
     nb = sub.add_parser("notebook", help="lab session journal — log activity + render a report")
     nb.add_argument("--path", default="/captures/live/notebook.jsonl", help="notebook path")
