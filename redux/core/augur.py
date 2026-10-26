@@ -824,6 +824,14 @@ class Augur:
         if self.sentinel() is not None:
             status["sentinel"] = self.sentinel_status()
         status["capture_engine"] = self.capture_plan().get("selected_engine")
+        # Surface the capability option-space + readiness so every UI (TFT/web/phone)
+        # can show the full picture of what the box can do and how ready each is —
+        # the "nothing useful is hidden" view. Cheap + fail-safe.
+        try:
+            from .manifest import completion as _cap_completion
+            status["capabilities"] = _cap_completion()
+        except Exception:
+            pass
         if processing_report is None:
             from ..crack.ingest import read_summary
             processing_report = read_summary()

@@ -49,6 +49,9 @@ def test_snapshot_once_boots_real_stack_and_replays_scenario():
     assert rt["handshake_events"] >= 1                       # incl. the dad24 handshake
     assert "doctor" in snap and "ui" in snap                 # Doctor + TFT model are populated
     assert snap.get("capture_engine") == "bettercap"
+    # the capability option-space + readiness is surfaced for every UI to read
+    assert "capabilities" in snap and snap["capabilities"]["total"] >= 1
+    assert "summary" in snap["capabilities"]
     # the user's own test AP (dad24) shows up in the live state
     blob = json.dumps(snap.get("access_points", []))
     assert "dad24" in blob or "18:a5:e9:65:34:d2" in blob
