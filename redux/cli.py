@@ -3104,6 +3104,31 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_leases(args) -> int:
+    """Resource ownership / lease broker — who holds which radio. `demo` shows the
+    arbitration (preemption by priority, shared GPS, multi-band coexistence) that
+    swarm + multi-engine + multi-band rely on to not clobber each other."""
+    from .core.leases import ResourceBroker, Resource, SHARED
+    if args.leases_cmd == "demo":
+        b = ResourceBroker()
+        b.register(Resource("wlan0", "wifi")).register(Resource("wlan1", "wifi"))
+        b.register(Resource("gps0", "gps", shareable=True))
+        print("resource lease broker — arbitration demo\n")
+        print(f"  bettercap -> wlan1 (pri1)   : {b.acquire('wlan1', 'bettercap', priority=1, reason='baseline capture').reason}")
+        print(f"  sense-csi -> wlan0          : {b.acquire('wlan0', 'sense-csi', reason='onboard CSI').reason}  (multi-band coexist)")
+        print(f"  gpsd -> gps0 (shared)       : {b.acquire('gps0', 'gpsd', mode=SHARED, reason='position').reason}")
+        print(f"  fox-hunt -> gps0 (shared)   : {b.acquire('gps0', 'fox-hunt', mode=SHARED, reason='read fix').reason}")
+        g = b.acquire("wlan1", "angryoxide", priority=9, reason="preferred scalpel")
+        print(f"  angryoxide -> wlan1 (pri9)  : {g.reason}")
+        snap = b.snapshot()
+        print(f"\n  {snap['note']}")
+        for r in snap["resources"]:
+            who = ", ".join(f"{h['owner']}({h['mode']})" for h in r["holders"]) or "free"
+            print(f"    {r['resource']:7} [{r['type']:4}] {who}")
+        return 0
+    return 2
+
+
 def cmd_scenario(args) -> int:
     """Scenario library — runnable playbooks that chain capabilities toward an
     outcome. `list`/`show` are tutorials + the capability map; `check` cross-refs
@@ -5252,6 +5277,10 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
     nr.add_argument("--json", action="store_true", help="machine-readable output")
     nr.set_defaults(func=cmd_narrate)
+    lz = sub.add_parser("leases", help="resource ownership broker — who holds which radio (arbitration for swarm/multi-engine)")
+    lzsub = lz.add_subparsers(dest="leases_cmd", required=True)
+    lzsub.add_parser("demo", help="show lease arbitration (preemption, shared GPS, multi-band coexist)")
+    lz.set_defaults(func=cmd_leases)
     scn = sub.add_parser("scenario", help="runnable playbooks that chain capabilities (tutorial + manifest readiness check)")
     scnsub = scn.add_subparsers(dest="scenario_cmd", required=True)
     scnsub.add_parser("list", help="list the scenarios")
