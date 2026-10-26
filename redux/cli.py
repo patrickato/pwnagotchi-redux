@@ -858,6 +858,32 @@ def cmd_simulate(args) -> int:
     return 0
 
 
+def cmd_hardware(args) -> int:
+    """What's plugged in, and what it unlocks. Enumerates USB devices, maps the
+    recognized ones to the capability they add (+ its live readiness), and flags
+    anything it doesn't recognize so an unknown dongle is never silently ignored."""
+    import json as _json
+    from .core.hwprofile import profile
+    entries = profile()
+    if getattr(args, "json", False):
+        print(_json.dumps([e.to_dict() for e in entries], indent=2))
+        return 0
+    if not entries:
+        print("no USB devices seen (or /sys unavailable here)")
+        return 0
+    known = [e for e in entries if e.known]
+    unknown = [e for e in entries if not e.known]
+    print("plugged in → what it unlocks:")
+    for e in known:
+        tag = f" [{e.state}]" if e.state else ""
+        print(f"  ✓ {e.usb_id:12} {e.device:38} → {e.feature}{tag}")
+    for e in unknown:
+        print(f"  ? {e.usb_id:12} {e.device:38} → unrecognized (may add a capability)")
+    print(f"\n  {len(known)} recognized, {len(unknown)} unknown. "
+          f"See `redux capabilities list` for what each unlocked feature needs.")
+    return 0
+
+
 def cmd_stealth(args) -> int:
     """Stealth / OPSEC for Augur's OWN device. `mac` randomizes a radio's MAC so
     the box doesn't present a stable fingerprint (vendor-plausible by default).
@@ -4440,6 +4466,11 @@ def build_parser() -> argparse.ArgumentParser:
                      help="tick a few times, print the status snapshot JSON, and exit")
     sim.add_argument("--ticks", type=int, default=14, help="with --once: how many tick steps to run")
     sim.set_defaults(func=cmd_simulate)
+
+    hw = sub.add_parser("hardware", aliases=["hw"],
+                        help="what's plugged in and what capability each device unlocks")
+    hw.add_argument("--json", action="store_true", help="machine-readable output")
+    hw.set_defaults(func=cmd_hardware)
 
     st = sub.add_parser("stealth", help="OPSEC for Augur's own device (MAC randomization, …)")
     stsub = st.add_subparsers(dest="stealth_cmd", required=True)
