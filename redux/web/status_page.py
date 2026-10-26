@@ -62,11 +62,24 @@ def status_payload(augur, *, processing_report=None) -> Dict:
     # APs this device has actually recorded). Read-only situational awareness.
     try:
         from ..geo.latest_n import latest_n
+        from ..geo import oui as _oui
         aps = latest_n(augur.store, 16, kind="wifi")
-        data["access_points"] = [
-            {"bssid": s.mac, "ssid": s.ssid, "channel": s.channel, "rssi": s.rssi, "ts": s.ts}
-            for s in aps
-        ]
+        rows = []
+        for s in aps:
+            device = ""
+            try:
+                from ..intel.device_id import DeviceSignals, identify
+                vendor = _oui.lookup_oui(s.mac) or ""
+                g = identify(DeviceSignals(mac=s.mac, vendor=vendor))
+                if g.category != "unknown":
+                    device = f"{g.product} [{g.category}]"
+                elif vendor:
+                    device = vendor
+            except Exception:
+                device = ""
+            rows.append({"bssid": s.mac, "ssid": s.ssid, "channel": s.channel,
+                         "rssi": s.rssi, "ts": s.ts, "device": device})
+        data["access_points"] = rows
     except Exception:
         data["access_points"] = []
     # the active engagement case file, if one is open (cheap single-file read) —
@@ -852,7 +865,8 @@ function renderAPs(aps){var el=document.getElementById('aptbl'),note=document.ge
  ['CH','BSSID','SIG','SSID'].forEach(function(h){var d=document.createElement('div');d.className='h';d.textContent=h;el.appendChild(d)});
  function cell(t,cls){var d=document.createElement('div');if(cls)d.className=cls;d.textContent=t;el.appendChild(d)}
  aps.forEach(function(a){cell(a.channel!=null?String(a.channel):'-','c');cell(a.bssid||'—');
-  cell(a.rssi!=null?(a.rssi+''):'—','c');cell(a.ssid||'<hidden>')});
+  cell(a.rssi!=null?(a.rssi+''):'—','c');
+  cell((a.ssid||'<hidden>')+(a.device?('  ·  '+a.device):''))});
  note.textContent=aps.length+' AP'+(aps.length>1?'s':'')+' · strongest first · real sightings only';
 }
 function renderMap(pts,pos){const NS='http://www.w3.org/2000/svg',svg=document.getElementById('map'),rng=document.getElementById('maprange');

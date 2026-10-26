@@ -602,7 +602,9 @@ def cmd_dex(args) -> int:
             print(f"  randomized MACs (privacy/phone): {s['randomized']}")
         print("  rarest:")
         for e in dex.rarest(limit=args.top):
-            print(f"    [{e.rarity.value:9}] {e.kind:4} {e.ssid or e.mac} — known {e.known_days:.0f}d")
+            dev = e.device_label
+            print(f"    [{e.rarity.value:9}] {e.kind:4} {e.mac}  {e.ssid or ''}"
+                  + (f"  · {dev}" if dev else "") + f"  — known {e.known_days:.0f}d")
         dep = dex.departed()
         if dep:
             print("  departed:")

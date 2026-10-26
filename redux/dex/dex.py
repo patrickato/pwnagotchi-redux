@@ -60,11 +60,23 @@ class DexEntry:
     rarity: Rarity
     departed: bool
     reason: str                # one-line glass-box description
+    device: Optional[dict] = None   # what IS it: {category, vendor, product, confidence}
 
     def to_dict(self) -> dict:
         d = self.__dict__.copy()
         d["rarity"] = self.rarity.value
         return d
+
+    @property
+    def device_label(self) -> str:
+        """A short 'product [category]' tag to show ALONGSIDE the MAC, or ''."""
+        if not self.device:
+            return ""
+        prod = self.device.get("product") or self.device.get("vendor") or ""
+        cat = self.device.get("category") or ""
+        if not prod or cat in ("", "unknown"):
+            return ""
+        return f"{prod} [{cat}]"
 
 
 @dataclass(frozen=True)
@@ -116,12 +128,26 @@ def build_dex(store, *, now: Optional[float] = None, departed_after_days: float 
         else:
             tail = f" — {rarity.value}, known {known_days:.0f}d" + (", located" if located else "")
             reason = label + tail
+        # What IS it? Fuse the signals this sighting carries — OUI vendor, and the
+        # name field (a BLE local name for BLE sightings) — into a product guess,
+        # shown ALONGSIDE the MAC, never instead of it. Fail-safe.
+        device = None
+        try:
+            from ..intel.device_id import DeviceSignals, identify
+            sig = DeviceSignals(mac=s.mac, vendor=cls.vendor or "",
+                                ble_name=(s.ssid if s.kind == "ble" else ""))
+            g = identify(sig)
+            if g.category != "unknown" or (g.vendor and g.vendor != "unknown"):
+                device = {"category": g.category, "vendor": g.vendor,
+                          "product": g.product, "confidence": g.confidence}
+        except Exception:
+            device = None
         entries.append(DexEntry(
             kind=s.kind, mac=s.mac, ssid=s.ssid, oui=o,
             vendor=cls.vendor, randomized=cls.randomized, device_class=cls.device_class,
             first_seen=first, last_seen=last, known_days=known_days,
             located=located, channel=s.channel, rarity=rarity,
-            departed=departed, reason=reason,
+            departed=departed, reason=reason, device=device,
         ))
 
     by_kind: Dict[str, int] = {}

@@ -76,3 +76,24 @@ def test_dex_enriches_vendor_and_randomized():
     assert dex.summary["randomized"] == 1
     assert dex.summary["identified_vendors"] == 1
     assert dex.summary["by_vendor"].get("RaspberryPi") == 1
+
+
+def test_dex_attaches_device_identity_alongside_mac():
+    # a BLE sighting whose name says 'Roomba' is identified, and the MAC is kept.
+    s = SightingStore(":memory:")
+    s.insert(Sighting(kind="ble", mac="aa:bb:cc:dd:ee:01", ssid="Roomba-3F2A",
+                      ts=1000.0, first_seen=1000.0, provenance="t"))
+    dex = build_dex(s, now=1000.0)
+    entry = dex.entries[0]
+    assert entry.mac == "aa:bb:cc:dd:ee:01"             # MAC still present (alongside)
+    assert entry.device and entry.device["category"] == "vacuum"
+    assert "Roomba" in entry.device_label and "[vacuum]" in entry.device_label
+
+
+def test_dex_entry_without_identity_has_empty_label():
+    s = SightingStore(":memory:")
+    s.insert(Sighting(kind="wifi", mac="de:ad:be:ef:00:09", ssid="",
+                      ts=1000.0, first_seen=1000.0, provenance="t"))
+    entry = build_dex(s, now=1000.0).entries[0]
+    assert entry.mac == "de:ad:be:ef:00:09"             # MAC always shown
+    assert entry.device_label == "" or entry.device is None
