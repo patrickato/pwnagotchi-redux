@@ -239,6 +239,14 @@ FEATURES: Tuple[Feature, ...] = (
             note="pure (composes crackability + captured-list + PMKID state); feeds "
                  "capture planning and autopilot priority",
             related=("wifi.pmkid", "wifi.capture", "wifi.crack")),
+    Feature("net.device_id", "Device identification",
+            "name what a device IS from its signals (OUI vendor, hostname, BLE "
+            "name/company, mDNS) — Roomba, Echo, Chromecast, phone, camera, printer "
+            "— and list what you can do with/to it for that category.",
+            "net", implemented=True,
+            note="pure/knowledge-base driven (verified with fixtures); fuses OUI + "
+                 "BLE + mDNS + hostname signals the box already collects",
+            related=("wifi.dna", "wifi.dossier", "blue.tracker")),
     Feature("wifi.dna", "Device DNA (behavioral re-id)",
             "link a device across MAC rotation by HOW it probes (timing cadence, "
             "supported-rate set, channels, IE template) — works even with no PNL.",

@@ -3218,6 +3218,38 @@ def cmd_engagement(args) -> int:
     return 2
 
 
+def cmd_identify(args) -> int:
+    """Device identification — what IS this thing, and what can I do with/to it.
+    Fuses OUI vendor + hostname + BLE name/company + mDNS into a product guess, then
+    lists the attack surface for its category (pointed at the project's own tools)."""
+    from .intel.device_id import DeviceSignals, identify
+    if getattr(args, "demo", False):
+        sig = DeviceSignals(mac="50:dc:e7:00:11:22", hostname="Roomba-3F2A",
+                            ble_name="", mdns_services=("_amzn-alexa._tcp",))
+        print("redux identify — SYNTHETIC device (no radio)")
+    else:
+        sig = DeviceSignals(
+            mac=args.mac or "", hostname=args.hostname or "", ble_name=args.ble_name or "",
+            ble_company_id=args.ble_company or "",
+            mdns_services=tuple(args.mdns or ()), ssdp=args.ssdp or "",
+            ble_service_uuids=tuple(args.ble_service or ()))
+        if not any((sig.mac, sig.hostname, sig.ble_name, sig.ble_company_id, sig.mdns_services, sig.ssdp)):
+            print("give at least one signal — e.g. --mac, --hostname, --ble-name, --mdns  (or --demo)")
+            return 2
+    g = identify(sig)
+    if getattr(args, "json", False):
+        print(json.dumps(g.to_dict(), indent=2))
+        return 0
+    print(f"  WHAT IT IS : {g.product}  [{g.category}]  (vendor {g.vendor}, {g.confidence} confidence)")
+    for r in g.reasons:
+        print(f"    · {r}")
+    if g.actions:
+        print("  WHAT YOU CAN DO:")
+        for a in g.actions:
+            print(f"    - {a['do']:44} ({a['via']})")
+    return 0
+
+
 def cmd_dossier(args) -> int:
     """Target dossier — everything the box knows about one AP in a single glass-box
     view: identity, security (and any WPA3-transition downgrade path), value,
@@ -5659,6 +5691,17 @@ def build_parser() -> argparse.ArgumentParser:
     ds.add_argument("--demo", action="store_true", help="synthetic target (no radio)")
     ds.add_argument("--json", action="store_true", help="machine-readable output")
     ds.set_defaults(func=cmd_dossier)
+    idf = sub.add_parser("identify", help="what IS this device (stove/Roomba/Alexa/phone...) + what you can do with/to it")
+    idf.add_argument("--mac", default=None, help="device MAC (→ OUI vendor)")
+    idf.add_argument("--hostname", default=None, help="DHCP/mDNS/NetBIOS hostname")
+    idf.add_argument("--ble-name", default=None, help="BLE local name")
+    idf.add_argument("--ble-company", default=None, help="BLE company id (hex, e.g. 004c)")
+    idf.add_argument("--ble-service", action="append", help="BLE service UUID (repeatable)")
+    idf.add_argument("--mdns", action="append", help="mDNS service type (repeatable, e.g. _googlecast._tcp)")
+    idf.add_argument("--ssdp", default=None, help="UPnP/SSDP server or device-type string")
+    idf.add_argument("--demo", action="store_true", help="synthetic device (no radio)")
+    idf.add_argument("--json", action="store_true", help="machine-readable output")
+    idf.set_defaults(func=cmd_identify)
     ph = sub.add_parser("phone", help="phone UI over Bluetooth PAN — tether a phone (no Wi-Fi/cable) and serve the dashboard")
     ph.add_argument("--adapter", default="hci0", help="Bluetooth adapter")
     ph.add_argument("--iface", default="pan0", help="PAN interface")
