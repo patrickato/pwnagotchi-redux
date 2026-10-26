@@ -3643,6 +3643,58 @@ def cmd_loot(args) -> int:
             for p in flagged:
                 print(f"    ⚑ {p}")
         return 0
+    if cmd == "reuse":
+        # Credential-reuse graph: one recovered password's blast radius across the
+        # discovered hosts. --demo shows the graph; live sprays vault creds across a
+        # scanned subnet (scope-gated; FIELD needs --authorized, LAB unleashed).
+        from .netrecon.credreuse import CredReuse, creds_from_vault, Target, CredPair
+        from .core.scope import Scope
+        if getattr(args, "demo", False):
+            engine = CredReuse()
+            creds = [CredPair("root", "toor", origin="10.0.0.5"),
+                     CredPair("svc", "Spring2026!")]
+            targets = [Target("10.0.0.6", 445, "smb"), Target("10.0.0.7", 22, "ssh"),
+                       Target("10.0.0.8", 3306, "sql")]
+            def tester(h, p, s, u, sec):
+                return (u == "root" and h in ("10.0.0.6", "10.0.0.7")) or (u == "svc" and h == "10.0.0.8")
+            results = engine.spray(creds, targets, tester=tester, lab=True)
+            print("redux loot reuse — SYNTHETIC reuse graph (no network)")
+        else:
+            creds = creds_from_vault(vault.entries())
+            if not creds:
+                print("no service credentials in the vault to reuse (crack/recover some first)")
+                return 0
+            scope = None if getattr(args, "lab", False) else Scope.load(args.scope_file or _DEFAULT_SCOPE_PATH)
+            engine = CredReuse(scope=scope)
+            from .netrecon.pipeline import recon_subnet, try_credentials
+            targets = []
+            try:
+                sr = recon_subnet(scope, args.subnet, authorized=getattr(args, "authorized", False)) if args.subnet else None
+                for h in (getattr(sr, "hosts", None) or ()):
+                    for p in getattr(h, "ports", ()) or ():
+                        targets.append(Target(h.ip, p.number, p.service or p.proto or ""))
+            except Exception as error:
+                print(f"  scan unavailable: {type(error).__name__}")
+                return 3
+            if not targets:
+                print("  no hosts/services discovered to spray (need an in-scope --subnet with live hosts)")
+                return 0
+            def tester(host, port, service, user, secret):
+                cr = try_credentials(host, port, service, [user], [secret], scope=scope)
+                return getattr(cr, "found", None) is not None
+            results = engine.spray(creds, targets, tester=tester,
+                                   authorized=getattr(args, "authorized", False), lab=getattr(args, "lab", False))
+        g = engine.graph(results)
+        print(f"  {g['note']}")
+        print(f"  {g['credentials_that_reuse']} credential(s) reuse · {g['hosts_unlocked']} host(s) unlocked")
+        mv, me = g.get("most_valuable_credential"), g.get("most_exposed_host")
+        if mv:
+            print(f"  most valuable cred: {mv['credential']} → unlocks {', '.join(mv['unlocks'])}")
+        if me:
+            print(f"  most exposed host : {me['host']} ({me['credentials']} credential(s) open it)")
+        for host, users in sorted(g["by_host"].items()):
+            print(f"    {host}: {', '.join(users)}")
+        return 0
     return 2
 
 
@@ -5548,6 +5600,12 @@ def build_parser() -> argparse.ArgumentParser:
     lp.add_argument("--pw", action="append", help="extra password to try (vaulted PSKs are included automatically)")
     lp.add_argument("--authorized", action="store_true", help="FIELD only: actually fire (targets must be armed in scope)")
     lp.add_argument("--scope-file", default=None, help="scope store (default: the device scope)")
+    lr = losub.add_parser("reuse", help="credential-reuse graph: one password's blast radius across discovered hosts")
+    lr.add_argument("--subnet", default=None, help="CIDR to scan + spray vault creds across")
+    lr.add_argument("--demo", action="store_true", help="synthetic reuse graph (no network)")
+    lr.add_argument("--authorized", action="store_true", help="FIELD: actually spray (hosts must be armed)")
+    lr.add_argument("--lab", action="store_true", help="LAB: run unleashed")
+    lr.add_argument("--scope-file", default=None, help="scope store")
     lt = losub.add_parser("triage", help="forensic triage of pulled files (exiftool/binwalk/steghide/secrets)")
     lt.add_argument("files", nargs="+", help="files to triage")
     lt.add_argument("--json", action="store_true", help="machine-readable output")

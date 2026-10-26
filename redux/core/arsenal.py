@@ -60,6 +60,7 @@ _RAW: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
         ("campaign unleashed", "autonomous kill-chain over armed targets"),
         ("netrecon", "scan a Scope-authorized subnet"),
         ("loot pivot", "recon + credential reuse into a subnet"),
+        ("loot reuse", "credential-reuse graph — one password's blast radius"),
         ("loot files", "pull interesting files off a host (SMB) -> triage"),
         ("responder harvest", "NetNTLM hashes on the joined LAN -> crack queue"),
         ("loot triage", "forensic triage of pulled files"),

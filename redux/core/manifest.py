@@ -132,6 +132,13 @@ FEATURES: Tuple[Feature, ...] = (
             toolbox="nmap", guidance="netrecon",
             note="real nmap + hydra runners; needs access to a network in Scope",
             related=("net.responder", "wifi.crack")),
+    Feature("net.credreuse", "Credential-reuse graph",
+            "spray recovered credentials across discovered hosts and map the blast "
+            "radius — which password unlocks what, which host is most exposed.",
+            "net", implemented=True,
+            note="the planner + graph are pure (verified with no network); the live "
+                 "spray reuses netrecon's scope-gated primitives",
+            related=("net.recon", "net.responder")),
     Feature("net.responder", "NetNTLM hash harvest",
             "on the joined LAN, poison LLMNR/NBT-NS/mDNS to harvest NetNTLMv1/v2 "
             "hashes → the crack queue (hashcat -m 5500/5600).",
