@@ -5,6 +5,7 @@ cp -a files/redux "$ROOTFS_DIR/opt/redux/"
 cp -a files/nexmon "$ROOTFS_DIR/usr/local/src/"
 install -m 0644 files/sources.sh files/redux-revision "$ROOTFS_DIR/usr/share/redux/"
 install -m 0644 files/redux.service "$ROOTFS_DIR/etc/systemd/system/redux.service"
+install -m 0644 files/redux-bt-up.service "$ROOTFS_DIR/etc/systemd/system/redux-bt-up.service"
 # The image copies Python sources directly; expose the same Redux CLI without
 # relying on pip or a writable root filesystem after boot.
 install -d "$ROOTFS_DIR/usr/local/bin"
@@ -109,6 +110,14 @@ apt-get install -y --no-install-recommends gpsd gpsd-clients >/dev/null 2>&1 || 
 printf '%s\n' 'START_DAEMON="true"' 'USBAUTO="true"' 'DEVICES=""' 'GPSD_OPTIONS="-n"' \
     > /etc/default/gpsd
 systemctl enable gpsd.socket 2>/dev/null || true
+# Bluetooth: onboard hci0 serves the phone-PAN link; a USB BT dongle (hci1) is the
+# dedicated BLE radio. AutoEnable powers adapters at boot, and redux-bt-up clears
+# any rfkill soft-block + powers a late-enumerating dongle. Both honoured only
+# when BlueZ is present; harmless otherwise.
+install -d /etc/bluetooth/main.conf.d
+printf '%s\n' '[Policy]' 'AutoEnable=true' > /etc/bluetooth/main.conf.d/redux-autoenable.conf
+systemctl enable bluetooth.service 2>/dev/null || true
+systemctl enable redux-bt-up.service 2>/dev/null || true
 # hcx conversion is bundled; Hashcat compute backend remains hardware-gated.
 apt-get install -y --no-install-recommends hcxtools
 # --- Comprehensive operator toolset -----------------------------------------
