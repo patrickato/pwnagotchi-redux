@@ -45,3 +45,26 @@ def test_safety_topic_states_the_contract():
     s = G.get("safety")
     assert "Scope decides WHERE" in s.how
     assert "jamming" in s.how.lower()
+
+
+def test_new_user_workflow_topics_present_and_wired():
+    for tid in ("toolbox", "capture", "netrecon"):
+        t = G.get(tid)
+        assert t is not None and t.command.startswith("redux ")
+    # the workflow topics are reachable from their neighbours
+    assert "toolbox" in G.get("getting-started").related
+    assert "capture" in G.get("crack").related
+
+
+def test_capture_topic_describes_the_real_chain():
+    cap = G.get("capture")
+    # the end-to-end path, tied to real commands (no invented steps)
+    assert "redux capture" in cap.how and "redux crack" in cap.how
+    assert "hcxpcapngtool" in cap.how        # the real converter, not a vague "convert"
+    assert "monitor" in cap.how.lower()      # honest about the hardware it needs
+
+
+def test_toolbox_topic_is_honest_about_enables():
+    tb = G.get("toolbox")
+    assert "redux toolbox list" in tb.how
+    assert "no empty promises" in tb.how.lower()  # enables shown only when redux drives it
