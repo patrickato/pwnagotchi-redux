@@ -143,7 +143,7 @@ hydra medusa ncrack crunch cewl hashid sqlmap nikto whatweb dirb wfuzz bluez \
 bluez-tools rtl-sdr rtl-433 multimon-ng hackrf gpsd gpsd-clients binwalk foremost \
 libimage-exiftool-perl steghide python3-scapy python3-impacket python3-pip htop \
 btop iftop iotop nload tmux screen jq vim tree ncdu rsync usbutils pciutils \
-i2c-tools net-tools"
+i2c-tools net-tools smbclient responder dnsmasq"
 if ! apt-get install -y --no-install-recommends $REDUX_TOOLSET; then
     echo "redux toolset: batch install hit an unavailable package; retrying per-package"
     for _pkg in $REDUX_TOOLSET; do

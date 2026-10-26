@@ -197,6 +197,13 @@ FEATURES: Tuple[Feature, ...] = (
             "the always-on detector suite — deauth floods, rogue APs, karma, etc.",
             "blue", implemented=True, needs_hardware="a Wi-Fi radio in monitor mode",
             note="core; findings stay tied to real observations"),
+    Feature("bt.pan", "Phone UI over Bluetooth PAN",
+            "tether a phone over Bluetooth (no Wi-Fi/cable) and serve the responsive "
+            "dashboard — the Operations view in your pocket.",
+            "bt", implemented=True, needs_hardware="a Bluetooth adapter",
+            note="the responsive web dashboard IS the phone UI; this is the PAN bring-up. "
+                 "plan/readiness/URL are pure (verified with no radio); live bring-up needs the adapter",
+            related=("ble.scan",)),
     Feature("blue.tracker", "Unwanted-tracker check",
             "is a BLE tracker following me? — the personal-safety sweep.",
             "blue", implemented=True, needs_hardware="a Bluetooth adapter",

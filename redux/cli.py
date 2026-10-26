@@ -3218,6 +3218,37 @@ def cmd_engagement(args) -> int:
     return 2
 
 
+def cmd_phone(args) -> int:
+    """Phone UI over Bluetooth PAN — the responsive web dashboard, reachable with
+    no Wi-Fi and no cable. `plan` shows the bring-up + the URL to browse; `up`
+    runs it (needs a Bluetooth adapter + root). The dashboard is the same web UI,
+    Operations tab included."""
+    from .web.btpan import PanBringup, dashboard_url
+    b = PanBringup(adapter=args.adapter, iface=args.iface, ip=args.ip, port=args.port)
+    cmd = args.phone_cmd
+    if cmd == "url":
+        print(dashboard_url(args.ip, args.port))
+        return 0
+    if cmd == "plan":
+        plan = b.plan()
+        print(f"phone UI over Bluetooth PAN — pair your phone, then browse {plan.dashboard_url}")
+        print(f"  adapter {plan.adapter} · iface {plan.iface} · Pi {plan.ip} · dashboard :{plan.port}")
+        for s in plan.steps:
+            print("  $ " + s)
+        print("  (the dashboard is the SAME responsive web UI — Operations tab included)")
+        return 0
+    if cmd == "up":
+        present = os.path.exists(f"/sys/class/bluetooth/{args.adapter}") or getattr(args, "assume_adapter", False)
+        res = b.up(apply=getattr(args, "apply", False), adapter_present=present)
+        print(res["note"])
+        for r in res.get("results", []):
+            if not r["ok"]:
+                print(f"  ! {r['cmd']}: {r.get('error', 'failed')}")
+        print(f"  dashboard: {res['dashboard_url']}")
+        return 0
+    return 2
+
+
 def cmd_leases(args) -> int:
     """Resource ownership / lease broker — who holds which radio. `demo` shows the
     arbitration (preemption by priority, shared GPS, multi-band coexistence) that
@@ -5408,6 +5439,18 @@ def build_parser() -> argparse.ArgumentParser:
     enc.add_argument("id", nargs="?", default=None, help="engagement id (default: the active one)")
     enc.add_argument("--report-out", default=None, help="write the frozen report as Markdown here")
     en.set_defaults(func=cmd_engagement)
+    ph = sub.add_parser("phone", help="phone UI over Bluetooth PAN — tether a phone (no Wi-Fi/cable) and serve the dashboard")
+    ph.add_argument("--adapter", default="hci0", help="Bluetooth adapter")
+    ph.add_argument("--iface", default="pan0", help="PAN interface")
+    ph.add_argument("--ip", default="172.20.10.1", help="the Pi's address on the PAN")
+    ph.add_argument("--port", type=int, default=8080, help="dashboard port")
+    phsub = ph.add_subparsers(dest="phone_cmd", required=True)
+    phsub.add_parser("plan", help="show the bring-up commands + the URL to browse")
+    phu = phsub.add_parser("up", help="bring the PAN up (DRY-RUN unless --apply; needs a BT adapter)")
+    phu.add_argument("--apply", action="store_true", help="actually run the bring-up")
+    phu.add_argument("--assume-adapter", action="store_true", help="skip the adapter-present check")
+    phsub.add_parser("url", help="print the dashboard URL the tethered phone hits")
+    ph.set_defaults(func=cmd_phone)
     lz = sub.add_parser("leases", help="resource ownership broker — who holds which radio (arbitration for swarm/multi-engine)")
     lzsub = lz.add_subparsers(dest="leases_cmd", required=True)
     lzsub.add_parser("demo", help="show lease arbitration (preemption, shared GPS, multi-band coexist)")
