@@ -3642,6 +3642,23 @@ def cmd_loot(args) -> int:
                   (f", {len(flagged)} FLAGGED" if flagged else ""))
             for p in flagged:
                 print(f"    ⚑ {p}")
+        # Always scan pulled files for TYPED secrets — the payoff of file-loot.
+        from .loot.secrets import scan_files as _scan_secrets
+        sec = _scan_secrets(pulled)
+        if sec["summary"]["total"]:
+            print(f"  secrets: {sec['summary']['note']}")
+            for f in sec["findings"][:12]:
+                print(f"    [{f['confidence']:6}] {f['rule']:22} {f['redacted']}  ({f['source']})")
+        return 0
+    if cmd == "secrets":
+        from .loot.secrets import scan_files as _scan_secrets
+        sec = _scan_secrets(args.files)
+        if args.json:
+            print(json.dumps(sec, indent=2))
+            return 0
+        print(f"typed secrets — {sec['summary']['note']}")
+        for f in sec["findings"]:
+            print(f"  [{f['confidence']:6}] {f['rule']:22} {f['redacted']:14} line {f['line']}  {f['source']}")
         return 0
     if cmd == "reuse":
         # Credential-reuse graph: one recovered password's blast radius across the
@@ -5609,6 +5626,9 @@ def build_parser() -> argparse.ArgumentParser:
     lt = losub.add_parser("triage", help="forensic triage of pulled files (exiftool/binwalk/steghide/secrets)")
     lt.add_argument("files", nargs="+", help="files to triage")
     lt.add_argument("--json", action="store_true", help="machine-readable output")
+    lse = losub.add_parser("secrets", help="typed, redacted secrets scan over files (AWS/GitHub/keys/JWT/DB-URI/passwords)")
+    lse.add_argument("files", nargs="+", help="files to scan")
+    lse.add_argument("--json", action="store_true", help="machine-readable output")
     lf = losub.add_parser("files", help="scope-gated SMB file-loot: pull interesting files off a host with a recovered credential")
     lf.add_argument("host", help="target host (IP or name); must be armed in scope")
     lf.add_argument("--user", required=True, help="username for the recovered credential")
