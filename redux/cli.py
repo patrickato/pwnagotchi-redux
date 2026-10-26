@@ -3077,6 +3077,58 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_airwave(args) -> int:
+    """Airwave DVR — scrub back through RF history. An append-only timeline of
+    what was on the air, so you can rewind and ask 'what was here at 3:42pm?'.
+    Reads the device DVR (JSONL) or a --demo timeline."""
+    from .radio.airwave_dvr import AirwaveDVR, AirwaveEvent
+    dvr = AirwaveDVR(path=(None if getattr(args, "demo", False) else (args.dvr or "/captures/live/airwave.jsonl")))
+    if getattr(args, "demo", False):
+        base = 1000.0
+        dvr.record_many([
+            AirwaveEvent(base + 0, "beacon", "aa:00:00:00:00:01", "HomeNet", 6, -45),
+            AirwaveEvent(base + 2, "beacon", "aa:00:00:00:00:01", "HomeNet", 6, -46),
+            AirwaveEvent(base + 5, "pmkid", "aa:00:00:00:00:01", "HomeNet", 6, -47),
+            AirwaveEvent(base + 61, "deauth", "bb:00:00:00:00:02", "", 11, -60),
+            AirwaveEvent(base + 63, "eapol", "bb:00:00:00:00:02", "Guest", 11, -61),
+            AirwaveEvent(base + 130, "beacon", "cc:00:00:00:00:03", "FarAP", 149, -72),
+        ])
+        print("redux airwave — SYNTHETIC RF timeline (no radio)")
+    else:
+        n = dvr.load()
+        print(f"redux airwave — {n} event(s) from {dvr.path}")
+    cmd = args.airwave_cmd
+    if cmd == "summary":
+        s = dvr.summary()
+        print(f"  {s['note']}  |  {s['unique_aps']} AP(s); kinds: {s['kinds'] or 'none'}")
+        return 0
+    if cmd == "timeline":
+        rows = dvr.timeline(bucket_seconds=args.bucket)
+        if not rows:
+            print("  (empty)")
+            return 0
+        lo = rows[0]["t"]
+        for r in rows:
+            off = int(r["t"] - lo)
+            bar = "#" * min(40, r["count"])
+            print(f"  t+{off // 60:02d}:{off % 60:02d}  {bar} {r['count']} ({r['top_kind']}, {r['aps']} AP)")
+        return 0
+    if cmd == "scrub":
+        snap = dvr.scrub(args.at, radius=args.radius)
+        print(f"  @ t={args.at} (+/-{args.radius}s): {snap['events']} event(s), "
+              f"{len(snap['aps'])} AP(s), bands {snap['bands']}, kinds {snap['kinds']}")
+        for b in snap["aps"]:
+            print(f"    AP {b}")
+        return 0
+    if cmd == "track":
+        hist = dvr.track(args.bssid)
+        print(f"  {args.bssid}: seen {len(hist)} time(s)")
+        for e in hist[:40]:
+            print(f"    t={e.ts} {e.kind} ch{e.channel} {e.ssid or ''}")
+        return 0
+    return 2
+
+
 def cmd_responder(args) -> int:
     """Responder-style hash harvesting on the joined LAN — the move the kill-chain
     JOIN phase sets up. Poison LLMNR/NBT-NS/mDNS so Windows hosts authenticate to
@@ -5087,6 +5139,19 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
     nr.add_argument("--json", action="store_true", help="machine-readable output")
     nr.set_defaults(func=cmd_narrate)
+    aw = sub.add_parser("airwave", help="Airwave DVR — scrub back through RF history (timeline/scrub/track)")
+    aw.add_argument("--dvr", default=None, help="DVR JSONL file (default: the device airwave log)")
+    aw.add_argument("--demo", action="store_true", help="synthetic RF timeline (no radio)")
+    awsub = aw.add_subparsers(dest="airwave_cmd", required=True)
+    awsub.add_parser("summary", help="overview of recorded airtime")
+    awt = awsub.add_parser("timeline", help="activity histogram over time (the scrub bar)")
+    awt.add_argument("--bucket", type=float, default=60.0, help="bucket size in seconds")
+    aws = awsub.add_parser("scrub", help="snapshot the air at an instant")
+    aws.add_argument("--at", type=float, required=True, help="timestamp to scrub to")
+    aws.add_argument("--radius", type=float, default=5.0, help="+/- seconds around --at")
+    awk = awsub.add_parser("track", help="every time one BSSID appeared")
+    awk.add_argument("bssid", help="BSSID to follow")
+    aw.set_defaults(func=cmd_airwave)
     rp = sub.add_parser("responder", help="harvest NetNTLM hashes on the joined LAN (LLMNR/NBT-NS/mDNS poisoning) → crack queue")
     rp.add_argument("iface", help="LAN interface Augur joined (e.g. wlan0)")
     rpsub = rp.add_subparsers(dest="responder_cmd", required=True)

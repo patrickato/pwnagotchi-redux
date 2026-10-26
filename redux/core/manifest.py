@@ -119,6 +119,13 @@ FEATURES: Tuple[Feature, ...] = (
             "harvest preferred-network lists; advertise only to in-scope clients.",
             "wifi", implemented=True, needs_hardware="a monitor/injection Wi-Fi radio",
             guidance="karma"),
+    Feature("rf.dvr", "Airwave DVR",
+            "append-only RF timeline — scrub back to any moment, snapshot the air, "
+            "replay a window, track one BSSID's presence over time.",
+            "wifi", implemented=True,
+            note="the engine is pure (verified with no radio); it records whatever the "
+                 "tap/engine/sweep feeds it and persists on /captures",
+            related=("wifi.pmkid", "wifi.dna")),
     Feature("net.recon", "Network kill-chain",
             "scan → scope-gated cred-test → loot over an authorized network.",
             "net", implemented=True, binaries=("nmap", "hydra"),
