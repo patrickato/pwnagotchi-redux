@@ -100,6 +100,15 @@ if [[ -f /usr/share/redux/field-ssh-profile ]]; then
 fi
 # Capture processing operates on the writable REDUXCAP partition, independently.
 systemctl enable redux-capture-ingest.timer
+# GPS: the standard Linux gpsd owns the USB/serial GPS; the runtime reads fixes
+# over localhost:2947 (REDUX_GPSD=1 in redux-live.service). USBAUTO lets gpsd pick
+# up a hotplugged or boot-present USB GPS on any tty path. Enabled by default and
+# harmless with no GPS attached. gpsd is installed tolerantly here so this works
+# regardless of whether the toolset stage (which also ships gpsd) ran first.
+apt-get install -y --no-install-recommends gpsd gpsd-clients >/dev/null 2>&1 || true
+printf '%s\n' 'START_DAEMON="true"' 'USBAUTO="true"' 'DEVICES=""' 'GPSD_OPTIONS="-n"' \
+    > /etc/default/gpsd
+systemctl enable gpsd.socket 2>/dev/null || true
 # hcx conversion is bundled; Hashcat compute backend remains hardware-gated.
 apt-get install -y --no-install-recommends hcxtools
 # Timers are shipped, but left disabled until output paths and writable
