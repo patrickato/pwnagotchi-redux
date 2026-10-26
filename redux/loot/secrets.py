@@ -69,17 +69,23 @@ class SecretFinding:
     rule: str
     kind: str
     confidence: str
-    redacted: str
+    value: str            # the FULL recovered secret — your loot, shown in the clear
     line: int
     source: str = ""
 
-    def to_dict(self) -> dict:
+    @property
+    def redacted(self) -> str:
+        return _redact(self.value)
+
+    def to_dict(self, *, redact: bool = False) -> dict:
         return {"rule": self.rule, "kind": self.kind, "confidence": self.confidence,
+                "value": self.redacted if redact else self.value,
                 "redacted": self.redacted, "line": self.line, "source": self.source}
 
 
 def scan_text(text: str, *, source: str = "") -> List[SecretFinding]:
-    """Typed, redacted secret findings in a blob of text (deduped per rule+value)."""
+    """Typed secret findings in a blob of text (deduped per rule+value). Values are
+    kept in full — this is the operator's own loot; redaction is opt-in at output."""
     out: List[SecretFinding] = []
     seen = set()
     for lineno, line in enumerate((text or "").splitlines(), start=1):
@@ -88,13 +94,12 @@ def scan_text(text: str, *, source: str = "") -> List[SecretFinding]:
             if not m:
                 continue
             raw = m.group(rule.group) if rule.group and m.groups() else m.group(0)
-            red = _redact(raw)
-            key = (rule.name, red)
+            key = (rule.name, raw)
             if key in seen:
                 continue
             seen.add(key)
             out.append(SecretFinding(rule=rule.name, kind=rule.kind,
-                                     confidence=rule.confidence, redacted=red,
+                                     confidence=rule.confidence, value=raw,
                                      line=lineno, source=source))
     out.sort(key=lambda f: (_CONF_RANK.get(f.confidence, 9), f.rule, f.line))
     return out
@@ -108,16 +113,17 @@ def scan_file(path: str) -> List[SecretFinding]:
     return scan_text(data.decode("utf-8", "replace"), source=str(path))
 
 
-def scan_files(paths: Sequence[str]) -> dict:
-    """Scan several files → {findings, by_file, summary}. Shareable (redacted)."""
+def scan_files(paths: Sequence[str], *, redact: bool = False) -> dict:
+    """Scan several files → {findings, by_file, summary}. Full values by default;
+    pass redact=True to mask them for a shareable report."""
     by_file: Dict[str, List[dict]] = {}
     all_findings: List[SecretFinding] = []
     for p in paths or ():
         fs = scan_file(p)
         if fs:
-            by_file[str(p)] = [f.to_dict() for f in fs]
+            by_file[str(p)] = [f.to_dict(redact=redact) for f in fs]
             all_findings.extend(fs)
-    return {"findings": [f.to_dict() for f in sorted(
+    return {"findings": [f.to_dict(redact=redact) for f in sorted(
                 all_findings, key=lambda f: (_CONF_RANK.get(f.confidence, 9), f.source))],
             "by_file": by_file, "summary": summarize(all_findings)}
 

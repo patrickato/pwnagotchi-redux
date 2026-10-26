@@ -3753,7 +3753,7 @@ def cmd_loot(args) -> int:
         if sec["summary"]["total"]:
             print(f"  secrets: {sec['summary']['note']}")
             for f in sec["findings"][:12]:
-                print(f"    [{f['confidence']:6}] {f['rule']:22} {f['redacted']}  ({f['source']})")
+                print(f"    [{f['confidence']:6}] {f['rule']:22} {f['value']}  ({f['source']})")
         return 0
     if cmd == "report":
         from .loot.rollup import rollup
@@ -3768,17 +3768,18 @@ def cmd_loot(args) -> int:
         print(f"  NetNTLM     : {r['netntlm_hashes']}")
         print(f"  secrets     : {r['secrets']['total']} ({r['secrets'].get('by_confidence', {})})")
         for s in r["top_secrets"]:
-            print(f"    [{s['confidence']:6}] {s['rule']:22} {s['redacted']:14} {s['source']}")
+            print(f"    [{s['confidence']:6}] {s['rule']:22} {s['value']}   {s['source']}")
         return 0
     if cmd == "secrets":
         from .loot.secrets import scan_files as _scan_secrets
-        sec = _scan_secrets(args.files)
+        sec = _scan_secrets(args.files, redact=getattr(args, "redact", False))
         if args.json:
             print(json.dumps(sec, indent=2))
             return 0
-        print(f"typed secrets — {sec['summary']['note']}")
+        print(f"typed secrets — {sec['summary']['note']}"
+              + ("  (redacted)" if getattr(args, "redact", False) else ""))
         for f in sec["findings"]:
-            print(f"  [{f['confidence']:6}] {f['rule']:22} {f['redacted']:14} line {f['line']}  {f['source']}")
+            print(f"  [{f['confidence']:6}] {f['rule']:22} {f['value']}   line {f['line']}  {f['source']}")
         return 0
     if cmd == "reuse":
         # Credential-reuse graph: one recovered password's blast radius across the
@@ -5754,8 +5755,9 @@ def build_parser() -> argparse.ArgumentParser:
     lt = losub.add_parser("triage", help="forensic triage of pulled files (exiftool/binwalk/steghide/secrets)")
     lt.add_argument("files", nargs="+", help="files to triage")
     lt.add_argument("--json", action="store_true", help="machine-readable output")
-    lse = losub.add_parser("secrets", help="typed, redacted secrets scan over files (AWS/GitHub/keys/JWT/DB-URI/passwords)")
+    lse = losub.add_parser("secrets", help="typed secrets scan over files (AWS/GitHub/keys/JWT/DB-URI/passwords); full cleartext")
     lse.add_argument("files", nargs="+", help="files to scan")
+    lse.add_argument("--redact", action="store_true", help="mask the values (for a shareable report; default shows them in full)")
     lse.add_argument("--json", action="store_true", help="machine-readable output")
     lrp = losub.add_parser("report", help="loot rollup — one view across creds/files/NetNTLM/secrets")
     lrp.add_argument("--json", action="store_true", help="machine-readable output")

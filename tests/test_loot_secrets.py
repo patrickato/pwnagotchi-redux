@@ -22,11 +22,18 @@ def test_private_key_and_jwt():
     assert any(f.kind == "jwt" for f in scan_text(jwt))
 
 
-def test_secret_is_redacted_never_emitted():
+def test_value_is_full_cleartext_by_default():
     text = "aws_access_key_id=AKIAIOSFODNN7EXAMPLE"
     f = scan_text(text)[0]
-    assert "AKIAIOSFODNN7EXAMPLE" not in f.redacted      # the real value never appears
-    assert f.redacted.startswith("AKIA") and f.redacted.endswith("LE")
+    assert f.value == "AKIAIOSFODNN7EXAMPLE"            # operator's own loot, in the clear
+    assert f.to_dict()["value"] == "AKIAIOSFODNN7EXAMPLE"
+
+
+def test_redaction_is_opt_in_for_sharing():
+    text = "aws_access_key_id=AKIAIOSFODNN7EXAMPLE"
+    f = scan_text(text)[0]
+    assert "AKIAIOSFODNN7EXAMPLE" not in f.redacted      # the masked form, when asked
+    assert f.to_dict(redact=True)["value"] == f.redacted
 
 
 def test_password_assignment_medium_confidence():
