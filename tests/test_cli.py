@@ -156,6 +156,24 @@ def test_init_scope_path_matches_firing_default(tmp_path, monkeypatch):
     from redux.cli import _DEFAULT_SCOPE_PATH
     assert rc == 0 and _DEFAULT_SCOPE_PATH in out
 
+def test_toolbox_list_is_install_aware():
+    rc, out = _run(["toolbox", "list"])
+    assert rc == 0
+    assert "✓ = installed" in out                 # the legend explains the marker
+    assert "installed" in out and "/" in out      # the N/total summary line
+    # every listed row carries one of the two state markers
+    rows = [ln for ln in out.splitlines() if ln.strip().startswith(("✓ [", "· ["))]
+    assert rows, "expected marked tool rows"
+
+
+def test_toolbox_show_reports_installed_status_and_baked():
+    rc, out = _run(["toolbox", "show", "nmap"])
+    assert rc == 0
+    assert "status:" in out                        # install state is surfaced
+    assert "stock image" in out                    # nmap is baked into the image
+    assert "netrecon" in out                        # and its real redux wiring
+
+
 def test_live_doctor_uses_local_actual_health_not_synthetic_augmentations(monkeypatch):
     import urllib.request
     served = []

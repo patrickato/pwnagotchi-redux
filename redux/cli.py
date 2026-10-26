@@ -652,16 +652,24 @@ def cmd_toolbox(args) -> int:
         if not rows:
             print("no matching tools")
             return 0
+        print("  ✓ = installed on this device   · = not found (add with `redux toolbox install <name>`)")
+        present = 0
         for t in rows:
+            here = TB.is_installed(t)
+            present += here
+            mark = "✓" if here else "·"
             en = f"  -> {t.enables}" if t.enables else ""
-            print(f"  [{t.category:<9}] {t.name:<13} {t.summary}{en}")
+            print(f"  {mark} [{t.category:<9}] {t.name:<13} {t.summary}{en}")
+        print(f"\n  {present}/{len(rows)} installed")
         return 0
     if cmd == "show":
         t = TB.get(args.name)
         if t is None:
             print(f"unknown tool '{args.name}' (see `redux toolbox list`)")
             return 3
-        print(f"{t.name} — {t.summary}\n  category: {t.category}")
+        state = "installed ✓" if TB.is_installed(t) else "not installed"
+        baked = " (ships in the stock image)" if t.baked else ""
+        print(f"{t.name} — {t.summary}\n  category: {t.category}\n  status:   {state}{baked}")
         if t.enables:
             print(f"  enables:  {t.enables}")
         if t.needs_hw:
@@ -4133,7 +4141,8 @@ def build_parser() -> argparse.ArgumentParser:
     tbsub = tb.add_subparsers(dest="toolbox_cmd", required=True)
     tbl = tbsub.add_parser("list", help="list tools (optionally filter)")
     tbl.add_argument("query", nargs="?", default="", help="filter by name/summary/feature")
-    tbl.add_argument("--category", default=None, help="sdr/wifi/crack/gps/ir/tx/recon/companion")
+    tbl.add_argument("--category", default=None,
+                     help="sdr/wifi/crack/recon/forensics/bt/gps/ir/tx/companion")
     tbs = tbsub.add_parser("show", help="full detail + install command for one tool")
     tbs.add_argument("name")
     tbi = tbsub.add_parser("install", help="print (or --run) the install command for a tool")
