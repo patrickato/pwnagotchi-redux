@@ -956,6 +956,42 @@ def cmd_stealth(args) -> int:
         res = MacRandomizer(mode=args.mode).randomize(args.iface)
         print(res.reason)
         return 0 if res.ok else 3
+    if cmd == "pace":
+        # Low-and-slow planner (#92): show WHEN a run of actions would fire to stay
+        # under the footprint cap, honouring Quiet mode. Glass-box, no radio.
+        from .core.lowslow import LowAndSlowScheduler, LowSlowConfig
+        from .core.stealth import QuietConfig
+        cfg = LowSlowConfig(window_seconds=args.window, max_weighted_per_window=args.cap,
+                            min_gap_seconds=args.min_gap, jitter_seconds=args.jitter)
+        sched = LowAndSlowScheduler(config=cfg, seed=args.seed)
+        quiet = None
+        if getattr(args, "quiet", False):
+            quiet = QuietConfig.load(getattr(args, "file", None) or "/captures/live/stealth.json")
+        print(f"low-and-slow plan — {args.count}x {args.kind}, cap {cfg.max_weighted_per_window}/"
+              f"{int(cfg.window_seconds)}s, gap {cfg.min_gap_seconds}+<={cfg.jitter_seconds}s jitter"
+              + (" [quiet ON]" if quiet and quiet.enabled else ""))
+        t, fired, guard = 0.0, 0, 0
+        last_reason = ""
+        while fired < args.count and guard < args.count * 2000 + 20:
+            guard += 1
+            d = sched.permit(t, kind=args.kind, quiet=quiet, confirmed=args.confirm)
+            if d.allowed:
+                sched.record(t, kind=args.kind)
+                fired += 1
+                mm, ss = divmod(int(t), 60)
+                print(f"  #{fired:<3} t+{mm:02d}:{ss:02d}  (window {sched.window_weight(t)}/{cfg.max_weighted_per_window})")
+                t = sched._next_allowed
+            else:
+                last_reason = d.reason
+                if d.reason.lower().startswith("quiet"):     # hard block — Quiet denies it
+                    break
+                t += max(0.5, d.wait_seconds)
+        if fired == 0:
+            print(f"  nothing scheduled — {last_reason}")
+            return 0
+        span = int(t)
+        print(f"  -> {fired} action(s) spread over {span // 60}m{span % 60:02d}s; {sched.status(t)['note']}")
+        return 0
     return 2
 
 
@@ -4661,6 +4697,17 @@ def build_parser() -> argparse.ArgumentParser:
     stq.add_argument("quiet_cmd", choices=["on", "off", "status"], nargs="?", default="status")
     stq.add_argument("--budget", type=int, default=None, help="max frames to emit while quiet (0 = fully passive)")
     stq.add_argument("--file", default=None, help="stealth config path (default: the device stealth state)")
+    stp = stsub.add_parser("pace", help="low-and-slow planner — spread N actions under a footprint cap (jittered)")
+    stp.add_argument("--count", type=int, default=5, help="how many actions to schedule")
+    stp.add_argument("--kind", default="deauth", help="action kind (deauth/assoc/probe/eapol/pmkid…)")
+    stp.add_argument("--window", type=float, default=300.0, help="sliding window seconds (default 300)")
+    stp.add_argument("--cap", type=int, default=14, help="footprint-weight ceiling per window (default 14 = quiet)")
+    stp.add_argument("--min-gap", type=float, default=8.0, help="floor spacing between actions (seconds)")
+    stp.add_argument("--jitter", type=float, default=6.0, help="random extra spacing so cadence isn't a pattern")
+    stp.add_argument("--seed", type=int, default=0, help="jitter seed (reproducible schedules)")
+    stp.add_argument("--quiet", action="store_true", help="also honour the saved Quiet-mode gate")
+    stp.add_argument("--confirm", action="store_true", help="treat over-budget transmits as confirmed")
+    stp.add_argument("--file", default=None, help="stealth config path (with --quiet)")
     st.set_defaults(func=cmd_stealth)
 
     nb = sub.add_parser("notebook", help="lab session journal — log activity + render a report")

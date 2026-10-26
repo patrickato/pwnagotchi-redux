@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Tuple
 
-CATEGORIES = ("wifi", "net", "sdr", "rf", "bt", "gps", "power", "sense", "mesh", "blue", "storage")
+CATEGORIES = ("wifi", "net", "sdr", "rf", "bt", "gps", "power", "sense", "mesh", "blue", "stealth", "storage")
 
 
 class Readiness(str, Enum):
@@ -184,6 +184,26 @@ FEATURES: Tuple[Feature, ...] = (
             "wifi", implemented=False, needs_hardware="a monitor/injection Wi-Fi radio",
             note="PLANNED — a plan builder exists, but it is not yet a validated hostapd "
                  "integration (no AP is actually launched/qualified)"),
+    Feature("stealth.quiet", "Quiet/Ghost mode",
+            "one-toggle stealth posture: passive-first capture, frame budget, "
+            "per-action confirm, MAC rotation — never loosens a gate, only tightens.",
+            "stealth", implemented=True, guidance="crack",
+            note="software posture; the MAC-rotate part needs a Wi-Fi radio",
+            related=("stealth.footprint", "stealth.lowslow", "stealth.mac", "wifi.pmkid")),
+    Feature("stealth.footprint", "Footprint / noise meter",
+            "live 0–100 detectability score from emitted frames (silent→loud).",
+            "stealth", implemented=True,
+            related=("stealth.quiet", "stealth.lowslow")),
+    Feature("stealth.lowslow", "Low-and-slow scheduler",
+            "pace offensive emissions under a footprint cap with jittered spacing "
+            "so neither the volume nor the cadence is a signature.",
+            "stealth", implemented=True, guidance="crack",
+            related=("stealth.quiet", "stealth.footprint")),
+    Feature("stealth.mac", "Own-radio MAC randomization",
+            "rotate the device's own MAC (vendor-plausible or LAA) so it leaves no "
+            "stable fingerprint.",
+            "stealth", implemented=True, needs_hardware="a Wi-Fi radio",
+            related=("stealth.quiet",)),
 )
 
 _BY_ID: Dict[str, Feature] = {f.id: f for f in FEATURES}
