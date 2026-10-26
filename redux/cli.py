@@ -1415,8 +1415,8 @@ def cmd_campaign(args) -> int:
         def _ok(name):
             return lambda t: (True, f"{name} ok on {t}")
         execs = {Phase.CAPTURE: _ok("capture"), Phase.CRACK: _ok("crack"),
-                 Phase.PIVOT_SCAN: _ok("scan"), Phase.PIVOT_CRED: _ok("cred-test"),
-                 Phase.LOOT: _ok("loot")}
+                 Phase.JOIN: _ok("join"), Phase.PIVOT_SCAN: _ok("scan"),
+                 Phase.PIVOT_CRED: _ok("cred-test"), Phase.LOOT: _ok("loot")}
         prioritize = None
         if getattr(args, "adaptive", False):
             try:
@@ -1448,13 +1448,14 @@ def cmd_campaign(args) -> int:
                   f"{s.action:18} — {s.reason}")
         return 0
 
-    # demo: fake executors that succeed; capture engine assumed present
-    op = Operator(scope, offense_enabled=offense, caps={"capture.handshake": True})
+    # demo: fake executors that succeed; capture engine + uplink assumed present
+    op = Operator(scope, offense_enabled=offense,
+                  caps={"capture.handshake": True, "radio.wifi.uplink": True})
     def _ok(name):
         return lambda t: (True, f"{name} ok on {t}")
     execs = {Phase.CAPTURE: _ok("capture"), Phase.CRACK: _ok("crack"),
-             Phase.PIVOT_SCAN: _ok("scan"), Phase.PIVOT_CRED: _ok("cred-test"),
-             Phase.LOOT: _ok("loot")}
+             Phase.JOIN: _ok("join"), Phase.PIVOT_SCAN: _ok("scan"),
+             Phase.PIVOT_CRED: _ok("cred-test"), Phase.LOOT: _ok("loot")}
     out = op.run(targets, execs, recon=lambda: (True, "12 APs seen"))
     for s in out["steps"]:
         tag = "exec " if s["executed"] else ("BLOCK" if not s["allowed"] else "stop ")
