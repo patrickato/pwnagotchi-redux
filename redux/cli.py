@@ -3693,6 +3693,21 @@ def cmd_loot(args) -> int:
             for f in sec["findings"][:12]:
                 print(f"    [{f['confidence']:6}] {f['rule']:22} {f['redacted']}  ({f['source']})")
         return 0
+    if cmd == "report":
+        from .loot.rollup import rollup
+        r = rollup(vault_entries=vault.entries())
+        if getattr(args, "json", False):
+            print(json.dumps(r, indent=2))
+            return 0
+        print(f"loot rollup — {r['note']}")
+        c = r["credentials"]
+        print(f"  credentials : {c['total']} ({c['service']} service)  {c['by_kind'] or ''}")
+        print(f"  files       : {r['files']['count']}")
+        print(f"  NetNTLM     : {r['netntlm_hashes']}")
+        print(f"  secrets     : {r['secrets']['total']} ({r['secrets'].get('by_confidence', {})})")
+        for s in r["top_secrets"]:
+            print(f"    [{s['confidence']:6}] {s['rule']:22} {s['redacted']:14} {s['source']}")
+        return 0
     if cmd == "secrets":
         from .loot.secrets import scan_files as _scan_secrets
         sec = _scan_secrets(args.files)
@@ -5675,6 +5690,8 @@ def build_parser() -> argparse.ArgumentParser:
     lse = losub.add_parser("secrets", help="typed, redacted secrets scan over files (AWS/GitHub/keys/JWT/DB-URI/passwords)")
     lse.add_argument("files", nargs="+", help="files to scan")
     lse.add_argument("--json", action="store_true", help="machine-readable output")
+    lrp = losub.add_parser("report", help="loot rollup — one view across creds/files/NetNTLM/secrets")
+    lrp.add_argument("--json", action="store_true", help="machine-readable output")
     lf = losub.add_parser("files", help="scope-gated SMB file-loot: pull interesting files off a host with a recovered credential")
     lf.add_argument("host", help="target host (IP or name); must be armed in scope")
     lf.add_argument("--user", required=True, help="username for the recovered credential")

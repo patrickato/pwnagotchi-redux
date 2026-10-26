@@ -66,6 +66,7 @@ _RAW: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
         ("responder harvest", "NetNTLM hashes on the joined LAN -> crack queue"),
         ("loot triage", "forensic triage of pulled files"),
         ("loot secrets", "typed, redacted secrets scan (keys/tokens/JWT/DB-URI)"),
+        ("loot report", "one rollup across creds / files / NetNTLM / secrets"),
         ("scenario list", "runnable playbooks that chain the toolkit"),
     )),
     ("STEALTH & OPSEC", (
