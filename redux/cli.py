@@ -73,9 +73,51 @@ def _build(args, driver=None) -> Augur:
 
 # --- subcommands ------------------------------------------------------------- #
 
+def _live_snapshot(port=8080, timeout=2.0):
+    """The running daemon's REAL status snapshot from its loopback API, or None if
+    no daemon is listening / the response is unusable.
+
+    This is device truth. Building a fresh local Augur instead (see cmd_status)
+    yields a no-hardware STUB — onboard-only radios, no live engine — that reports
+    `capture_iface=wlan0 / capture_engine=null / face=blind` even while the daemon
+    is happily capturing on the real adapter. That stub masquerading as device
+    state is a glass-box lie, so every status/doctor path prefers this first."""
+    from urllib.request import urlopen
+    from urllib.error import URLError
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= port <= 65535:
+        return None
+    try:
+        with urlopen(f"http://127.0.0.1:{port}/api/status", timeout=timeout) as response:
+            raw = response.read(262145)
+        if len(raw) > 262144:
+            return None
+        snap = json.loads(raw)
+        return snap if isinstance(snap, dict) else None
+    except (OSError, URLError, ValueError, json.JSONDecodeError):
+        return None
+
+
 def cmd_status(args) -> int:
-    bc = _build(args)
-    print(json.dumps(bc.status(), indent=2))
+    # A live supervisor owns the real capture radio + engine. Recomputing a fresh
+    # local snapshot here is a no-hardware STUB that flatly contradicts a running
+    # daemon (the "blind on wlan0" trap). Prefer the daemon's real status; fall back
+    # to the stub only when nothing is listening, and LABEL it so it can never be
+    # mistaken for device state.
+    port = int(getattr(args, "port", 8080) or 8080)
+    live = None if getattr(args, "no_daemon", False) else _live_snapshot(port)
+    if live is not None:
+        live.setdefault("source", "live-daemon")
+        print(json.dumps(live, indent=2))
+        return 0
+    snap = _build(args).status()
+    snap["source"] = ("offline-stub — no live daemon on 127.0.0.1:%d; this is a "
+                      "no-hardware snapshot, NOT device state "
+                      "(run on the device, or use 'redux live status')") % port
+    print(json.dumps(snap, indent=2))
     return 0
 
 
@@ -1201,18 +1243,36 @@ def cmd_help(args) -> int:
     return 0
 
 
-def cmd_doctor(args) -> int:
-    """Print the headless, glass-box self-diagnosis from live state."""
-    bc = _build(args)
-    rep = bc.doctor_report()
-    print(f"redux doctor: {rep['label']}")
-    for f in rep["findings"]:
-        print(f"  [{f['status'].upper():8}] {f['area']}: {f['summary']}")
-        if f["reason"]:
+def _print_doctor(rep, *, suffix="") -> None:
+    print(f"redux doctor: {rep.get('label', rep.get('overall', 'unknown'))}{suffix}")
+    for f in rep.get("findings", []):
+        if not isinstance(f, dict):
+            continue
+        print(f"  [{str(f.get('status', 'unknown')).upper():8}] "
+              f"{f.get('area', 'unknown')}: {f.get('summary', '')}")
+        if f.get("reason"):
             print(f"             why: {f['reason']}")
-        if f["remediation"]:
+        if f.get("remediation"):
             print(f"             do:  {f['remediation']}")
-    print(f"coverage: {rep['coverage']['reason']}")
+    cov = rep.get("coverage")
+    print(f"coverage: {cov.get('reason', 'not reported') if isinstance(cov, dict) else 'not reported'}")
+
+
+def cmd_doctor(args) -> int:
+    """Print the headless, glass-box self-diagnosis.
+
+    Prefers the running daemon's REAL Doctor (the live supervisor owns the actual
+    radio/engine). Only when no daemon is listening does it fall back to a clearly
+    labeled no-hardware stub — never a stub masquerading as device state."""
+    port = int(getattr(args, "port", 8080) or 8080)
+    live = None if getattr(args, "no_daemon", False) else _live_snapshot(port)
+    if live is not None:
+        rep = live.get("doctor")
+        if isinstance(rep, dict) and isinstance(rep.get("findings"), list):
+            _print_doctor(rep, suffix="  [live daemon]")
+            return 0
+    rep = _build(args).doctor_report()
+    _print_doctor(rep, suffix=f"  [offline stub — no live daemon on :{port}]")
     return 0
 
 
@@ -3610,8 +3670,14 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--adapter", action="store_true", help="include a USB adapter (Alfa-class)")
         sp.add_argument("--intent", default="recon", choices=[i.value for i in Intent])
 
-    st = sub.add_parser("status", help="print a glass-box status snapshot")
-    add_radio_flags(st); st.set_defaults(func=cmd_status)
+    st = sub.add_parser("status", help="print a glass-box status snapshot "
+                        "(reads the live daemon when one is running)")
+    add_radio_flags(st)
+    st.add_argument("--port", type=int, default=8080,
+                    help="live daemon dashboard port to read real status from (default 8080)")
+    st.add_argument("--no-daemon", action="store_true",
+                    help="force the local no-hardware snapshot instead of the live daemon")
+    st.set_defaults(func=cmd_status)
 
     rn = sub.add_parser("run", help="run pump cycles (optionally over a recorded session)")
     add_radio_flags(rn)
@@ -3832,8 +3898,14 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--authorize-side-effects", action="store_true", help="authorize requested side effects, never activate code")
     pk.set_defaults(func=cmd_packs)
 
-    dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
-    add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+    dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis "
+                        "(reads the live daemon when one is running)")
+    add_radio_flags(dr)
+    dr.add_argument("--port", type=int, default=8080,
+                    help="live daemon dashboard port to read real Doctor from (default 8080)")
+    dr.add_argument("--no-daemon", action="store_true",
+                    help="force the local no-hardware self-diagnosis instead of the live daemon")
+    dr.set_defaults(func=cmd_doctor)
 
     ca = sub.add_parser("campaign", help="autonomous glass-box kill-chain operator")
     ca.add_argument("--persona", help="posture (red/purple = offense; blue/recon = detection-only)")
