@@ -186,6 +186,13 @@ FEATURES: Tuple[Feature, ...] = (
             guidance="mesh",
             note="message signing + scope-sync logic are real; a real LoRa transport "
                  "(Meshtastic) is not wired yet — it currently runs over loopback"),
+    Feature("mesh.correlate", "Swarm time-correlation",
+            "fuse nodes in TIME: corroborate an event across nodes, track an entity "
+            "moving node→node, merge a swarm-wide timeline (clock-skew corrected).",
+            "mesh", implemented=True,
+            note="engine is pure (verified with no radio); pairs with the spatial "
+                 "collector-grid fusion and rides whatever transport the fleet uses",
+            related=("mesh.swarm", "wifi.dna", "rf.dvr")),
     Feature("blue.detect", "Wireless detectors (blue)",
             "the always-on detector suite — deauth floods, rogue APs, karma, etc.",
             "blue", implemented=True, needs_hardware="a Wi-Fi radio in monitor mode",

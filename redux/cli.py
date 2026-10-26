@@ -2539,6 +2539,27 @@ def cmd_mesh(args) -> int:
     swarm key) is rejected."""
     if getattr(args, "mesh_cmd", "demo") == "swarm":
         return _cmd_mesh_swarm(args)
+    if getattr(args, "mesh_cmd", "") == "correlate":
+        from .mesh.time_correlate import SwarmTimeCorrelator, SwarmEvent
+        c = SwarmTimeCorrelator(window=5.0)
+        tgt = "aa:bb:cc:dd:ee:ff"
+        # 3 nodes see the same deauth burst within a few seconds (corroboration),
+        # and a phone probes its way past the nodes in order (movement).
+        c.set_skew("charlie", 3.0)         # charlie's clock runs 3s ahead
+        for n, t in (("alpha", 100.0), ("bravo", 101.5), ("charlie", 105.0)):
+            c.add(SwarmEvent(n, t, tgt, "deauth", rssi=-55))
+        for n, t in (("alpha", 100.0), ("bravo", 118.0), ("charlie", 140.0)):
+            c.add(SwarmEvent(n, t, "de:ad:be:ef:00:01", "probe", rssi=-60))
+        print("redux mesh correlate — swarm time-correlation demo (SIMULATED nodes)\n")
+        print("  corroborated events (same event, several nodes, one window):")
+        for ce in c.corroborated():
+            print(f"    {ce.entity} [{ce.kind}] nodes={list(ce.nodes)} "
+                  f"span={ce.span:.1f}s conf={ce.confidence:.2f}")
+        print("  movement (an entity tracked node→node):")
+        for h in c.movements("de:ad:be:ef:00:01"):
+            print(f"    {h.entity}: {h.from_node} → {h.to_node}  (+{h.dt:.0f}s)")
+        print(f"\n  {c.summary()['note']}")
+        return 0
     from .mesh import ScopeSync, LoopbackMesh, SignedMessage, sign
     key = b"swarm-shared-key"
     mesh = LoopbackMesh()
@@ -4854,6 +4875,7 @@ def build_parser() -> argparse.ArgumentParser:
     mesub.add_parser("demo", help="3-node swarm: propagate an arm + reject a forged delta")
     mesub.add_parser("swarm", help="coordinated capture: place the chain across nodes, "
                                    "each re-gates locally before it fires")
+    mesub.add_parser("correlate", help="swarm time-correlation: corroborate events + track movement across nodes")
     mk = mesub.add_parser("key", help="swarm-key lifecycle: gen/rotate/show/export/import (sealed)")
     mksub = mk.add_subparsers(dest="key_cmd", required=True)
 
