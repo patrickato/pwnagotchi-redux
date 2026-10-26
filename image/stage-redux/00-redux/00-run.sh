@@ -87,6 +87,14 @@ install -m 0755 files/install-nexmon.sh "$ROOTFS_DIR/usr/local/src/install-nexmo
 install -m 0644 files/target-kernel.sh "$ROOTFS_DIR/usr/local/src/target-kernel.sh"
 install -m 0644 files/patch-nexmon-driver.py "$ROOTFS_DIR/usr/local/src/patch-nexmon-driver.py"
 on_chroot <<'EOF'
+# Headless build: never let a package's debconf dialog stall the chroot. The
+# toolset pulls wireshark-common and kismet, whose setuid questions otherwise
+# pop an interactive blue screen that hangs a pi-gen build. Force the
+# noninteractive frontend for every apt-get below and preseed the known setuid
+# prompts to safe defaults (capture runs as root; no setuid-root helpers needed).
+export DEBIAN_FRONTEND=noninteractive
+echo 'wireshark-common wireshark-common/install-setuid boolean false' | debconf-set-selections 2>/dev/null || true
+echo 'kismet-capture-common kismet-capture-common/install-setuid boolean false' | debconf-set-selections 2>/dev/null || true
 /usr/local/src/install-nexmon.sh
 useradd --system --home-dir /var/lib/redux --shell /usr/sbin/nologin redux
 chown -R root:root /opt/redux
