@@ -858,6 +858,39 @@ def cmd_simulate(args) -> int:
     return 0
 
 
+def cmd_shadow(args) -> int:
+    """Blue-shadow: what a defender would see from each action. With no action it
+    lists every action's footprint (loudest first); with one it shows the detail +
+    a quieter way to the same goal. Learn evasion by seeing the footprint."""
+    import json as _json
+    from .frameworks.blueshadow import shadow, all_shadows
+    if getattr(args, "action", None):
+        s = shadow(args.action)
+        if getattr(args, "json", False):
+            print(_json.dumps(s, indent=2)); return 0
+        if not s.get("known"):
+            print(s["reason"]); return 3
+        print(f"{s['action']} — {s['label']}")
+        print(f"  footprint: {s['footprint']}")
+        print(f"  blue sees: {', '.join(s['seen_by']) if s['seen_by'] else 'nothing in the wireless suite'}")
+        print(f"  ATT&CK: {', '.join(s['attack'])}   D3FEND: {', '.join(s['defend'])}   PTES: {s['ptes_phase']}")
+        if s.get("stealthier"):
+            print(f"  quieter: {s['stealthier']['action']} — {s['stealthier']['why']}")
+        if s.get("note"):
+            print(f"  note: {s['note']}")
+        return 0
+    rows = all_shadows()
+    if getattr(args, "json", False):
+        print(_json.dumps(rows, indent=2)); return 0
+    print("what blue sees, per action (loudest first):")
+    for s in rows:
+        glyph = "🔊" if s["loud"] else "🔇"
+        seen = ", ".join(s["seen_by"]) if s["seen_by"] else "—"
+        alt = f"   → quieter: {s['stealthier']['action']}" if s.get("stealthier") else ""
+        print(f"  {glyph} {s['action']:18} seen by: {seen}{alt}")
+    return 0
+
+
 def cmd_hardware(args) -> int:
     """What's plugged in, and what it unlocks. Enumerates USB devices, maps the
     recognized ones to the capability they add (+ its live readiness), and flags
@@ -4471,6 +4504,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="what's plugged in and what capability each device unlocks")
     hw.add_argument("--json", action="store_true", help="machine-readable output")
     hw.set_defaults(func=cmd_hardware)
+
+    sh = sub.add_parser("shadow", help="blue-shadow — what a defender sees from each action (+ quieter paths)")
+    sh.add_argument("action", nargs="?", default=None, help="one action to detail (else list all)")
+    sh.add_argument("--json", action="store_true", help="machine-readable output")
+    sh.set_defaults(func=cmd_shadow)
 
     st = sub.add_parser("stealth", help="OPSEC for Augur's own device (MAC randomization, …)")
     stsub = st.add_subparsers(dest="stealth_cmd", required=True)
