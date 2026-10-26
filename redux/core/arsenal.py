@@ -41,6 +41,7 @@ _RAW: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
     )),
     ("RECON & IDENTITY", (
         ("survey", "passive airspace survey — APs/clients in earshot"),
+        ("dossier", "everything known about one AP + the recommended move"),
         ("dex --dna", "devices re-identified by behavior past MAC rotation"),
         ("airwave timeline", "scrub back through RF history"),
         ("captap live", "raw-frame tap + cross-MAC re-identification"),

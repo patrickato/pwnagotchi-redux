@@ -222,6 +222,16 @@ FEATURES: Tuple[Feature, ...] = (
             "is a BLE tracker following me? — the personal-safety sweep.",
             "blue", implemented=True, needs_hardware="a Bluetooth adapter",
             guidance="tracker"),
+    Feature("wifi.downgrade", "WPA3 downgrade classifier",
+            "spot WPA2/WPA3 (and OWE) transition-mode APs — a 'WPA3' network with a "
+            "crackable WPA2-PSK path still hiding behind it.",
+            "wifi", implemented=True, related=("wifi.crack", "wifi.dossier")),
+    Feature("wifi.dossier", "Target dossier",
+            "everything the box knows about one AP in a single view — identity, "
+            "security + downgrade path, value, sightings, location, recommended move.",
+            "wifi", implemented=True,
+            note="pure (composes crackability, downgrade, radar, OUI, sightings)",
+            related=("wifi.target_radar", "wifi.downgrade", "wifi.dna")),
     Feature("wifi.target_radar", "Target-value radar",
             "rank APs by how worth attacking each is — crackability, a free PMKID, "
             "signal, clients, WPS — minus what's already owned; juiciest first.",

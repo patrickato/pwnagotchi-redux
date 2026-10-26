@@ -3218,6 +3218,68 @@ def cmd_engagement(args) -> int:
     return 2
 
 
+def cmd_dossier(args) -> int:
+    """Target dossier — everything the box knows about one AP in a single glass-box
+    view: identity, security (and any WPA3-transition downgrade path), value,
+    what's been seen, where/when, and the one recommended next move."""
+    from .intel.dossier import build_dossier
+    retired = set()
+    try:
+        from .crack.captured import retired_bssids
+        retired = retired_bssids()
+    except Exception:
+        retired = set()
+    kw = {}
+    if getattr(args, "demo", False):
+        bssid = "aa:bb:cc:00:11:22"
+        kw = dict(ssid="HomeNet", security="wpa3", akm=["SAE", "PSK"], channel=6,
+                  rssi=-48, clients=2, pmkid_seen=True, lat=45.0, lon=-93.0)
+        print("redux dossier — SYNTHETIC target (no radio)")
+    else:
+        bssid = args.bssid
+        try:
+            from .crack.passive_pmkid import load_state
+            for h in load_state().get("hits", []):
+                if _norm_mac_like(h.get("bssid", "")) == _norm_mac_like(bssid):
+                    kw.update(ssid=h.get("ssid", ""), security=h.get("security") or "wpa2-psk",
+                              channel=h.get("channel"), rssi=h.get("rssi"), pmkid_seen=True)
+        except Exception:
+            pass
+        try:
+            from .geo import SightingStore
+            st = SightingStore("/captures/live/sightings.db")
+            s = st.get("wifi", bssid)
+            if s is not None:
+                kw.setdefault("ssid", getattr(s, "ssid", "") or kw.get("ssid", ""))
+                kw.setdefault("channel", getattr(s, "channel", None))
+                kw.setdefault("rssi", getattr(s, "rssi", None))
+                kw["first_seen"] = getattr(s, "first_seen", None)
+                kw["last_seen"] = getattr(s, "ts", None)
+                if getattr(s, "lat", None) is not None:
+                    kw["lat"], kw["lon"] = s.lat, s.lon
+        except Exception:
+            pass
+    d = build_dossier(bssid, retired=retired, **kw)
+    if getattr(args, "json", False):
+        print(json.dumps(d.to_dict(), indent=2))
+        return 0
+    print(f"DOSSIER  {d.bssid}  {d.ssid or '<hidden>'}")
+    print(f"  vendor {d.vendor} · ch{d.channel if d.channel is not None else '?'} ({d.band}GHz) · "
+          f"security {d.security_mode}" + (" [DOWNGRADABLE]" if d.downgradable else ""))
+    print(f"  value {d.value_score}/100 · crackable {'yes' if d.crackable else 'no'}"
+          + (f" ({d.method})" if d.crackable else ""))
+    for f in d.facts:
+        print(f"    - {f}")
+    if d.located:
+        print(f"  located: {d.located['lat']}, {d.located['lon']}")
+    print(f"  >> {d.recommended}")
+    return 0
+
+
+def _norm_mac_like(v: str) -> str:
+    return (v or "").strip().lower()
+
+
 def cmd_targets(args) -> int:
     """Target-value radar — rank APs by how worth attacking each is (crackability,
     a free PMKID, signal, clients, WPS), juiciest first. Glass-box: every point
@@ -5591,6 +5653,11 @@ def build_parser() -> argparse.ArgumentParser:
     tg = sub.add_parser("targets", help="target-value radar — rank APs by how worth attacking each is")
     tg.add_argument("--demo", action="store_true", help="synthetic radar (no radio)")
     tg.set_defaults(func=cmd_targets)
+    ds = sub.add_parser("dossier", help="everything known about one AP in a single view (+ recommended move)")
+    ds.add_argument("bssid", nargs="?", default="", help="target BSSID")
+    ds.add_argument("--demo", action="store_true", help="synthetic target (no radio)")
+    ds.add_argument("--json", action="store_true", help="machine-readable output")
+    ds.set_defaults(func=cmd_dossier)
     ph = sub.add_parser("phone", help="phone UI over Bluetooth PAN — tether a phone (no Wi-Fi/cable) and serve the dashboard")
     ph.add_argument("--adapter", default="hci0", help="Bluetooth adapter")
     ph.add_argument("--iface", default="pan0", help="PAN interface")
