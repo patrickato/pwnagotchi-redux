@@ -19,6 +19,11 @@ Environment=PYTHONPATH=/opt/redux
 Environment=PYTHONUNBUFFERED=1
 # Bettercap must never try to create ~/bettercap.aliases in protected /root.
 Environment=HOME=/captures/live
+# Position via gpsd (the standard Linux GPS daemon): gpsd owns the USB/serial GPS
+# and the runtime reads fixes over localhost:2947. Harmless with no GPS attached —
+# the position provider simply returns no fix (fails safe), so this stays on by
+# default and the map/sightings populate automatically once a GPS is present.
+Environment=REDUX_GPSD=1
 UMask=0077
 ExecStart=/usr/bin/python3 -m redux.core.live_runtime --config /etc/redux/live.toml
 Restart=on-failure
