@@ -12,6 +12,22 @@ def _run(argv):
     return rc, out.getvalue()
 
 
+def test_cli_puts_sbin_on_path(monkeypatch):
+    # iw/ip/rfkill live in /usr/sbin, which a non-root login PATH omits — the CLI
+    # must make them findable or it reports installed radio tools as missing
+    # (the "iw: command not found" trap). Append, never prepend/shadow.
+    import os
+    from redux.cli import _ensure_tool_path
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    _ensure_tool_path()
+    parts = os.environ["PATH"].split(os.pathsep)
+    assert "/usr/sbin" in parts and "/sbin" in parts
+    assert parts.index("/usr/bin") < parts.index("/usr/sbin")   # appended, not prepended
+    # idempotent: a second call doesn't duplicate
+    _ensure_tool_path()
+    assert os.environ["PATH"].split(os.pathsep).count("/usr/sbin") == 1
+
+
 def test_status_prints_snapshot():
     rc, out = _run(["status", "--onboard", "--adapter", "--intent", "hunt"])
     assert rc == 0
