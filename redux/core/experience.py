@@ -32,7 +32,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 SUCCESS_OUTCOMES = frozenset({"handshake", "pmkid", "capture", "eapol", "recovered"})
 
 # Dimensions we can slice experience by. Each maps to a context key.
-DIMENSIONS = ("channel", "band", "hour", "vendor", "kind")
+DIMENSIONS = ("channel", "band", "hour", "vendor", "kind", "method")
 
 _MAX_ROWS = 20000           # bound the log; prune oldest beyond this
 _UCB_C = 1.2                # exploration weight (higher = explore more)

@@ -2646,6 +2646,23 @@ def cmd_capture(args) -> int:
         print("  " + " ".join(prev.argv))
     else:
         print("  " + prev.reason)
+    # Adaptive method pick: what the device's own experience says works best. The
+    # methods available depend on what's present (AngryOxide binary, injection radio).
+    try:
+        from .crack.adaptive_capture import recommend_capture_method, method_table, CAPTURE_METHODS
+        from .core.experience import ExperienceStore
+        avail = list(CAPTURE_METHODS) if ao.available() else [m for m in CAPTURE_METHODS if m != "angryoxide"]
+        rows = ExperienceStore(getattr(args, "experience", None)
+                               or "/captures/live/experience.jsonl").load()
+        pick, why = recommend_capture_method(rows, available=avail)
+        print(f"\nadaptive method (from experience): {pick}")
+        print(f"  {why}")
+        tbl = method_table(rows, available=avail)
+        if any(r["trials"] for r in tbl):
+            for r in tbl:
+                print(f"    {r['method']:13} {r['successes']}/{r['trials']}  score {r['score']}")
+    except Exception:
+        pass   # experience is optional; never let it break the capture plan
     return 0
 
 
