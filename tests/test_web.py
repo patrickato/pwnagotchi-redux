@@ -34,6 +34,23 @@ def test_status_payload_has_fields():
     assert "narration" in p and "recommendation" in p
 
 
+def test_operations_tab_surfaces_capabilities_stealth_and_engagement():
+    # the Operations dashboard reads these keys; they must be in the payload so the
+    # panels have real data (capabilities + stealth come from Augur.status()).
+    bc = Augur([ONBOARD, ALFA], intent=Intent.HUNT)
+    p = status_payload(bc)
+    assert "capabilities" in p and "by_state" in p["capabilities"]
+    assert "stealth" in p and "footprint" in p["stealth"]
+    assert "engagement" in p             # None when no case is open, but present
+
+
+def test_operations_panels_render_in_page():
+    page = render_page()
+    for panel in ("opsengagement", "opsstealth", "opsloot", "opscaps"):
+        assert f'id="{panel}"' in page
+    assert 'data-view="ops"' in page and "function renderOps(" in page
+
+
 def test_status_payload_includes_own_position_honestly():
     # no position provider → position is None, never a fabricated coordinate
     bc = Augur([ONBOARD], intent=Intent.RECON)

@@ -69,6 +69,15 @@ def status_payload(augur, *, processing_report=None) -> Dict:
         ]
     except Exception:
         data["access_points"] = []
+    # the active engagement case file, if one is open (cheap single-file read) —
+    # so the dashboard shows which op is running + its authorization at a glance.
+    try:
+        from ..core.engagement import EngagementStore
+        _es = EngagementStore()
+        _act = _es.active()
+        data["engagement"] = _es.summary(_act.id) if _act else None
+    except Exception:
+        data["engagement"] = None
     return data
 
 
@@ -255,6 +264,7 @@ body[data-skin="plain"] .hero::before{display:none}
 </header>
 <nav id="viewnav" class="view-nav" aria-label="Redux workspace pages">
  <button type="button" data-view="overview" aria-pressed="true">Overview</button>
+ <button type="button" data-view="ops" aria-pressed="false">Operations</button>
  <button type="button" data-view="radio" aria-pressed="false">Radio</button>
  <button type="button" data-view="captures" aria-pressed="false">Captures</button>
  <button type="button" data-view="doctor" aria-pressed="false">Doctor</button>
@@ -265,6 +275,18 @@ body[data-skin="plain"] .hero::before{display:none}
  <section class="card" data-page="system" hidden aria-label="System evidence">
   <h2>System evidence</h2><p class="mut">Sensor, visual and heartbeat timestamps are independent. Unknown coverage requires evidence.</p>
   <div id="systemevidence" aria-live="polite">Evidence unavailable</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Engagement">
+  <div class="k">engagement · active case</div><div id="opsengagement" class="v">no active engagement</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Stealth posture">
+  <div class="k">stealth · emissions footprint (real-time)</div><div id="opsstealth" aria-live="polite">stealth status unavailable</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Passive loot">
+  <div class="k">passive loot · zero-transmit PMKID harvest</div><div id="opsloot" aria-live="polite">no passive sweep recorded</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Capability readiness">
+  <div class="k">capabilities · readiness (what the box can do, how ready)</div><div id="opscaps" aria-live="polite">capability map unavailable</div>
  </section>
  <div class="card hero" data-page="overview" aria-label="Live Augur persona">
   <div class="hero-top"><span class="hero-overline">AUGUR / LIVE OBSERVATIONS</span>
@@ -730,11 +752,36 @@ function renderSystem(d){
   item.children[1].textContent='Source: '+row.source+' · Measured: '+(row.measured_at??'unavailable');
  });
 }
+function renderOps(d){
+ // engagement — the active case file + its authorization
+ var eng=d.engagement, ee=document.getElementById('opsengagement');
+ if(ee){ ee.textContent = eng ? (eng.name+' ['+eng.status+'] · auth: '+(eng.authorization||'—')
+   +' · armed at open: '+(eng.armed_at_open??0)) : 'no active engagement'; }
+ // stealth footprint — the real-time detectability meter
+ var st=d.stealth, se=document.getElementById('opsstealth');
+ if(se){ if(st&&st.footprint){ var fp=st.footprint;
+   se.textContent='quiet '+(st.quiet?'ON':'off')+' · footprint '+fp.label.toUpperCase()
+    +' ('+fp.score+'/100) · budget '+(st.frame_budget??0)+' · MAC rotate '+(st.randomize_mac?'on':'off');
+  } else { se.textContent='stealth status unavailable'; } }
+ // passive loot — zero-transmit PMKID harvest summary
+ var pl=d.passive_loot, le=document.getElementById('opsloot');
+ if(le){ le.textContent = pl ? (pl.new_loot+' NEW crackable · '+pl.aps_leaking_pmkid+' leaking · '
+   +pl.already_captured+' owned · '+(pl.footprint||'silent')+' ('+(pl.transmit||'zero transmit')+')')
+   : 'no passive sweep recorded'; }
+ // capability readiness — what the box can do + how ready
+ var cap=d.capabilities, ce=document.getElementById('opscaps');
+ if(ce){ if(cap&&cap.by_state){ var b=cap.by_state;
+   ce.textContent=(b.ready||0)+' ready · '+(b['needs-hardware']||0)+' need hardware · '
+    +(b['tool-missing']||0)+' need a tool · '+(b.planned||0)+' planned'
+    +(cap.summary?(' — '+cap.summary):'');
+  } else { ce.textContent='capability map unavailable'; } }
+}
 function paint(d){
  renderSystem(d);
  renderDoctor(d.doctor||null);
  renderPipeline(d);
  renderRuntimePanels(d);
+ renderOps(d);
  var fe=document.getElementById('face'),nf=d.face||'‹·_·›';
  var base='face'+(d.face_state==='ruffle'?' crit':'')+(d.face_state==='blind'?' blinded':'');
  if(fe.textContent!==nf){fe.textContent=nf;fe.className=base;void fe.offsetWidth;fe.className=base+' pop';}
