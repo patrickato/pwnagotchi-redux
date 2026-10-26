@@ -13,12 +13,47 @@ def _run(argv):
 
 
 def test_status_prints_snapshot():
-    rc, out = _run(["status", "--onboard", "--adapter", "--intent", "hunt"])
+    # --no-daemon: force the local no-hardware snapshot (deterministic; never
+    # depends on whether something is listening on :8080 in CI).
+    rc, out = _run(["status", "--onboard", "--adapter", "--intent", "hunt", "--no-daemon"])
     assert rc == 0
     data = json.loads(out)
     assert data["intent"] == "hunt"
     assert data["capture_iface"] == "wlan1"
     assert "reason" in data["recommendation"]
+    # The stub must be LABELED so it can never be mistaken for device state.
+    assert "offline-stub" in data["source"]
+
+
+def test_status_prefers_live_daemon_over_stub(monkeypatch):
+    # When a daemon is running, `redux status` must show its REAL state, not the
+    # local onboard-only stub (the "blind on wlan0" trap this fixes).
+    import redux.cli as cli
+    real = {"intent": "hunt", "capture_iface": "wlan1", "capture_engine": "bettercap",
+            "face_state": "hunting"}
+    monkeypatch.setattr(cli, "_live_snapshot", lambda *a, **k: dict(real))
+    rc, out = _run(["status"])
+    assert rc == 0
+    data = json.loads(out)
+    assert data["capture_iface"] == "wlan1"          # device truth, not the wlan0 stub
+    assert data["capture_engine"] == "bettercap"
+    assert data["source"] == "live-daemon"
+
+
+def test_doctor_prefers_live_daemon(monkeypatch):
+    import redux.cli as cli
+    snap = {"doctor": {"overall": "ok", "label": "ALL GREEN", "findings": [
+        {"status": "ok", "area": "capture", "summary": "capturing on wlan1"}]}}
+    monkeypatch.setattr(cli, "_live_snapshot", lambda *a, **k: dict(snap))
+    rc, out = _run(["doctor"])
+    assert rc == 0
+    assert "live daemon" in out and "ALL GREEN" in out
+
+
+def test_doctor_offline_stub_is_labeled():
+    rc, out = _run(["doctor", "--no-daemon"])
+    assert rc == 0
+    assert "offline stub" in out
 
 
 def test_hwtest_runs_software_and_synthetic_battery(tmp_path):
