@@ -222,3 +222,31 @@ def test_live_doctor_sanitizes_terminal_sequences(monkeypatch):
     assert "Danger" in output and "RED" in output
 
 
+
+
+def test_capabilities_list_shows_states_and_summary():
+    rc, out = _run(["capabilities", "list"])
+    assert rc == 0
+    assert "ready" in out and "planned" in out            # the legend
+    assert "wifi.capture" in out and "eap.enterprise" in out
+    assert "capabilities)" in out                          # the completion summary line
+    # the alias works too
+    rc2, out2 = _run(["caps", "list"])
+    assert rc2 == 0 and out2 == out
+
+
+def test_capabilities_show_links_install_and_howto():
+    rc, out = _run(["capabilities", "show", "wifi.crack"])
+    assert rc == 0
+    assert "wifi.crack" in out and "status:" in out
+    assert "redux help crack" in out                       # guidance how-to link
+    assert "apt-get install" in out                        # toolbox install link
+    rc2, out2 = _run(["caps", "show", "nope"])
+    assert rc2 == 3 and "unknown capability" in out2
+
+
+def test_capabilities_completion_is_evidence_based():
+    rc, out = _run(["capabilities", "completion"])
+    assert rc == 0
+    assert "never counted as ready" in out
+    assert "still planned" in out
