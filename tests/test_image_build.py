@@ -1309,3 +1309,24 @@ def test_invalid_country_refused_before_any_build_workspace(prepared, tmp_path, 
     assert result.returncode != 0
     assert "REDUX_REGULATORY_COUNTRY" in result.stderr
     assert not work.exists()
+
+
+def test_image_declares_gps_ups_and_time_packages():
+    """Regression for F12 + the field-utility bake: the image must declare the
+    Python modules the GPS reader (`serial`/pyserial) and UPS probes (`smbus2`,
+    distinct from the `smbus` already shipped) import, or fitted hardware fails
+    silently on a clean image. Plus the field utilities we rely on: chrony (the
+    Pi has no RTC), evtest (touch bring-up) and ethtool (link diagnostics)."""
+    power = (REPO / "image/stage-redux/40-power/00-packages").read_text().split()
+    assert "python3-serial" in power, "GPS serial reader needs pyserial"
+    assert "python3-smbus2" in power, "UPS probes import smbus2, not smbus"
+    assert "python3-smbus" in power, "boot power path still uses smbus (keep both)"
+    assert "evtest" in power, "touch bring-up/calibration diagnostics"
+    core = (REPO / "image/stage-redux/00-redux/00-packages").read_text().split()
+    assert "chrony" in core, "no RTC on the Pi — time must be disciplined"
+    assert "ethtool" in core
+    # chrony's GPS reference-clock drop-in ships and is wired into the run script
+    dropin = REPO / "image/stage-redux/40-power/files/chrony-gps.conf"
+    assert dropin.exists() and "refclock SHM 0" in dropin.read_text()
+    run = (REPO / "image/stage-redux/40-power/00-run.sh").read_text()
+    assert "conf.d/redux-gps.conf" in run and "chrony" in run

@@ -320,8 +320,18 @@ class Scope:
                 data = json.load(f)
         except (OSError, ValueError):
             return cls(entries=[], path=path)   # missing/corrupt → empty scope, never a crash
+        # Fail CLOSED on a malformed scope. A top-level JSON array/string/number is
+        # not a scope document: return an empty scope rather than crashing on
+        # data.get(...). A corrupt scope must never resolve to "armed" or "lab".
+        if not isinstance(data, dict):
+            return cls(entries=[], path=path)
+        raw_entries = data.get("entries", [])
+        if not isinstance(raw_entries, list):
+            raw_entries = []
         entries = []
-        for d in data.get("entries", []):
+        for d in raw_entries:
+            if not isinstance(d, dict):
+                continue   # skip malformed rows, keep the rest
             try:
                 entries.append(ScopeEntry(
                     kind=d["kind"], value=d["value"], label=d.get("label", ""),
@@ -329,8 +339,13 @@ class Scope:
                     expires=(None if d.get("expires") is None else float(d["expires"])),
                 ))
             except (KeyError, TypeError, ValueError):
-                continue   # skip malformed rows, keep the rest
-        return cls(entries=entries, path=path, lab_mode=bool(data.get("lab_mode", False)))
+                continue
+        # lab_mode is the one-switch firing loosening — treat it like a safety
+        # interlock: ONLY a real JSON boolean true enables it. Never coerce an
+        # ambiguous value into permission (bool("false") is True; so is bool(1)),
+        # or a typo'd/corrupt field would silently arm fire-on-sight.
+        lab_mode = data.get("lab_mode", False) is True
+        return cls(entries=entries, path=path, lab_mode=lab_mode)
 
     def summary(self) -> dict:
         now = time.time()

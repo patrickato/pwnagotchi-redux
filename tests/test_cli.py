@@ -12,13 +12,64 @@ def _run(argv):
     return rc, out.getvalue()
 
 
+def test_cli_puts_sbin_on_path(monkeypatch):
+    # iw/ip/rfkill live in /usr/sbin, which a non-root login PATH omits — the CLI
+    # must make them findable or it reports installed radio tools as missing
+    # (the "iw: command not found" trap). Append, never prepend/shadow.
+    import os
+    from redux.cli import _ensure_tool_path
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    _ensure_tool_path()
+    parts = os.environ["PATH"].split(os.pathsep)
+    assert "/usr/sbin" in parts and "/sbin" in parts
+    assert parts.index("/usr/bin") < parts.index("/usr/sbin")   # appended, not prepended
+    # idempotent: a second call doesn't duplicate
+    _ensure_tool_path()
+    assert os.environ["PATH"].split(os.pathsep).count("/usr/sbin") == 1
+
+
 def test_status_prints_snapshot():
-    rc, out = _run(["status", "--onboard", "--adapter", "--intent", "hunt"])
+    # --no-daemon: force the local no-hardware snapshot (deterministic; never
+    # depends on whether something is listening on :8080 in CI).
+    rc, out = _run(["status", "--onboard", "--adapter", "--intent", "hunt", "--no-daemon"])
     assert rc == 0
     data = json.loads(out)
     assert data["intent"] == "hunt"
     assert data["capture_iface"] == "wlan1"
     assert "reason" in data["recommendation"]
+    # The stub must be LABELED so it can never be mistaken for device state.
+    assert "offline-stub" in data["source"]
+
+
+def test_status_prefers_live_daemon_over_stub(monkeypatch):
+    # When a daemon is running, `redux status` must show its REAL state, not the
+    # local onboard-only stub (the "blind on wlan0" trap this fixes).
+    import redux.cli as cli
+    real = {"intent": "hunt", "capture_iface": "wlan1", "capture_engine": "bettercap",
+            "face_state": "hunting"}
+    monkeypatch.setattr(cli, "_live_snapshot", lambda *a, **k: dict(real))
+    rc, out = _run(["status"])
+    assert rc == 0
+    data = json.loads(out)
+    assert data["capture_iface"] == "wlan1"          # device truth, not the wlan0 stub
+    assert data["capture_engine"] == "bettercap"
+    assert data["source"] == "live-daemon"
+
+
+def test_doctor_prefers_live_daemon(monkeypatch):
+    import redux.cli as cli
+    snap = {"doctor": {"overall": "ok", "label": "ALL GREEN", "findings": [
+        {"status": "ok", "area": "capture", "summary": "capturing on wlan1"}]}}
+    monkeypatch.setattr(cli, "_live_snapshot", lambda *a, **k: dict(snap))
+    rc, out = _run(["doctor"])
+    assert rc == 0
+    assert "live daemon" in out and "ALL GREEN" in out
+
+
+def test_doctor_offline_stub_is_labeled():
+    rc, out = _run(["doctor", "--no-daemon"])
+    assert rc == 0
+    assert "offline stub" in out
 
 
 def test_hwtest_runs_software_and_synthetic_battery(tmp_path):
@@ -156,6 +207,24 @@ def test_init_scope_path_matches_firing_default(tmp_path, monkeypatch):
     from redux.cli import _DEFAULT_SCOPE_PATH
     assert rc == 0 and _DEFAULT_SCOPE_PATH in out
 
+def test_toolbox_list_is_install_aware():
+    rc, out = _run(["toolbox", "list"])
+    assert rc == 0
+    assert "✓ = installed" in out                 # the legend explains the marker
+    assert "installed" in out and "/" in out      # the N/total summary line
+    # every listed row carries one of the two state markers
+    rows = [ln for ln in out.splitlines() if ln.strip().startswith(("✓ [", "· ["))]
+    assert rows, "expected marked tool rows"
+
+
+def test_toolbox_show_reports_installed_status_and_baked():
+    rc, out = _run(["toolbox", "show", "nmap"])
+    assert rc == 0
+    assert "status:" in out                        # install state is surfaced
+    assert "stock image" in out                    # nmap is baked into the image
+    assert "netrecon" in out                        # and its real redux wiring
+
+
 def test_live_doctor_uses_local_actual_health_not_synthetic_augmentations(monkeypatch):
     import urllib.request
     served = []
@@ -222,3 +291,38 @@ def test_live_doctor_sanitizes_terminal_sequences(monkeypatch):
     assert "Danger" in output and "RED" in output
 
 
+
+
+def test_capabilities_list_shows_states_and_summary():
+    rc, out = _run(["capabilities", "list"])
+    assert rc == 0
+    assert "ready" in out and "planned" in out            # the legend
+    assert "wifi.capture" in out and "eap.enterprise" in out
+    assert "capabilities)" in out                          # the completion summary line
+    # the alias works too
+    rc2, out2 = _run(["caps", "list"])
+    assert rc2 == 0 and out2 == out
+
+
+def test_capabilities_show_links_install_and_howto():
+    rc, out = _run(["capabilities", "show", "wifi.crack"])
+    assert rc == 0
+    assert "wifi.crack" in out and "status:" in out
+    assert "redux help crack" in out                       # guidance how-to link
+    assert "apt-get install" in out                        # toolbox install link
+    rc2, out2 = _run(["caps", "show", "nope"])
+    assert rc2 == 3 and "unknown capability" in out2
+
+
+def test_capabilities_completion_is_evidence_based():
+    rc, out = _run(["capabilities", "completion"])
+    assert rc == 0
+    assert "never counted as ready" in out
+    assert "still planned" in out
+def test_simulate_once_boots_the_real_stack():
+    rc, out = _run(["simulate", "--once", "--ticks", "12"])
+    assert rc == 0
+    data = json.loads(out)
+    assert data["runtime"]["state"] == "running"
+    assert data["runtime"]["events_seen"] >= 1
+    assert "doctor" in data

@@ -378,12 +378,38 @@ class LiveDriver(BettercapDriver):
         return self._checked(super().set_handshake_file(path), "capture output configuration")
 
 
+class _SimProcess:
+    """Stand-in for the bettercap child in simulator mode: always 'running' until
+    reaped, and reaps cleanly. No OS process exists. Satisfies the subset of the
+    Popen interface the runtime's health/shutdown paths use (poll/terminate/kill/
+    wait, and a stdin attribute, which it leaves as None)."""
+    stdin = None
+
+    def __init__(self):
+        self.pid = None
+        self._alive = True
+
+    def poll(self):
+        return None if self._alive else 0
+
+    def terminate(self):
+        self._alive = False
+
+    def kill(self):
+        self._alive = False
+
+    def wait(self, timeout=None):
+        self._alive = False
+        return 0
+
+
 class LiveRuntime:
     """Owner of one Bettercap subprocess, its Augur event loop, and local UI."""
 
     def __init__(self, config: LiveConfig, *, radio_probe=probe, executor=subprocess.run,
                  spawn=subprocess.Popen, clock=time.monotonic, lease_guard=None,
-                 radio_inventory_provider=None, resource_monitor=None):
+                 radio_inventory_provider=None, resource_monitor=None,
+                 driver_factory=None):
         config.validate()
         self.config = config
         self.capture_mount_required = any(
@@ -401,6 +427,11 @@ class LiveRuntime:
         if not self._capture_mount_ok():
             raise RuntimeError("REDUXCAP ext4 partition is not mounted at /captures")
         self.radio_probe = radio_probe
+        # Simulator seam (redux simulate only): when injected, _launch skips the
+        # monitor-mode/caplet/bettercap-spawn/REST path and _connect builds the
+        # engine from this factory instead of a live HttpTransport. It is None in
+        # every production path, so the real launch/connect flow is unchanged.
+        self.driver_factory = driver_factory
         self.radio_inventory_provider = radio_inventory_provider
         self._radio_inventory = None
         self._radio_inventory_error = ""
@@ -978,6 +1009,8 @@ class LiveRuntime:
         self.next_try = now + self.retry_delay
 
     def _launch(self, iface):
+        if self.driver_factory is not None:
+            return self._launch_sim(iface)
         # Never start Bettercap with an unconfigured/blocked regulatory domain.
         # This safety gate runs independently of the boot one-shot so a failed
         # service cannot result in a falsely "running" radio. Doctor stays up.
@@ -1046,14 +1079,37 @@ class LiveRuntime:
         self.state = "starting_engine"
         self._check_usb_lease()
 
+    def _launch_sim(self, iface):
+        """Simulator launch (driver_factory injected): no monitor-mode, no caplet,
+        no bettercap child, no REST transport — _connect builds the engine from the
+        factory. Only reachable when a driver_factory was injected (redux simulate);
+        never in production. Mirrors _launch's state bookkeeping so the rest of the
+        runtime (health, status, _connect) behaves exactly as with a real child."""
+        self.transport = None
+        self.capture_file = self.config.active_dir / ("sim-" + secrets.token_hex(8) + ".pcap")
+        self.log_handle = self._open_engine_log()
+        self.engine_attempts += 1
+        self.process = _SimProcess()
+        self.iface = iface
+        self.started = self.clock()
+        self.state = "starting_engine"
+
     def _connect(self):
-        self._check_usb_lease()
-        self.transport.session()  # authenticated readiness probe
-        self._check_usb_lease()
-        driver = LiveDriver(config=self.transport.config, transport=self.transport,
-                            operation_guard=self._check_usb_lease,
-                            capture_iface=self.iface if self.lease_guard is not None else None)
-        driver.set_handshake_file(str(self.capture_file))
+        if self.driver_factory is not None:
+            # Simulator: the injected factory supplies the engine (a real
+            # BettercapDriver over a replay transport, or any driver), so there is
+            # no live REST session to probe and no monitor-mode radio to own.
+            driver = self.driver_factory(iface=self.iface)
+            if hasattr(driver, "set_handshake_file"):
+                driver.set_handshake_file(str(self.capture_file))
+        else:
+            self._check_usb_lease()
+            self.transport.session()  # authenticated readiness probe
+            self._check_usb_lease()
+            driver = LiveDriver(config=self.transport.config, transport=self.transport,
+                                operation_guard=self._check_usb_lease,
+                                capture_iface=self.iface if self.lease_guard is not None else None)
+            driver.set_handshake_file(str(self.capture_file))
         radios = [r for r in self.radio_probe() if r.iface == self.iface]
         if not radios:
             raise RuntimeError("capture radio disappeared during startup")

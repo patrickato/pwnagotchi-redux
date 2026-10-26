@@ -194,7 +194,7 @@ class NmapScanner:
 
     def scan(self, cidr: str) -> ScanResult:
         if shutil.which(self.BINARY) is None:
-            return ScanResult(False, (), f"{self.BINARY} not installed — enable the Kali pack", tool="")
+            return ScanResult(False, (), f"{self.BINARY} not installed — run `redux toolbox install {self.BINARY}`", tool="")
         if not _valid_target(cidr):
             return ScanResult(False, (), f"not a valid CIDR/host: {cidr!r}", tool=self.BINARY)
         argv = [self.BINARY, "-sV", "-Pn", "-T4", "--open", "-oX", "-", cidr]
@@ -228,7 +228,7 @@ class HydraCredTester:
 
     def test(self, ip, port, service, usernames, passwords) -> CredResult:
         if shutil.which(self.BINARY) is None:
-            return CredResult(False, None, f"{self.BINARY} not installed — enable the Kali pack", tool="")
+            return CredResult(False, None, f"{self.BINARY} not installed — run `redux toolbox install {self.BINARY}`", tool="")
         try:
             ipaddress.ip_address(ip)
         except (ValueError, TypeError):

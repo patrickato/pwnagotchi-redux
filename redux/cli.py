@@ -73,9 +73,51 @@ def _build(args, driver=None) -> Augur:
 
 # --- subcommands ------------------------------------------------------------- #
 
+def _live_snapshot(port=8080, timeout=2.0):
+    """The running daemon's REAL status snapshot from its loopback API, or None if
+    no daemon is listening / the response is unusable.
+
+    This is device truth. Building a fresh local Augur instead (see cmd_status)
+    yields a no-hardware STUB — onboard-only radios, no live engine — that reports
+    `capture_iface=wlan0 / capture_engine=null / face=blind` even while the daemon
+    is happily capturing on the real adapter. That stub masquerading as device
+    state is a glass-box lie, so every status/doctor path prefers this first."""
+    from urllib.request import urlopen
+    from urllib.error import URLError
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= port <= 65535:
+        return None
+    try:
+        with urlopen(f"http://127.0.0.1:{port}/api/status", timeout=timeout) as response:
+            raw = response.read(262145)
+        if len(raw) > 262144:
+            return None
+        snap = json.loads(raw)
+        return snap if isinstance(snap, dict) else None
+    except (OSError, URLError, ValueError, json.JSONDecodeError):
+        return None
+
+
 def cmd_status(args) -> int:
-    bc = _build(args)
-    print(json.dumps(bc.status(), indent=2))
+    # A live supervisor owns the real capture radio + engine. Recomputing a fresh
+    # local snapshot here is a no-hardware STUB that flatly contradicts a running
+    # daemon (the "blind on wlan0" trap). Prefer the daemon's real status; fall back
+    # to the stub only when nothing is listening, and LABEL it so it can never be
+    # mistaken for device state.
+    port = int(getattr(args, "port", 8080) or 8080)
+    live = None if getattr(args, "no_daemon", False) else _live_snapshot(port)
+    if live is not None:
+        live.setdefault("source", "live-daemon")
+        print(json.dumps(live, indent=2))
+        return 0
+    snap = _build(args).status()
+    snap["source"] = ("offline-stub — no live daemon on 127.0.0.1:%d; this is a "
+                      "no-hardware snapshot, NOT device state "
+                      "(run on the device, or use 'redux live status')") % port
+    print(json.dumps(snap, indent=2))
     return 0
 
 
@@ -652,16 +694,24 @@ def cmd_toolbox(args) -> int:
         if not rows:
             print("no matching tools")
             return 0
+        print("  ✓ = installed on this device   · = not found (add with `redux toolbox install <name>`)")
+        present = 0
         for t in rows:
+            here = TB.is_installed(t)
+            present += here
+            mark = "✓" if here else "·"
             en = f"  -> {t.enables}" if t.enables else ""
-            print(f"  [{t.category:<9}] {t.name:<13} {t.summary}{en}")
+            print(f"  {mark} [{t.category:<9}] {t.name:<13} {t.summary}{en}")
+        print(f"\n  {present}/{len(rows)} installed")
         return 0
     if cmd == "show":
         t = TB.get(args.name)
         if t is None:
             print(f"unknown tool '{args.name}' (see `redux toolbox list`)")
             return 3
-        print(f"{t.name} — {t.summary}\n  category: {t.category}")
+        state = "installed ✓" if TB.is_installed(t) else "not installed"
+        baked = " (ships in the stock image)" if t.baked else ""
+        print(f"{t.name} — {t.summary}\n  category: {t.category}\n  status:   {state}{baked}")
         if t.enables:
             print(f"  enables:  {t.enables}")
         if t.needs_hw:
@@ -694,6 +744,118 @@ def cmd_toolbox(args) -> int:
                 return 3
         return 0
     return 2
+
+
+def cmd_capabilities(args) -> int:
+    """The honest option-space: every capability Augur ships, what each needs, and
+    a live readiness state (ready / needs-hardware / tool-missing / planned). Reads
+    the manifest and probes the real environment; links to toolbox (install) and
+    guidance (how-to) rather than duplicating them."""
+    import json as _json
+    from .core import manifest as M
+    cmd = args.capabilities_cmd
+    if cmd == "list":
+        feats = [f for f in M.list_features()
+                 if not getattr(args, "category", None) or f.category == args.category]
+        if not feats:
+            print("no matching capabilities")
+            return 0
+        if getattr(args, "json", False):
+            print(_json.dumps([M.readiness_record(f) for f in feats], indent=2))
+            return 0
+        print("  ✓ ready   ◐ needs hardware   ○ tool missing   · planned          🔒 = LAB power-tier")
+        counts = {r: 0 for r in M.Readiness}
+        for f in feats:
+            state, reason = M.readiness(f)
+            counts[state] += 1
+            lock = " 🔒" if f.power_tier else "   "
+            print(f"  {M.GLYPH[state]}{lock} [{f.category:<7}] {f.id:<16} {f.title}")
+            if state in (M.Readiness.TOOL_MISSING, M.Readiness.PLANNED):
+                print(f"          └─ {reason}")
+        c = M.completion(feats)
+        print(f"\n  {c['summary']}")
+        return 0
+    if cmd == "show":
+        f = M.get(args.id)
+        if f is None:
+            print(f"unknown capability '{args.id}' (see `redux capabilities list`)")
+            return 3
+        if getattr(args, "json", False):
+            print(_json.dumps(M.readiness_record(f), indent=2))
+            return 0
+        state, reason = M.readiness(f)
+        print(f"{f.id} — {f.title}   [{M.GLYPH[state]} {state.value}]")
+        print(f"  {f.summary}")
+        print(f"  category: {f.category}" + ("   🔒 LAB power-tier (per-action confirm)" if f.power_tier else ""))
+        print(f"  status:   {reason}")
+        if f.needs_hardware:
+            print(f"  hardware: {f.needs_hardware}")
+        if f.binaries:
+            print(f"  binaries: {', '.join(f.binaries)}")
+        if f.imports:
+            print(f"  python:   {', '.join(f.imports)}")
+        if f.note and f.note != reason:
+            print(f"  note:     {f.note}")
+        if f.toolbox:
+            from . import toolbox as TB
+            cmds = TB.install_commands(f.toolbox)
+            if cmds:
+                print(f"  install:  {cmds[0]}" + ("  …" if len(cmds) > 1 else ""))
+        if f.guidance:
+            from . import guidance as G
+            topic = G.get(f.guidance)
+            if topic:
+                print(f"  how-to:   `redux help {f.guidance}` — {topic.command or topic.title}")
+        if f.related:
+            print(f"  related:  {', '.join(f.related)}")
+        return 0
+    if cmd == "completion":
+        c = M.completion()
+        if getattr(args, "json", False):
+            print(_json.dumps(c, indent=2))
+            return 0
+        print("Augur capability completion (evidence-based — a plan is never counted as ready)\n")
+        order = [M.Readiness.READY, M.Readiness.NEEDS_HARDWARE, M.Readiness.TOOL_MISSING, M.Readiness.PLANNED]
+        for r in order:
+            print(f"  {M.GLYPH[r]} {r.value:<14} {c['by_state'][r.value]}")
+        print(f"\n  {c['implemented']}/{c['total']} capabilities have a real code path; "
+              f"{c['planned']} still planned")
+        print(f"  {c['summary']}")
+        return 0
+    return 2
+
+
+def cmd_simulate(args) -> int:
+    """Boot the whole live stack with no Pi and no radios: a fake engine replays a
+    recorded scenario through the REAL supervisor / Augur / Doctor / status-API /
+    TFT model. `redux live status --port <p>` and the dashboard work against it
+    unchanged — iterate on the integrated system between bench sessions."""
+    import json as _json
+    from .replay.device_sim import run_simulation, snapshot_once, DEFAULT_SCENARIO
+    scenario = DEFAULT_SCENARIO
+    if getattr(args, "scenario", None):
+        try:
+            loaded = _json.loads(open(args.scenario).read())
+        except (OSError, ValueError) as error:
+            print(f"could not read scenario '{args.scenario}': {error}")
+            return 4
+        if not isinstance(loaded, list):
+            print("scenario must be a JSON list of {tag,time,data} events")
+            return 4
+        scenario = loaded
+    if getattr(args, "once", False):
+        print(_json.dumps(snapshot_once(scenario=scenario, ticks=args.ticks), indent=2))
+        return 0
+    port = args.port
+    print(f"simulated Augur booting on 127.0.0.1:{port}  (Ctrl-C to stop)")
+    print(f"  check it:  redux live status --port {port}")
+    print(f"             redux live doctor --port {port}")
+    print(f"  or open:   http://127.0.0.1:{port}/")
+    try:
+        run_simulation(scenario=scenario, web_port=port, seconds=args.seconds)
+    except KeyboardInterrupt:
+        print("\nsimulator stopped")
+    return 0
 
 
 def cmd_notebook(args) -> int:
@@ -1201,18 +1363,36 @@ def cmd_help(args) -> int:
     return 0
 
 
-def cmd_doctor(args) -> int:
-    """Print the headless, glass-box self-diagnosis from live state."""
-    bc = _build(args)
-    rep = bc.doctor_report()
-    print(f"redux doctor: {rep['label']}")
-    for f in rep["findings"]:
-        print(f"  [{f['status'].upper():8}] {f['area']}: {f['summary']}")
-        if f["reason"]:
+def _print_doctor(rep, *, suffix="") -> None:
+    print(f"redux doctor: {rep.get('label', rep.get('overall', 'unknown'))}{suffix}")
+    for f in rep.get("findings", []):
+        if not isinstance(f, dict):
+            continue
+        print(f"  [{str(f.get('status', 'unknown')).upper():8}] "
+              f"{f.get('area', 'unknown')}: {f.get('summary', '')}")
+        if f.get("reason"):
             print(f"             why: {f['reason']}")
-        if f["remediation"]:
+        if f.get("remediation"):
             print(f"             do:  {f['remediation']}")
-    print(f"coverage: {rep['coverage']['reason']}")
+    cov = rep.get("coverage")
+    print(f"coverage: {cov.get('reason', 'not reported') if isinstance(cov, dict) else 'not reported'}")
+
+
+def cmd_doctor(args) -> int:
+    """Print the headless, glass-box self-diagnosis.
+
+    Prefers the running daemon's REAL Doctor (the live supervisor owns the actual
+    radio/engine). Only when no daemon is listening does it fall back to a clearly
+    labeled no-hardware stub — never a stub masquerading as device state."""
+    port = int(getattr(args, "port", 8080) or 8080)
+    live = None if getattr(args, "no_daemon", False) else _live_snapshot(port)
+    if live is not None:
+        rep = live.get("doctor")
+        if isinstance(rep, dict) and isinstance(rep.get("findings"), list):
+            _print_doctor(rep, suffix="  [live daemon]")
+            return 0
+    rep = _build(args).doctor_report()
+    _print_doctor(rep, suffix=f"  [offline stub — no live daemon on :{port}]")
     return 0
 
 
@@ -3610,8 +3790,14 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--adapter", action="store_true", help="include a USB adapter (Alfa-class)")
         sp.add_argument("--intent", default="recon", choices=[i.value for i in Intent])
 
-    st = sub.add_parser("status", help="print a glass-box status snapshot")
-    add_radio_flags(st); st.set_defaults(func=cmd_status)
+    st = sub.add_parser("status", help="print a glass-box status snapshot "
+                        "(reads the live daemon when one is running)")
+    add_radio_flags(st)
+    st.add_argument("--port", type=int, default=8080,
+                    help="live daemon dashboard port to read real status from (default 8080)")
+    st.add_argument("--no-daemon", action="store_true",
+                    help="force the local no-hardware snapshot instead of the live daemon")
+    st.set_defaults(func=cmd_status)
 
     rn = sub.add_parser("run", help="run pump cycles (optionally over a recorded session)")
     add_radio_flags(rn)
@@ -3832,8 +4018,14 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--authorize-side-effects", action="store_true", help="authorize requested side effects, never activate code")
     pk.set_defaults(func=cmd_packs)
 
-    dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis")
-    add_radio_flags(dr); dr.set_defaults(func=cmd_doctor)
+    dr = sub.add_parser("doctor", help="headless glass-box self-diagnosis "
+                        "(reads the live daemon when one is running)")
+    add_radio_flags(dr)
+    dr.add_argument("--port", type=int, default=8080,
+                    help="live daemon dashboard port to read real Doctor from (default 8080)")
+    dr.add_argument("--no-daemon", action="store_true",
+                    help="force the local no-hardware self-diagnosis instead of the live daemon")
+    dr.set_defaults(func=cmd_doctor)
 
     ca = sub.add_parser("campaign", help="autonomous glass-box kill-chain operator")
     ca.add_argument("--persona", help="posture (red/purple = offense; blue/recon = detection-only)")
@@ -4133,13 +4325,39 @@ def build_parser() -> argparse.ArgumentParser:
     tbsub = tb.add_subparsers(dest="toolbox_cmd", required=True)
     tbl = tbsub.add_parser("list", help="list tools (optionally filter)")
     tbl.add_argument("query", nargs="?", default="", help="filter by name/summary/feature")
-    tbl.add_argument("--category", default=None, help="sdr/wifi/crack/gps/ir/tx/recon/companion")
+    tbl.add_argument("--category", default=None,
+                     help="sdr/wifi/crack/recon/forensics/bt/gps/ir/tx/companion")
     tbs = tbsub.add_parser("show", help="full detail + install command for one tool")
     tbs.add_argument("name")
     tbi = tbsub.add_parser("install", help="print (or --run) the install command for a tool")
     tbi.add_argument("name")
     tbi.add_argument("--run", action="store_true", help="execute the install on this device (needs root)")
     tb.set_defaults(func=cmd_toolbox)
+
+    cap = sub.add_parser("capabilities", aliases=["caps"],
+                         help="the honest catalog of everything Augur can do + how ready each is")
+    capsub = cap.add_subparsers(dest="capabilities_cmd", required=True)
+    capl = capsub.add_parser("list", help="every capability with its readiness state")
+    capl.add_argument("--category", default=None,
+                      help="wifi/net/sdr/rf/bt/gps/power/sense/mesh/blue/storage")
+    capl.add_argument("--json", action="store_true", help="machine-readable records")
+    caps_ = capsub.add_parser("show", help="full detail + what it needs + how to use one capability")
+    caps_.add_argument("id")
+    caps_.add_argument("--json", action="store_true")
+    capc = capsub.add_parser("completion", help="evidence-based completion picture (no subjective %)")
+    capc.add_argument("--json", action="store_true")
+    cap.set_defaults(func=cmd_capabilities)
+    sim = sub.add_parser("simulate",
+                         help="boot the whole live stack with no Pi (fake engine replaying a scenario)")
+    sim.add_argument("--port", type=int, default=8080, help="status API / dashboard port (default 8080)")
+    sim.add_argument("--seconds", type=float, default=None,
+                     help="auto-stop after N seconds (default: run until Ctrl-C)")
+    sim.add_argument("--scenario", default=None,
+                     help="a JSON list of {tag,time,data} events to replay (default: a built-in session)")
+    sim.add_argument("--once", action="store_true",
+                     help="tick a few times, print the status snapshot JSON, and exit")
+    sim.add_argument("--ticks", type=int, default=14, help="with --once: how many tick steps to run")
+    sim.set_defaults(func=cmd_simulate)
 
     nb = sub.add_parser("notebook", help="lab session journal — log activity + render a report")
     nb.add_argument("--path", default="/captures/live/notebook.jsonl", help="notebook path")
@@ -4468,7 +4686,23 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _ensure_tool_path() -> None:
+    """iw / ip / rfkill live in /usr/sbin (and /sbin) on Debian / Raspberry Pi OS,
+    which a non-root login PATH omits. redux invokes them by bare name, so without
+    this the CLI reports installed radio tools as MISSING — the "iw: command not
+    found" trap that makes a working radio look dead (and a healthy benchpass gate
+    read as a failure). Append the system sbin dirs so they resolve, never
+    shadowing anything already on PATH. The root daemon already gets them from
+    systemd's PATH; this is for the interactive / non-root CLI."""
+    parts = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    for d in ("/usr/sbin", "/sbin"):
+        if d not in parts:
+            parts.append(d)
+    os.environ["PATH"] = os.pathsep.join(parts)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
+    _ensure_tool_path()
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
         return args.func(args)

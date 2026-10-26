@@ -1,3 +1,10 @@
 python3-smbus
 python3-libgpiod
 python3-pil
+# GPS serial reader (redux/geo/gps.py imports `serial`) and the UPS/peripheral
+# probes (which import `smbus2`, NOT the smbus above) need their Python modules
+# present on the image, or fitted GPS/UPS hardware silently fails to report.
+python3-serial
+python3-smbus2
+# Raw touch-event diagnostics for bringing up / calibrating the XPT2046 panel.
+evtest

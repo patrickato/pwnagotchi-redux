@@ -178,3 +178,37 @@ def test_default_scope_path_prefers_captures_mount(monkeypatch):
     assert sc.default_scope_path() == "/etc/pwnagotchi/scope.json"
     monkeypatch.setenv("REDUX_SCOPE", "/tmp/custom.json")
     assert sc.default_scope_path() == "/tmp/custom.json"
+
+
+# --- F04: a malformed scope must fail CLOSED, never open --------------------- #
+
+def test_scope_load_fails_closed_on_malformed(tmp_path):
+    import json
+    from redux.core.scope import Scope
+
+    def _load(obj_or_text):
+        p = tmp_path / "scope.json"
+        p.write_text(obj_or_text if isinstance(obj_or_text, str) else json.dumps(obj_or_text))
+        return Scope.load(str(p))
+
+    # a top-level JSON array/string/number is not a scope → empty, never a crash
+    assert _load("[]").empty is True
+    assert _load('"nope"').empty is True
+    assert _load("42").empty is True
+
+    # the STRING "false" (and other truthy-but-not-True values) must NOT arm lab:
+    # bool("false") is True / bool(1) is True — only a real JSON boolean true counts
+    for val in ("false", "true", "yes", 1, 0, None, [], {}):
+        assert _load({"lab_mode": val}).lab_mode is False, f"{val!r} must not arm lab"
+
+    # a real boolean true still enables lab mode
+    assert _load({"lab_mode": True}).lab_mode is True
+
+    # a malformed entries container is tolerated (empty), not fatal, and does not
+    # drag lab_mode down with it
+    s = _load({"entries": "nope", "lab_mode": True})
+    assert s.lab_mode is True and list(s.entries) == []
+
+    # non-dict rows inside entries are skipped, valid rows kept
+    s2 = _load({"entries": ["garbage", {"kind": "bssid", "value": "aa:bb:cc:dd:ee:ff"}]})
+    assert [e.value for e in s2.entries] == ["aa:bb:cc:dd:ee:ff"]

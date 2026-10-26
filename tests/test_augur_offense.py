@@ -117,3 +117,28 @@ def test_pump_is_fully_passive_when_lab_mode_off():
     a = _agent(lab=False, events=evs)
     a.pump()
     assert a.supervisor.driver.deauthed == []
+
+
+def test_offense_blocked_by_detection_only_persona_even_in_lab():
+    """Regression for F01: posture is an EXTRA gate. A detection-only persona
+    (blue) must hard-disable firing even with lab_mode on — apply_persona()
+    promises exactly this, so the offense pump has to honor offense_enabled()."""
+    from redux.core import persona as _persona
+    a = _agent(lab=True)
+    a._persona = _persona.get("blue")          # wireless IDS — nothing fires
+    assert a.offense_enabled() is False
+    a._offense_known = {"aa:bb:cc:dd:ee:01": "dad24", "aa:bb:cc:dd:ee:02": ""}
+    assert a._drive_offense() == 0             # lab_mode is NOT authority to transmit
+    assert a.supervisor.driver.deauthed == []
+
+
+def test_offense_still_fires_for_a_firing_persona_in_lab():
+    """The gate is the persona's posture, not a blanket off: a firing persona
+    (red) in lab mode still drives offense, so F01's fix didn't neuter lab."""
+    from redux.core import persona as _persona
+    a = _agent(lab=True)
+    a._persona = _persona.get("red")
+    assert a.offense_enabled() is True
+    a._offense_known = {"aa:bb:cc:dd:ee:01": "dad24"}
+    assert a._drive_offense() == 1
+    assert a.supervisor.driver.deauthed == [("aa:bb:cc:dd:ee:01", "dad24")]

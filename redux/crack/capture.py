@@ -26,7 +26,15 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Protocol
 
-DEFAULT_CAPTURE_DIR = "/etc/pwnagotchi/handshakes"
+# AngryOxide drops validated handshakes straight into the capture broker's
+# incoming dir on the PERSISTENT /captures volume — the same dir the live ingest
+# pipeline watches (redux/core/live_runtime.py: capture_dir=/captures/incoming),
+# which settles each file before converting it into the crack pipeline. The old
+# default (/etc/pwnagotchi/handshakes) sat on the ephemeral overlayroot and was
+# watched by nothing, so AngryOxide captures were silently lost on reboot and
+# never reached crack. Keep this on /captures so the scalpel's output persists
+# and is ingested like every other capture.
+DEFAULT_CAPTURE_DIR = "/captures/incoming"
 
 
 def _armed_wifi_targets(scope) -> List[str]:

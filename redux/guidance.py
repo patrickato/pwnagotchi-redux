@@ -44,7 +44,7 @@ TOPICS: Tuple[HelpTopic, ...] = (
              "3. Run `redux doctor` to see what the box has and what it's missing.\n"
              "4. For your own lab gear, switch to LAB (one press on the TFT, or `redux mode lab`).\n"
              "5. Explore capabilities with `redux help` — every feature has an entry here."),
-        command="redux doctor", related=("lab-vs-field", "doctor", "scope")),
+        command="redux doctor", related=("lab-vs-field", "doctor", "scope", "toolbox")),
     HelpTopic(
         id="lab-vs-field", title="LAB vs FIELD mode",
         bubble="FIELD = passive & gated (the safe default). LAB = unlocked & automatic, for your OWN gear.",
@@ -104,7 +104,7 @@ TOPICS: Tuple[HelpTopic, ...] = (
              "2. `redux crack plan <file> --type <slug>` — shows the exact hashcat command.\n"
              "3. `redux crack run <file> --type <slug>` — runs it (needs --authorized in FIELD).\n"
              "Pick wordlists with `redux wordlist`, and spread a big job with `redux crack-distribute`."),
-        command="redux crack modes", related=("wordlists", "wps")),
+        command="redux crack modes", related=("capture", "wordlists", "wps")),
     HelpTopic(
         id="wordlists", title="Wordlists",
         bubble="Register wordlists once and pick one; the crack uses your pick until you change it.",
@@ -186,6 +186,44 @@ TOPICS: Tuple[HelpTopic, ...] = (
              "  indiscriminate beacon/BLE spam and RF jamming (also illegal to transmit).\n"
              "- Every decision carries a human-readable reason. Real data only."),
         command="", related=("scope", "lab-vs-field")),
+    HelpTopic(
+        id="toolbox", title="Toolbox — what's installed & how to add more",
+        bubble="`redux toolbox list` shows every bundled tool with a ✓ for what's already on the box; one command adds the rest.",
+        when="You want to know what the image already carries, or add a capability it doesn't.",
+        how=("The image ships a broad working set baked in (aircrack-ng, hashcat, hcxtools,\n"
+             "nmap, masscan, hydra, kismet, binwalk, sqlmap, the SDR decoders, and more).\n"
+             "1. `redux toolbox list` — ✓ = installed on this device, · = a one-command add.\n"
+             "   Filter by area: `redux toolbox list --category recon` (or wifi/crack/sdr/bt/...).\n"
+             "2. `redux toolbox show <name>` — what it does, whether it ships baked, the redux\n"
+             "   feature it lights up (if any), and the exact install command.\n"
+             "3. `redux toolbox install <name>` — prints the command; add `--run` to install now.\n"
+             "A tool's `enables` line is shown only when redux actually drives it — no empty promises."),
+        command="redux toolbox list", related=("doctor", "peripherals", "getting-started")),
+    HelpTopic(
+        id="capture", title="Capture a handshake → crackable file",
+        bubble="The core Wi-Fi chain: pick a scoped AP, capture the handshake/PMKID, convert to a 22000 hash, crack it.",
+        when="You want the Wi-Fi key for an AP in your Scope (the end-to-end recon→capture→crack path).",
+        how=("1. See the plan: `redux capture` — it picks the engine (AngryOxide if present, else\n"
+             "   bettercap) and aims only at Scope-approved targets, with a glass-box reason.\n"
+             "2. Capture runs against your scoped AP; the handshake/PMKID lands in /captures.\n"
+             "3. Convert: hcxtools (hcxpcapngtool) turns the capture into a hashcat 22000 file —\n"
+             "   `redux crack id <file>` recognises it and names the mode.\n"
+             "4. Crack: `redux crack run <file> --type wpa` (needs --authorized in FIELD; LAB is\n"
+             "   turnkey and uses your selected wordlist).\n"
+             "Needs a monitor/injection-capable radio (your ALFA). FIELD gates the active step; LAB\n"
+             "runs the whole chain itself for your own gear."),
+        command="redux capture", related=("scope", "crack", "wordlists", "lab-vs-field")),
+    HelpTopic(
+        id="netrecon", title="Network kill-chain (scan → creds → loot)",
+        bubble="Once you're on a network in Scope, `redux netrecon` maps it, tests creds, and collects loot — all scope-gated.",
+        when="You have access to a network you're authorized to assess and want the layer-3 picture.",
+        how=("Runs the real tools (nmap to map, hydra to test logins) but only against hosts your\n"
+             "Scope authorizes — nothing off-scope is ever touched.\n"
+             "1. `redux netrecon scan` — nmap sweep of in-scope hosts/services.\n"
+             "2. `redux netrecon cred` — scope-gated credential test on discovered services.\n"
+             "3. `redux netrecon loot` — gather what the authorized access exposes.\n"
+             "FIELD requires explicit authorization per run; LAB runs it on sight for your own ranges."),
+        command="redux netrecon", related=("scope", "crack", "lab-vs-field", "safety")),
 )
 
 _BY_ID = {t.id: t for t in TOPICS}
