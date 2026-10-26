@@ -102,7 +102,15 @@ FEATURES: Tuple[Feature, ...] = (
     Feature("wifi.crack", "WPA / hash cracking",
             "convert captures and crack them (hashcat engine, aircrack alt).",
             "wifi", implemented=True, binaries=("hashcat", "hcxpcapngtool"),
-            toolbox="hashcat", guidance="crack", related=("wifi.capture", "net.recon")),
+            toolbox="hashcat", guidance="crack", related=("wifi.capture", "wifi.pmkid", "net.recon")),
+    Feature("wifi.pmkid", "Passive PMKID sweep",
+            "zero-transmit loot: harvest PMKIDs APs volunteer, correlate to scope + "
+            "captured-list + crackability + forge, rank the new loot.",
+            "wifi", implemented=True, needs_hardware="a monitor-mode Wi-Fi radio",
+            guidance="crack",
+            note="live harvest needs a monitor radio; offline correlation of a .22000 "
+                 "the engine already wrote needs no hardware (redux pmkid sweep --from-22000)",
+            related=("wifi.capture", "wifi.crack")),
     Feature("wifi.wps", "WPS / Pixie-Dust",
             "wash scan → reaver/bully + pixiewps against an armed WPS AP.",
             "wifi", implemented=True, needs_hardware="a monitor/injection Wi-Fi radio",

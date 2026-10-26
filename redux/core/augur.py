@@ -841,6 +841,15 @@ class Augur:
             status["stealth"] = _stealth_status(QuietConfig.load(_sp))
         except Exception:
             pass
+        # Passive PMKID loot — the zero-transmit harvest summary, so every UI can
+        # show how much crackable loot the box pulled without ever transmitting.
+        try:
+            from ..crack.passive_pmkid import load_state as _pmkid_state
+            _pl = _pmkid_state()
+            if _pl.get("summary"):
+                status["passive_loot"] = _pl["summary"]
+        except Exception:
+            pass
         if processing_report is None:
             from ..crack.ingest import read_summary
             processing_report = read_summary()

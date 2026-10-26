@@ -3013,6 +3013,78 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_pmkid(args) -> int:
+    """Passive PMKID sweep — ZERO-TRANSMIT loot. Harvest the PMKIDs APs volunteer
+    on their own (no deauth, no association — nothing sent), then correlate them
+    against the beacon inventory, the crackability pre-flight, the central Scope
+    and the already-captured list, and rank the new loot. The quietest loot path
+    there is: a WIDS has nothing to detect. `plan` explains the posture; `sweep`
+    runs over the engine's real .22000 output (--from-22000) or synthetic (--demo)."""
+    from .crack.passive_pmkid import PassivePmkidSweep, parse_22000_pmkid
+    cmd = args.pmkid_cmd
+    scope = None
+    if getattr(args, "scoped", False):
+        scope = Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)
+    retired = set()
+    try:
+        from .crack.captured import retired_bssids
+        retired = retired_bssids()
+    except Exception:
+        retired = set()
+
+    if cmd == "plan":
+        print("passive PMKID sweep — ZERO-TRANSMIT loot")
+        print("  posture  : listen only; no deauth, no association request, nothing sent")
+        print("  harvest  : PMKIDs an AP volunteers in EAPOL M1 whenever any client joins")
+        print("  correlate: + beacon inventory (SSID/ch) + crackability + scope + captured-list + wordlist forge")
+        print(f"  scope    : {'device scope' if scope is not None else 'LAB unscoped — every AP in earshot is fair game'}")
+        print(f"  skip     : {len(retired)} already-captured / ignored AP(s)")
+        print("  footprint: silent — nothing leaves the antenna, so a blue team has nothing to flag")
+        print("  run      : redux pmkid sweep --from-22000 /captures/<file>.22000   (real engine output)")
+        print("             redux pmkid sweep --demo                                 (synthetic, no radio)")
+        return 0
+
+    sweep = PassivePmkidSweep(scope=scope, retired=retired)
+    if getattr(args, "demo", False):
+        from .detect.frames import Frame, FrameType
+        demo = [
+            Frame(type=FrameType.PMKID, ts=1.0, bssid="aa:bb:cc:00:11:22",
+                  ssid="Linksys00112", channel=6, security="wpa2-psk", rssi=-48),
+            Frame(type=FrameType.PMKID, ts=2.0, bssid="de:ad:be:ef:00:01",
+                  ssid="NETGEAR-Guest", channel=11, security="wpa2-psk", rssi=-67),
+        ]
+        sweep.feed_many(demo)
+        print("redux pmkid sweep — SYNTHETIC PMKID sightings (no radio)")
+    elif getattr(args, "from_22000", None):
+        if not os.path.exists(args.from_22000):
+            print(f"  no such file: {args.from_22000}")
+            return 2
+        with open(args.from_22000, "r", errors="replace") as fh:
+            frames = parse_22000_pmkid(fh.read())
+        sweep.feed_many(frames)
+        print(f"redux pmkid sweep — {len(frames)} PMKID(s) parsed from {args.from_22000}")
+    else:
+        print("nothing to sweep: pass --from-22000 <file> (real engine output) or --demo (synthetic)")
+        print("  (continuous live monitor-mode PMKID harvest runs under the capture daemon)")
+        return 2
+
+    summ = sweep.summary()
+    sweep.save_state()        # surface the harvest to the UIs (TFT/web/phone) via live-state
+    if getattr(args, "json", False):
+        print(json.dumps({"summary": summ, "hits": [h.to_dict() for h in sweep.hits()]}, indent=2))
+        return 0
+    print(f"  {summ['note']}  [{summ['footprint']}]")
+    print(f"  {summ['aps_leaking_pmkid']} leaking PMKID | {summ['crackable']} crackable | "
+          f"{summ['in_scope']} in-scope | {summ['already_captured']} already owned | {summ['new_loot']} NEW")
+    for h in sweep.hits():
+        flag = ("NEW  " if h.new_loot else "OWNED" if h.already_captured
+                else "----- " if h.in_scope else "SCOPE")
+        ch = f"ch{h.channel}" if h.channel is not None else "ch?"
+        rssi = f"{h.rssi}dBm" if h.rssi is not None else ""
+        print(f"    [{flag}] {h.bssid}  {ch:5} {rssi:7} {(h.ssid or '<hidden>'):22} {h.reason}")
+    return 0
+
+
 def cmd_loot(args) -> int:
     """Recovered-credential vault + scope-gated network pivot. The vault is
     owner-only on-device storage, auth-log-linked (never the secret). `pivot`
@@ -4860,6 +4932,16 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
     nr.add_argument("--json", action="store_true", help="machine-readable output")
     nr.set_defaults(func=cmd_narrate)
+    pk = sub.add_parser("pmkid", help="passive PMKID sweep — zero-transmit loot (harvest PMKIDs APs leak, correlate to scope/loot/forge)")
+    pksub = pk.add_subparsers(dest="pmkid_cmd", required=True)
+    pksub.add_parser("plan", help="explain the zero-transmit posture + what it correlates")
+    pks = pksub.add_parser("sweep", help="harvest + rank PMKID loot from real .22000 output or synthetic frames")
+    pks.add_argument("--from-22000", default=None, help="hashcat-22000 file the capture engine wrote")
+    pks.add_argument("--demo", action="store_true", help="synthetic PMKID sightings (no radio)")
+    pks.add_argument("--scoped", action="store_true", help="gate by the device scope (default: LAB unscoped)")
+    pks.add_argument("--scope-file", default=None, help="scope store (with --scoped)")
+    pks.add_argument("--json", action="store_true", help="machine-readable output")
+    pk.set_defaults(func=cmd_pmkid)
     lo = sub.add_parser("loot", help="recovered-credential vault + scope-gated network pivot")
     lo.add_argument("--vault", default=None, help="vault file (default: the device loot vault)")
     losub = lo.add_subparsers(dest="loot_cmd", required=True)
