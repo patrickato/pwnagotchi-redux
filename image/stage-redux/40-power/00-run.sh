@@ -34,8 +34,17 @@ elif [[ -f files/mpi3501 ]]; then
     [[ -f $ROOTFS_DIR/boot/firmware/overlays/fbtft.dtbo ]] || { echo 'Target firmware lacks fbtft overlay.' >&2; exit 1; }
     printf '\n[all]\ndtparam=spi=on\ndtoverlay=fbtft,spi0-0,ili9486,reset_pin=25,dc_pin=24,rotate=90,speed=16000000\n' >> "$ROOTFS_DIR/boot/firmware/config.txt"
 fi
+# Time discipline: the Pi has no RTC and the Faraday lab has no internet, so a
+# plugged-in GPS (via gpsd's SHM export) is the dependable clock source. Install
+# the chrony refclock drop-in and enable chrony. The drop-in is additive to the
+# default pool config and inert when no GPS/gpsd is present.
+install -d "$ROOTFS_DIR/etc/chrony/conf.d"
+install -m 0644 files/chrony-gps.conf "$ROOTFS_DIR/etc/chrony/conf.d/redux-gps.conf"
 on_chroot <<'EOF'
 systemctl enable redux-power.service
+# chrony replaces systemd-timesyncd (the package conflicts with it); enable it
+# explicitly so time is disciplined wherever a source is reachable.
+systemctl enable chrony.service 2>/dev/null || systemctl enable chronyd.service 2>/dev/null || true
 EOF
 # Only a validated-overlay (tft35a) image boots straight to a working screen, so
 # only that profile enables the display services. A no-TFT or legacy image stays
