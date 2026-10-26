@@ -1,0 +1,18 @@
+[Unit]
+Description=Redux: unblock + power all Bluetooth adapters (onboard PAN + USB BLE dongle)
+# BlueZ AutoEnable powers adapters, but a soft rfkill block or a dongle that
+# enumerated after bluetoothd started can leave hci1 DOWN. This oneshot clears the
+# block and powers every present adapter, so the onboard hci0 (phone-PAN link) and
+# a USB BT dongle (dedicated BLE radio) are both live without manual steps.
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Leading '-' / '|| true': never fail the boot if BT is simply absent.
+ExecStartPre=-/bin/sh -c 'rfkill unblock bluetooth 2>/dev/null || true'
+ExecStart=/bin/sh -c 'for h in /sys/class/bluetooth/hci*; do [ -e "$h" ] && hciconfig "$(basename "$h")" up 2>/dev/null || true; done; exit 0'
+
+[Install]
+WantedBy=multi-user.target
