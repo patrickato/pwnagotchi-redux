@@ -62,6 +62,16 @@ CATALOG: tuple = (
          note="set REDUX_GPSD=1 to use it"),
     # --- Wi-Fi / crack ---
     Tool("aircrack-ng", "classic Wi-Fi capture/crack suite", "wifi", [f"{_APT} aircrack-ng"]),
+    Tool("angryoxide", "preferred capture scalpel (Rust): active EAPOL/PMKID, "
+         "auto-hunt channels, rate-limited deauth — no apt package", "wifi",
+         ["curl -fsSL https://api.github.com/repos/Ragnt/AngryOxide/releases/latest "
+          "| grep -oE 'https://[^\"]+aarch64[^\"]+tar.gz' | head -1 "
+          "| xargs -r curl -fsSL -o /tmp/aox.tgz "
+          "&& tar -xzf /tmp/aox.tgz -C /tmp "
+          "&& sudo install -m0755 \"$(find /tmp -name angryoxide -type f | head -1)\" /usr/bin/angryoxide"],
+         enables="dual-engine capture (preferred over bettercap when present)",
+         needs_hw="external monitor+injection USB adapter",
+         note="the image bakes this when the build can reach GitHub; this is the manual install"),
     Tool("hashcat", "GPU/CPU hash cracker — the crack pipeline's engine", "crack",
          [f"{_APT} hashcat"], enables="redux crack, pipeline audit"),
     Tool("hcxtools", "convert captures to hashcat 22000 (hcxpcapngtool)", "crack",
