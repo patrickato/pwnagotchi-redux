@@ -122,10 +122,13 @@ def build_chain_executors(
         book.add_hosts(c.get("hosts") or [])
         for cred in c.get("creds") or []:
             book.credentials.append(cred)
+        files = c.get("files") or []
         triaged = {}
-        if triage is not None:
-            files = c.get("files") or []
-            triaged = triage(files) or {}
+        if files:
+            tri = triage
+            if tri is None:
+                from ..loot.triage import triage as tri      # forensic triage by default
+            triaged = tri(files) or {}
         c["loot"] = {"hosts": len(c.get("hosts") or []),
                      "credentials": len(c.get("creds") or []),
                      "triage": triaged}

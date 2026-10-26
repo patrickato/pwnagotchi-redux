@@ -2950,6 +2950,28 @@ def cmd_loot(args) -> int:
         for n in res.notes:
             print(f"  {n}")
         return 0
+    if cmd == "triage":
+        from .loot import triage as _triage
+        results = _triage(args.files)
+        if args.json:
+            print(json.dumps(results, indent=2))
+            return 0
+        for path, r in results.items():
+            flag = " ⚑ FLAGGED" if r.get("flagged") else ""
+            print(f"\n{path}{flag}")
+            for tool, info in r.get("tools", {}).items():
+                if not info.get("available"):
+                    print(f"  {tool:9} — {info.get('reason', 'unavailable')}")
+                elif tool == "strings":
+                    n = info.get("secret_count", 0)
+                    print(f"  {tool:9} — {n} secret-looking string(s)" +
+                          (f": {', '.join(info['secret_hits'][:3])}…" if n else ""))
+                elif tool == "steghide":
+                    print(f"  {tool:9} — {'possible hidden data' if info.get('maybe_embedded') else 'nothing obvious'}")
+                else:
+                    first = (info.get("metadata") or info.get("signatures") or "").splitlines()
+                    print(f"  {tool:9} — {first[0] if first else 'no output'}")
+        return 0
     return 2
 
 
@@ -4683,6 +4705,9 @@ def build_parser() -> argparse.ArgumentParser:
     lp.add_argument("--pw", action="append", help="extra password to try (vaulted PSKs are included automatically)")
     lp.add_argument("--authorized", action="store_true", help="FIELD only: actually fire (targets must be armed in scope)")
     lp.add_argument("--scope-file", default=None, help="scope store (default: the device scope)")
+    lt = losub.add_parser("triage", help="forensic triage of pulled files (exiftool/binwalk/steghide/secrets)")
+    lt.add_argument("files", nargs="+", help="files to triage")
+    lt.add_argument("--json", action="store_true", help="machine-readable output")
     lo.set_defaults(func=cmd_loot)
     return p
 
