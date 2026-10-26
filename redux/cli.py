@@ -825,6 +825,39 @@ def cmd_capabilities(args) -> int:
     return 2
 
 
+def cmd_simulate(args) -> int:
+    """Boot the whole live stack with no Pi and no radios: a fake engine replays a
+    recorded scenario through the REAL supervisor / Augur / Doctor / status-API /
+    TFT model. `redux live status --port <p>` and the dashboard work against it
+    unchanged — iterate on the integrated system between bench sessions."""
+    import json as _json
+    from .replay.device_sim import run_simulation, snapshot_once, DEFAULT_SCENARIO
+    scenario = DEFAULT_SCENARIO
+    if getattr(args, "scenario", None):
+        try:
+            loaded = _json.loads(open(args.scenario).read())
+        except (OSError, ValueError) as error:
+            print(f"could not read scenario '{args.scenario}': {error}")
+            return 4
+        if not isinstance(loaded, list):
+            print("scenario must be a JSON list of {tag,time,data} events")
+            return 4
+        scenario = loaded
+    if getattr(args, "once", False):
+        print(_json.dumps(snapshot_once(scenario=scenario, ticks=args.ticks), indent=2))
+        return 0
+    port = args.port
+    print(f"simulated Augur booting on 127.0.0.1:{port}  (Ctrl-C to stop)")
+    print(f"  check it:  redux live status --port {port}")
+    print(f"             redux live doctor --port {port}")
+    print(f"  or open:   http://127.0.0.1:{port}/")
+    try:
+        run_simulation(scenario=scenario, web_port=port, seconds=args.seconds)
+    except KeyboardInterrupt:
+        print("\nsimulator stopped")
+    return 0
+
+
 def cmd_notebook(args) -> int:
     """Lab notebook: a session journal for learning — log what you did and render
     a clean report of the session."""
@@ -4314,6 +4347,17 @@ def build_parser() -> argparse.ArgumentParser:
     capc = capsub.add_parser("completion", help="evidence-based completion picture (no subjective %)")
     capc.add_argument("--json", action="store_true")
     cap.set_defaults(func=cmd_capabilities)
+    sim = sub.add_parser("simulate",
+                         help="boot the whole live stack with no Pi (fake engine replaying a scenario)")
+    sim.add_argument("--port", type=int, default=8080, help="status API / dashboard port (default 8080)")
+    sim.add_argument("--seconds", type=float, default=None,
+                     help="auto-stop after N seconds (default: run until Ctrl-C)")
+    sim.add_argument("--scenario", default=None,
+                     help="a JSON list of {tag,time,data} events to replay (default: a built-in session)")
+    sim.add_argument("--once", action="store_true",
+                     help="tick a few times, print the status snapshot JSON, and exit")
+    sim.add_argument("--ticks", type=int, default=14, help="with --once: how many tick steps to run")
+    sim.set_defaults(func=cmd_simulate)
 
     nb = sub.add_parser("notebook", help="lab session journal — log activity + render a report")
     nb.add_argument("--path", default="/captures/live/notebook.jsonl", help="notebook path")

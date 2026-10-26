@@ -319,3 +319,10 @@ def test_capabilities_completion_is_evidence_based():
     assert rc == 0
     assert "never counted as ready" in out
     assert "still planned" in out
+def test_simulate_once_boots_the_real_stack():
+    rc, out = _run(["simulate", "--once", "--ticks", "12"])
+    assert rc == 0
+    data = json.loads(out)
+    assert data["runtime"]["state"] == "running"
+    assert data["runtime"]["events_seen"] >= 1
+    assert "doctor" in data
