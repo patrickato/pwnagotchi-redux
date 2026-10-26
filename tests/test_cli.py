@@ -222,3 +222,12 @@ def test_live_doctor_sanitizes_terminal_sequences(monkeypatch):
     assert "Danger" in output and "RED" in output
 
 
+
+
+def test_simulate_once_boots_the_real_stack():
+    rc, out = _run(["simulate", "--once", "--ticks", "12"])
+    assert rc == 0
+    data = json.loads(out)
+    assert data["runtime"]["state"] == "running"
+    assert data["runtime"]["events_seen"] >= 1
+    assert "doctor" in data
