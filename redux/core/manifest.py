@@ -211,6 +211,15 @@ FEATURES: Tuple[Feature, ...] = (
             "the always-on detector suite — deauth floods, rogue APs, karma, etc.",
             "blue", implemented=True, needs_hardware="a Wi-Fi radio in monitor mode",
             note="core; findings stay tied to real observations"),
+    Feature("bt.gatt", "BLE GATT looting",
+            "connect to a BLE device, enumerate its GATT tree, decode the standard "
+            "UUIDs, read the device-info (manufacturer/model/serial/firmware/battery) "
+            "and flag vendor services — then identify the product.",
+            "bt", implemented=True, needs_hardware="a Bluetooth adapter",
+            toolbox="bluez",
+            note="UUID KB + loot extraction are pure (verified with no radio); the "
+                 "live connect needs a BT adapter and is scope-gated",
+            related=("blue.tracker", "net.device_id")),
     Feature("bt.pan", "Phone UI over Bluetooth PAN",
             "tether a phone over Bluetooth (no Wi-Fi/cable) and serve the responsive "
             "dashboard — the Operations view in your pocket.",

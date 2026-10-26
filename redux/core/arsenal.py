@@ -49,6 +49,7 @@ _RAW: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
         ("graph", "entity graph — devices, travels-with, sightings"),
         ("hunt", "RSSI fox-hunt — walk warmer/colder toward a target"),
         ("tracker", "is a BLE tag following me? (counter-surveillance)"),
+        ("gatt", "BLE GATT looting — read a device's info/battery/vendor services"),
     )),
     ("CAPTURE & CRACK", (
         ("targets", "rank APs by how worth attacking (crackability x value x signal)"),

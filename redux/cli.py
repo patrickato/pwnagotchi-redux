@@ -3220,6 +3220,57 @@ def cmd_engagement(args) -> int:
     return 2
 
 
+def cmd_gatt(args) -> int:
+    """BLE GATT looting — connect to a BLE device, enumerate its GATT tree, read
+    the device-info it gives up (manufacturer, model, serial, firmware, battery),
+    flag vendor services, and feed it into device identification. Scope-gated:
+    LAB runs it, FIELD needs --authorized. Live needs a Bluetooth adapter."""
+    from .bt.gatt import GattLooter, Service, Characteristic, to_identify_signals
+    looter = GattLooter()
+    if getattr(args, "demo", False):
+        def _enum(_mac):
+            return [
+                Service("1800", (Characteristic("2a00", ("read",), "Charge 5-ABC"),)),
+                Service("180a", (Characteristic("2a29", ("read",), "Fitbit Inc."),
+                                 Characteristic("2a24", ("read",), "Charge 5"),
+                                 Characteristic("2a25", ("read",), "FB-SN-0099"),
+                                 Characteristic("2a26", ("read",), "1.2.3"))),
+                Service("180f", (Characteristic("2a19", ("read", "notify"), "87"),)),
+                Service("adaf0100-c332-42a8-93bd-25e905756cb8", ()),
+            ]
+        loot, reason = looter.loot(args.mac or "aa:bb:cc:dd:ee:ff", lab=True, enumerator=_enum)
+        print("redux gatt — SYNTHETIC BLE device (no radio)")
+    else:
+        scope = None if getattr(args, "lab", False) else Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)
+        loot, reason = looter.loot(args.mac, scope=scope,
+                                   authorized=getattr(args, "authorized", False),
+                                   lab=getattr(args, "lab", False), enumerator=None)
+    if loot is None:
+        print(f"gatt {args.mac or ''} — {reason}")
+        print("  plan:")
+        for c in looter.plan(args.mac or "<mac>"):
+            print("    $ " + c)
+        return 0
+    if getattr(args, "json", False):
+        print(json.dumps(loot.to_dict(), indent=2))
+        return 0
+    print(f"GATT loot {loot.mac} — {loot.note}")
+    for f in ("device_name", "manufacturer", "model", "serial", "firmware",
+              "hardware", "software", "battery", "appearance"):
+        v = getattr(loot, f)
+        if v:
+            print(f"  {f:13} {v}")
+    if loot.services:
+        print("  services:")
+        for s in loot.services:
+            print(f"    {s['uuid']}  {s['name']}" + ("  [vendor]" if s["vendor_specific"] else ""))
+    from .intel.device_id import identify
+    g = identify(to_identify_signals(loot))
+    if g.category != "unknown":
+        print(f"  => identifies as: {g.product} [{g.category}] ({g.confidence})")
+    return 0
+
+
 def cmd_identify(args) -> int:
     """Device identification — what IS this thing, and what can I do with/to it.
     Fuses OUI vendor + hostname + BLE name/company + mDNS into a product guess, then
@@ -5693,6 +5744,14 @@ def build_parser() -> argparse.ArgumentParser:
     ds.add_argument("--demo", action="store_true", help="synthetic target (no radio)")
     ds.add_argument("--json", action="store_true", help="machine-readable output")
     ds.set_defaults(func=cmd_dossier)
+    gt = sub.add_parser("gatt", help="BLE GATT looting — enumerate + read a BLE device's GATT (device-info, battery, vendor services)")
+    gt.add_argument("mac", nargs="?", default="", help="target BLE MAC")
+    gt.add_argument("--demo", action="store_true", help="synthetic BLE device (no radio)")
+    gt.add_argument("--authorized", action="store_true", help="FIELD: actually connect (target must be armed)")
+    gt.add_argument("--lab", action="store_true", help="LAB: run unleashed")
+    gt.add_argument("--scope-file", default=None, help="scope store (FIELD gate)")
+    gt.add_argument("--json", action="store_true", help="machine-readable output")
+    gt.set_defaults(func=cmd_gatt)
     idf = sub.add_parser("identify", help="what IS this device (stove/Roomba/Alexa/phone...) + what you can do with/to it")
     idf.add_argument("--mac", default=None, help="device MAC (→ OUI vendor)")
     idf.add_argument("--hostname", default=None, help="DHCP/mDNS/NetBIOS hostname")
