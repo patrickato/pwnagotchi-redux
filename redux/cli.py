@@ -3104,6 +3104,99 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_engagement(args) -> int:
+    """Engagement case file — tie Scope + authlog + loot + notebook + report into
+    one durable object with a lifecycle. `open` snapshots your authorization;
+    `close` pulls the authlog/loot/notebook together and freezes the report."""
+    from .core.engagement import EngagementStore
+    from .core.scope import Scope
+    st = EngagementStore(dir=getattr(args, "dir", None) or "/captures/engagements")
+    cmd = args.engagement_cmd
+    if cmd == "open":
+        scope = Scope.load(_DEFAULT_SCOPE_PATH)
+        try:
+            eng = st.open(args.name, operator=args.operator,
+                          authorization=args.authorization or "", scope=scope,
+                          force=getattr(args, "force", False))
+        except ValueError as e:
+            print(str(e))
+            return 2
+        print(f"opened engagement {eng.id}  ({eng.name})")
+        print(f"  authorization : {eng.authorization}")
+        print(f"  armed at open : {len(eng.scope_opened)} target(s)")
+        return 0
+    if cmd == "list":
+        es = st.list()
+        if not es:
+            print("no engagements yet")
+            return 0
+        for e in es:
+            print(f"  {e.id:34} [{e.status:6}] {e.name}"
+                  + (f"  — {e.counts.get('actions', 0)} action(s), integrity "
+                     f"{(e.report or {}).get('integrity', '?')}" if e.status == 'closed' else ""))
+        return 0
+    if cmd == "status":
+        eng = st.active()
+        if not eng:
+            print("no active engagement (open one with `redux engagement open <name>`)")
+            return 0
+        s = st.summary(eng.id)
+        print(f"active: {eng.id} ({eng.name})")
+        print(f"  authorization: {s['authorization']}  |  armed at open: {s['armed_at_open']}")
+        return 0
+    if cmd == "show":
+        s = st.summary(args.id)
+        if not s["found"]:
+            print(f"no such engagement: {args.id}")
+            return 2
+        print(json.dumps(s, indent=2))
+        return 0
+    if cmd == "close":
+        eid = args.id or (st.active().id if st.active() else None)
+        if not eid:
+            print("no engagement to close")
+            return 2
+        scope = Scope.load(_DEFAULT_SCOPE_PATH)
+        entries, integrity, loot, nb = [], None, {}, []
+        try:
+            import dataclasses as _dc
+            from .core import authlog as _A
+            log = _A.AuthLog(_A.default_authlog_path())
+            entries = log.entries()
+            if hasattr(log, "verify"):
+                v = log.verify()
+                integrity = _dc.asdict(v) if _dc.is_dataclass(v) else dict(v)
+        except Exception:
+            integrity = None
+        try:
+            from .loot import LootVault, default_loot_path
+            loot = {"credentials": len(LootVault(default_loot_path()))}
+        except Exception:
+            pass
+        try:
+            from .notebook import LabNotebook
+            nb = LabNotebook("/captures/live/notebook.jsonl").entries()
+        except Exception:
+            pass
+        closed = st.close(eid, scope=scope, authlog_entries=entries, loot=loot,
+                          notebook_entries=nb, authlog_integrity=integrity)
+        if closed is None:
+            print(f"no such engagement: {eid}")
+            return 2
+        c = closed.counts
+        print(f"closed engagement {closed.id} ({closed.name})")
+        print(f"  actions {c.get('actions', 0)} | unauthorized {c.get('unauthorized', 0)} | "
+              f"creds {c.get('loot_credentials', 0)} | notebook {c.get('notebook', 0)} | "
+              f"integrity {(closed.report or {}).get('integrity', '?')}")
+        if getattr(args, "report_out", None) and closed.report:
+            from .report import render_markdown
+            with open(args.report_out, "w", encoding="utf-8") as fh:
+                fh.write(render_markdown(closed.report))
+            print(f"  report written: {args.report_out}")
+        return 0
+    return 2
+
+
 def cmd_leases(args) -> int:
     """Resource ownership / lease broker — who holds which radio. `demo` shows the
     arbitration (preemption by priority, shared GPS, multi-band coexistence) that
@@ -5277,6 +5370,22 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
     nr.add_argument("--json", action="store_true", help="machine-readable output")
     nr.set_defaults(func=cmd_narrate)
+    en = sub.add_parser("engagement", help="case file — tie Scope+authlog+loot+notebook+report into one durable object")
+    en.add_argument("--dir", default=None, help="engagements dir (default: /captures/engagements)")
+    ensub = en.add_subparsers(dest="engagement_cmd", required=True)
+    eno = ensub.add_parser("open", help="open a case (snapshots your authorization)")
+    eno.add_argument("name", help="engagement name")
+    eno.add_argument("--operator", default="operator", help="who is running it")
+    eno.add_argument("--authorization", default=None, help="what authorizes it (SOW/contract/lab/CTF)")
+    eno.add_argument("--force", action="store_true", help="open even if another is active")
+    ensub.add_parser("status", help="show the active engagement")
+    ensub.add_parser("list", help="list all engagements")
+    ens = ensub.add_parser("show", help="full summary of one engagement")
+    ens.add_argument("id")
+    enc = ensub.add_parser("close", help="close the case: pull authlog/loot/notebook, freeze the report")
+    enc.add_argument("id", nargs="?", default=None, help="engagement id (default: the active one)")
+    enc.add_argument("--report-out", default=None, help="write the frozen report as Markdown here")
+    en.set_defaults(func=cmd_engagement)
     lz = sub.add_parser("leases", help="resource ownership broker — who holds which radio (arbitration for swarm/multi-engine)")
     lzsub = lz.add_subparsers(dest="leases_cmd", required=True)
     lzsub.add_parser("demo", help="show lease arbitration (preemption, shared GPS, multi-band coexist)")
