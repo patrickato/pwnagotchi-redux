@@ -249,6 +249,50 @@ def test_file_list_filters_by_hash_mode():
     assert set(md5) == {"dump.hash", "creds.txt"}
 
 
+def test_run_enters_running_screen_and_streams_output():
+    lines_src = ["converting captures…", "hashcat -m 22000 …", "recovered: HomeNet:hunter2hunter2"]
+
+    def fake_runner(cmd, on_line, on_done):
+        for ln in lines_src:
+            on_line(ln)
+        on_done()
+
+    d = Deck(arsenal.groups(), _state())
+    d.runner = fake_runner
+    d.action = DA.ACTIONS["survey"]            # safe action, no confirm
+    d.screen = "action"
+    run = next(z for z in d.view().zones if z.kind == "run")
+    intent = d.tap(run.x0 + 2, run.y0 + 2)
+    assert intent == ("run", "redux survey")
+    assert d.screen == "running" and d.run_done
+    v = d.view()
+    assert any("recovered: HomeNet" in s.text for s in v.spans)
+    # when done, a BACK control returns to the action
+    back = next(z for z in v.zones if z.kind == "runback")
+    d.tap(back.x0 + 2, back.y0 + 2)
+    assert d.screen == "action"
+
+
+def test_power_tier_confirm_then_runs():
+    ran = {}
+
+    def fake_runner(cmd, on_line, on_done):
+        ran["cmd"] = cmd
+        on_line("armed"); on_done()
+
+    d = Deck(arsenal.groups(), _state())
+    d.runner = fake_runner
+    d.action = DA.ACTIONS["loot pivot"]
+    d.screen = "action"
+    d.chosen = {"subnet": "10.0.0.0/24"}
+    run = next(z for z in d.view().zones if z.kind == "run")
+    assert d.tap(run.x0 + 2, run.y0 + 2) is None and d.screen == "confirm"   # confirm first
+    conf = next(z for z in d.view().zones if z.kind == "confirm")
+    d.tap(conf.x0 + 2, conf.y0 + 2)
+    assert ran["cmd"] == "redux loot pivot --subnet 10.0.0.0/24"             # only runs after confirm
+    assert d.screen == "running"
+
+
 def test_toggle_layout_switches_in_one_tap():
     d = Deck(arsenal.groups(), DeckState(mode_lab=False))
     d.action = DA.ACTIONS["mode"]

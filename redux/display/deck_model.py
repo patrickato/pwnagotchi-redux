@@ -116,6 +116,12 @@ class Deck:
         self.kbd_buffer = ""
         self.kbd_shift = False
         self.kbd_sym = False
+        # execution: a runner(cmd, on_line, on_done) injected by the fbui (subprocess
+        # on-device, a fake in tests). None → the RUNNING screen just shows the command.
+        self.runner = None
+        self.run_cmd = ""
+        self.run_output: List[str] = []
+        self.run_done = False
 
     # ---- command assembly ---------------------------------------------------- #
     def command(self, action: Optional[Action] = None) -> str:
@@ -197,7 +203,54 @@ class Deck:
             return self._view_detail()
         if self.screen == "keyboard":
             return self._view_keyboard()
+        if self.screen == "running":
+            return self._view_running()
         return self._view_menu()
+
+    # --- execution ------------------------------------------------------------ #
+    def start_run(self, cmd: str) -> None:
+        """Enter the RUNNING screen for a command and kick off the runner (if any).
+        The runner streams output back through _on_line and signals _on_done."""
+        self.run_cmd = cmd
+        self.run_output = []
+        self.run_done = False
+        self.screen = "running"
+        if self.runner is not None:
+            try:
+                self.runner(cmd, self._on_line, self._on_done)
+            except Exception as exc:                      # a runner blow-up is glass-box
+                self._on_line(f"runner error: {type(exc).__name__}: {exc}")
+                self._on_done()
+
+    def _on_line(self, line: object) -> None:
+        self.run_output.append(str(line)[:120])
+        self.run_output = self.run_output[-200:]          # bound the buffer
+
+    def _on_done(self) -> None:
+        self.run_done = True
+
+    def _view_running(self) -> View:
+        zones: List[Zone] = [Zone(W - 64, 0, W, HEADER_H, "home", "", "home", "nav")]
+        status = "DONE" if self.run_done else "RUNNING…"
+        spans = [Span(10, 8, status, "accent" if self.run_done else "warn"),
+                 Span(10, HEADER_H + 2, ("$ " + self.run_cmd)[:60], "value")]
+        tail = self.run_output[-9:]                       # newest lines fill the panel
+        y = CONTENT_TOP + 24
+        for line in tail:
+            spans.append(Span(12, y, line[:64], "muted"))
+            y += 18
+        if not tail:
+            spans.append(Span(12, CONTENT_TOP + 24,
+                              "(no output yet)" if not self.run_done else "(no output)",
+                              "muted"))
+        # STOP while running, BACK to the action when done
+        if self.run_done:
+            zones.append(Zone(8, FOOTER_Y - RUN_H, W - 8, FOOTER_Y, "runback", "",
+                              "‹ BACK", "run"))
+        else:
+            zones.append(Zone(8, FOOTER_Y - RUN_H, W - 8, FOOTER_Y, "runstop", "",
+                              "STOP", "cancel"))
+        return View("running", "running", tuple(zones), tuple(spans))
 
     def _header(self, title: str, *, back: bool) -> List[Zone]:
         z: List[Zone] = []
@@ -579,10 +632,19 @@ class Deck:
                 self.screen = "confirm"
                 return None
             self.last_run = self.command()
+            self.start_run(self.last_run)
             return ("run", self.last_run)
         if z.kind == "confirm":
             self.last_run = self.command()
+            self.start_run(self.last_run)
             return ("confirm", self.last_run)
+        if z.kind == "runback":
+            self.screen = "action"
+            return None
+        if z.kind == "runstop":
+            self._on_line("(stop requested)")
+            self._on_done()
+            return ("stop", self.run_cmd)
         if z.kind == "cancel":
             self.screen = "action"
             return None
