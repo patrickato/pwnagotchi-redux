@@ -537,14 +537,26 @@ class AutoExecutor:
     def _g_eap(self, g) -> Tuple[str, str]:
         # Machine-checkable: `eap plan` must REFUSE an unarmed SSID (gating). The
         # live MSCHAPv2 capture + -m 5500 crack needs a real WPA-Enterprise SSID.
-        rc, out = self._redux(["eap", "--iface", "wlan1", "--persona", "red", "plan",
-                               "--ssid", "BenchpassNoSuchSSID", "--authorized"])
+        #
+        # Probe against a hermetic EMPTY, non-lab scope (--scope-file at an absent
+        # path, placed BEFORE `plan` since argparse attaches it to the `eap`
+        # parser). This tests the gating LOGIC, not the device's live scope: lab
+        # mode (approve-on-sight for your own gear) legitimately makes ANY SSID
+        # runnable, so reading the ambient scope here would false-fail the gate on
+        # a box that (correctly) has lab mode on.
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            empty_scope = os.path.join(td, "empty-nonlab-scope.json")  # absent -> empty, lab off
+            rc, out = self._redux(["eap", "--iface", "wlan1", "--persona", "red",
+                                   "--scope-file", empty_scope, "plan",
+                                   "--ssid", "BenchpassNoSuchSSID", "--authorized"])
         low = out.lower()
         refused = ("refus" in low or "not in the authorized scope" in low or "runnable=false" in low)
         if not refused:
             return "fail", f"EAP plan did not refuse an unarmed SSID — gating broken: {out.strip()[:120]}"
-        return "skip", ("EAP gating verified (plan refuses an unarmed SSID); the live gate needs a "
-                        "WPA-Enterprise test SSID + client for the MSCHAPv2 capture + -m 5500 crack")
+        return "skip", ("EAP gating verified (plan refuses an unarmed SSID, probed against an empty "
+                        "non-lab scope); the live gate needs a WPA-Enterprise test SSID + client "
+                        "for the MSCHAPv2 capture + -m 5500 crack")
 
     def _g_mesh(self, g) -> Tuple[str, str]:
         import glob

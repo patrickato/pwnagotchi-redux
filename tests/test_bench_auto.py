@@ -461,6 +461,26 @@ def test_eap_fail_when_plan_does_not_refuse():
     assert status == "fail" and "gating broken" in detail.lower()
 
 
+def test_eap_gating_probed_against_hermetic_nonlab_scope():
+    # Regression: the gate must probe a forced-empty, non-lab scope via a
+    # --scope-file placed BEFORE `plan`, so lab mode being ON on the device can't
+    # false-fail it (lab mode legitimately approves any SSID on sight). Before this
+    # the grader read the ambient scope and failed under lab mode.
+    seen = {}
+
+    def run(c, t=20):
+        seen["cmd"] = list(c)
+        return (0, "EAP harvest ... runnable=False\n  refused: SSID not in the authorized scope")
+
+    status, _ = mk(run=run)(GMAP["2b.3"])
+    assert status == "skip"
+    cmd = seen["cmd"]
+    assert "--scope-file" in cmd
+    assert cmd.index("--scope-file") < cmd.index("plan")      # attaches to `eap`, not `plan`
+    scope_arg = cmd[cmd.index("--scope-file") + 1]
+    assert not os.path.exists(scope_arg)                      # absent -> empty -> non-lab -> refuses
+
+
 def test_mesh_skip_without_lora():
     status, detail = mk()(GMAP["2b.4"])
     assert status == "skip" and "lora" in detail.lower()
