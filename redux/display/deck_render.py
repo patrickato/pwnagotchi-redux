@@ -65,13 +65,28 @@ def _draw_zone(draw, z: Zone):
         return
     if z.style == "pick":
         _panel(draw, box, radius=7, fill=PANEL2, outline=STROKE, width=1)
-        draw.text((z.x0 + 12, z.y0 + 6), z.label, font=_font(11), fill=SUBTLE)
+        draw.text((z.x0 + 12, z.y0 + 5), z.label, font=_font(10), fill=SUBTLE)
         choice = fit_text(draw, z.sub, _font(13, bold=True), z.x1 - z.x0 - 40)
-        picked = z.sub not in ("pick…", "(keyboard)", "")
-        draw.text((z.x0 + 12, z.y0 + 21), choice,
-                  font=_font(13, bold=True), fill=(TEAL if picked else MUT))
+        auto_or_empty = z.sub.startswith("auto:") or z.sub in ("pick…", "(keyboard)", "")
+        draw.text((z.x0 + 12, z.y0 + 18), choice,
+                  font=_font(13, bold=True), fill=(MUT if auto_or_empty else TEAL))
         draw.text((z.x1 - 20, z.y0 + (z.y1 - z.y0) / 2 - 9), "⌄",
-                  font=_font(15, bold=True), fill=MUT)
+                  font=_font(14, bold=True), fill=MUT)
+        return
+    if z.style in ("checkon", "checkoff"):          # multi-select row w/ drawn checkbox
+        _panel(draw, box, radius=7, fill=PANEL2, outline=STROKE, width=1)
+        cy = (z.y0 + z.y1) // 2
+        bx = z.x0 + 14
+        on = z.style == "checkon"
+        draw.rounded_rectangle((bx, cy - 9, bx + 18, cy + 9), radius=4,
+                               fill=(10, 28, 30) if on else PANEL,
+                               outline=TEAL if on else MUT, width=2)
+        if on:                                      # a drawn check, not a font glyph
+            draw.line((bx + 4, cy + 1, bx + 8, cy + 5), fill=TEAL, width=2)
+            draw.line((bx + 8, cy + 5, bx + 15, cy - 5), fill=TEAL, width=2)
+        label = fit_text(draw, z.label, _font(13, bold=True), z.x1 - z.x0 - 64)
+        draw.text((bx + 30, cy - 8), label, font=_font(13, bold=True),
+                  fill=INK if on else SUBTLE)
         return
     if z.style in ("run", "confirm", "cancel"):
         edge = {"run": TEAL, "confirm": AMBER, "cancel": MUT}[z.style]

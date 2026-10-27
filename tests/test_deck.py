@@ -128,6 +128,66 @@ def test_lab_only_adds_lab_flag_when_not_in_lab():
     assert d.command().endswith("--lab")
 
 
+def test_auto_until_overridden_then_modified():
+    d = Deck(arsenal.groups(), _state())
+    cr = next(z for z in d.view().zones if z.kind == "category" and z.value == "CAPTURE & CRACK")
+    d.tap(cr.x0 + 2, cr.y0 + 2)
+    row = next(z for z in d.view().zones if z.value == "crack run")
+    d.tap(row.x0 + 2, row.y0 + 2)
+    assert d.screen == "action" and not d.is_modified()      # pure auto out of the gate
+    assert d.command() == "redux crack run"                  # auto: engine decides, no flags forced
+    v = d.view()
+    assert any(s.text == "⟳ AUTO" for s in v.spans)
+    run = next(z for z in v.zones if z.kind == "run")
+    assert run.label == "RUN (auto)"
+
+
+def test_override_a_field_shows_modified_and_emits_it():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["crack run"]
+    d.screen = "action"
+    # pick an attack mode (value=label candidate) → command uses the VALUE, UI the label
+    ap = next(z for z in d.view().zones if z.kind == "param" and z.value == "attack")
+    d.tap(ap.x0 + 2, ap.y0 + 2)
+    opt = next(z for z in d.view().zones if z.kind == "pick" and z.value.startswith("3="))
+    d.tap(opt.x0 + 2, opt.y0 + 2)
+    assert d.is_modified()
+    assert "--attack 3" in d.command()
+    v = d.view()
+    assert any(s.text == "✎ MODIFIED" for s in v.spans)
+    assert any(z.kind == "reset" for z in v.zones)           # reset-to-auto appears
+
+
+def test_reset_returns_to_auto():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["crack run"]
+    d.screen = "action"
+    d.chosen = {"attack": "3=3 · mask"}
+    rz = next(z for z in d.view().zones if z.kind == "reset")
+    d.tap(rz.x0 + 2, rz.y0 + 2)
+    assert not d.is_modified() and d.command() == "redux crack run"
+
+
+def test_multi_select_captures_toggle_and_emit():
+    d = Deck(arsenal.groups(), DeckState(captures=("cap-A.pcapng", "cap-B.pcapng", "cap-C.pcapng")))
+    d.action = DA.ACTIONS["crack run"]
+    d.screen = "action"
+    cap = next(z for z in d.view().zones if z.kind == "param" and z.value == "captures")
+    d.tap(cap.x0 + 2, cap.y0 + 2)
+    assert d.screen == "picker"
+    # toggle two files on
+    for name in ("cap-A.pcapng", "cap-C.pcapng"):
+        z = next(zz for zz in d.view().zones if zz.kind == "pick" and zz.value == name)
+        d.tap(z.x0 + 2, z.y0 + 2)
+        assert d.screen == "picker"                          # multi-select stays put
+    assert set(d.chosen["captures"]) == {"cap-A.pcapng", "cap-C.pcapng"}
+    done = next(z for z in d.view().zones if z.kind == "pickdone")
+    d.tap(done.x0 + 2, done.y0 + 2)
+    assert d.screen == "action"
+    cmd = d.command()
+    assert "--capture cap-A.pcapng" in cmd and "--capture cap-C.pcapng" in cmd
+
+
 def test_back_and_home_navigation():
     d = Deck(arsenal.groups(), _state())
     d.category, d.screen = "LOOT & PIVOT", "category"

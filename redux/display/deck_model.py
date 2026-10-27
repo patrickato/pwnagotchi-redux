@@ -24,7 +24,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from . import deck_actions
-from .deck_actions import Action, DeckState, Param, candidates_for
+from .deck_actions import (Action, DeckState, Param, candidates_for,
+                           choice_value, choice_label)
 
 
 # --- geometry (480×320) ------------------------------------------------------ #
@@ -38,6 +39,7 @@ GRID_ROWS = 4
 TILE_W = (W - 24) // GRID_COLS      # 228
 TILE_H = 58
 RUN_H = 46
+PARAM_ROW = 36               # param field height on the action screen (fits ~5)
 LIST_ROWS = 5                # rows visible before the list scrolls
 
 
@@ -118,13 +120,49 @@ class Deck:
             val = self.chosen.get(p.name)
             if not val:
                 continue
-            if p.flag:
-                parts += [p.flag, val]
-            else:
-                parts.append(val)
+            values = val if isinstance(val, list) else [val]
+            for v in values:
+                cv = choice_value(v)
+                if p.flag:
+                    parts += [p.flag, cv]
+                else:
+                    parts.append(cv)
         if a.lab_only and not self.state.mode_lab:
             parts.append("--lab")
         return " ".join(parts)
+
+    def is_modified(self) -> bool:
+        """True once the operator overrides any field away from its auto default —
+        the deck's AUTO↔MODIFIED signal. Untouched = the pipeline's own choices."""
+        a = self.action
+        if a is None:
+            return False
+        for p in a.params:
+            v = self.chosen.get(p.name)
+            if v in (None, "", [], p.default):
+                continue
+            return True
+        return False
+
+    def reset_auto(self) -> None:
+        """Drop all overrides — back to pure auto (defaults only)."""
+        if self.action is not None:
+            self.chosen = {p.name: p.default for p in self.action.params if p.default}
+
+    def _field_display(self, p: Param) -> str:
+        """What the action screen shows in a param's field: the chosen label(s), or
+        the auto hint when the operator hasn't overridden it."""
+        v = self.chosen.get(p.name)
+        if p.multi:
+            picks = v if isinstance(v, list) else ([v] if v else [])
+            if picks:
+                return f"{len(picks)} selected"
+            return f"auto: {p.auto}" if p.auto else "pick…"
+        if v:
+            return choice_label(v)
+        if p.auto:
+            return f"auto: {p.auto}"
+        return "(keyboard)" if p.is_free_text else "pick…"
 
     # ---- the action for an arsenal command (catalog, or a 0-param RUN) -------- #
     def _resolve(self, command: str, group: str, title: str) -> Action:
@@ -197,24 +235,35 @@ class Deck:
     def _view_action(self) -> View:
         a = self.action
         assert a is not None
+        modified = self.is_modified()
         zones: List[Zone] = list(self._header(a.title, back=True))
-        spans = [Span(70, 8, a.title[:26], "title"),
-                 Span(10, HEADER_H + 2, a.note[:58], "muted")]
-        y = CONTENT_TOP + 18
+        spans = [Span(70, 8, a.title[:24], "title"),
+                 Span(10, HEADER_H + 2, a.note[:60], "muted"),
+                 Span(W - 104, HEADER_H + 2,
+                      "✎ MODIFIED" if modified else "⟳ AUTO",
+                      "warn" if modified else "accent")]
+        y = CONTENT_TOP + 16
         for p in a.params:
-            chosen = self.chosen.get(p.name, "")
-            shown = chosen or ("(keyboard)" if p.is_free_text else "pick…")
-            zones.append(Zone(8, y, W - 8, y + ROW_H - 4, "param", p.name,
-                              p.label, "pick", shown))
-            y += ROW_H
-        # RUN button — full width, bottom; style warns for power-tier
+            zones.append(Zone(8, y, W - 8, y + PARAM_ROW - 3, "param", p.name,
+                              p.label, "pick", self._field_display(p)))
+            y += PARAM_ROW
+        # RUN button; a reset-to-auto control appears once anything is overridden.
         ready = a.ready(self.chosen)
         style = "confirm" if a.power_tier else "run"
-        label = ("ARM & RUN" if a.power_tier else "RUN") if ready else "pick required ↑"
-        zones.append(Zone(8, FOOTER_Y - RUN_H, W - 8, FOOTER_Y, "run",
+        if not ready:
+            label = "pick required ↑"
+        elif a.power_tier:
+            label = "ARM & RUN"
+        else:
+            label = "RUN" if modified else "RUN (auto)"
+        run_x1 = int(W * 0.66) if modified else W - 8
+        zones.append(Zone(8, FOOTER_Y - RUN_H, run_x1, FOOTER_Y, "run",
                           a.id if ready else "", label, style))
+        if modified:
+            zones.append(Zone(run_x1 + 6, FOOTER_Y - RUN_H, W - 8, FOOTER_Y,
+                              "reset", "", "⟳ auto", "cancel"))
         if a.power_tier:
-            spans += (Span(10, FOOTER_Y - RUN_H - 16,
+            spans += (Span(10, FOOTER_Y - RUN_H - 15,
                            "⚡ transmits/fires — confirm next", "warn"),)
         return View("action", a.title, tuple(zones), tuple(spans))
 
@@ -223,7 +272,8 @@ class Deck:
         assert p is not None
         opts = candidates_for(p.source, self.state)
         zones: List[Zone] = list(self._header(p.label, back=True))
-        spans = [Span(70, 8, ("Pick " + p.label)[:26], "title")]
+        title = ("Select " if p.multi else "Pick ") + p.label
+        spans = [Span(70, 8, title[:26], "title")]
         if not opts:
             spans += (Span(14, CONTENT_TOP + 20,
                            "none yet — arm/scan first, or type it", "muted"),)
@@ -231,15 +281,26 @@ class Deck:
                 zones.append(Zone(8, CONTENT_TOP + 50, W - 8, CONTENT_TOP + 50 + ROW_H,
                                   "pick", "__keyboard__", "⌨ type it", "pick"))
             return View("picker", p.label, tuple(zones), tuple(spans))
-        window = opts[self.offset:self.offset + LIST_ROWS]
+        current = self.chosen.get(p.name)
+        sel = set(current) if isinstance(current, list) else ({current} if current else set())
+        rows = LIST_ROWS - 1 if p.multi else LIST_ROWS      # leave room for DONE
+        window = opts[self.offset:self.offset + rows]
         for i, opt in enumerate(window):
             y0 = CONTENT_TOP + i * ROW_H
-            mark = "● " if self.chosen.get(p.name) == opt else ""
-            zones.append(Zone(8, y0, W - 8, y0 + ROW_H - 4, "pick", opt,
-                              mark + opt, "row"))
-        scroll = len(opts) > LIST_ROWS
+            if p.multi:
+                style = "checkon" if opt in sel else "checkoff"
+                zones.append(Zone(8, y0, W - 8, y0 + ROW_H - 4, "pick", opt,
+                                  choice_label(opt), style))
+            else:
+                mark = "● " if opt in sel else ""
+                zones.append(Zone(8, y0, W - 8, y0 + ROW_H - 4, "pick", opt,
+                                  mark + choice_label(opt), "row"))
+        scroll = len(opts) > rows
         if scroll:
             zones += self._scrollers(len(opts))
+        if p.multi:
+            zones.append(Zone(8, FOOTER_Y - RUN_H, W - 8, FOOTER_Y, "pickdone", "",
+                              f"DONE  ({len(sel)} chosen)", "run"))
         return View("picker", p.label, tuple(zones), tuple(spans), scroll)
 
     def _view_confirm(self) -> View:
@@ -299,9 +360,22 @@ class Deck:
         if z.kind == "pick":
             if z.value == "__keyboard__":
                 return ("keyboard", self.picker_param.name if self.picker_param else "")
-            if self.picker_param is not None:
-                self.chosen[self.picker_param.name] = z.value
+            p = self.picker_param
+            if p is not None and p.multi:
+                cur = self.chosen.get(p.name)
+                lst = list(cur) if isinstance(cur, list) else ([cur] if cur else [])
+                lst.remove(z.value) if z.value in lst else lst.append(z.value)
+                self.chosen[p.name] = lst
+                return None                        # stay on the picker (toggle)
+            if p is not None:
+                self.chosen[p.name] = z.value
             self.screen, self.offset = "action", 0
+            return None
+        if z.kind == "pickdone":
+            self.screen, self.offset = "action", 0
+            return None
+        if z.kind == "reset":
+            self.reset_auto()
             return None
         if z.kind == "run":
             if not z.value:                       # not ready — required pick missing

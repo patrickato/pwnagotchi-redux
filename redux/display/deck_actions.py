@@ -33,11 +33,23 @@ class DeckState:
     subnets: Tuple[str, ...] = ()             # armed CIDRs
     wordlists: Tuple[str, ...] = ()           # registered wordlist names
     captures: Tuple[str, ...] = ()            # capture files ready to crack
+    hash_modes: Tuple[str, ...] = ()          # hashcat -m recipes ("22000=WPA-PBKDF2", ...)
+    rules: Tuple[str, ...] = ()               # rule files ("best64", "dive", ...)
     device_categories: Tuple[str, ...] = ()   # router/camera/doorbell/...
     vendors: Tuple[str, ...] = ()             # tp-link/hikvision/...
     interfaces: Tuple[str, ...] = ()          # wlan0/wlan1
     personas: Tuple[str, ...] = ()
     mode_lab: bool = False
+
+
+def choice_value(choice: str) -> str:
+    """A candidate may be 'value=label' (CLI value + friendly label). The command
+    uses the value; the screen shows the label."""
+    return choice.split("=", 1)[0] if "=" in choice else choice
+
+
+def choice_label(choice: str) -> str:
+    return choice.split("=", 1)[1] if "=" in choice else choice
 
 
 _STATIC_PREFIX = "static:"
@@ -65,8 +77,10 @@ class Param:
     source: str               # candidate source key, or "static:a|b|c", or "free_text"
     flag: str = ""            # CLI flag it fills ("" = positional argument)
     required: bool = True
-    default: str = ""         # pre-selected choice when present
+    default: str = ""         # pre-selected choice when present (the auto pick)
     free_text: bool = False   # no pick-list → on-screen keyboard fallback
+    multi: bool = False       # choose all that apply (e.g. which capture files)
+    auto: str = ""            # what the auto-pipeline would use, shown when unset
 
     @property
     def is_free_text(self) -> bool:
@@ -114,9 +128,20 @@ _CATALOG: Tuple[Action, ...] = (
     Action("pmkid sweep", "PMKID sweep", "CAPTURE & CRACK",
            note="zero-transmit PMKID loot — harvest + rank"),
     Action("crack run", "Crack captures", "CAPTURE & CRACK",
-           params=(Param("wordlist", "Wordlist", "wordlists", flag="--wordlist",
-                         required=False),),
-           note="convert + crack (hashcat); uses the selected wordlist"),
+           params=(
+               Param("captures", "Capture files", "captures", flag="--capture",
+                     required=False, multi=True, auto="all ready"),
+               Param("type", "Hash type (-m)", "hash_modes", flag="--type",
+                     required=False, auto="auto-detect"),
+               Param("attack", "Attack (-a)",
+                     "static:0=0 · wordlist|3=3 · mask|6=6 · wordlist+mask|7=7 · mask+wordlist",
+                     flag="--attack", required=False, auto="0 · wordlist"),
+               Param("wordlist", "Wordlist", "wordlists", flag="--wordlist",
+                     required=False, auto="selected"),
+               Param("rules", "Rules", "rules", flag="--rules",
+                     required=False, auto="none"),
+           ),
+           note="hashcat — every field auto-fills like the pipeline; override any"),
     Action("wps", "WPS / Pixie", "CAPTURE & CRACK",
            params=(Param("target", "Target AP", "scope_targets"),),
            power_tier=True, note="active WPS attack against an armed AP"),
