@@ -43,7 +43,7 @@ _RAW: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
         ("survey", "passive airspace survey — APs/clients in earshot"),
         ("identify", "what IS this device (Roomba/Alexa/phone...) + what you can do to it"),
         ("discover", "LAN service discovery → labeled inventory of what every host is"),
-        ("gatt", "BLE GATT looting — read a device's info/battery/vendor services"),
+        ("gatt", "BLE GATT loot + control — read device-info; map/write control points"),
         ("dossier", "everything known about one AP + the recommended move"),
         ("dex --dna", "devices re-identified by behavior past MAC rotation"),
         ("airwave timeline", "scrub back through RF history"),

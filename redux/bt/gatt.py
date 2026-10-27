@@ -188,3 +188,63 @@ def to_identify_signals(loot: GattLoot):
     from ..intel.device_id import DeviceSignals
     return DeviceSignals(mac=loot.mac, vendor=loot.manufacturer,
                          ble_name=loot.device_name or loot.model)
+
+
+# ---- write surface / actuation (POWER-TIER: per-action confirm, even in LAB) ----
+_WRITE_PROPS = ("write", "write-without-response", "writenoresponse", "writable")
+
+
+def writable_surface(services: Sequence[Service]) -> List[dict]:
+    """The control points: every characteristic that can be WRITTEN — these are the
+    knobs that actuate a device (a light's color, a lock's state, a speaker's
+    volume). Reading this is passive; writing is the power-tier action below."""
+    out: List[dict] = []
+    for svc in services or ():
+        for ch in svc.characteristics or ():
+            props = {p.lower() for p in (ch.properties or ())}
+            if props & set(_WRITE_PROPS):
+                out.append({"service": svc.uuid, "service_name": svc.name,
+                            "uuid": ch.uuid, "name": ch.name,
+                            "properties": list(ch.properties),
+                            "vendor_specific": svc.vendor_specific})
+    return out
+
+
+@dataclass
+class GattWriter:
+    """Write to a BLE characteristic — actuate a device. POWER-TIER: refuses unless
+    the target is authorized (scope / LAB) AND the write is explicitly confirmed
+    per action, even in LAB. runner/writer injected for tests."""
+    runner: Optional[Callable] = None
+
+    def plan(self, mac: str, uuid: str, value: str) -> List[str]:
+        return [f"# POWER-TIER: writing actuates the device — confirm each one",
+                f"gatttool -b {mac} --char-write-req -a <handle:{uuid}> -n {value}"]
+
+    def write(self, mac: str, uuid: str, value: str, *, scope=None,
+              authorized: bool = False, lab: bool = False, confirmed: bool = False,
+              writer: Optional[Callable[[str, str, str], bool]] = None,
+              now: Optional[float] = None):
+        """Gate → (per-action confirm) → write. Returns (ok, reason)."""
+        # per-action confirm is mandatory, even in LAB — this changes a device.
+        if not confirmed:
+            return False, "refused: writing actuates the device — needs explicit per-action confirm"
+        # posture gate (same as the rest of the BLE firing path)
+        if not lab:
+            if scope is not None:
+                try:
+                    ok, why = scope.authorize(bssid=mac, now=now)
+                except Exception:
+                    ok, why = False, "scope check failed"
+                if not ok and not authorized:
+                    return False, f"refused: {why}"
+            elif not authorized:
+                return False, "refused: GATT write needs --authorized in FIELD (or LAB mode)"
+        if writer is None:
+            return False, "no BLE writer available (needs a Bluetooth adapter on-device)"
+        try:
+            ok = bool(writer(mac, uuid, value))
+        except Exception as e:
+            return False, f"write failed: {type(e).__name__}"
+        return (ok, f"wrote {value} to {describe_uuid(uuid)} ({uuid})" if ok
+                else (False, "write rejected by the device"))

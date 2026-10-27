@@ -3282,7 +3282,8 @@ def cmd_gatt(args) -> int:
                                  Characteristic("2a25", ("read",), "FB-SN-0099"),
                                  Characteristic("2a26", ("read",), "1.2.3"))),
                 Service("180f", (Characteristic("2a19", ("read", "notify"), "87"),)),
-                Service("adaf0100-c332-42a8-93bd-25e905756cb8", ()),
+                Service("fff0", (Characteristic("fff3", ("write", "write-without-response")),
+                                 Characteristic("fff4", ("read", "notify")))),
             ]
         loot, reason = looter.loot(args.mac or "aa:bb:cc:dd:ee:ff", lab=True, enumerator=_enum)
         print("redux gatt — SYNTHETIC BLE device (no radio)")
@@ -3314,6 +3315,31 @@ def cmd_gatt(args) -> int:
     g = identify(to_identify_signals(loot))
     if g.category != "unknown":
         print(f"  => identifies as: {g.product} [{g.category}] ({g.confidence})")
+    # control surface: which characteristics can be WRITTEN (actuate the device)
+    if getattr(args, "write_surface", False) or getattr(args, "write", None):
+        from .bt.gatt import writable_surface, GattWriter
+        services = _enum(args.mac or "") if getattr(args, "demo", False) else []
+        surface = writable_surface(services)
+        print("  CONTROL SURFACE (writable characteristics — actuate the device):")
+        if not surface:
+            print("    (none enumerated" + ("" if getattr(args, "demo", False) else "; needs a live enumerate on-device") + ")")
+        for c in surface:
+            print(f"    {c['uuid']}  {c['name']}  [{','.join(c['properties'])}]"
+                  + ("  (vendor)" if c["vendor_specific"] else ""))
+        if getattr(args, "write", None):
+            if getattr(args, "value", None) is None:
+                print("  write: pass --value <hex> too")
+                return 2
+            w = GattWriter()
+            ok, reason = w.write(args.mac, args.write, args.value,
+                                 scope=(None if getattr(args, "lab", False) else Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)),
+                                 authorized=getattr(args, "authorized", False),
+                                 lab=getattr(args, "lab", False),
+                                 confirmed=getattr(args, "confirm", False),
+                                 writer=None)
+            print(f"  WRITE {args.write} = {args.value}: {reason}")
+            if not getattr(args, "confirm", False):
+                print("    (power-tier — add --confirm to actually actuate; needs a BT adapter)")
     return 0
 
 
@@ -5822,6 +5848,10 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--authorized", action="store_true", help="FIELD: actually connect (target must be armed)")
     gt.add_argument("--lab", action="store_true", help="LAB: run unleashed")
     gt.add_argument("--scope-file", default=None, help="scope store (FIELD gate)")
+    gt.add_argument("--write-surface", action="store_true", help="map the writable characteristics (control points)")
+    gt.add_argument("--write", default=None, help="POWER-TIER: write to this characteristic UUID (actuates the device)")
+    gt.add_argument("--value", default=None, help="hex value to write (with --write)")
+    gt.add_argument("--confirm", action="store_true", help="required per-action confirm for a --write (even in LAB)")
     gt.add_argument("--json", action="store_true", help="machine-readable output")
     gt.set_defaults(func=cmd_gatt)
     idf = sub.add_parser("identify", help="what IS this device (stove/Roomba/Alexa/phone...) + what you can do with/to it")
