@@ -905,6 +905,9 @@ def main(argv=None):
                         help="invert swipe direction for rotated touch controllers")
     parser.add_argument("--swipe-threshold", type=int, default=300,
                         help="minimum raw axis movement for one swipe")
+    parser.add_argument("--deck", action="store_true",
+                        help="interactive control-deck UI (tap to operate) instead of "
+                             "the read-only status pages; requires --calibration-file")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="read-only hardware/API checks")
     mode.add_argument("--once", action="store_true", help="paint one measured frame")
@@ -991,6 +994,17 @@ def main(argv=None):
     mode_arm_until = 0.0          # header-tap mode switch: armed by the first tap
     signals_panel = None          # Signal Dex snapshot for the signals page
     signals_panel_at = 0.0        # last sample time (refreshed slowly, only when viewed)
+    # Control-deck mode (opt-in, --deck): the interactive touch UI. Built once;
+    # the status-page path is untouched when it's off.
+    deck_controller = None
+    if args.deck:
+        from .deck_runtime import DeckController, make_subprocess_runner, build_deck_state
+        from .deck_model import Deck
+        from ..core import arsenal as _arsenal
+        deck_controller = DeckController(Deck(_arsenal.groups(), build_deck_state()),
+                                         runner=make_subprocess_runner())
+        if tracker is not None:
+            tracker.deck = True
     try:
         while running:
             if reconnect is not None and touch_fd is None:
@@ -1013,7 +1027,9 @@ def main(argv=None):
             # Only genuine, independently updated live status counters advance
             # the bounded in-memory chart; the UI never synthesizes activity.
             history.ingest(report, now=sampled_at)
-            if page == "doctor":
+            if deck_controller is not None:
+                image = deck_controller.frame()
+            elif page == "doctor":
                 current_doctor = status_view(report, now=sampled_at)
                 if current_doctor["stale"]:
                     doctor_offset = 0
@@ -1086,6 +1102,12 @@ def main(argv=None):
                     actions, fragment = consume_gestures(fragment, tracker)
                     if actions:
                         action, value = actions[-1]
+                        if deck_controller is not None:
+                            # deck mode: a tap carries its (x, y); feed the deck and
+                            # redraw. Swipes/other status actions are ignored here.
+                            if action == "tap":
+                                deck_controller.on_tap(value[0], value[1])
+                            break
                         if action == "detail" and page == "system":
                             system_detail = system_offset + value if system_detail is None else None
                         elif action == "scroll":
