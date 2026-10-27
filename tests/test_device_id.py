@@ -58,3 +58,11 @@ def test_wearable_is_ble_not_on_lan():
     dos = " ".join(a["do"] for a in acts).lower()
     assert "gatt" in dos or "ble" in dos
     assert "ports/services" not in dos                          # not a LAN host
+
+
+def test_doorbell_covers_wireless_surface():
+    from redux.intel.device_id import actions_for
+    dos = " ".join(a["do"] for a in actions_for("doorbell")).lower()
+    assert "wi-fi" in dos or "wifi" in dos                 # capture/crack its Wi-Fi
+    assert "deauth" in dos and ("ble" in dos or "pairing" in dos)
+    assert "cloud-tied" in dos                             # Ring/Wyze handled honestly

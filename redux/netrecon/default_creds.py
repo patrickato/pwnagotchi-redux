@@ -18,48 +18,95 @@ from typing import List, Optional, Tuple
 
 Pair = Tuple[str, str]      # (username, password)  — "" password means blank
 
-# generic factory defaults seen across most gear, tried for anything.
+# generic factory defaults seen across most gear, tried for anything. A real run
+# works through the whole list, most-likely first.
 _COMMON: Tuple[Pair, ...] = (
     ("admin", "admin"), ("admin", "password"), ("admin", ""), ("admin", "1234"),
-    ("admin", "12345"), ("root", "root"), ("root", ""), ("user", "user"),
-    ("admin", "admin123"), ("administrator", "administrator"),
+    ("admin", "12345"), ("admin", "123456"), ("admin", "admin123"),
+    ("admin", "pass"), ("admin", "default"), ("administrator", "administrator"),
+    ("administrator", "password"), ("administrator", ""), ("root", "root"),
+    ("root", ""), ("root", "admin"), ("root", "password"), ("root", "toor"),
+    ("root", "1234"), ("user", "user"), ("user", "password"), ("guest", "guest"),
+    ("guest", ""), ("support", "support"), ("admin", "changeme"), ("admin", "letmein"),
 )
 
-# category → published defaults for that kind of device (most-likely first).
+# category → published defaults for that kind of device (most-likely first). These
+# are the standard lists a tool like this works through against a scope target.
 _BY_CATEGORY: dict = {
-    "router": (("admin", "admin"), ("admin", "password"), ("admin", ""),
-               ("admin", "1234"), ("user", "user"), ("root", "admin")),
-    "camera": (("admin", "admin"), ("admin", ""), ("admin", "12345"),
-               ("admin", "888888"), ("root", "root"), ("admin", "admin12345"),
-               ("admin", "123456")),
-    "doorbell": (("admin", "admin"), ("admin", "")),
-    "printer": (("admin", ""), ("admin", "admin"), ("admin", "0000"), ("admin", "access")),
-    "thermostat": (("admin", "admin"), ("admin", "")),
-    "iot": (("admin", "admin"), ("admin", ""), ("root", "root")),
-    "plug": (("admin", "admin"), ("admin", "")),
-    "light": (("admin", "admin"),),
-    "computer": (("administrator", ""), ("admin", "admin")),
-    "streamer": (),          # usually no local login
-    "voice-assistant": (),
+    "router": (
+        ("admin", "admin"), ("admin", "password"), ("admin", ""), ("admin", "1234"),
+        ("admin", "motorola"), ("admin", "5up"), ("user", "user"), ("root", "admin"),
+        ("admin", "epicrouter"), ("admin", "sky"), ("admin", "virginmedia"),
+        ("admin", "changeme"), ("", "admin"), ("cusadmin", "highspeed"),
+    ),
+    "camera": (
+        ("admin", "admin"), ("admin", ""), ("admin", "12345"), ("admin", "123456"),
+        ("admin", "888888"), ("admin", "9999"), ("admin", "admin12345"),
+        ("admin", "4321"), ("admin", "camera"), ("admin", "ipcam"), ("root", "root"),
+        ("root", "pass"), ("root", "admin"), ("root", "12345"), ("root", "vizxv"),
+        ("root", "888888"), ("root", "hi3518"), ("root", "xc3511"), ("root", "7ujMko0admin"),
+        ("supervisor", "supervisor"), ("Admin", "1234"), ("service", "service"),
+    ),
+    "doorbell": (
+        ("admin", "admin"), ("admin", ""), ("admin", "12345"), ("admin", "123456"),
+        ("admin", "888888"), ("root", "root"), ("admin", "1234"), ("admin", "admin123"),
+    ),
+    "printer": (
+        ("admin", ""), ("admin", "admin"), ("admin", "0000"), ("admin", "access"),
+        ("admin", "1234"), ("admin", "password"), ("admin", "myadmin"),
+        ("admin", "123456"), ("", "admin"),
+    ),
+    "nas": (
+        ("admin", "admin"), ("admin", ""), ("admin", "password"), ("admin", "1234"),
+        ("root", "root"), ("admin", "synology"), ("admin", "nasadmin"),
+    ),
+    "thermostat": (("admin", "admin"), ("admin", ""), ("admin", "1234")),
+    "iot": (
+        ("admin", "admin"), ("admin", ""), ("admin", "12345"), ("root", "root"),
+        ("admin", "1234"), ("admin", "password"), ("admin", "0000"), ("user", "user"),
+    ),
+    "plug": (("admin", "admin"), ("admin", ""), ("admin", "1234")),
+    "light": (("admin", "admin"), ("admin", "")),
+    "voice-assistant": (),      # cloud-tied, no local login
+    "streamer": (("admin", "admin"),),   # some (Roku web), most none
     "speaker": (),
+    "computer": (("administrator", ""), ("admin", "admin"), ("user", "user")),
 }
 
-# vendor substring → defaults specific to that maker (refines the category set).
+# vendor substring → defaults specific to that maker (refines the category set,
+# tried BEFORE the category list). Published factory defaults.
 _BY_VENDOR: Tuple[Tuple[str, Tuple[Pair, ...]], ...] = (
     ("tp-link", (("admin", "admin"),)),
     ("tplink", (("admin", "admin"),)),
-    ("netgear", (("admin", "password"),)),
-    ("d-link", (("admin", ""), ("admin", "admin"))),
+    ("netgear", (("admin", "password"), ("admin", "1234"))),
+    ("d-link", (("admin", ""), ("admin", "admin"), ("user", ""))),
     ("dlink", (("admin", ""), ("admin", "admin"))),
     ("linksys", (("admin", "admin"), ("", "admin"))),
+    ("cisco", (("cisco", "cisco"), ("admin", "admin"))),
     ("ubiquiti", (("ubnt", "ubnt"),)),
-    ("hikvision", (("admin", "12345"),)),
-    ("dahua", (("admin", "admin"),)),
-    ("axis", (("root", "pass"),)),
-    ("zyxel", (("admin", "1234"),)),
+    ("mikrotik", (("admin", ""),)),
     ("asus", (("admin", "admin"),)),
+    ("zyxel", (("admin", "1234"), ("admin", "admin"))),
+    ("huawei", (("admin", "admin"), ("telecomadmin", "admintelecom"))),
+    ("arris", (("admin", "password"),)),
+    ("technicolor", (("admin", "admin"),)),
+    ("hikvision", (("admin", "12345"),)),
+    ("dahua", (("admin", "admin"), ("888888", "888888"), ("666666", "666666"))),
+    ("amcrest", (("admin", "admin"),)),
+    ("reolink", (("admin", ""),)),
+    ("axis", (("root", "pass"),)),
+    ("foscam", (("admin", ""),)),
+    # wyze / ring / arlo are cloud+app tied — no useful local web login; their real
+    # surface is the Wi-Fi/BLE setup flow (see the device playbook), not a password.
+    ("vivotek", (("root", ""),)),
+    ("ubnt", (("ubnt", "ubnt"),)),
     ("synology", (("admin", ""),)),
     ("qnap", (("admin", "admin"),)),
+    ("western digital", (("admin", "admin"),)),
+    ("brother", (("admin", "access"),)),
+    ("hp", (("admin", ""),)),
+    ("epson", (("admin", "admin"),)),
+    ("lexmark", (("admin", "admin"),)),
 )
 
 

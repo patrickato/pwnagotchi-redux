@@ -47,3 +47,14 @@ def test_creds_for_identity_from_identify_dict():
 def test_unknown_category_still_gets_common():
     pairs = creds_for(category="voice-assistant")   # empty specific set
     assert all(p in pairs for p in _COMMON[:3])     # still gets the common defaults
+
+
+def test_lists_are_substantial_per_device():
+    # a real run works through a sizable list, not 2-3
+    assert len(creds_for(category="camera")) >= 25
+    assert len(creds_for(category="router")) >= 20
+
+
+def test_dahua_and_hikvision_vendor_specifics():
+    assert ("888888", "888888") in creds_for(category="camera", vendor="Dahua")
+    assert creds_for(category="camera", vendor="Hikvision")[0] == ("admin", "12345")

@@ -159,12 +159,19 @@ _PLAYBOOK: dict = {
     ),
     "camera": (
         ("find RTSP / ONVIF stream + web UI", "redux netrecon (554/80/8000)"),
-        ("default-admin credential check", "redux loot pivot"),
+        ("default-admin credential check", "redux loot pivot --defaults --device-category camera"),
+        ("capture + crack its Wi-Fi (it's a wireless client)", "redux pmkid sweep ; redux crack"),
+        ("deauth to interrupt its stream/upload (LAB)", "redux campaign (LAB)"),
         ("note model+firmware for a known-issue check", "redux dossier"),
     ),
     "doorbell": (
-        ("find its local web/API + stream", "redux netrecon"),
-        ("default-cred check", "redux loot pivot"),
+        ("find its local web/API + stream (ONVIF cams)", "redux netrecon (554/80)"),
+        ("default-cred check", "redux loot pivot --defaults --device-category doorbell"),
+        ("capture + crack its Wi-Fi handshake", "redux pmkid sweep ; redux crack"),
+        ("deauth to knock it off Wi-Fi / interrupt (LAB)", "redux campaign (LAB)"),
+        ("BLE setup/pairing mode when it's being provisioned", "redux gatt ; BLE scan"),
+        ("cloud-tied (Ring/Wyze/Arlo): no local login — work the Wi-Fi + BLE surface",
+         "redux pmkid sweep ; redux gatt"),
     ),
     "printer": (
         ("IPP / raw-9100 / PJL enumeration", "redux netrecon (631/9100)"),
