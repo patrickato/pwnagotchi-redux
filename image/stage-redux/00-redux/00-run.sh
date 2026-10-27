@@ -35,6 +35,18 @@ cat > "$ROOTFS_DIR/usr/local/bin/redux-display-diag" <<'REDUX_DISPLAY_DIAG_LAUNC
 PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.display.acceptance "$@"
 REDUX_DISPLAY_DIAG_LAUNCHER
 chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-display-diag"
+# redux-touch-calibrate: the offline five-point calibration fitter. It is a
+# console_script in pyproject but was not previously installed to the image, so
+# the touch deck could never be calibrated on-device. Wire it in.
+cat > "$ROOTFS_DIR/usr/local/bin/redux-touch-calibrate" <<'REDUX_TOUCH_CALIBRATE_LAUNCHER'
+#!/bin/sh
+PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.display.calibration_wizard "$@"
+REDUX_TOUCH_CALIBRATE_LAUNCHER
+chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-touch-calibrate"
+# redux-deck-enable: one-command touch-deck setup (detect panel -> capture five
+# corner taps -> write calibration -> enable the deck in fbui.env -> restart),
+# replacing the manual diag/calibrate/edit/restart sequence.
+install -m 0755 files/redux-deck-enable "$ROOTFS_DIR/usr/local/bin/redux-deck-enable"
 # Headless first-boot mount, service, and image evidence: operator invoked only.
 cat > "$ROOTFS_DIR/usr/local/bin/redux-boot-check" <<'REDUX_BOOT_CHECK_LAUNCHER'
 #!/bin/sh

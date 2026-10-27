@@ -1,0 +1,130 @@
+#!/bin/bash
+# redux-deck-enable: one-command setup of the TFT touch control deck.
+#
+# Detects the touch panel, captures a five-point calibration (you tap four
+# corners + center), writes it, turns the deck on in fbui.env, and restarts the
+# display. Replaces the hand-run redux-display-diag -> redux-touch-calibrate ->
+# edit fbui.env -> restart sequence. Run as root:
+#
+#   sudo redux-deck-enable                 # auto-detect the touch panel
+#   sudo redux-deck-enable /dev/input/event1   # or name it explicitly
+#
+# Swipe-only navigation needs no calibration; this is only for TAPS + the deck.
+set -euo pipefail
+
+CFG_DIR=/captures/config
+ENV_FILE="$CFG_DIR/fbui.env"
+DIAG="$CFG_DIR/deck-diag.json"
+CAL="$CFG_DIR/touch-calibration.json"
+WINDOW=30   # seconds to tap in
+
+die() { echo "redux-deck-enable: $*" >&2; exit 1; }
+
+[ "$(id -u)" = 0 ] || die "run as root:  sudo redux-deck-enable"
+[ -f "$ENV_FILE" ] || die "no $ENV_FILE (is the fbui display installed?)"
+# The image ships the redux-display-diag launcher but (on older builds) not
+# redux-touch-calibrate. Both modules live in /opt/redux, so run the module
+# directly when a launcher is missing - this works on every redux image.
+[ -d /opt/redux/redux ] || command -v redux-display-diag >/dev/null 2>&1 \
+    || die "the redux package was not found (is this a redux image?)"
+
+run_diag() {
+    if command -v redux-display-diag >/dev/null 2>&1; then
+        redux-display-diag "$@"
+    else
+        PYTHONPATH=/opt/redux /usr/bin/python3 -m redux.display.acceptance "$@"
+    fi
+}
+run_calibrate() {
+    if command -v redux-touch-calibrate >/dev/null 2>&1; then
+        redux-touch-calibrate "$@"
+    else
+        PYTHONPATH=/opt/redux /usr/bin/python3 -m redux.display.calibration_wizard "$@"
+    fi
+}
+
+# 1. Resolve the touch input device: an explicit argument, else by controller name.
+if [ -n "${1:-}" ]; then
+    TOUCH="$1"
+    [ -e "$TOUCH" ] || die "no such device: $TOUCH"
+    echo "Using touch device: $TOUCH"
+else
+    TOUCH=""
+    for e in /sys/class/input/event*; do
+        [ -r "$e/device/name" ] || continue
+        name=$(cat "$e/device/name" 2>/dev/null || true)
+        case "$name" in
+            *ADS7846*|*XPT2046*|*[Tt]ouchscreen*)
+                TOUCH="/dev/input/$(basename "$e")"
+                echo "Found touch panel: $TOUCH ($name)"
+                break ;;
+        esac
+    done
+    if [ -z "$TOUCH" ]; then
+        echo "Could not auto-detect the touch panel. Devices present:" >&2
+        for e in /sys/class/input/event*; do
+            echo "  $(basename "$e"): $(cat "$e/device/name" 2>/dev/null || true)" >&2
+        done
+        die "re-run naming the right one:  sudo redux-deck-enable /dev/input/eventN"
+    fi
+fi
+
+mkdir -p "$CFG_DIR"
+
+# Read a y/n from the real terminal even when this script is piped in (curl|bash).
+ask() {
+    local ans=""
+    read -r -p "$1 [Y/n] " ans </dev/tty 2>/dev/null || ans="n"
+    case "$ans" in [Nn]*) return 1 ;; *) return 0 ;; esac
+}
+
+# 2. Capture five corner taps; retry until clean or the operator stops.
+attempt=1
+while :; do
+    rm -f "$DIAG" "$CAL"
+    echo
+    echo "=============  CALIBRATION (attempt $attempt)  ============="
+    echo "You get $WINDOW seconds. Tap ONCE on each spot, IN THIS ORDER:"
+    echo "   1) TOP-LEFT corner"
+    echo "   2) TOP-RIGHT corner"
+    echo "   3) BOTTOM-LEFT corner"
+    echo "   4) BOTTOM-RIGHT corner"
+    echo "   5) CENTER"
+    echo "Get your finger/stylus ready - starting in 4 seconds..."
+    sleep 4
+    echo ">>> TAP NOW <<<"
+    redux-display-diag --touch-device "$TOUCH" --seconds "$WINDOW" > "$DIAG" 2>/dev/null || true
+    if redux-touch-calibrate --report "$DIAG" --output-dir "$CFG_DIR" \
+            --confirm-order 2>/tmp/redux-deck-cal.err; then
+        echo "Calibration accepted."
+        break
+    fi
+    echo "That didn't take: $(cat /tmp/redux-deck-cal.err 2>/dev/null)"
+    echo "Usually the taps weren't clean - it needs exactly five, one per spot."
+    ask "Try the calibration again?" || die "aborted; the deck was not enabled"
+    attempt=$((attempt + 1))
+done
+
+[ -f "$CAL" ] || die "no calibration file was written; aborting"
+
+# 3. Turn the deck on in fbui.env (idempotent; --confirm-touch-calibration is
+#    required alongside --calibration-file or fbui refuses to start).
+ARGS="--calibration-file $CAL --confirm-touch-calibration --deck"
+if grep -q '^REDUX_FBUI_ARGS=' "$ENV_FILE"; then
+    sed -i "s#^REDUX_FBUI_ARGS=.*#REDUX_FBUI_ARGS=$ARGS#" "$ENV_FILE"
+else
+    printf 'REDUX_FBUI_ARGS=%s\n' "$ARGS" >> "$ENV_FILE"
+fi
+
+# 4. Restart the display and report.
+systemctl restart redux-fbui
+sleep 2
+if systemctl is-active --quiet redux-fbui; then
+    echo
+    echo "Deck enabled. Tap the screen - the footer tabs and the control deck now respond."
+    echo "(To go back to swipe-only: blank the REDUX_FBUI_ARGS line in $ENV_FILE and restart.)"
+else
+    echo "redux-fbui did not come back up. Check:" >&2
+    echo "  journalctl -u redux-fbui -n 30 --no-pager" >&2
+    exit 1
+fi
