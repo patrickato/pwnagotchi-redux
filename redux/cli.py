@@ -3480,6 +3480,26 @@ def cmd_targets(args) -> int:
     return 0
 
 
+def cmd_provision(args) -> int:
+    """First-boot provisioning — create the /captures skeleton and seed a starter
+    WPA wordlist so capture→crack works out of the box. Idempotent + fail-safe;
+    runs automatically on boot, this is the manual/verify path."""
+    from .core.provision import provision
+    res = provision(root=getattr(args, "root", None) or "/captures")
+    print(f"provision {res['root']} — {res['note']}")
+    for d in res["dirs_created"]:
+        print(f"  + {d}")
+    if res["wordlist_seeded"]:
+        try:
+            from .crack.wordlists import WordlistStore
+            sel = WordlistStore((res["root"] + "/wordlists")).selected()
+            if sel:
+                print(f"  wordlist: '{sel.name}' selected ({sel.size_bytes} bytes) — crack is ready")
+        except Exception:
+            pass
+    return 0
+
+
 def cmd_arsenal(args) -> int:
     """The arsenal — one place listing everything the box can do and the exact
     command to run it. `--search` filters by command, title or group."""
@@ -5445,7 +5465,7 @@ def build_parser() -> argparse.ArgumentParser:
     caps_ = capsub.add_parser("show", help="full detail + what it needs + how to use one capability")
     caps_.add_argument("id")
     caps_.add_argument("--json", action="store_true")
-    capc = capsub.add_parser("completion", help="evidence-based completion picture (no subjective %)")
+    capc = capsub.add_parser("completion", help="evidence-based completion picture (no subjective percentage)")
     capc.add_argument("--json", action="store_true")
     capq = capsub.add_parser("qualified",
                              help="readiness spine: one truth (manifest + hardware-present + benchpass)")
@@ -5827,6 +5847,9 @@ def build_parser() -> argparse.ArgumentParser:
     ar = sub.add_parser("arsenal", help="one-place index of everything the box can do + the command to run it")
     ar.add_argument("--search", default=None, help="filter by a term (command / title / group)")
     ar.set_defaults(func=cmd_arsenal)
+    pv = sub.add_parser("provision", help="first-boot setup — create /captures skeleton + seed a starter wordlist (crack-ready)")
+    pv.add_argument("--root", default=None, help="captures root (default: /captures)")
+    pv.set_defaults(func=cmd_provision)
     tg = sub.add_parser("targets", help="target-value radar — rank APs by how worth attacking each is")
     tg.add_argument("--demo", action="store_true", help="synthetic radar (no radio)")
     tg.set_defaults(func=cmd_targets)

@@ -197,6 +197,12 @@ FEATURES: Tuple[Feature, ...] = (
             "the REDUXCAP /captures partition that survives the ephemeral root.",
             "storage", implemented=True, cap="storage.persist",
             note="captures/jobs/results live here; the root filesystem is overlay-ephemeral"),
+    Feature("storage.provision", "First-boot provisioning",
+            "create the /captures skeleton and seed a starter WPA wordlist so "
+            "capture→crack works out of the box; idempotent, runs on boot.",
+            "storage", implemented=True,
+            note="the baked starter wordlist ships in the package (redux/data); "
+                 "bigger lists come from environment-grow, NAS pull, `redux wordlist add`"),
     Feature("sense.csi", "CSI motion sensing",
             "use nexmon CSI as a presence/motion sensor (the radio as a sensor).",
             "sense", implemented=True, needs_hardware="nexmon CSI firmware on the onboard radio",

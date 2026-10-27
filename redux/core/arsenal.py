@@ -93,6 +93,7 @@ _RAW: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
         ("ir", "IR capture / blast (LAB-only)"),
     )),
     ("CONFIG & SYSTEM", (
+        ("provision", "first-boot setup — /captures skeleton + starter wordlist (crack-ready)"),
         ("scope arm-lab", "authorize your whole lab in one gesture"),
         ("mode", "FIELD <-> LAB posture switch"),
         ("phone plan", "serve the dashboard to a phone over Bluetooth PAN"),
