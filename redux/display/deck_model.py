@@ -52,11 +52,12 @@ class Zone:
     y0: int
     x1: int
     y1: int
-    kind: str                 # category|action|param|run|confirm|cancel|back|home|pick|scroll
+    kind: str                 # category|action|param|run|confirm|cancel|back|home|pick|scroll|toggle|target
     value: str
     label: str = ""
-    style: str = "row"        # render token: row|tile|run|confirm|cancel|nav|pick|chosen
-    sub: str = ""             # secondary line (e.g. current choice, note)
+    style: str = "row"        # render token: row|tile|run|confirm|cancel|nav|pick|toggle*|target*
+    sub: str = ""             # secondary line (e.g. current choice, note, badges)
+    sig: int = -1             # signal 0..100 for a target row (-1 = none)
 
     def contains(self, x: int, y: int) -> bool:
         return self.x0 <= x < self.x1 and self.y0 <= y < self.y1
@@ -176,6 +177,11 @@ class Deck:
         if self.screen == "category":
             return self._view_category()
         if self.screen == "action":
+            lay = self.action.layout if self.action else "form"
+            if lay == "toggle":
+                return self._view_toggle()
+            if lay == "targets":
+                return self._view_targets()
             return self._view_action()
         if self.screen == "picker":
             return self._view_picker()
@@ -231,6 +237,62 @@ class Deck:
         if self.offset + LIST_ROWS < total:
             z.append(Zone(W - 44, FOOTER_Y - 44, W, FOOTER_Y, "scroll", "down", "▼", "nav"))
         return z
+
+    def _view_toggle(self) -> View:
+        """A big two/few-state switch (FIELD/LAB, on/off) — one tap flips it."""
+        a = self.action
+        assert a is not None
+        p = next((q for q in a.params if q.name == a.toggle_param), a.params[0])
+        opts = candidates_for(p.source, self.state)
+        zones: List[Zone] = list(self._header(a.title, back=True))
+        spans = [Span(70, 8, a.title[:24], "title"),
+                 Span(10, HEADER_H + 2, a.note[:60], "muted")]
+        current = ("lab" if self.state.mode_lab else "field") if a.id == "mode" \
+            else choice_value(self.chosen.get(p.name, "") or "")
+        n = max(1, len(opts))
+        bw = (W - 16 - (n - 1) * 10) // n
+        for i, opt in enumerate(opts):
+            x0 = 8 + i * (bw + 10)
+            on = choice_value(opt) == current
+            zones.append(Zone(x0, CONTENT_TOP + 40, x0 + bw, CONTENT_TOP + 140,
+                              "toggle", opt, choice_label(opt),
+                              "toggleon" if on else "toggleoff"))
+        spans += (Span(14, CONTENT_TOP + 158,
+                       "tap a posture to switch — takes effect immediately", "muted"),)
+        return View("action", a.title, tuple(zones), tuple(spans))
+
+    def _view_targets(self) -> View:
+        """A ranked target list: multi-select which APs to run the action on, with
+        signal + crackability at a glance. ARM & RUN uses the ones you ticked."""
+        a = self.action
+        assert a is not None
+        p = a.params[0]
+        zones: List[Zone] = list(self._header(a.title, back=True))
+        spans = [Span(70, 8, a.title[:22], "title"),
+                 Span(10, HEADER_H + 2, a.note[:60], "muted")]
+        tgts = self.state.targets
+        cur = self.chosen.get(p.name)
+        sel = set(cur) if isinstance(cur, list) else set()
+        if not tgts:
+            spans += (Span(14, CONTENT_TOP + 24,
+                           "no targets yet — run Survey / Rank targets first", "muted"),)
+            return View("action", a.title, tuple(zones), tuple(spans))
+        rows = 4                                   # room for the ARM & RUN bar
+        window = tgts[self.offset:self.offset + rows]
+        for i, t in enumerate(window):
+            y0 = CONTENT_TOP + 6 + i * ROW_H
+            on = t.label in sel
+            badge = "crackable" if t.crackable else "hard"
+            sub = f"{t.security or '—'}  ·  {badge}" + (f"  ·  {t.value}" if t.value else "")
+            zones.append(Zone(8, y0, W - 8, y0 + ROW_H - 4, "target", t.label,
+                              t.label, "targeton" if on else "targetoff", sub, t.signal))
+        if len(tgts) > rows:
+            zones += self._scrollers(len(tgts))
+        ready = bool(sel)
+        label = f"ARM & RUN  ({len(sel)})" if ready else "tick targets ↑"
+        zones.append(Zone(8, FOOTER_Y - RUN_H, W - 8, FOOTER_Y, "run",
+                          a.id if ready else "", label, "confirm"))
+        return View("action", a.title, tuple(zones), tuple(spans))
 
     def _view_action(self) -> View:
         a = self.action
@@ -376,6 +438,20 @@ class Deck:
             return None
         if z.kind == "reset":
             self.reset_auto()
+            return None
+        if z.kind == "toggle":
+            if self.action is not None:
+                self.chosen[self.action.toggle_param] = z.value
+                self.last_run = self.command()
+                return ("run", self.last_run)
+            return None
+        if z.kind == "target":
+            if self.action is not None:
+                pname = self.action.params[0].name
+                cur = self.chosen.get(pname)
+                lst = list(cur) if isinstance(cur, list) else ([cur] if cur else [])
+                lst.remove(z.value) if z.value in lst else lst.append(z.value)
+                self.chosen[pname] = lst
             return None
         if z.kind == "run":
             if not z.value:                       # not ready — required pick missing

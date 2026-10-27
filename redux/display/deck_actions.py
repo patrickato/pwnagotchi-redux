@@ -39,6 +39,7 @@ class DeckState:
     vendors: Tuple[str, ...] = ()             # tp-link/hikvision/...
     interfaces: Tuple[str, ...] = ()          # wlan0/wlan1
     personas: Tuple[str, ...] = ()
+    targets: Tuple["Target", ...] = ()        # ranked targets for the target-list layout
     mode_lab: bool = False
 
 
@@ -88,6 +89,16 @@ class Param:
 
 
 @dataclass(frozen=True)
+class Target:
+    """A rankable target for the target-list layout (campaign/targets/WPS)."""
+    label: str                # SSID or BSSID
+    signal: int = 0           # 0..100 for the bar
+    security: str = ""        # WPA2 / WPA3 / OPEN
+    crackable: bool = False
+    value: str = ""           # high / med / low
+
+
+@dataclass(frozen=True)
 class Action:
     id: str                   # the arsenal command, e.g. "crack run"
     title: str                # short label for the row
@@ -96,6 +107,8 @@ class Action:
     power_tier: bool = False   # transmits / fires / writes → per-action confirm
     lab_only: bool = False     # refuses outside LAB (confirm explains)
     note: str = ""
+    layout: str = "form"       # form | toggle | targets — picks the action screen shape
+    toggle_param: str = ""     # for layout=toggle: the param whose choices are the switch
 
     def ready(self, chosen: Dict[str, str]) -> bool:
         """True when every required param has a value chosen."""
@@ -162,9 +175,9 @@ _CATALOG: Tuple[Action, ...] = (
            params=(Param("host", "Host", "hosts"),),
            power_tier=True, note="pull interesting files off a host"),
     Action("campaign unleashed", "Kill-chain", "LOOT & PIVOT",
-           params=(Param("target", "Targets", "scope_targets", required=False),),
-           power_tier=True, lab_only=True,
-           note="autonomous capture→crack→loot over armed targets"),
+           params=(Param("target", "Targets", "scope_targets", required=False, multi=True),),
+           power_tier=True, lab_only=True, layout="targets",
+           note="autonomous capture→crack→loot over the targets you pick"),
     # --- STEALTH & OPSEC ---
     Action("stealth quiet on", "Go dark", "STEALTH & OPSEC",
            note="passive-first, frame budget, MAC rotate"),
@@ -174,8 +187,9 @@ _CATALOG: Tuple[Action, ...] = (
            note="what would a blue team see from this?"),
     # --- CONFIG & SYSTEM ---
     Action("mode", "FIELD / LAB", "CONFIG & SYSTEM",
-           params=(Param("state", "Posture", "static:lab|field|status", default="status"),),
-           note="switch operating posture"),
+           params=(Param("state", "Posture", "static:field=FIELD|lab=LAB"),),
+           layout="toggle", toggle_param="state",
+           note="switch operating posture — LAB unleashes the toolkit"),
     Action("web", "Serve dashboard", "CONFIG & SYSTEM",
            note="serve the web UI to your phone"),
     Action("provision", "First-boot setup", "CONFIG & SYSTEM",

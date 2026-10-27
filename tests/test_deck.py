@@ -188,6 +188,44 @@ def test_multi_select_captures_toggle_and_emit():
     assert "--capture cap-A.pcapng" in cmd and "--capture cap-C.pcapng" in cmd
 
 
+def test_toggle_layout_switches_in_one_tap():
+    d = Deck(arsenal.groups(), DeckState(mode_lab=False))
+    d.action = DA.ACTIONS["mode"]
+    d.screen = "action"
+    v = d.view()
+    assert v.screen == "action"
+    toggles = [z for z in v.zones if z.kind == "toggle"]
+    assert len(toggles) == 2 and all((z.y1 - z.y0) >= 80 for z in toggles)   # big switches
+    lab = next(z for z in toggles if z.value.startswith("lab"))
+    assert d.tap(lab.x0 + 2, lab.y0 + 2) == ("run", "redux mode lab")
+
+
+def test_targets_layout_multiselect_and_arm():
+    from redux.display.deck_actions import Target
+    st = DeckState(mode_lab=True, targets=(
+        Target("NETGEAR-5G", signal=80, security="WPA2", crackable=True, value="high"),
+        Target("xfinitywifi", signal=40, security="OPEN", crackable=False, value="low"),
+        Target("HomeLab", signal=95, security="WPA2", crackable=True, value="high"),
+    ))
+    d = Deck(arsenal.groups(), st)
+    d.action = DA.ACTIONS["campaign unleashed"]
+    d.screen = "action"
+    v = d.view()
+    trows = [z for z in v.zones if z.kind == "target"]
+    assert len(trows) == 3 and trows[0].sig == 80          # signal carried to the row
+    # arm is disabled until something is ticked
+    run = next(z for z in v.zones if z.kind == "run")
+    assert not run.value
+    for name in ("NETGEAR-5G", "HomeLab"):
+        z = next(zz for zz in d.view().zones if zz.kind == "target" and zz.value == name)
+        d.tap(z.x0 + 2, z.y0 + 2)
+    assert set(d.chosen["target"]) == {"NETGEAR-5G", "HomeLab"}
+    # now ARM & RUN is live and (power-tier) routes through confirm
+    run = next(z for z in d.view().zones if z.kind == "run")
+    assert run.value == "campaign unleashed"
+    assert d.tap(run.x0 + 2, run.y0 + 2) is None and d.screen == "confirm"
+
+
 def test_back_and_home_navigation():
     d = Deck(arsenal.groups(), _state())
     d.category, d.screen = "LOOT & PIVOT", "category"

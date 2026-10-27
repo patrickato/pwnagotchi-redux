@@ -42,8 +42,50 @@ def _center(draw, box, text, font, fill):
               text, font=font, fill=fill)
 
 
+def _signal(draw, x, cy, pct):
+    """A 4-bar signal glyph, filled proportional to pct (0..100)."""
+    bars = 4
+    filled = round(max(0, min(100, pct)) / 100 * bars)
+    for i in range(bars):
+        h = 5 + i * 4
+        bx = x + i * 8
+        col = TEAL if i < filled else (40, 60, 70)
+        draw.rectangle((bx, cy - h // 2, bx + 5, cy + 6), fill=col)
+
+
 def _draw_zone(draw, z: Zone):
     box = (z.x0, z.y0, z.x1, z.y1)
+    if z.style in ("toggleon", "toggleoff"):
+        on = z.style == "toggleon"
+        edge = TEAL if on else MUT
+        _panel(draw, box, radius=12, fill=(10, 28, 30) if on else PANEL2,
+               outline=edge, width=3 if on else 2)
+        _center(draw, (z.x0, z.y0, z.x1, z.y1 - 22), z.label,
+                _font(24, bold=True), edge if on else INK)
+        _center(draw, (z.x0, z.y1 - 30, z.x1, z.y1 - 6),
+                "● ACTIVE" if on else "tap to switch",
+                _font(10, bold=True), TEAL if on else MUT)
+        return
+    if z.style in ("targeton", "targetoff"):
+        on = z.style == "targeton"
+        _panel(draw, box, radius=7, fill=PANEL2, outline=TEAL if on else STROKE,
+               width=2 if on else 1)
+        cy = (z.y0 + z.y1) // 2
+        bx = z.x0 + 12
+        draw.rounded_rectangle((bx, cy - 9, bx + 18, cy + 9), radius=4,
+                               fill=(10, 28, 30) if on else PANEL,
+                               outline=TEAL if on else MUT, width=2)
+        if on:
+            draw.line((bx + 4, cy + 1, bx + 8, cy + 5), fill=TEAL, width=2)
+            draw.line((bx + 8, cy + 5, bx + 15, cy - 5), fill=TEAL, width=2)
+        draw.text((bx + 30, z.y0 + 6), fit_text(draw, z.label, _font(13, bold=True), 180),
+                  font=_font(13, bold=True), fill=INK)
+        crackable = "crackable" in z.sub
+        draw.text((bx + 30, z.y0 + 22), fit_text(draw, z.sub, _font(10), 230),
+                  font=_font(10), fill=GRN if crackable else SUBTLE)
+        if z.sig >= 0:
+            _signal(draw, z.x1 - 52, cy, z.sig)
+        return
     if z.style == "tile":
         _panel(draw, box, radius=9, fill=PANEL, outline=STROKE, width=1)
         draw.rectangle((z.x0, z.y0 + 8, z.x0 + 3, z.y1 - 8), fill=TEAL)   # accent bar
