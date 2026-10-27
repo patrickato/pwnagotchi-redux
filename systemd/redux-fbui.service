@@ -16,7 +16,14 @@ ExecStartPre=/usr/local/bin/redux-fbui --check --framebuffer ${REDUX_FRAMEBUFFER
 # --touch-auto resolves the single XPT2046/ADS7846 node by controller name and
 # drives swipe navigation. It never guesses: zero or several matches leave the
 # display running without touch. To disable touch, remove the flag.
-ExecStart=/usr/local/bin/redux-fbui --run --touch-auto --framebuffer ${REDUX_FRAMEBUFFER} --port ${REDUX_DASHBOARD_PORT} --order ${REDUX_PIXEL_ORDER} --rotate ${REDUX_ROTATE}
+#
+# TAPS + CONTROL DECK: swipe nav works without calibration, but TAPS (footer tabs,
+# the mode pill, and the whole interactive control deck) need a calibration file.
+# After running the one-time calibration (redux-display-diag → redux-touch-calibrate),
+# set in fbui.env, e.g.:
+#   REDUX_FBUI_ARGS=--calibration-file /captures/config/touch-calibration.json --deck
+# $REDUX_FBUI_ARGS is unbraced on purpose so systemd word-splits it into flags.
+ExecStart=/usr/local/bin/redux-fbui --run --touch-auto --framebuffer ${REDUX_FRAMEBUFFER} --port ${REDUX_DASHBOARD_PORT} --order ${REDUX_PIXEL_ORDER} --rotate ${REDUX_ROTATE} $REDUX_FBUI_ARGS
 Restart=on-failure
 RestartSec=8
 TimeoutStopSec=8
