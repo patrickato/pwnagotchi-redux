@@ -287,6 +287,45 @@ def test_targets_layout_multiselect_and_arm():
     assert d.tap(run.x0 + 2, run.y0 + 2) is None and d.screen == "confirm"
 
 
+def test_onscreen_keyboard_types_into_a_free_text_field():
+    from redux.display.deck_actions import Action, Param
+    # a scratch action with a genuine free-text param (an IP, say)
+    act = Action("discover", "Scan host", "RECON & IDENTITY",
+                 params=(Param("ip", "Host IP", "free_text", flag="--ip", free_text=True),))
+    d = Deck(arsenal.groups(), _state())
+    d.action = act
+    d.screen = "action"
+    pz = next(z for z in d.view().zones if z.kind == "param" and z.value == "ip")
+    d.tap(pz.x0 + 2, pz.y0 + 2)
+    assert d.screen == "keyboard"
+    def press(label):
+        z = next(zz for zz in d.view().zones if zz.label == label)
+        d.tap(z.x0 + 2, z.y0 + 2)
+    for ch in "10":
+        press(ch)
+    # shift then a letter comes out uppercase, then auto-unshifts
+    press("⇧"); press("A")
+    assert d.kbd_buffer == "10A"
+    press("⌫")
+    assert d.kbd_buffer == "10"
+    done = next(z for z in d.view().zones if z.kind == "kdone")
+    d.tap(done.x0 + 2, done.y0 + 2)
+    assert d.screen == "action" and d.chosen["ip"] == "10"
+    assert d.command() == "redux discover --ip 10"
+
+
+def test_keyboard_symbol_toggle():
+    from redux.display.deck_actions import Action, Param
+    d = Deck(arsenal.groups(), _state())
+    d.action = Action("x", "x", "g", params=(Param("f", "F", "free_text", free_text=True),))
+    d._open_keyboard("f")
+    assert any(z.label == "#+=" for z in d.view().zones)
+    sym = next(z for z in d.view().zones if z.kind == "ksym")
+    d.tap(sym.x0 + 2, sym.y0 + 2)
+    assert d.kbd_sym and any(z.label == "ABC" for z in d.view().zones)
+    assert any(z.kind == "key" and z.value == "@" for z in d.view().zones)
+
+
 def test_back_and_home_navigation():
     d = Deck(arsenal.groups(), _state())
     d.category, d.screen = "LOOT & PIVOT", "category"

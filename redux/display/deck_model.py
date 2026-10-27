@@ -112,6 +112,10 @@ class Deck:
         self.last_run: str = ""             # the command the last RUN/confirm emitted
         self.device: Optional[Dict[str, object]] = None   # identify → detail context
         self._action_from = "category"      # where the current action screen was entered from
+        self.kbd_param = ""                 # on-screen keyboard: param being typed
+        self.kbd_buffer = ""
+        self.kbd_shift = False
+        self.kbd_sym = False
 
     # ---- command assembly ---------------------------------------------------- #
     def command(self, action: Optional[Action] = None) -> str:
@@ -191,6 +195,8 @@ class Deck:
             return self._view_confirm()
         if self.screen == "detail":
             return self._view_detail()
+        if self.screen == "keyboard":
+            return self._view_keyboard()
         return self._view_menu()
 
     def _header(self, title: str, *, back: bool) -> List[Zone]:
@@ -241,6 +247,46 @@ class Deck:
         if self.offset + LIST_ROWS < total:
             z.append(Zone(W - 44, FOOTER_Y - 44, W, FOOTER_Y, "scroll", "down", "▼", "nav"))
         return z
+
+    # --- on-screen keyboard (free-text fallback) ------------------------------ #
+    _KB_LETTERS = ("qwertyuiop", "asdfghjkl", "zxcvbnm")
+    _KB_SYMBOLS = ("@#$%&*-+=", "_()[]{}/\\", ":;\"'!?.,")
+
+    def _open_keyboard(self, param: str) -> None:
+        cur = self.chosen.get(param, "")
+        self.kbd_param = param
+        self.kbd_buffer = cur if isinstance(cur, str) else ""
+        self.kbd_shift, self.kbd_sym = False, False
+        self.screen = "keyboard"
+
+    def _view_keyboard(self) -> View:
+        zones: List[Zone] = [Zone(0, 0, 64, HEADER_H, "back", "", "‹ back", "nav"),
+                             Zone(W - 64, 0, W, HEADER_H, "home", "", "home", "nav")]
+        label = next((p.label for p in (self.action.params if self.action else ())
+                      if p.name == self.kbd_param), self.kbd_param)
+        spans = [Span(70, 8, f"Type: {label}"[:28], "title"),
+                 Span(14, HEADER_H + 8, (self.kbd_buffer or "_") + "▏", "value")]
+        rows = ("1234567890",) + (self._KB_SYMBOLS if self.kbd_sym else self._KB_LETTERS)
+        y = CONTENT_TOP + 30
+        for r, keys in enumerate(rows):
+            disp = keys.upper() if (self.kbd_shift and not self.kbd_sym and r > 0) else keys
+            n = len(disp)
+            span = (W - 16) / n
+            for i, ch in enumerate(disp):
+                x0 = int(8 + i * span)
+                x1 = int(8 + (i + 1) * span) - 3
+                zones.append(Zone(x0, y, x1, y + 42, "key", ch, ch, "kbkey"))
+            y += 46
+        # control row: shift/ABC · #+= · space · ⌫ · DONE
+        cy0, cy1 = y, y + 44
+        zones.append(Zone(8, cy0, 70, cy1, "kshift", "",
+                          "⇧" + ("•" if self.kbd_shift else ""), "kbctl"))
+        zones.append(Zone(74, cy0, 140, cy1, "ksym", "",
+                          "ABC" if self.kbd_sym else "#+=", "kbctl"))
+        zones.append(Zone(144, cy0, 300, cy1, "kspace", " ", "space", "kbkey"))
+        zones.append(Zone(304, cy0, 366, cy1, "kback", "", "⌫", "kbctl"))
+        zones.append(Zone(370, cy0, W - 8, cy1, "kdone", "", "DONE", "run"))
+        return View("keyboard", "keyboard", tuple(zones), tuple(spans))
 
     def show_device(self, device: Dict[str, object]) -> None:
         """Enter the identify→detail screen for a device the recon pipeline saw."""
@@ -468,12 +514,14 @@ class Deck:
             if p is None:
                 return None
             if p.is_free_text and not candidates_for(p.source, self.state, self.chosen):
-                return ("keyboard", p.name)
+                self._open_keyboard(p.name)
+                return None
             self.picker_param, self.offset, self.screen = p, 0, "picker"
             return None
         if z.kind == "pick":
             if z.value == "__keyboard__":
-                return ("keyboard", self.picker_param.name if self.picker_param else "")
+                self._open_keyboard(self.picker_param.name if self.picker_param else "")
+                return None
             p = self.picker_param
             if p is not None and p.multi:
                 cur = self.chosen.get(p.name)
@@ -508,6 +556,22 @@ class Deck:
         if z.kind == "playbook":
             self._launch_from_via(z.value)
             return None
+        if z.kind == "key":
+            self.kbd_buffer += z.value
+            self.kbd_shift = False              # auto-unshift after a character
+            return None
+        if z.kind == "kshift":
+            self.kbd_shift = not self.kbd_shift
+            return None
+        if z.kind == "ksym":
+            self.kbd_sym = not self.kbd_sym
+            return None
+        if z.kind == "kback":
+            self.kbd_buffer = self.kbd_buffer[:-1]
+            return None
+        if z.kind == "kdone":
+            self.set_text(self.kbd_param, self.kbd_buffer)
+            return None
         if z.kind == "run":
             if not z.value:                       # not ready — required pick missing
                 return None
@@ -537,6 +601,8 @@ class Deck:
             self.screen, self.offset = "action", 0
         elif self.screen == "confirm":
             self.screen = "action"
+        elif self.screen == "keyboard":
+            self.screen = "action"          # cancel typing, keep prior value
         elif self.screen == "detail":
             self._reset()
         elif self.screen == "category":

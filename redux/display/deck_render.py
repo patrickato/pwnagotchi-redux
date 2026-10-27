@@ -139,6 +139,12 @@ def _draw_zone(draw, z: Zone):
         col = edge if z.value or z.kind != "run" else MUT
         _center(draw, box, z.label, _font(15, bold=True), col)
         return
+    if z.style in ("kbkey", "kbctl"):
+        _panel(draw, box, radius=6, fill=PANEL if z.style == "kbkey" else PANEL2,
+               outline=STROKE, width=1)
+        _center(draw, box, z.label, _font(16 if z.style == "kbkey" else 13, bold=True),
+                INK if z.style == "kbkey" else CY2)
+        return
     if z.style == "nav":
         _center(draw, box, z.label, _font(12, bold=True), SUBTLE)
         return
