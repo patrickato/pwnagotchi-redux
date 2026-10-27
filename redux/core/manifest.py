@@ -139,6 +139,14 @@ FEATURES: Tuple[Feature, ...] = (
             toolbox="nmap", guidance="netrecon",
             note="real nmap + hydra runners; needs access to a network in Scope",
             related=("net.responder", "wifi.crack")),
+    Feature("net.default_creds", "Device default-credential pack",
+            "well-known factory default creds keyed by device type (router/camera/"
+            "printer/...) — identify/discover names a device, this feeds its defaults "
+            "into the scope-gated pivot.",
+            "net", implemented=True,
+            note="a published default-cred dictionary (like a wordlist); firing + "
+                 "gating are the pivot's. Pure lookup.",
+            related=("net.device_id", "net.recon", "net.credreuse")),
     Feature("net.credreuse", "Credential-reuse graph",
             "spray recovered credentials across discovered hosts and map the blast "
             "radius — which password unlocks what, which host is most exposed.",

@@ -3258,6 +3258,11 @@ def cmd_discover(args) -> int:
         print(f"  {r['ip']:15} {(r['hostname'] or ''):26} {label}")
         for a in idy.get("actions", [])[:2]:
             print(f"      - {a['do']} ({a['via']})")
+        if idy.get("category") in ("router", "camera", "printer", "doorbell", "iot", "thermostat"):
+            from .netrecon.default_creds import creds_for_identity
+            dc = creds_for_identity(idy, include_common=False)[:3]
+            if dc:
+                print("      defaults to try: " + ", ".join(f"{u}/{p or '∅'}" for u, p in dc))
     return 0
 
 
@@ -3810,6 +3815,13 @@ def cmd_loot(args) -> int:
         scope = Scope.load(args.scope_file or _DEFAULT_SCOPE_PATH)
         usernames = args.user or ["admin", "root"]
         passwords = list(args.pw or []) + vault.psk_list()
+        if getattr(args, "defaults", False):
+            from .netrecon.default_creds import creds_for, users_and_passwords
+            du, dp = users_and_passwords(creds_for(category=getattr(args, "device_category", "") or ""))
+            usernames = list(dict.fromkeys(usernames + du))
+            passwords = list(dict.fromkeys(passwords + dp))
+            print(f"  folding in {len(du)}+ device default creds"
+                  + (f" for category '{args.device_category}'" if getattr(args, "device_category", "") else ""))
         res = pivot(scope, authorized=args.authorized, subnet=args.subnet,
                     usernames=usernames, passwords=passwords, vault=vault)
         if not res.executed:
@@ -3880,6 +3892,18 @@ def cmd_loot(args) -> int:
             print(f"  secrets: {sec['summary']['note']}")
             for f in sec["findings"][:12]:
                 print(f"    [{f['confidence']:6}] {f['rule']:22} {f['value']}  ({f['source']})")
+        return 0
+    if cmd == "defaults":
+        from .netrecon.default_creds import creds_for
+        pairs = creds_for(category=getattr(args, "category", "") or "",
+                          vendor=getattr(args, "vendor", "") or "",
+                          include_common=not getattr(args, "no_common", False))
+        who = args.category or args.vendor or "any device"
+        print(f"default creds to try for {who} ({len(pairs)} pair(s), most-likely first):")
+        for u, p in pairs:
+            print(f"  {u or '(blank)'} : {p or '(blank)'}")
+        print("  → feed into a run with: redux loot pivot --defaults"
+              + (f" --device-category {args.category}" if args.category else ""))
         return 0
     if cmd == "report":
         from .loot.rollup import rollup
@@ -5898,6 +5922,12 @@ def build_parser() -> argparse.ArgumentParser:
     lp.add_argument("--pw", action="append", help="extra password to try (vaulted PSKs are included automatically)")
     lp.add_argument("--authorized", action="store_true", help="FIELD only: actually fire (targets must be armed in scope)")
     lp.add_argument("--scope-file", default=None, help="scope store (default: the device scope)")
+    lp.add_argument("--defaults", action="store_true", help="fold in well-known device default creds")
+    lp.add_argument("--device-category", default=None, help="with --defaults: focus on a category (router/camera/printer/...)")
+    ld = losub.add_parser("defaults", help="well-known default creds for a device type (feeds `loot pivot --defaults`)")
+    ld.add_argument("--category", default=None, help="device category (router/camera/printer/iot/...)")
+    ld.add_argument("--vendor", default=None, help="vendor (tp-link/hikvision/ubiquiti/...)")
+    ld.add_argument("--no-common", action="store_true", help="only the device-specific set, not the generic common one")
     lr = losub.add_parser("reuse", help="credential-reuse graph: one password's blast radius across discovered hosts")
     lr.add_argument("--subnet", default=None, help="CIDR to scan + spray vault creds across")
     lr.add_argument("--demo", action="store_true", help="synthetic reuse graph (no network)")
