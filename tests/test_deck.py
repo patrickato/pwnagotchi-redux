@@ -188,6 +188,33 @@ def test_multi_select_captures_toggle_and_emit():
     assert "--capture cap-A.pcapng" in cmd and "--capture cap-C.pcapng" in cmd
 
 
+def test_identify_detail_playbook_chains_into_an_action():
+    d = Deck(arsenal.groups(), _state())
+    d.show_device({
+        "product": "Ring", "category": "doorbell", "vendor": "Amazon", "confidence": "high",
+        "actions": [
+            {"do": "default-cred check", "via": "redux loot pivot --defaults --device-category doorbell"},
+            {"do": "capture + crack its Wi-Fi", "via": "redux pmkid sweep"},
+        ],
+    })
+    assert d.screen == "detail"
+    rows = [z for z in d.view().zones if z.kind == "playbook"]
+    assert len(rows) == 2 and rows[0].label == "default-cred check"
+    # tap the default-cred row → lands on loot pivot, device-category pre-filled
+    d.tap(rows[0].x0 + 2, rows[0].y0 + 2)
+    assert d.screen == "action" and d.action.id == "loot pivot"
+    assert d.chosen.get("category") == "doorbell"
+    # and it's power-tier, so RUN still routes through confirm
+    run = next(z for z in d.view().zones if z.kind == "run")
+    d.tap(run.x0 + 2, run.y0 + 2)
+    assert d.screen == "confirm"
+    # back from the action returns to the device detail, not the menu
+    d.screen = "action"
+    back = next(z for z in d.view().zones if z.kind == "back")
+    d.tap(back.x0 + 2, back.y0 + 2)
+    assert d.screen == "detail"
+
+
 def test_cascading_fields_appear_with_the_attack():
     d = Deck(arsenal.groups(), _state())
     d.action = DA.ACTIONS["crack run"]

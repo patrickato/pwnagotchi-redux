@@ -110,6 +110,8 @@ class Deck:
         self.picker_param: Optional[Param] = None
         self.offset = 0                     # scroll offset for the current list
         self.last_run: str = ""             # the command the last RUN/confirm emitted
+        self.device: Optional[Dict[str, object]] = None   # identify → detail context
+        self._action_from = "category"      # where the current action screen was entered from
 
     # ---- command assembly ---------------------------------------------------- #
     def command(self, action: Optional[Action] = None) -> str:
@@ -187,6 +189,8 @@ class Deck:
             return self._view_picker()
         if self.screen == "confirm":
             return self._view_confirm()
+        if self.screen == "detail":
+            return self._view_detail()
         return self._view_menu()
 
     def _header(self, title: str, *, back: bool) -> List[Zone]:
@@ -237,6 +241,54 @@ class Deck:
         if self.offset + LIST_ROWS < total:
             z.append(Zone(W - 44, FOOTER_Y - 44, W, FOOTER_Y, "scroll", "down", "▼", "nav"))
         return z
+
+    def show_device(self, device: Dict[str, object]) -> None:
+        """Enter the identify→detail screen for a device the recon pipeline saw."""
+        self.device = device
+        self.screen, self.offset = "detail", 0
+
+    def _view_detail(self) -> View:
+        """What a device IS + a playbook of what you can do to it, each tappable to
+        set up (chains recon → action: your A + B → C)."""
+        dv = self.device or {}
+        product = str(dv.get("product", "device"))
+        zones: List[Zone] = list(self._header(product, back=True))
+        spans = [Span(70, 8, f"{product}  ·  {dv.get('category', '?')}"[:26], "title"),
+                 Span(10, HEADER_H + 3,
+                      f"{dv.get('vendor', '')} · {dv.get('confidence', '')} confidence"[:58],
+                      "muted"),
+                 Span(10, HEADER_H + 18, "WHAT YOU CAN DO — tap to set up", "accent")]
+        acts = (dv.get("actions") or [])[:5]
+        y = CONTENT_TOP + 32
+        for a in acts:
+            via = str(a.get("via", ""))
+            zones.append(Zone(8, y, W - 8, y + (ROW_H - 6), "playbook", via,
+                              str(a.get("do", ""))[:48], "row", via.replace("redux ", "")))
+            y += ROW_H - 2
+        return View("detail", product, tuple(zones), tuple(spans))
+
+    def _launch_from_via(self, via: str) -> None:
+        """Resolve a playbook 'via' command into a deck action, pre-filled from the
+        device, and open its action screen so you can tweak then RUN."""
+        cmd = via.replace("redux ", "").strip()
+        base: Optional[Action] = None
+        for aid in sorted(deck_actions.ACTIONS, key=len, reverse=True):
+            if cmd == aid or cmd.startswith(aid + " "):
+                base = deck_actions.ACTIONS[aid]
+                break
+        if base is None:
+            toks = cmd.split()
+            twoword = len(toks) > 1 and not toks[1].startswith("-")
+            base = Action(id=(" ".join(toks[:2]) if twoword else toks[:1][0] if toks else cmd),
+                          title=cmd[:20], group="")
+        self.action = base
+        self.chosen = {p.name: p.default for p in base.params if p.default}
+        cat = (self.device or {}).get("category")
+        if cat:
+            for p in base.params:
+                if p.name == "category" or "device-category" in p.flag:
+                    self.chosen[p.name] = str(cat)
+        self.screen, self.offset, self._action_from = "action", 0, "detail"
 
     def _view_toggle(self) -> View:
         """A big two/few-state switch (FIELD/LAB, on/off) — one tap flips it."""
@@ -409,7 +461,7 @@ class Deck:
             entry_title = z.label.replace("  ⚡", "")
             self.action = self._resolve(z.value, self.category or "", entry_title)
             self.chosen = {p.name: p.default for p in self.action.params if p.default}
-            self.offset, self.screen = 0, "action"
+            self.offset, self.screen, self._action_from = 0, "action", "category"
             return None
         if z.kind == "param":
             p = next((q for q in self.action.params if q.name == z.value), None)
@@ -453,6 +505,9 @@ class Deck:
                 lst.remove(z.value) if z.value in lst else lst.append(z.value)
                 self.chosen[pname] = lst
             return None
+        if z.kind == "playbook":
+            self._launch_from_via(z.value)
+            return None
         if z.kind == "run":
             if not z.value:                       # not ready — required pick missing
                 return None
@@ -473,12 +528,17 @@ class Deck:
         self.offset = max(0, self.offset + (1 if direction == "down" else -1))
 
     def _back(self) -> None:
-        if self.screen in ("action",):
-            self.screen, self.offset = "category", 0
+        if self.screen == "action":
+            if self._action_from == "detail" and self.device:
+                self.screen, self.offset = "detail", 0
+            else:
+                self.screen, self.offset = "category", 0
         elif self.screen == "picker":
             self.screen, self.offset = "action", 0
         elif self.screen == "confirm":
             self.screen = "action"
+        elif self.screen == "detail":
+            self._reset()
         elif self.screen == "category":
             self._reset()
         else:
