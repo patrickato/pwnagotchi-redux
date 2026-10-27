@@ -111,25 +111,28 @@ def test_lab_never_auto_approves_a_public_range(tmp_path):
 
 def _ns(**kw):
     base = dict(vault=None, loot_cmd=None, psk=None, bssid=None, ssid=None, source="manual",
-                reveal=False, json=False, subnet=None, user=None, pw=None, authorized=False,
+                reveal=False, mask=False, json=False, subnet=None, user=None, pw=None, authorized=False,
                 scope_file=None)
     base.update(kw)
     return SimpleNamespace(**base)
 
 
-def test_cmd_loot_add_list_redacts(tmp_path, capsys, monkeypatch):
+def test_cmd_loot_add_list_shows_full_cleartext(tmp_path, capsys, monkeypatch):
     from redux.cli import cmd_loot
     monkeypatch.setenv("REDUX_AUTHLOG", str(tmp_path / "a.jsonl"))
     vp = str(tmp_path / "v.json")
     assert cmd_loot(_ns(vault=vp, loot_cmd="add", psk="hunter2hunter2",
                         bssid="aa:bb:cc:dd:ee:ff", ssid="HomeNet", source="crack")) == 0
     capsys.readouterr()
+    # default: open-text, nothing held back
     assert cmd_loot(_ns(vault=vp, loot_cmd="list")) == 0
     out = capsys.readouterr().out
     assert "HomeNet" in out or "aa:bb:cc:dd:ee:ff" in out
-    assert "hunter2hunter2" not in out and "redacted" in out
-    assert cmd_loot(_ns(vault=vp, loot_cmd="list", reveal=True)) == 0
-    assert "hunter2hunter2" in capsys.readouterr().out
+    assert "hunter2hunter2" in out and "masked" not in out
+    # --mask is the opt-in, for a shareable screenshot
+    assert cmd_loot(_ns(vault=vp, loot_cmd="list", mask=True)) == 0
+    masked = capsys.readouterr().out
+    assert "hunter2hunter2" not in masked and "masked" in masked
 
 
 def test_cmd_loot_pivot_field_plans(tmp_path, capsys):

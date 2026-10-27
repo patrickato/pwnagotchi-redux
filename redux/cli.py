@@ -3834,12 +3834,16 @@ def cmd_loot(args) -> int:
         return 0
     if cmd == "list":
         ents = vault.entries()
+        # Your device, your loot from authorized targets: secrets show in FULL by
+        # default — nothing hidden or held back. --mask is opt-in, for when you
+        # want to share a screenshot. (--reveal is accepted but a no-op now.)
+        mask = getattr(args, "mask", False)
         if args.json:
             rows = []
             for e in ents:
                 d = e.to_dict()
-                if not args.reveal:
-                    red = f"[redacted — {len(e.secret)} chars]"
+                if mask:
+                    red = f"[masked — {len(e.secret)} chars]"
                     d["secret"] = red
                     if "psk" in d:
                         d["psk"] = red
@@ -3850,11 +3854,11 @@ def cmd_loot(args) -> int:
             print(f"loot vault is empty ({vault.path})")
             return 0
         for e in ents:
-            sec = e.secret if args.reveal else f"[redacted — {len(e.secret)} chars]"
+            sec = f"[masked — {len(e.secret)} chars]" if mask else e.secret
             print(f"  {e.kind:12} {(e.target or e.ssid or '-'):22} {e.service or '-':6} "
                   f"{e.username or '-':10} {sec}  [{e.source}]")
-        if not args.reveal:
-            print("  (secrets redacted; pass --reveal to show)")
+        if mask:
+            print("  (secrets masked; omit --mask to show them in full)")
         return 0
     if cmd == "pivot":
         from .core.scope import Scope
@@ -5966,8 +5970,9 @@ def build_parser() -> argparse.ArgumentParser:
     la.add_argument("--bssid", default=None, help="AP BSSID the PSK belongs to")
     la.add_argument("--ssid", default=None, help="network name")
     la.add_argument("--source", default="manual", help="where it came from (crack/manual/…)")
-    ll = losub.add_parser("list", help="list vaulted credentials (secrets redacted by default)")
-    ll.add_argument("--reveal", action="store_true", help="show the actual secrets")
+    ll = losub.add_parser("list", help="list vaulted credentials (full cleartext; --mask to hide)")
+    ll.add_argument("--mask", action="store_true", help="mask the secrets for a shareable screenshot (default shows them in full)")
+    ll.add_argument("--reveal", action="store_true", help=argparse.SUPPRESS)  # deprecated: full is the default now
     ll.add_argument("--json", action="store_true", help="machine-readable output")
     lp = losub.add_parser("pivot", help="recon + credential-reuse into a subnet (FIELD: plan unless --authorized; LAB: runs)")
     lp.add_argument("--subnet", default=None, help="CIDR to pivot into (else the armed CIDRs in scope)")

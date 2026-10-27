@@ -1,14 +1,14 @@
-"""Typed secrets scanner — turn looted files into a ranked, redacted secrets report.
+"""Typed secrets scanner — turn looted files into a ranked secrets report.
 
 Triage flags "secret-looking strings"; this says WHAT each one is. A pack of typed
 detectors classifies every hit — AWS keys, GitHub/Slack/Stripe tokens, Google API
 keys, private keys, JWTs, credentialed DB URIs, bearer tokens, password
-assignments — with a confidence and, crucially, a REDACTION. The report shows
-enough to recognize a secret and where it came from, never the secret itself, so
-it's shareable the way the authlog is (glass-box, not a password dump).
+assignments — with a confidence. This is your loot off authorized targets, so the
+report shows every value in FULL cleartext by default — nothing held back. A mask
+(`redact=True`) is opt-in, for when YOU want a screenshot you can share.
 
 A + B ⇒ C: A (files pulled by file-loot #89) + B (this pack) ⇒ C (a typed,
-ranked, redacted inventory of the credentials sitting in the loot). Pure and
+ranked, full-cleartext inventory of the credentials sitting in the loot). Pure and
 deterministic — regex over text, no network, verified with fixtures.
 """
 from __future__ import annotations

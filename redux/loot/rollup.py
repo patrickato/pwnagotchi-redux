@@ -3,8 +3,8 @@
 The loot is scattered: recovered credentials in the vault, files pulled off hosts,
 NetNTLM hashes from Responder, typed secrets inside those files. After an op you
 want the single answer, not five commands. This aggregates them into one glass-box
-summary (counts + the typed-secrets breakdown), redacted and shareable like the
-rest of the loot surface.
+summary (counts + the typed-secrets breakdown), full cleartext like the rest of
+the loot surface — your loot off authorized targets, nothing held back.
 
 A + B + ... ⇒ C: every loot source ⇒ one rollup the engagement case file and the
 dashboards can show. Pure/deterministic over injected paths; fail-safe (a missing

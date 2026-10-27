@@ -104,11 +104,11 @@ FEATURES: Tuple[Feature, ...] = (
             "wifi", implemented=True, binaries=("hashcat", "hcxpcapngtool"),
             toolbox="hashcat", guidance="crack", related=("wifi.capture", "wifi.pmkid", "net.recon")),
     Feature("loot.secrets", "Typed secrets scanner",
-            "classify + redact credentials in looted files — AWS/GitHub/Slack/Stripe "
-            "keys, Google API keys, private keys, JWTs, DB URIs, password assignments.",
+            "classify credentials in looted files — AWS/GitHub/Slack/Stripe keys, "
+            "Google API keys, private keys, JWTs, DB URIs, password assignments.",
             "net", implemented=True,
-            note="pure (regex over text, verified with fixtures); redacted output is "
-                 "shareable like the authlog, never a password dump",
+            note="pure (regex over text, verified with fixtures); shows values in full "
+                 "cleartext by default (your authorized loot) — masking is opt-in",
             related=("net.recon", "wifi.crack")),
     Feature("wifi.pmkid", "Passive PMKID sweep",
             "zero-transmit loot: harvest PMKIDs APs volunteer, correlate to scope + "
