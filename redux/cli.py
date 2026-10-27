@@ -3220,6 +3220,47 @@ def cmd_engagement(args) -> int:
     return 2
 
 
+def cmd_discover(args) -> int:
+    """LAN service discovery → a labeled inventory of what everything IS. Gathers
+    mDNS/DNS-SD + SSDP/UPnP announcements on the joined LAN, identifies each host,
+    and maps the subnet ("Chromecast @ .50, printer @ .52") with each one's surface.
+    Active (it queries the LAN): LAB runs it, FIELD needs --authorized."""
+    from .netrecon.discovery import LanDiscovery
+    disc = LanDiscovery()
+    if getattr(args, "demo", False):
+        avahi = "\n".join([
+            "=;eth0;IPv4;Living Room;_googlecast._tcp;local;Living-Room.local;192.168.1.50;8009;id=abc",
+            "=;eth0;IPv4;Kitchen Echo;_amzn-alexa._tcp;local;echo-kitchen.local;192.168.1.51;443;",
+            "=;eth0;IPv4;Office HP;_ipp._tcp;local;HP-LaserJet.local;192.168.1.52;631;ty=HP LaserJet",
+        ])
+        ssdp = ("HTTP/1.1 200 OK\r\nLOCATION: http://192.168.1.53:1400/x.xml\r\n"
+                "SERVER: Linux UPnP/1.0 Sonos/1\r\nST: urn:schemas-upnp-org:device:ZonePlayer:1\r\n\r\n")
+        inv, reason = disc.discover(avahi_raw=avahi, ssdp_raw=ssdp, lab=True)
+        print("redux discover — SYNTHETIC LAN (no network)")
+    else:
+        scope = None if getattr(args, "lab", False) else Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)
+        inv, reason = disc.discover(scope=scope, authorized=getattr(args, "authorized", False),
+                                    lab=getattr(args, "lab", False))
+    if inv is None:
+        print(f"discover — {reason}")
+        print("  plan:")
+        for c in disc.plan():
+            print("    $ " + c)
+        return 0
+    if getattr(args, "json", False):
+        print(json.dumps(inv, indent=2))
+        return 0
+    print(f"LAN inventory — {inv['note']}")
+    for r in inv["hosts"]:
+        idy = r["identity"]
+        label = (f"{idy['product']} [{idy['category']}]" if idy["category"] != "unknown"
+                 else (idy["vendor"] or "unidentified"))
+        print(f"  {r['ip']:15} {(r['hostname'] or ''):26} {label}")
+        for a in idy.get("actions", [])[:2]:
+            print(f"      - {a['do']} ({a['via']})")
+    return 0
+
+
 def cmd_gatt(args) -> int:
     """BLE GATT looting — connect to a BLE device, enumerate its GATT tree, read
     the device-info it gives up (manufacturer, model, serial, firmware, battery),
@@ -5744,6 +5785,13 @@ def build_parser() -> argparse.ArgumentParser:
     ds.add_argument("--demo", action="store_true", help="synthetic target (no radio)")
     ds.add_argument("--json", action="store_true", help="machine-readable output")
     ds.set_defaults(func=cmd_dossier)
+    dv = sub.add_parser("discover", help="LAN service discovery → labeled inventory (what each host IS + its surface)")
+    dv.add_argument("--demo", action="store_true", help="synthetic LAN (no network)")
+    dv.add_argument("--authorized", action="store_true", help="FIELD: actually query (LAN must be armed)")
+    dv.add_argument("--lab", action="store_true", help="LAB: run unleashed")
+    dv.add_argument("--scope-file", default=None, help="scope store (FIELD gate)")
+    dv.add_argument("--json", action="store_true", help="machine-readable output")
+    dv.set_defaults(func=cmd_discover)
     gt = sub.add_parser("gatt", help="BLE GATT looting — enumerate + read a BLE device's GATT (device-info, battery, vendor services)")
     gt.add_argument("mac", nargs="?", default="", help="target BLE MAC")
     gt.add_argument("--demo", action="store_true", help="synthetic BLE device (no radio)")

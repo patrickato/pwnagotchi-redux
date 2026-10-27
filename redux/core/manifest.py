@@ -248,6 +248,13 @@ FEATURES: Tuple[Feature, ...] = (
             note="pure (composes crackability + captured-list + PMKID state); feeds "
                  "capture planning and autopilot priority",
             related=("wifi.pmkid", "wifi.capture", "wifi.crack")),
+    Feature("net.discovery", "LAN service discovery + inventory",
+            "gather mDNS/DNS-SD + SSDP/UPnP announcements on the joined LAN, identify "
+            "every host, and map the subnet — what each thing IS and its surface.",
+            "net", implemented=True, binaries=("avahi-browse",), toolbox="avahi",
+            note="parsers + labeling are pure (verified with fixtures); live query is "
+                 "active + scope-gated and needs network access",
+            related=("net.device_id", "net.recon", "wifi.dossier")),
     Feature("net.device_id", "Device identification",
             "name what a device IS from its signals (OUI vendor, hostname, BLE "
             "name/company, mDNS) — Roomba, Echo, Chromecast, phone, camera, printer "
