@@ -80,6 +80,35 @@ def test_page_has_access_points_panel():
     assert "renderAPs" in html and "aptbl" in html and "access_points" in html
 
 
+def test_status_payload_surfaces_recovered_loot_open_text(tmp_path, monkeypatch):
+    # The dashboard shows recovered creds OPEN-TEXT (operator's own authorized loot,
+    # token-gated surface) — nothing masked, same as `redux loot list`.
+    from redux.loot.vault import LootVault, LootEntry
+    vp = tmp_path / "loot" / "vault.json"
+    vp.parent.mkdir(parents=True)
+    (vp.parent / "netntlm").mkdir()
+    (vp.parent / "netntlm" / "grab.ntlm").write_text("user::DOM:...\n")
+    monkeypatch.setenv("REDUX_LOOT", str(vp))
+    v = LootVault(str(vp))
+    v.add(LootEntry(kind="wifi-psk", target="aa:bb:cc:dd:ee:ff", secret="Summ3r2024!",
+                    ssid="HomeNet", source="crack"))
+    v.add(LootEntry(kind="service-cred", target="10.0.0.5", secret="admin123",
+                    service="smb", username="admin", source="pivot"))
+    bc = Augur([ONBOARD], intent=Intent.HUNT)
+    loot = status_payload(bc)["loot"]
+    assert loot["count"] == 2 and loot["netntlm"] == 1
+    secrets = {c.get("secret") for c in loot["credentials"]}
+    assert "Summ3r2024!" in secrets and "admin123" in secrets   # full cleartext
+    assert all("*" not in (c.get("secret") or "") for c in loot["credentials"])
+
+
+def test_page_has_recovered_creds_panel():
+    html = render_page()
+    assert 'id="opscreds"' in html and 'id="credcount"' in html
+    # renderOps builds cred rows via textContent (XSS-safe) + tap-to-copy
+    assert "opscreds" in html and "navigator.clipboard" in html
+
+
 def test_doctor_health_panel_uses_real_status_not_demo_values():
     html = render_page()
     assert 'aria-label="Device Doctor"' in html

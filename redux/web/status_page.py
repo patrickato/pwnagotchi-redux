@@ -91,6 +91,23 @@ def status_payload(augur, *, processing_report=None) -> Dict:
         data["engagement"] = _es.summary(_act.id) if _act else None
     except Exception:
         data["engagement"] = None
+    # recovered loot — the creds this box has cracked/pivoted, shown OPEN-TEXT (your
+    # loot off authorized targets; the dashboard is already token-gated). Cheap: one
+    # JSON read + a dir count. Same vault `redux loot list` prints, nothing held back.
+    try:
+        import os as _os
+        from ..loot.vault import LootVault, default_loot_path
+        _vp = default_loot_path()
+        creds = [e.to_dict() for e in LootVault(_vp).entries()]
+        creds.sort(key=lambda d: d.get("ts") or 0, reverse=True)   # newest first
+        netntlm = 0
+        _nn = _os.path.join(_os.path.dirname(_vp), "netntlm")
+        if _os.path.isdir(_nn):
+            netntlm = sum(1 for f in _os.listdir(_nn)
+                          if f.endswith((".txt", ".ntlm", ".hash", ".hashes")))
+        data["loot"] = {"credentials": creds, "count": len(creds), "netntlm": netntlm}
+    except Exception:
+        data["loot"] = {"credentials": [], "count": 0, "netntlm": 0}
     return data
 
 
@@ -115,6 +132,15 @@ main{max-width:900px;margin:0 auto;padding:16px;display:grid;gap:13px}
 .arsenal .ae{display:flex;flex-wrap:wrap;gap:8px;padding:2px 0;border-top:1px solid var(--line)}
 .arsenal .ae code{color:var(--wifi);white-space:nowrap}
 .arsenal .ae span{color:var(--mut);flex:1 1 180px}
+.loot{display:grid;gap:7px;margin-top:8px}
+.loot .lr{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line)}
+.loot .lr:first-child{border-top:0}
+.loot .lk{color:var(--ble);font-size:10px;text-transform:uppercase;letter-spacing:.5px;flex:0 0 auto}
+.loot .lt{color:var(--mut);font-size:12px;flex:1 1 140px;min-width:0;overflow-wrap:anywhere}
+.loot .lu{color:var(--dim);font-size:12px}
+.loot .ls{color:var(--acc);font-weight:600;background:#0c1a18;border:1px solid #1c3a34;border-radius:5px;padding:1px 7px;overflow-wrap:anywhere;cursor:pointer}
+.loot .lsrc{color:var(--dim);font-size:10px}
+.loot .nn{color:var(--warn);font-size:11px;margin-top:4px}
 .row{display:flex;flex-wrap:wrap;gap:12px}.kv{flex:1 1 120px}
 .k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
 .v{font-size:17px;margin-top:2px}.creature{font-size:19px;color:var(--acc)}
@@ -302,6 +328,10 @@ body[data-skin="plain"] .hero::before{display:none}
  </section>
  <section class="card" data-page="ops" hidden aria-label="Passive loot">
   <div class="k">passive loot · zero-transmit PMKID harvest</div><div id="opsloot" aria-live="polite">no passive sweep recorded</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Recovered credentials">
+  <div class="k">recovered loot · credentials in the clear <span id="credcount" class="badge"></span></div>
+  <div id="opscreds" class="loot" aria-live="polite">no credentials recovered yet</div>
  </section>
  <section class="card" data-page="ops" hidden aria-label="Capability readiness">
   <div class="k">capabilities · readiness (what the box can do, how ready)</div><div id="opscaps" aria-live="polite">capability map unavailable</div>
@@ -797,6 +827,29 @@ function renderOps(d){
     +(b['tool-missing']||0)+' need a tool · '+(b.planned||0)+' planned'
     +(cap.summary?(' — '+cap.summary):'');
   } else { ce.textContent='capability map unavailable'; } }
+ // recovered credentials — OPEN-TEXT (your authorized loot). Built from DOM nodes
+ // with textContent so a hostile SSID/secret can't inject markup; tap a secret to copy.
+ var loot=d.loot||{}, lc=loot.credentials||[], ce2=document.getElementById('opscreds');
+ var cbadge=document.getElementById('credcount');
+ if(cbadge){ cbadge.textContent = loot.count ? (loot.count+' cred'+(loot.count==1?'':'s')) : ''; }
+ if(ce2){ ce2.textContent='';
+  if(!lc.length){ ce2.textContent='no credentials recovered yet'; }
+  else { lc.forEach(function(c){
+    var row=document.createElement('div'); row.className='lr';
+    function add(cls,txt){ if(txt==null||txt===''){return;} var s=document.createElement('span'); s.className=cls; s.textContent=txt; row.appendChild(s); }
+    add('lk', c.kind||'cred');
+    add('lt', c.ssid||c.target||c.service||'—');
+    if(c.username){ add('lu', c.username+' @'); }
+    var sec=document.createElement('span'); sec.className='ls'; sec.textContent=(c.secret||c.psk||''); sec.title='tap to copy';
+    sec.onclick=function(){ try{navigator.clipboard.writeText(sec.textContent);}catch(e){} };
+    row.appendChild(sec);
+    add('lsrc', c.source?('['+c.source+']'):'');
+    ce2.appendChild(row);
+   });
+   if(loot.netntlm){ var nn=document.createElement('div'); nn.className='nn';
+     nn.textContent='+ '+loot.netntlm+' NetNTLM hash file(s) in loot/netntlm → crack queue'; ce2.appendChild(nn); }
+  }
+ }
 }
 function paint(d){
  renderSystem(d);
