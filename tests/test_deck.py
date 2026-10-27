@@ -188,6 +188,40 @@ def test_multi_select_captures_toggle_and_emit():
     assert "--capture cap-A.pcapng" in cmd and "--capture cap-C.pcapng" in cmd
 
 
+def test_cascading_fields_appear_with_the_attack():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["crack run"]
+    d.screen = "action"
+    fields = lambda: {z.value for z in d.view().zones if z.kind == "param"}
+    # auto (attack unset == 0 wordlist): wordlist+rules shown, no mask
+    assert "wordlist" in fields() and "rules" in fields() and "mask" not in fields()
+    # switch to a mask attack → wordlist/rules vanish, mask appears
+    d.chosen["attack"] = "3=3 · mask"
+    assert "mask" in fields() and "wordlist" not in fields() and "rules" not in fields()
+    # hybrid shows both
+    d.chosen["attack"] = "6=6 · wordlist+mask"
+    assert {"wordlist", "mask"} <= fields()
+
+
+def test_hidden_field_is_not_emitted():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["crack run"]
+    d.chosen = {"attack": "3=3 · mask", "wordlist": "rockyou", "mask": "?d?d?d?d?d?d?d?d=8 digits"}
+    cmd = d.command()
+    assert "--mask ?d?d?d?d?d?d?d?d" in cmd and "--wordlist" not in cmd   # wordlist hidden → dropped
+
+
+def test_file_list_filters_by_hash_mode():
+    from redux.display.deck_actions import candidates_for
+    st = DeckState(captures=("HomeLab.pcapng", "net.22000", "dump.hash", "creds.txt"))
+    # WPA mode → only Wi-Fi capture families
+    wpa = candidates_for("captures", st, {"type": "22000=22000 · WPA-PBKDF2"})
+    assert set(wpa) == {"HomeLab.pcapng", "net.22000"}
+    # md5 mode → only raw-hash files, never a .pcapng
+    md5 = candidates_for("captures", st, {"type": "0=0 · MD5"})
+    assert set(md5) == {"dump.hash", "creds.txt"}
+
+
 def test_toggle_layout_switches_in_one_tap():
     d = Deck(arsenal.groups(), DeckState(mode_lab=False))
     d.action = DA.ACTIONS["mode"]

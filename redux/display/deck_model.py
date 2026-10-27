@@ -117,7 +117,7 @@ class Deck:
         if a is None:
             return ""
         parts = ["redux", *a.id.split()]
-        for p in a.params:
+        for p in a.visible_params(self.chosen):     # hidden-by-context fields never emit
             val = self.chosen.get(p.name)
             if not val:
                 continue
@@ -243,7 +243,7 @@ class Deck:
         a = self.action
         assert a is not None
         p = next((q for q in a.params if q.name == a.toggle_param), a.params[0])
-        opts = candidates_for(p.source, self.state)
+        opts = candidates_for(p.source, self.state, self.chosen)
         zones: List[Zone] = list(self._header(a.title, back=True))
         spans = [Span(70, 8, a.title[:24], "title"),
                  Span(10, HEADER_H + 2, a.note[:60], "muted")]
@@ -305,7 +305,7 @@ class Deck:
                       "✎ MODIFIED" if modified else "⟳ AUTO",
                       "warn" if modified else "accent")]
         y = CONTENT_TOP + 16
-        for p in a.params:
+        for p in a.visible_params(self.chosen):     # cascading: only valid fields show
             zones.append(Zone(8, y, W - 8, y + PARAM_ROW - 3, "param", p.name,
                               p.label, "pick", self._field_display(p)))
             y += PARAM_ROW
@@ -332,7 +332,7 @@ class Deck:
     def _view_picker(self) -> View:
         p = self.picker_param
         assert p is not None
-        opts = candidates_for(p.source, self.state)
+        opts = candidates_for(p.source, self.state, self.chosen)
         zones: List[Zone] = list(self._header(p.label, back=True))
         title = ("Select " if p.multi else "Pick ") + p.label
         spans = [Span(70, 8, title[:26], "title")]
@@ -415,7 +415,7 @@ class Deck:
             p = next((q for q in self.action.params if q.name == z.value), None)
             if p is None:
                 return None
-            if p.is_free_text and not candidates_for(p.source, self.state):
+            if p.is_free_text and not candidates_for(p.source, self.state, self.chosen):
                 return ("keyboard", p.name)
             self.picker_param, self.offset, self.screen = p, 0, "picker"
             return None

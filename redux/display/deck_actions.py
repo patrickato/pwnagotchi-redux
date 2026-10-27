@@ -55,13 +55,33 @@ def choice_label(choice: str) -> str:
 
 _STATIC_PREFIX = "static:"
 
+# Which capture family a hashcat mode (-m) expects, so a crack session only ever
+# offers the *right* files: WPA modes never list a raw-hash file and vice-versa.
+_WPA_EXT = (".pcapng", ".pcap", ".cap", ".22000", ".hc22000", ".hccapx")
+_MODE_FAMILY = {
+    "22000": "wpa", "16800": "wpa", "2500": "wpa", "2501": "wpa",   # Wi-Fi
+    "0": "hash", "100": "hash", "1000": "hash", "1800": "hash",     # md5/sha1/ntlm/sha512crypt
+    "3200": "hash", "1700": "hash", "500": "hash",
+}
 
-def candidates_for(source: str, state: DeckState) -> List[str]:
-    """Resolve a param's candidate list from its source key + live state."""
+
+def _capture_family(name: str) -> str:
+    return "wpa" if name.lower().endswith(_WPA_EXT) else "hash"
+
+
+def candidates_for(source: str, state: DeckState,
+                   chosen: "Optional[Dict[str, object]]" = None) -> List[str]:
+    """Resolve a param's candidate list from its source + live state, filtered by
+    earlier picks (`chosen`) so only valid options ever appear for the context."""
+    chosen = chosen or {}
     if source.startswith(_STATIC_PREFIX):
         return [s for s in source[len(_STATIC_PREFIX):].split("|") if s]
-    values = getattr(state, source, ()) or ()
-    # de-dupe, keep order, bound the list so a popup never runs off the screen
+    values = list(getattr(state, source, ()) or ())
+    # cascading filter: capture files must match the chosen hash mode's family
+    if source == "captures" and chosen.get("type"):
+        fam = _MODE_FAMILY.get(choice_value(str(chosen["type"])))
+        if fam:
+            values = [v for v in values if _capture_family(str(v)) == fam]
     seen: Dict[str, None] = {}
     for v in values:
         if isinstance(v, str) and v and v not in seen:
@@ -82,10 +102,20 @@ class Param:
     free_text: bool = False   # no pick-list → on-screen keyboard fallback
     multi: bool = False       # choose all that apply (e.g. which capture files)
     auto: str = ""            # what the auto-pipeline would use, shown when unset
+    # cascading control: only show this field when an earlier pick allows it, e.g.
+    # mask only for mask attacks. "" in the allowed set means "also when unset (auto)".
+    visible_when: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
 
     @property
     def is_free_text(self) -> bool:
         return self.free_text or self.source == "free_text"
+
+    def visible(self, chosen: Dict[str, object]) -> bool:
+        for key, allowed in self.visible_when:
+            v = choice_value(str(chosen.get(key, "") or ""))
+            if v not in allowed:
+                return False
+        return True
 
 
 @dataclass(frozen=True)
@@ -110,9 +140,15 @@ class Action:
     layout: str = "form"       # form | toggle | targets — picks the action screen shape
     toggle_param: str = ""     # for layout=toggle: the param whose choices are the switch
 
-    def ready(self, chosen: Dict[str, str]) -> bool:
-        """True when every required param has a value chosen."""
-        return all((not p.required) or chosen.get(p.name) for p in self.params)
+    def visible_params(self, chosen: Dict[str, object]) -> Tuple[Param, ...]:
+        """The fields to show given earlier picks — cascading options. A field hidden
+        by the current context is neither shown nor emitted."""
+        return tuple(p for p in self.params if p.visible(chosen))
+
+    def ready(self, chosen: Dict[str, object]) -> bool:
+        """True when every *visible* required param has a value chosen."""
+        return all((not p.required) or chosen.get(p.name)
+                   for p in self.visible_params(chosen))
 
 
 # The catalog. Only actions that take choices need an entry; everything else in
@@ -149,12 +185,21 @@ _CATALOG: Tuple[Action, ...] = (
                Param("attack", "Attack (-a)",
                      "static:0=0 · wordlist|3=3 · mask|6=6 · wordlist+mask|7=7 · mask+wordlist",
                      flag="--attack", required=False, auto="0 · wordlist"),
+               # wordlist/rules only make sense for wordlist attacks; mask only for
+               # mask attacks — the field appears/vanishes with the attack you pick.
                Param("wordlist", "Wordlist", "wordlists", flag="--wordlist",
-                     required=False, auto="selected"),
+                     required=False, auto="selected",
+                     visible_when=(("attack", ("", "0", "6", "7")),)),
                Param("rules", "Rules", "rules", flag="--rules",
-                     required=False, auto="none"),
+                     required=False, auto="none",
+                     visible_when=(("attack", ("", "0", "6", "7")),)),
+               Param("mask", "Mask",
+                     "static:?d?d?d?d?d?d?d?d=8 digits|?l?l?l?l?l?l?l?l=8 lowercase|"
+                     "?a?a?a?a?a?a?a?a=8 any|?d?d?d?d?d?d?d?d?d?d=10 digits",
+                     flag="--mask", required=False, auto="(pick a mask)",
+                     visible_when=(("attack", ("3", "6", "7")),)),
            ),
-           note="hashcat — every field auto-fills like the pipeline; override any"),
+           note="hashcat — fields cascade: each pick narrows what's valid next"),
     Action("wps", "WPS / Pixie", "CAPTURE & CRACK",
            params=(Param("target", "Target AP", "scope_targets"),),
            power_tier=True, note="active WPS attack against an armed AP"),
