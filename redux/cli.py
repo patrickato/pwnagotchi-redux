@@ -4598,6 +4598,25 @@ def _resolve_attack(value):
     return None
 
 
+def _resolve_wordlist_or_seed(wordlist_dir, *, name=None):
+    """Resolve the wordlist for a crack; if the store is empty (e.g. the live
+    daemon hasn't run yet on a fresh box), seed the baked starter on the spot so a
+    crack is never blocked for lack of a wordlist, then resolve again. Returns
+    (path, reason) exactly like resolve_wordlist."""
+    from .crack.wordlists import resolve_wordlist, WordlistStore
+    path, reason = resolve_wordlist(wordlist_dir, name=name)
+    if path is None and name is None:
+        try:
+            if not WordlistStore(wordlist_dir).list():
+                from pathlib import Path as _P
+                from .core.provision import provision as _provision
+                _provision(str(_P(wordlist_dir).parent))
+                path, reason = resolve_wordlist(wordlist_dir, name=name)
+        except Exception:
+            pass
+    return path, reason
+
+
 def cmd_crack(args) -> int:
     """Guided, any-hash cracking front-end (not just Wi-Fi): browse hash types,
     identify a sample, plan the exact hashcat command, and run it (gated by
@@ -4657,8 +4676,7 @@ def cmd_crack(args) -> int:
             return 3
         wl_path = getattr(args, "wordlist_path", None)
         if wl_path is None:
-            from .crack.wordlists import resolve_wordlist
-            wl_path, wl_reason = resolve_wordlist(args.wordlist_dir, name=getattr(args, "wordlist", None))
+            wl_path, wl_reason = _resolve_wordlist_or_seed(args.wordlist_dir, name=getattr(args, "wordlist", None))
             if wl_path is None:
                 print(f"no wordlist: {wl_reason}")
                 return 3
@@ -4702,8 +4720,7 @@ def cmd_crack(args) -> int:
     # resolve a wordlist from the store (by name, or the persisted pick) unless a direct path was given
     wl_path = getattr(args, "wordlist_path", None)
     if wl_path is None and (atk in (None, 0, 1, 6, 7)):
-        from .crack.wordlists import resolve_wordlist
-        wl_path, wl_reason = resolve_wordlist(args.wordlist_dir, name=getattr(args, "wordlist", None))
+        wl_path, wl_reason = _resolve_wordlist_or_seed(args.wordlist_dir, name=getattr(args, "wordlist", None))
         if wl_path is None and cmd == "plan":
             print(f"note: {wl_reason}")
     outfile = getattr(args, "outfile", None)
