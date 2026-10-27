@@ -72,7 +72,7 @@ def test_native_loop_reconnects_same_controller_and_requires_new_contact(monkeyp
     writes = []
     def write(*_):
         writes.append(pages[-1])
-        if pages[-1] == 'trends':
+        if pages[-1] == 'radios':
             raise RuntimeError('navigation recovered')
     monkeypatch.setattr(fbui, 'write_frame', write)
     monkeypatch.setattr(fbui.select, 'select', lambda fds, *a: (fds, [], []))
@@ -86,5 +86,5 @@ def test_native_loop_reconnects_same_controller_and_requires_new_contact(monkeyp
         fbui.main(['--framebuffer', '/dev/fb1', '--run', '--touch-device', '/dev/input/event4',
                     '--calibration-file', '/tmp/synthetic-calibration', '--confirm-touch-calibration'])
     assert opened == [123, 456] and closed == [123, 456]
-    assert writes == ['overview', 'trends']
-    assert pages == ['overview', 'overview', 'overview', 'trends']
+    assert writes == ['overview', 'radios']
+    assert pages == ['overview', 'overview', 'overview', 'radios']

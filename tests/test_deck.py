@@ -1,0 +1,383 @@
+"""Control-deck interaction model — drill-down nav, pick-lists, power-tier confirm.
+Pure logic, no framebuffer, no hardware."""
+from redux.core import arsenal
+from redux.display import deck_actions as DA
+from redux.display.deck_actions import DeckState, candidates_for
+from redux.display.deck_model import Deck, hit
+
+
+def _state():
+    return DeckState(
+        scope_targets=("aa:bb:cc:dd:ee:ff", "HomeLab"),
+        subnets=("10.0.0.0/24",),
+        wordlists=("starter", "rockyou"),
+        device_categories=("router", "camera", "doorbell"),
+        hosts=("10.0.0.5",),
+        mode_lab=True,
+    )
+
+
+# --- catalog integrity ------------------------------------------------------- #
+def test_every_catalog_action_is_a_real_arsenal_command():
+    real = {e.command for e in arsenal.all_entries()}
+    for a in DA.ACTIONS.values():
+        assert a.id in real, f"deck action {a.id!r} is not an arsenal command"
+
+
+def test_every_param_source_resolves():
+    st = _state()
+    for a in DA.ACTIONS.values():
+        for p in a.params:
+            if p.source.startswith("static:"):
+                assert candidates_for(p.source, st)          # non-empty inline list
+            elif p.source == "free_text":
+                assert p.is_free_text
+            else:
+                assert hasattr(st, p.source), f"{a.id}:{p.name} bad source {p.source}"
+
+
+def test_static_and_live_candidates():
+    st = _state()
+    assert candidates_for("static:lab|field|status", st) == ["lab", "field", "status"]
+    assert candidates_for("wordlists", st) == ["starter", "rockyou"]
+    assert candidates_for("subnets", DeckState()) == []        # honest empty on fresh box
+
+
+# --- navigation -------------------------------------------------------------- #
+def test_menu_lists_every_arsenal_group_as_a_tile():
+    d = Deck(arsenal.groups(), _state())
+    v = d.view()
+    tiles = [z for z in v.zones if z.kind == "category"]
+    assert len(tiles) == min(8, len(arsenal.groups()))
+    # tiles are big finger targets
+    for z in tiles:
+        assert (z.x1 - z.x0) >= 200 and (z.y1 - z.y0) >= 50
+
+
+def test_drill_into_category_then_action():
+    d = Deck(arsenal.groups(), _state())
+    cap = next(z for z in d.view().zones if z.kind == "category"
+               and z.value == "CAPTURE & CRACK")
+    d.tap(cap.x0 + 5, cap.y0 + 5)
+    assert d.screen == "category" and d.category == "CAPTURE & CRACK"
+    row = next(z for z in d.view().zones if z.kind == "action" and z.value == "crack run")
+    d.tap(row.x0 + 5, row.y0 + 5)
+    assert d.screen == "action" and d.action.id == "crack run"
+
+
+# --- pick-lists fill the blanks (no typing) ---------------------------------- #
+def test_param_pick_fills_the_command():
+    d = Deck(arsenal.groups(), _state())
+    d.category = "CAPTURE & CRACK"
+    d.screen = "category"
+    row = next(z for z in d.view().zones if z.value == "crack run")
+    d.tap(row.x0 + 2, row.y0 + 2)                     # → action screen
+    pz = next(z for z in d.view().zones if z.kind == "param" and z.value == "wordlist")
+    d.tap(pz.x0 + 2, pz.y0 + 2)                       # → picker
+    assert d.screen == "picker"
+    opt = next(z for z in d.view().zones if z.kind == "pick" and z.value == "rockyou")
+    d.tap(opt.x0 + 2, opt.y0 + 2)                     # pick it
+    assert d.screen == "action" and d.chosen["wordlist"] == "rockyou"
+    assert d.command() == "redux crack run --wordlist rockyou"
+
+
+def test_positional_vs_flag_assembly():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["identify"]
+    d.chosen = {"target": "HomeLab"}
+    assert d.command() == "redux identify HomeLab"         # positional
+    d.action = DA.ACTIONS["loot pivot"]
+    d.chosen = {"subnet": "10.0.0.0/24", "category": "camera"}
+    assert d.command() == "redux loot pivot --subnet 10.0.0.0/24 --device-category camera"
+
+
+# --- power-tier always confirms before running ------------------------------- #
+def test_power_tier_routes_through_confirm():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["loot pivot"]
+    d.screen = "action"
+    d.chosen = {"subnet": "10.0.0.0/24"}
+    run = next(z for z in d.view().zones if z.kind == "run")
+    assert d.tap(run.x0 + 2, run.y0 + 2) is None          # no run yet
+    assert d.screen == "confirm"
+    conf = next(z for z in d.view().zones if z.kind == "confirm")
+    intent = d.tap(conf.x0 + 2, conf.y0 + 2)
+    assert intent == ("confirm", "redux loot pivot --subnet 10.0.0.0/24")
+
+
+def test_safe_action_runs_without_confirm():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["survey"]
+    d.screen = "action"
+    run = next(z for z in d.view().zones if z.kind == "run")
+    assert d.tap(run.x0 + 2, run.y0 + 2) == ("run", "redux survey")
+
+
+def test_cancel_from_confirm_returns_to_action():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["wps"]
+    d.screen = "confirm"
+    cancel = next(z for z in d.view().zones if z.kind == "cancel")
+    d.tap(cancel.x0 + 2, cancel.y0 + 2)
+    assert d.screen == "action"
+
+
+def test_lab_only_adds_lab_flag_when_not_in_lab():
+    d = Deck(arsenal.groups(), DeckState(scope_targets=("HomeLab",), mode_lab=False))
+    d.action = DA.ACTIONS["campaign unleashed"]
+    assert d.command().endswith("--lab")
+
+
+def test_auto_until_overridden_then_modified():
+    d = Deck(arsenal.groups(), _state())
+    cr = next(z for z in d.view().zones if z.kind == "category" and z.value == "CAPTURE & CRACK")
+    d.tap(cr.x0 + 2, cr.y0 + 2)
+    row = next(z for z in d.view().zones if z.value == "crack run")
+    d.tap(row.x0 + 2, row.y0 + 2)
+    assert d.screen == "action" and not d.is_modified()      # pure auto out of the gate
+    assert d.command() == "redux crack run"                  # auto: engine decides, no flags forced
+    v = d.view()
+    assert any(s.text == "⟳ AUTO" for s in v.spans)
+    run = next(z for z in v.zones if z.kind == "run")
+    assert run.label == "RUN (auto)"
+
+
+def test_override_a_field_shows_modified_and_emits_it():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["crack run"]
+    d.screen = "action"
+    # pick an attack mode (value=label candidate) → command uses the VALUE, UI the label
+    ap = next(z for z in d.view().zones if z.kind == "param" and z.value == "attack")
+    d.tap(ap.x0 + 2, ap.y0 + 2)
+    opt = next(z for z in d.view().zones if z.kind == "pick" and z.value.startswith("3="))
+    d.tap(opt.x0 + 2, opt.y0 + 2)
+    assert d.is_modified()
+    assert "--attack 3" in d.command()
+    v = d.view()
+    assert any(s.text == "✎ MODIFIED" for s in v.spans)
+    assert any(z.kind == "reset" for z in v.zones)           # reset-to-auto appears
+
+
+def test_reset_returns_to_auto():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["crack run"]
+    d.screen = "action"
+    d.chosen = {"attack": "3=3 · mask"}
+    rz = next(z for z in d.view().zones if z.kind == "reset")
+    d.tap(rz.x0 + 2, rz.y0 + 2)
+    assert not d.is_modified() and d.command() == "redux crack run"
+
+
+def test_multi_select_captures_toggle_and_emit():
+    d = Deck(arsenal.groups(), DeckState(captures=("cap-A.pcapng", "cap-B.pcapng", "cap-C.pcapng")))
+    d.action = DA.ACTIONS["crack run"]
+    d.screen = "action"
+    cap = next(z for z in d.view().zones if z.kind == "param" and z.value == "captures")
+    d.tap(cap.x0 + 2, cap.y0 + 2)
+    assert d.screen == "picker"
+    # toggle two files on
+    for name in ("cap-A.pcapng", "cap-C.pcapng"):
+        z = next(zz for zz in d.view().zones if zz.kind == "pick" and zz.value == name)
+        d.tap(z.x0 + 2, z.y0 + 2)
+        assert d.screen == "picker"                          # multi-select stays put
+    assert set(d.chosen["captures"]) == {"cap-A.pcapng", "cap-C.pcapng"}
+    done = next(z for z in d.view().zones if z.kind == "pickdone")
+    d.tap(done.x0 + 2, done.y0 + 2)
+    assert d.screen == "action"
+    cmd = d.command()
+    assert "--capture cap-A.pcapng" in cmd and "--capture cap-C.pcapng" in cmd
+
+
+def test_identify_detail_playbook_chains_into_an_action():
+    d = Deck(arsenal.groups(), _state())
+    d.show_device({
+        "product": "Ring", "category": "doorbell", "vendor": "Amazon", "confidence": "high",
+        "actions": [
+            {"do": "default-cred check", "via": "redux loot pivot --defaults --device-category doorbell"},
+            {"do": "capture + crack its Wi-Fi", "via": "redux pmkid sweep"},
+        ],
+    })
+    assert d.screen == "detail"
+    rows = [z for z in d.view().zones if z.kind == "playbook"]
+    assert len(rows) == 2 and rows[0].label == "default-cred check"
+    # tap the default-cred row → lands on loot pivot, device-category pre-filled
+    d.tap(rows[0].x0 + 2, rows[0].y0 + 2)
+    assert d.screen == "action" and d.action.id == "loot pivot"
+    assert d.chosen.get("category") == "doorbell"
+    # and it's power-tier, so RUN still routes through confirm
+    run = next(z for z in d.view().zones if z.kind == "run")
+    d.tap(run.x0 + 2, run.y0 + 2)
+    assert d.screen == "confirm"
+    # back from the action returns to the device detail, not the menu
+    d.screen = "action"
+    back = next(z for z in d.view().zones if z.kind == "back")
+    d.tap(back.x0 + 2, back.y0 + 2)
+    assert d.screen == "detail"
+
+
+def test_cascading_fields_appear_with_the_attack():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["crack run"]
+    d.screen = "action"
+    fields = lambda: {z.value for z in d.view().zones if z.kind == "param"}
+    # auto (attack unset == 0 wordlist): wordlist+rules shown, no mask
+    assert "wordlist" in fields() and "rules" in fields() and "mask" not in fields()
+    # switch to a mask attack → wordlist/rules vanish, mask appears
+    d.chosen["attack"] = "3=3 · mask"
+    assert "mask" in fields() and "wordlist" not in fields() and "rules" not in fields()
+    # hybrid shows both
+    d.chosen["attack"] = "6=6 · wordlist+mask"
+    assert {"wordlist", "mask"} <= fields()
+
+
+def test_hidden_field_is_not_emitted():
+    d = Deck(arsenal.groups(), _state())
+    d.action = DA.ACTIONS["crack run"]
+    d.chosen = {"attack": "3=3 · mask", "wordlist": "rockyou", "mask": "?d?d?d?d?d?d?d?d=8 digits"}
+    cmd = d.command()
+    assert "--mask ?d?d?d?d?d?d?d?d" in cmd and "--wordlist" not in cmd   # wordlist hidden → dropped
+
+
+def test_file_list_filters_by_hash_mode():
+    from redux.display.deck_actions import candidates_for
+    st = DeckState(captures=("HomeLab.pcapng", "net.22000", "dump.hash", "creds.txt"))
+    # WPA mode → only Wi-Fi capture families
+    wpa = candidates_for("captures", st, {"type": "22000=22000 · WPA-PBKDF2"})
+    assert set(wpa) == {"HomeLab.pcapng", "net.22000"}
+    # md5 mode → only raw-hash files, never a .pcapng
+    md5 = candidates_for("captures", st, {"type": "0=0 · MD5"})
+    assert set(md5) == {"dump.hash", "creds.txt"}
+
+
+def test_run_enters_running_screen_and_streams_output():
+    lines_src = ["converting captures…", "hashcat -m 22000 …", "recovered: HomeNet:hunter2hunter2"]
+
+    def fake_runner(cmd, on_line, on_done):
+        for ln in lines_src:
+            on_line(ln)
+        on_done()
+
+    d = Deck(arsenal.groups(), _state())
+    d.runner = fake_runner
+    d.action = DA.ACTIONS["survey"]            # safe action, no confirm
+    d.screen = "action"
+    run = next(z for z in d.view().zones if z.kind == "run")
+    intent = d.tap(run.x0 + 2, run.y0 + 2)
+    assert intent == ("run", "redux survey")
+    assert d.screen == "running" and d.run_done
+    v = d.view()
+    assert any("recovered: HomeNet" in s.text for s in v.spans)
+    # when done, a BACK control returns to the action
+    back = next(z for z in v.zones if z.kind == "runback")
+    d.tap(back.x0 + 2, back.y0 + 2)
+    assert d.screen == "action"
+
+
+def test_power_tier_confirm_then_runs():
+    ran = {}
+
+    def fake_runner(cmd, on_line, on_done):
+        ran["cmd"] = cmd
+        on_line("armed"); on_done()
+
+    d = Deck(arsenal.groups(), _state())
+    d.runner = fake_runner
+    d.action = DA.ACTIONS["loot pivot"]
+    d.screen = "action"
+    d.chosen = {"subnet": "10.0.0.0/24"}
+    run = next(z for z in d.view().zones if z.kind == "run")
+    assert d.tap(run.x0 + 2, run.y0 + 2) is None and d.screen == "confirm"   # confirm first
+    conf = next(z for z in d.view().zones if z.kind == "confirm")
+    d.tap(conf.x0 + 2, conf.y0 + 2)
+    assert ran["cmd"] == "redux loot pivot --subnet 10.0.0.0/24"             # only runs after confirm
+    assert d.screen == "running"
+
+
+def test_toggle_layout_switches_in_one_tap():
+    d = Deck(arsenal.groups(), DeckState(mode_lab=False))
+    d.action = DA.ACTIONS["mode"]
+    d.screen = "action"
+    v = d.view()
+    assert v.screen == "action"
+    toggles = [z for z in v.zones if z.kind == "toggle"]
+    assert len(toggles) == 2 and all((z.y1 - z.y0) >= 80 for z in toggles)   # big switches
+    lab = next(z for z in toggles if z.value.startswith("lab"))
+    assert d.tap(lab.x0 + 2, lab.y0 + 2) == ("run", "redux mode lab")
+
+
+def test_targets_layout_multiselect_and_arm():
+    from redux.display.deck_actions import Target
+    st = DeckState(mode_lab=True, targets=(
+        Target("NETGEAR-5G", signal=80, security="WPA2", crackable=True, value="high"),
+        Target("xfinitywifi", signal=40, security="OPEN", crackable=False, value="low"),
+        Target("HomeLab", signal=95, security="WPA2", crackable=True, value="high"),
+    ))
+    d = Deck(arsenal.groups(), st)
+    d.action = DA.ACTIONS["campaign unleashed"]
+    d.screen = "action"
+    v = d.view()
+    trows = [z for z in v.zones if z.kind == "target"]
+    assert len(trows) == 3 and trows[0].sig == 80          # signal carried to the row
+    # arm is disabled until something is ticked
+    run = next(z for z in v.zones if z.kind == "run")
+    assert not run.value
+    for name in ("NETGEAR-5G", "HomeLab"):
+        z = next(zz for zz in d.view().zones if zz.kind == "target" and zz.value == name)
+        d.tap(z.x0 + 2, z.y0 + 2)
+    assert set(d.chosen["target"]) == {"NETGEAR-5G", "HomeLab"}
+    # now ARM & RUN is live and (power-tier) routes through confirm
+    run = next(z for z in d.view().zones if z.kind == "run")
+    assert run.value == "campaign unleashed"
+    assert d.tap(run.x0 + 2, run.y0 + 2) is None and d.screen == "confirm"
+
+
+def test_onscreen_keyboard_types_into_a_free_text_field():
+    from redux.display.deck_actions import Action, Param
+    # a scratch action with a genuine free-text param (an IP, say)
+    act = Action("discover", "Scan host", "RECON & IDENTITY",
+                 params=(Param("ip", "Host IP", "free_text", flag="--ip", free_text=True),))
+    d = Deck(arsenal.groups(), _state())
+    d.action = act
+    d.screen = "action"
+    pz = next(z for z in d.view().zones if z.kind == "param" and z.value == "ip")
+    d.tap(pz.x0 + 2, pz.y0 + 2)
+    assert d.screen == "keyboard"
+    def press(label):
+        z = next(zz for zz in d.view().zones if zz.label == label)
+        d.tap(z.x0 + 2, z.y0 + 2)
+    for ch in "10":
+        press(ch)
+    # shift then a letter comes out uppercase, then auto-unshifts
+    press("⇧"); press("A")
+    assert d.kbd_buffer == "10A"
+    press("⌫")
+    assert d.kbd_buffer == "10"
+    done = next(z for z in d.view().zones if z.kind == "kdone")
+    d.tap(done.x0 + 2, done.y0 + 2)
+    assert d.screen == "action" and d.chosen["ip"] == "10"
+    assert d.command() == "redux discover --ip 10"
+
+
+def test_keyboard_symbol_toggle():
+    from redux.display.deck_actions import Action, Param
+    d = Deck(arsenal.groups(), _state())
+    d.action = Action("x", "x", "g", params=(Param("f", "F", "free_text", free_text=True),))
+    d._open_keyboard("f")
+    assert any(z.label == "#+=" for z in d.view().zones)
+    sym = next(z for z in d.view().zones if z.kind == "ksym")
+    d.tap(sym.x0 + 2, sym.y0 + 2)
+    assert d.kbd_sym and any(z.label == "ABC" for z in d.view().zones)
+    assert any(z.kind == "key" and z.value == "@" for z in d.view().zones)
+
+
+def test_back_and_home_navigation():
+    d = Deck(arsenal.groups(), _state())
+    d.category, d.screen = "LOOT & PIVOT", "category"
+    d.action = DA.ACTIONS["loot pivot"]
+    d.screen = "action"
+    back = next(z for z in d.view().zones if z.kind == "back")
+    d.tap(back.x0 + 2, back.y0 + 2)
+    assert d.screen == "category"
+    home = next(z for z in d.view().zones if z.kind == "home")
+    d.tap(home.x0 + 2, home.y0 + 2)
+    assert d.screen == "menu"

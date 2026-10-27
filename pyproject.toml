@@ -32,6 +32,11 @@ crypto = ["cryptography>=42"]
 [tool.setuptools.packages.find]
 include = ["redux*"]
 
+[tool.setuptools.package-data]
+# ship the baked starter wordlist (and any future data) so a pip install, not just
+# the image's tree-copy, carries it — crack needs a wordlist on day one.
+redux = ["data/*.txt"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

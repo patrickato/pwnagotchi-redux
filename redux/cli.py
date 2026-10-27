@@ -542,6 +542,34 @@ def cmd_dex(args) -> int:
     """Print the Field Dex — the recon ledger over recorded sightings."""
     from .dex import build_dex, link_store
     from .geo import SightingStore
+    if getattr(args, "dna", False):
+        # Device DNA (#85): behavioral re-id past MAC randomization. Extends the
+        # exact-match reid above to a SIMILARITY match, catching devices that
+        # rotated MAC AND sent no PNL. Live traces come from the raw-frame tap;
+        # --demo proves the linker over synthetic behavior.
+        from .dex import DnaLinker, BehaviorTrace
+        link = DnaLinker()
+        if getattr(args, "demo", False):
+            common = dict(timestamps=(0.0, 10.0, 20.0, 30.0), rates=(1, 2, 5, 11),
+                          channels=(1, 6, 11), ie_hash="cafebabe")
+            link.add(BehaviorTrace("a2:11:11:11:11:11", **common))
+            link.add(BehaviorTrace("de:22:22:22:22:22", **common))   # same device, new MAC
+            link.add(BehaviorTrace("ff:00:00:00:00:99", rates=(6, 9, 12, 54),
+                                   channels=(36,), ie_hash="0ther", timestamps=(0.0, 60.0)))
+            print("redux dex --dna — SYNTHETIC behavioral traces (no radio)")
+        else:
+            print("redux dex --dna — live behavioral DNA needs the raw-frame tap feeding "
+                  "traces (timing/rates/IE); run with --demo to see the linker.")
+            return 0
+        s = link.summary()
+        print(f"Device DNA: {s['macs_seen']} MAC(s) → {s['devices']} device(s) · "
+              f"{s['reidentified']} re-identified by behavior")
+        for d in link.identities():
+            if d.reidentified:
+                print(f"  [DEVICE conf={d.confidence:.2f}] {len(d.macs)} MACs → one device "
+                      f"(matched on {', '.join(d.matched_on)}): {', '.join(sorted(d.macs))}")
+        print(f"  {s['note']}")
+        return 0
     store = SightingStore(args.store) if args.store else SightingStore()
     if getattr(args, "identities", False):
         linker = link_store(store)
@@ -574,7 +602,9 @@ def cmd_dex(args) -> int:
             print(f"  randomized MACs (privacy/phone): {s['randomized']}")
         print("  rarest:")
         for e in dex.rarest(limit=args.top):
-            print(f"    [{e.rarity.value:9}] {e.kind:4} {e.ssid or e.mac} — known {e.known_days:.0f}d")
+            dev = e.device_label
+            print(f"    [{e.rarity.value:9}] {e.kind:4} {e.mac}  {e.ssid or ''}"
+                  + (f"  · {dev}" if dev else "") + f"  — known {e.known_days:.0f}d")
         dep = dex.departed()
         if dep:
             print("  departed:")
@@ -822,6 +852,33 @@ def cmd_capabilities(args) -> int:
               f"{c['planned']} still planned")
         print(f"  {c['summary']}")
         return 0
+    if cmd == "qualified":
+        # The readiness spine: one truth layering manifest + hardware-present +
+        # benchpass attestation. Reads the real bench ledger if present.
+        from .core import readiness_spine as RS
+        passed = frozenset()
+        if getattr(args, "ledger", None):
+            try:
+                from .benchpass import Ledger
+                passed = RS.passed_gates_from_ledger(Ledger.load(args.ledger))
+            except Exception:
+                passed = frozenset()
+        comp = RS.spine_completion(passed_gates=passed)
+        if getattr(args, "json", False):
+            print(_json.dumps(comp, indent=2))
+            return 0
+        glyph = {"qualified": "★", "present": "✓", "needs-hardware": "◐",
+                 "tool-missing": "○", "planned": "·"}
+        print("Augur readiness spine — one truth (manifest + hardware-present + benchpass)\n")
+        for row in comp["rows"]:
+            g = glyph.get(row["rung"], " ")
+            print(f"  {g} [{row['rung']:14}] {row['feature']:16} {row['title']}")
+            if row["rung"] in ("present", "needs-hardware", "tool-missing"):
+                print(f"       └─ {row['reason']}")
+        print(f"\n  {comp['summary']}")
+        if not passed:
+            print("  (no bench ledger given — pass --ledger <file> to fold in hardware attestation)")
+        return 0
     return 2
 
 
@@ -856,6 +913,143 @@ def cmd_simulate(args) -> int:
     except KeyboardInterrupt:
         print("\nsimulator stopped")
     return 0
+
+
+def cmd_shadow(args) -> int:
+    """Blue-shadow: what a defender would see from each action. With no action it
+    lists every action's footprint (loudest first); with one it shows the detail +
+    a quieter way to the same goal. Learn evasion by seeing the footprint."""
+    import json as _json
+    from .frameworks.blueshadow import shadow, all_shadows
+    if getattr(args, "action", None):
+        s = shadow(args.action)
+        if getattr(args, "json", False):
+            print(_json.dumps(s, indent=2)); return 0
+        if not s.get("known"):
+            print(s["reason"]); return 3
+        print(f"{s['action']} — {s['label']}")
+        print(f"  footprint: {s['footprint']}")
+        print(f"  blue sees: {', '.join(s['seen_by']) if s['seen_by'] else 'nothing in the wireless suite'}")
+        print(f"  ATT&CK: {', '.join(s['attack'])}   D3FEND: {', '.join(s['defend'])}   PTES: {s['ptes_phase']}")
+        if s.get("stealthier"):
+            print(f"  quieter: {s['stealthier']['action']} — {s['stealthier']['why']}")
+        if s.get("note"):
+            print(f"  note: {s['note']}")
+        return 0
+    rows = all_shadows()
+    if getattr(args, "json", False):
+        print(_json.dumps(rows, indent=2)); return 0
+    print("what blue sees, per action (loudest first):")
+    for s in rows:
+        glyph = "🔊" if s["loud"] else "🔇"
+        seen = ", ".join(s["seen_by"]) if s["seen_by"] else "—"
+        alt = f"   → quieter: {s['stealthier']['action']}" if s.get("stealthier") else ""
+        print(f"  {glyph} {s['action']:18} seen by: {seen}{alt}")
+    return 0
+
+
+def cmd_hardware(args) -> int:
+    """What's plugged in, and what it unlocks. Enumerates USB devices, maps the
+    recognized ones to the capability they add (+ its live readiness), and flags
+    anything it doesn't recognize so an unknown dongle is never silently ignored."""
+    import json as _json
+    from .core.hwprofile import profile
+    entries = profile()
+    if getattr(args, "json", False):
+        print(_json.dumps([e.to_dict() for e in entries], indent=2))
+        return 0
+    if not entries:
+        print("no USB devices seen (or /sys unavailable here)")
+        return 0
+    known = [e for e in entries if e.known]
+    unknown = [e for e in entries if not e.known]
+    print("plugged in → what it unlocks:")
+    for e in known:
+        tag = f" [{e.state}]" if e.state else ""
+        print(f"  ✓ {e.usb_id:12} {e.device:38} → {e.feature}{tag}")
+    for e in unknown:
+        print(f"  ? {e.usb_id:12} {e.device:38} → unrecognized (may add a capability)")
+    print(f"\n  {len(known)} recognized, {len(unknown)} unknown. "
+          f"See `redux capabilities list` for what each unlocked feature needs.")
+    return 0
+
+
+def cmd_stealth(args) -> int:
+    """Stealth / OPSEC for Augur's OWN device. `mac` randomizes a radio's MAC so
+    the box doesn't present a stable fingerprint (vendor-plausible by default).
+    Dry by default (prints the new MAC + the exact commands); --apply executes."""
+    from .radio.macrand import MacRandomizer, random_mac, set_mac_commands
+    cmd = args.stealth_cmd
+    if cmd == "quiet":
+        from .core.stealth import QuietConfig
+        path = getattr(args, "file", None) or "/captures/live/stealth.json"
+        q = QuietConfig.load(path)
+        sub = args.quiet_cmd
+        if sub == "on":
+            q.enabled = True
+            if getattr(args, "budget", None) is not None:
+                q.frame_budget = max(0, args.budget)
+            q.save(path)
+            print(f"QUIET/GHOST mode ON — passive-first, frame budget {q.frame_budget}, "
+                  f"MAC randomize {'on' if q.randomize_mac else 'off'}; transmit needs confirm")
+            return 0
+        if sub == "off":
+            q.enabled = False
+            q.save(path)
+            print("QUIET/GHOST mode OFF — existing scope/power gates apply as normal")
+            return 0
+        # status
+        print(f"quiet: {'ON' if q.enabled else 'off'}  (prefer_passive={q.prefer_passive}, "
+              f"frame_budget={q.frame_budget}, randomize_mac={q.randomize_mac})")
+        return 0
+    if cmd == "mac":
+        if not getattr(args, "apply", False):
+            mac = random_mac(mode=args.mode)
+            print(f"would set {args.iface} -> {mac}  ({args.mode})")
+            for c in set_mac_commands(args.iface, mac):
+                print("  " + " ".join(c))
+            print("\n(re-run with --apply to change it on this device; needs root)")
+            return 0
+        res = MacRandomizer(mode=args.mode).randomize(args.iface)
+        print(res.reason)
+        return 0 if res.ok else 3
+    if cmd == "pace":
+        # Low-and-slow planner (#92): show WHEN a run of actions would fire to stay
+        # under the footprint cap, honouring Quiet mode. Glass-box, no radio.
+        from .core.lowslow import LowAndSlowScheduler, LowSlowConfig
+        from .core.stealth import QuietConfig
+        cfg = LowSlowConfig(window_seconds=args.window, max_weighted_per_window=args.cap,
+                            min_gap_seconds=args.min_gap, jitter_seconds=args.jitter)
+        sched = LowAndSlowScheduler(config=cfg, seed=args.seed)
+        quiet = None
+        if getattr(args, "quiet", False):
+            quiet = QuietConfig.load(getattr(args, "file", None) or "/captures/live/stealth.json")
+        print(f"low-and-slow plan — {args.count}x {args.kind}, cap {cfg.max_weighted_per_window}/"
+              f"{int(cfg.window_seconds)}s, gap {cfg.min_gap_seconds}+<={cfg.jitter_seconds}s jitter"
+              + (" [quiet ON]" if quiet and quiet.enabled else ""))
+        t, fired, guard = 0.0, 0, 0
+        last_reason = ""
+        while fired < args.count and guard < args.count * 2000 + 20:
+            guard += 1
+            d = sched.permit(t, kind=args.kind, quiet=quiet, confirmed=args.confirm)
+            if d.allowed:
+                sched.record(t, kind=args.kind)
+                fired += 1
+                mm, ss = divmod(int(t), 60)
+                print(f"  #{fired:<3} t+{mm:02d}:{ss:02d}  (window {sched.window_weight(t)}/{cfg.max_weighted_per_window})")
+                t = sched._next_allowed
+            else:
+                last_reason = d.reason
+                if d.reason.lower().startswith("quiet"):     # hard block — Quiet denies it
+                    break
+                t += max(0.5, d.wait_seconds)
+        if fired == 0:
+            print(f"  nothing scheduled — {last_reason}")
+            return 0
+        span = int(t)
+        print(f"  -> {fired} action(s) spread over {span // 60}m{span % 60:02d}s; {sched.status(t)['note']}")
+        return 0
+    return 2
 
 
 def cmd_notebook(args) -> int:
@@ -1415,8 +1609,8 @@ def cmd_campaign(args) -> int:
         def _ok(name):
             return lambda t: (True, f"{name} ok on {t}")
         execs = {Phase.CAPTURE: _ok("capture"), Phase.CRACK: _ok("crack"),
-                 Phase.PIVOT_SCAN: _ok("scan"), Phase.PIVOT_CRED: _ok("cred-test"),
-                 Phase.LOOT: _ok("loot")}
+                 Phase.JOIN: _ok("join"), Phase.PIVOT_SCAN: _ok("scan"),
+                 Phase.PIVOT_CRED: _ok("cred-test"), Phase.LOOT: _ok("loot")}
         prioritize = None
         if getattr(args, "adaptive", False):
             try:
@@ -1448,13 +1642,14 @@ def cmd_campaign(args) -> int:
                   f"{s.action:18} — {s.reason}")
         return 0
 
-    # demo: fake executors that succeed; capture engine assumed present
-    op = Operator(scope, offense_enabled=offense, caps={"capture.handshake": True})
+    # demo: fake executors that succeed; capture engine + uplink assumed present
+    op = Operator(scope, offense_enabled=offense,
+                  caps={"capture.handshake": True, "radio.wifi.uplink": True})
     def _ok(name):
         return lambda t: (True, f"{name} ok on {t}")
     execs = {Phase.CAPTURE: _ok("capture"), Phase.CRACK: _ok("crack"),
-             Phase.PIVOT_SCAN: _ok("scan"), Phase.PIVOT_CRED: _ok("cred-test"),
-             Phase.LOOT: _ok("loot")}
+             Phase.JOIN: _ok("join"), Phase.PIVOT_SCAN: _ok("scan"),
+             Phase.PIVOT_CRED: _ok("cred-test"), Phase.LOOT: _ok("loot")}
     out = op.run(targets, execs, recon=lambda: (True, "12 APs seen"))
     for s in out["steps"]:
         tag = "exec " if s["executed"] else ("BLOCK" if not s["allowed"] else "stop ")
@@ -2346,6 +2541,27 @@ def cmd_mesh(args) -> int:
     swarm key) is rejected."""
     if getattr(args, "mesh_cmd", "demo") == "swarm":
         return _cmd_mesh_swarm(args)
+    if getattr(args, "mesh_cmd", "") == "correlate":
+        from .mesh.time_correlate import SwarmTimeCorrelator, SwarmEvent
+        c = SwarmTimeCorrelator(window=5.0)
+        tgt = "aa:bb:cc:dd:ee:ff"
+        # 3 nodes see the same deauth burst within a few seconds (corroboration),
+        # and a phone probes its way past the nodes in order (movement).
+        c.set_skew("charlie", 3.0)         # charlie's clock runs 3s ahead
+        for n, t in (("alpha", 100.0), ("bravo", 101.5), ("charlie", 105.0)):
+            c.add(SwarmEvent(n, t, tgt, "deauth", rssi=-55))
+        for n, t in (("alpha", 100.0), ("bravo", 118.0), ("charlie", 140.0)):
+            c.add(SwarmEvent(n, t, "de:ad:be:ef:00:01", "probe", rssi=-60))
+        print("redux mesh correlate — swarm time-correlation demo (SIMULATED nodes)\n")
+        print("  corroborated events (same event, several nodes, one window):")
+        for ce in c.corroborated():
+            print(f"    {ce.entity} [{ce.kind}] nodes={list(ce.nodes)} "
+                  f"span={ce.span:.1f}s conf={ce.confidence:.2f}")
+        print("  movement (an entity tracked node→node):")
+        for h in c.movements("de:ad:be:ef:00:01"):
+            print(f"    {h.entity}: {h.from_node} → {h.to_node}  (+{h.dt:.0f}s)")
+        print(f"\n  {c.summary()['note']}")
+        return 0
     from .mesh import ScopeSync, LoopbackMesh, SignedMessage, sign
     key = b"swarm-shared-key"
     mesh = LoopbackMesh()
@@ -2645,6 +2861,23 @@ def cmd_capture(args) -> int:
         print("  " + " ".join(prev.argv))
     else:
         print("  " + prev.reason)
+    # Adaptive method pick: what the device's own experience says works best. The
+    # methods available depend on what's present (AngryOxide binary, injection radio).
+    try:
+        from .crack.adaptive_capture import recommend_capture_method, method_table, CAPTURE_METHODS
+        from .core.experience import ExperienceStore
+        avail = list(CAPTURE_METHODS) if ao.available() else [m for m in CAPTURE_METHODS if m != "angryoxide"]
+        rows = ExperienceStore(getattr(args, "experience", None)
+                               or "/captures/live/experience.jsonl").load()
+        pick, why = recommend_capture_method(rows, available=avail)
+        print(f"\nadaptive method (from experience): {pick}")
+        print(f"  {why}")
+        tbl = method_table(rows, available=avail)
+        if any(r["trials"] for r in tbl):
+            for r in tbl:
+                print(f"    {r['method']:13} {r['successes']}/{r['trials']}  score {r['score']}")
+    except Exception:
+        pass   # experience is optional; never let it break the capture plan
     return 0
 
 
@@ -2894,6 +3127,696 @@ def cmd_authlog(args) -> int:
     return 2
 
 
+def cmd_engagement(args) -> int:
+    """Engagement case file — tie Scope + authlog + loot + notebook + report into
+    one durable object with a lifecycle. `open` snapshots your authorization;
+    `close` pulls the authlog/loot/notebook together and freezes the report."""
+    from .core.engagement import EngagementStore
+    from .core.scope import Scope
+    st = EngagementStore(dir=getattr(args, "dir", None) or "/captures/engagements")
+    cmd = args.engagement_cmd
+    if cmd == "open":
+        scope = Scope.load(_DEFAULT_SCOPE_PATH)
+        try:
+            eng = st.open(args.name, operator=args.operator,
+                          authorization=args.authorization or "", scope=scope,
+                          force=getattr(args, "force", False))
+        except ValueError as e:
+            print(str(e))
+            return 2
+        print(f"opened engagement {eng.id}  ({eng.name})")
+        print(f"  authorization : {eng.authorization}")
+        print(f"  armed at open : {len(eng.scope_opened)} target(s)")
+        return 0
+    if cmd == "list":
+        es = st.list()
+        if not es:
+            print("no engagements yet")
+            return 0
+        for e in es:
+            print(f"  {e.id:34} [{e.status:6}] {e.name}"
+                  + (f"  — {e.counts.get('actions', 0)} action(s), integrity "
+                     f"{(e.report or {}).get('integrity', '?')}" if e.status == 'closed' else ""))
+        return 0
+    if cmd == "status":
+        eng = st.active()
+        if not eng:
+            print("no active engagement (open one with `redux engagement open <name>`)")
+            return 0
+        s = st.summary(eng.id)
+        print(f"active: {eng.id} ({eng.name})")
+        print(f"  authorization: {s['authorization']}  |  armed at open: {s['armed_at_open']}")
+        return 0
+    if cmd == "show":
+        s = st.summary(args.id)
+        if not s["found"]:
+            print(f"no such engagement: {args.id}")
+            return 2
+        print(json.dumps(s, indent=2))
+        return 0
+    if cmd == "close":
+        eid = args.id or (st.active().id if st.active() else None)
+        if not eid:
+            print("no engagement to close")
+            return 2
+        scope = Scope.load(_DEFAULT_SCOPE_PATH)
+        entries, integrity, loot, nb = [], None, {}, []
+        try:
+            import dataclasses as _dc
+            from .core import authlog as _A
+            log = _A.AuthLog(_A.default_authlog_path())
+            entries = log.entries()
+            if hasattr(log, "verify"):
+                v = log.verify()
+                integrity = _dc.asdict(v) if _dc.is_dataclass(v) else dict(v)
+        except Exception:
+            integrity = None
+        try:
+            from .loot import LootVault, default_loot_path
+            loot = {"credentials": len(LootVault(default_loot_path()))}
+        except Exception:
+            pass
+        try:
+            from .notebook import LabNotebook
+            nb = LabNotebook("/captures/live/notebook.jsonl").entries()
+        except Exception:
+            pass
+        closed = st.close(eid, scope=scope, authlog_entries=entries, loot=loot,
+                          notebook_entries=nb, authlog_integrity=integrity)
+        if closed is None:
+            print(f"no such engagement: {eid}")
+            return 2
+        c = closed.counts
+        print(f"closed engagement {closed.id} ({closed.name})")
+        print(f"  actions {c.get('actions', 0)} | unauthorized {c.get('unauthorized', 0)} | "
+              f"creds {c.get('loot_credentials', 0)} | notebook {c.get('notebook', 0)} | "
+              f"integrity {(closed.report or {}).get('integrity', '?')}")
+        if getattr(args, "report_out", None) and closed.report:
+            from .report import render_markdown
+            with open(args.report_out, "w", encoding="utf-8") as fh:
+                fh.write(render_markdown(closed.report))
+            print(f"  report written: {args.report_out}")
+        return 0
+    return 2
+
+
+def cmd_discover(args) -> int:
+    """LAN service discovery → a labeled inventory of what everything IS. Gathers
+    mDNS/DNS-SD + SSDP/UPnP announcements on the joined LAN, identifies each host,
+    and maps the subnet ("Chromecast @ .50, printer @ .52") with each one's surface.
+    Active (it queries the LAN): LAB runs it, FIELD needs --authorized."""
+    from .netrecon.discovery import LanDiscovery
+    disc = LanDiscovery()
+    if getattr(args, "demo", False):
+        avahi = "\n".join([
+            "=;eth0;IPv4;Living Room;_googlecast._tcp;local;Living-Room.local;192.168.1.50;8009;id=abc",
+            "=;eth0;IPv4;Kitchen Echo;_amzn-alexa._tcp;local;echo-kitchen.local;192.168.1.51;443;",
+            "=;eth0;IPv4;Office HP;_ipp._tcp;local;HP-LaserJet.local;192.168.1.52;631;ty=HP LaserJet",
+        ])
+        ssdp = ("HTTP/1.1 200 OK\r\nLOCATION: http://192.168.1.53:1400/x.xml\r\n"
+                "SERVER: Linux UPnP/1.0 Sonos/1\r\nST: urn:schemas-upnp-org:device:ZonePlayer:1\r\n\r\n")
+        inv, reason = disc.discover(avahi_raw=avahi, ssdp_raw=ssdp, lab=True)
+        print("redux discover — SYNTHETIC LAN (no network)")
+    else:
+        scope = None if getattr(args, "lab", False) else Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)
+        inv, reason = disc.discover(scope=scope, authorized=getattr(args, "authorized", False),
+                                    lab=getattr(args, "lab", False))
+    if inv is None:
+        print(f"discover — {reason}")
+        print("  plan:")
+        for c in disc.plan():
+            print("    $ " + c)
+        return 0
+    if getattr(args, "json", False):
+        print(json.dumps(inv, indent=2))
+        return 0
+    print(f"LAN inventory — {inv['note']}")
+    for r in inv["hosts"]:
+        idy = r["identity"]
+        label = (f"{idy['product']} [{idy['category']}]" if idy["category"] != "unknown"
+                 else (idy["vendor"] or "unidentified"))
+        print(f"  {r['ip']:15} {(r['hostname'] or ''):26} {label}")
+        for a in idy.get("actions", [])[:2]:
+            print(f"      - {a['do']} ({a['via']})")
+        if idy.get("category") in ("router", "camera", "printer", "doorbell", "iot", "thermostat"):
+            from .netrecon.default_creds import creds_for_identity
+            dc = creds_for_identity(idy, include_common=False)[:3]
+            if dc:
+                print("      defaults to try: " + ", ".join(f"{u}/{p or '∅'}" for u, p in dc))
+    return 0
+
+
+def cmd_gatt(args) -> int:
+    """BLE GATT looting — connect to a BLE device, enumerate its GATT tree, read
+    the device-info it gives up (manufacturer, model, serial, firmware, battery),
+    flag vendor services, and feed it into device identification. Scope-gated:
+    LAB runs it, FIELD needs --authorized. Live needs a Bluetooth adapter."""
+    from .bt.gatt import GattLooter, Service, Characteristic, to_identify_signals
+    looter = GattLooter()
+    if getattr(args, "demo", False):
+        def _enum(_mac):
+            return [
+                Service("1800", (Characteristic("2a00", ("read",), "Charge 5-ABC"),)),
+                Service("180a", (Characteristic("2a29", ("read",), "Fitbit Inc."),
+                                 Characteristic("2a24", ("read",), "Charge 5"),
+                                 Characteristic("2a25", ("read",), "FB-SN-0099"),
+                                 Characteristic("2a26", ("read",), "1.2.3"))),
+                Service("180f", (Characteristic("2a19", ("read", "notify"), "87"),)),
+                Service("fff0", (Characteristic("fff3", ("write", "write-without-response")),
+                                 Characteristic("fff4", ("read", "notify")))),
+            ]
+        loot, reason = looter.loot(args.mac or "aa:bb:cc:dd:ee:ff", lab=True, enumerator=_enum)
+        print("redux gatt — SYNTHETIC BLE device (no radio)")
+    else:
+        scope = None if getattr(args, "lab", False) else Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)
+        loot, reason = looter.loot(args.mac, scope=scope,
+                                   authorized=getattr(args, "authorized", False),
+                                   lab=getattr(args, "lab", False), enumerator=None)
+    if loot is None:
+        print(f"gatt {args.mac or ''} — {reason}")
+        print("  plan:")
+        for c in looter.plan(args.mac or "<mac>"):
+            print("    $ " + c)
+        return 0
+    if getattr(args, "json", False):
+        print(json.dumps(loot.to_dict(), indent=2))
+        return 0
+    print(f"GATT loot {loot.mac} — {loot.note}")
+    for f in ("device_name", "manufacturer", "model", "serial", "firmware",
+              "hardware", "software", "battery", "appearance"):
+        v = getattr(loot, f)
+        if v:
+            print(f"  {f:13} {v}")
+    if loot.services:
+        print("  services:")
+        for s in loot.services:
+            print(f"    {s['uuid']}  {s['name']}" + ("  [vendor]" if s["vendor_specific"] else ""))
+    from .intel.device_id import identify
+    g = identify(to_identify_signals(loot))
+    if g.category != "unknown":
+        print(f"  => identifies as: {g.product} [{g.category}] ({g.confidence})")
+    # control surface: which characteristics can be WRITTEN (actuate the device)
+    if getattr(args, "write_surface", False) or getattr(args, "write", None):
+        from .bt.gatt import writable_surface, GattWriter
+        services = _enum(args.mac or "") if getattr(args, "demo", False) else []
+        surface = writable_surface(services)
+        print("  CONTROL SURFACE (writable characteristics — actuate the device):")
+        if not surface:
+            print("    (none enumerated" + ("" if getattr(args, "demo", False) else "; needs a live enumerate on-device") + ")")
+        for c in surface:
+            print(f"    {c['uuid']}  {c['name']}  [{','.join(c['properties'])}]"
+                  + ("  (vendor)" if c["vendor_specific"] else ""))
+        if getattr(args, "write", None):
+            if getattr(args, "value", None) is None:
+                print("  write: pass --value <hex> too")
+                return 2
+            w = GattWriter()
+            ok, reason = w.write(args.mac, args.write, args.value,
+                                 scope=(None if getattr(args, "lab", False) else Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)),
+                                 authorized=getattr(args, "authorized", False),
+                                 lab=getattr(args, "lab", False),
+                                 confirmed=getattr(args, "confirm", False),
+                                 writer=None)
+            print(f"  WRITE {args.write} = {args.value}: {reason}")
+            if not getattr(args, "confirm", False):
+                print("    (power-tier — add --confirm to actually actuate; needs a BT adapter)")
+    return 0
+
+
+def cmd_identify(args) -> int:
+    """Device identification — what IS this thing, and what can I do with/to it.
+    Fuses OUI vendor + hostname + BLE name/company + mDNS into a product guess, then
+    lists the attack surface for its category (pointed at the project's own tools)."""
+    from .intel.device_id import DeviceSignals, identify
+    if getattr(args, "demo", False):
+        sig = DeviceSignals(mac="50:dc:e7:00:11:22", hostname="Roomba-3F2A",
+                            ble_name="", mdns_services=("_amzn-alexa._tcp",))
+        print("redux identify — SYNTHETIC device (no radio)")
+    else:
+        sig = DeviceSignals(
+            mac=args.mac or "", hostname=args.hostname or "", ble_name=args.ble_name or "",
+            ble_company_id=args.ble_company or "",
+            mdns_services=tuple(args.mdns or ()), ssdp=args.ssdp or "",
+            ble_service_uuids=tuple(args.ble_service or ()))
+        if not any((sig.mac, sig.hostname, sig.ble_name, sig.ble_company_id, sig.mdns_services, sig.ssdp)):
+            print("give at least one signal — e.g. --mac, --hostname, --ble-name, --mdns  (or --demo)")
+            return 2
+    g = identify(sig)
+    if getattr(args, "json", False):
+        print(json.dumps(g.to_dict(), indent=2))
+        return 0
+    print(f"  WHAT IT IS : {g.product}  [{g.category}]  (vendor {g.vendor}, {g.confidence} confidence)")
+    for r in g.reasons:
+        print(f"    · {r}")
+    if g.actions:
+        print("  WHAT YOU CAN DO:")
+        for a in g.actions:
+            print(f"    - {a['do']:44} ({a['via']})")
+    return 0
+
+
+def cmd_dossier(args) -> int:
+    """Target dossier — everything the box knows about one AP in a single glass-box
+    view: identity, security (and any WPA3-transition downgrade path), value,
+    what's been seen, where/when, and the one recommended next move."""
+    from .intel.dossier import build_dossier
+    retired = set()
+    try:
+        from .crack.captured import retired_bssids
+        retired = retired_bssids()
+    except Exception:
+        retired = set()
+    kw = {}
+    if getattr(args, "demo", False):
+        bssid = "aa:bb:cc:00:11:22"
+        kw = dict(ssid="HomeNet", security="wpa3", akm=["SAE", "PSK"], channel=6,
+                  rssi=-48, clients=2, pmkid_seen=True, lat=45.0, lon=-93.0)
+        print("redux dossier — SYNTHETIC target (no radio)")
+    else:
+        bssid = args.bssid
+        try:
+            from .crack.passive_pmkid import load_state
+            for h in load_state().get("hits", []):
+                if _norm_mac_like(h.get("bssid", "")) == _norm_mac_like(bssid):
+                    kw.update(ssid=h.get("ssid", ""), security=h.get("security") or "wpa2-psk",
+                              channel=h.get("channel"), rssi=h.get("rssi"), pmkid_seen=True)
+        except Exception:
+            pass
+        try:
+            from .geo import SightingStore
+            st = SightingStore("/captures/live/sightings.db")
+            s = st.get("wifi", bssid)
+            if s is not None:
+                kw.setdefault("ssid", getattr(s, "ssid", "") or kw.get("ssid", ""))
+                kw.setdefault("channel", getattr(s, "channel", None))
+                kw.setdefault("rssi", getattr(s, "rssi", None))
+                kw["first_seen"] = getattr(s, "first_seen", None)
+                kw["last_seen"] = getattr(s, "ts", None)
+                if getattr(s, "lat", None) is not None:
+                    kw["lat"], kw["lon"] = s.lat, s.lon
+        except Exception:
+            pass
+    d = build_dossier(bssid, retired=retired, **kw)
+    if getattr(args, "json", False):
+        print(json.dumps(d.to_dict(), indent=2))
+        return 0
+    print(f"DOSSIER  {d.bssid}  {d.ssid or '<hidden>'}")
+    print(f"  vendor {d.vendor} · ch{d.channel if d.channel is not None else '?'} ({d.band}GHz) · "
+          f"security {d.security_mode}" + (" [DOWNGRADABLE]" if d.downgradable else ""))
+    print(f"  value {d.value_score}/100 · crackable {'yes' if d.crackable else 'no'}"
+          + (f" ({d.method})" if d.crackable else ""))
+    for f in d.facts:
+        print(f"    - {f}")
+    if d.located:
+        print(f"  located: {d.located['lat']}, {d.located['lon']}")
+    print(f"  >> {d.recommended}")
+    return 0
+
+
+def _norm_mac_like(v: str) -> str:
+    return (v or "").strip().lower()
+
+
+def cmd_targets(args) -> int:
+    """Target-value radar — rank APs by how worth attacking each is (crackability,
+    a free PMKID, signal, clients, WPS), juiciest first. Glass-box: every point
+    carries a reason. `--demo` shows it; live reads the passive-PMKID harvest."""
+    from .intel.target_radar import rank, summary, TargetObservation
+    retired = set()
+    try:
+        from .crack.captured import retired_bssids
+        retired = retired_bssids()
+    except Exception:
+        retired = set()
+    obs = []
+    if getattr(args, "demo", False):
+        obs = [
+            TargetObservation("aa:00:00:00:00:01", "HomeNet", "wpa2-psk", -48, 6, clients=2, pmkid_seen=True),
+            TargetObservation("bb:00:00:00:00:02", "Guest", "wpa2-psk", -72, 11, wps=True),
+            TargetObservation("cc:00:00:00:00:03", "CoffeeWiFi", "open", -50, 1),
+            TargetObservation("dd:00:00:00:00:04", "Neighbor", "wpa2-psk", -80, 6),
+        ]
+        print("redux targets — SYNTHETIC radar (no radio)")
+    else:
+        try:
+            from .crack.passive_pmkid import load_state
+            for h in load_state().get("hits", []):
+                obs.append(TargetObservation(
+                    h.get("bssid", ""), h.get("ssid", ""), h.get("security") or "wpa2-psk",
+                    h.get("rssi"), h.get("channel"), pmkid_seen=True))
+        except Exception:
+            pass
+        if not obs:
+            print("no targets yet — run `redux pmkid sweep` first, or `redux targets --demo`")
+            return 0
+    ranked = rank(obs, retired=retired)
+    s = summary(ranked)
+    print(f"  {s['note']}")
+    for t in ranked:
+        tag = "OWNED" if t.already_owned else (f"{t.score:>3}" if t.score else "  -")
+        print(f"  [{tag}] {t.bssid}  {(t.ssid or '<hidden>'):20} {t.method if t.crackable else 'no offline path'}")
+        if t.score:
+            print(f"          {'; '.join(t.reasons)}")
+    return 0
+
+
+def cmd_provision(args) -> int:
+    """First-boot provisioning — create the /captures skeleton and seed a starter
+    WPA wordlist so capture→crack works out of the box. Idempotent + fail-safe;
+    runs automatically on boot, this is the manual/verify path."""
+    from .core.provision import provision
+    res = provision(root=getattr(args, "root", None) or "/captures")
+    print(f"provision {res['root']} — {res['note']}")
+    for d in res["dirs_created"]:
+        print(f"  + {d}")
+    if res["wordlist_seeded"]:
+        try:
+            from .crack.wordlists import WordlistStore
+            sel = WordlistStore((res["root"] + "/wordlists")).selected()
+            if sel:
+                print(f"  wordlist: '{sel.name}' selected ({sel.size_bytes} bytes) — crack is ready")
+        except Exception:
+            pass
+    return 0
+
+
+def cmd_arsenal(args) -> int:
+    """The arsenal — one place listing everything the box can do and the exact
+    command to run it. `--search` filters by command, title or group."""
+    from .core import arsenal
+    if getattr(args, "search", None):
+        hits = arsenal.search(args.search)
+        print(f"arsenal — {len(hits)} match(es) for '{args.search}':")
+        for e in hits:
+            print(f"  redux {e.command:30} {e.title}   [{e.group}]")
+        return 0
+    print("ARSENAL — everything Augur can do:\n")
+    for name, entries in arsenal.groups().items():
+        print(f"  {name}")
+        for e in entries:
+            print(f"    redux {e.command:30} {e.title}")
+        print()
+    return 0
+
+
+def cmd_phone(args) -> int:
+    """Phone UI over Bluetooth PAN — the responsive web dashboard, reachable with
+    no Wi-Fi and no cable. `plan` shows the bring-up + the URL to browse; `up`
+    runs it (needs a Bluetooth adapter + root). The dashboard is the same web UI,
+    Operations tab included."""
+    from .web.btpan import PanBringup, dashboard_url
+    b = PanBringup(adapter=args.adapter, iface=args.iface, ip=args.ip, port=args.port)
+    cmd = args.phone_cmd
+    if cmd == "url":
+        print(dashboard_url(args.ip, args.port))
+        return 0
+    if cmd == "plan":
+        plan = b.plan()
+        print(f"phone UI over Bluetooth PAN — pair your phone, then browse {plan.dashboard_url}")
+        print(f"  adapter {plan.adapter} · iface {plan.iface} · Pi {plan.ip} · dashboard :{plan.port}")
+        for s in plan.steps:
+            print("  $ " + s)
+        print("  (the dashboard is the SAME responsive web UI — Operations tab included)")
+        return 0
+    if cmd == "up":
+        present = os.path.exists(f"/sys/class/bluetooth/{args.adapter}") or getattr(args, "assume_adapter", False)
+        res = b.up(apply=getattr(args, "apply", False), adapter_present=present)
+        print(res["note"])
+        for r in res.get("results", []):
+            if not r["ok"]:
+                print(f"  ! {r['cmd']}: {r.get('error', 'failed')}")
+        print(f"  dashboard: {res['dashboard_url']}")
+        return 0
+    return 2
+
+
+def cmd_leases(args) -> int:
+    """Resource ownership / lease broker — who holds which radio. `demo` shows the
+    arbitration (preemption by priority, shared GPS, multi-band coexistence) that
+    swarm + multi-engine + multi-band rely on to not clobber each other."""
+    from .core.leases import ResourceBroker, Resource, SHARED
+    if args.leases_cmd == "demo":
+        b = ResourceBroker()
+        b.register(Resource("wlan0", "wifi")).register(Resource("wlan1", "wifi"))
+        b.register(Resource("gps0", "gps", shareable=True))
+        print("resource lease broker — arbitration demo\n")
+        print(f"  bettercap -> wlan1 (pri1)   : {b.acquire('wlan1', 'bettercap', priority=1, reason='baseline capture').reason}")
+        print(f"  sense-csi -> wlan0          : {b.acquire('wlan0', 'sense-csi', reason='onboard CSI').reason}  (multi-band coexist)")
+        print(f"  gpsd -> gps0 (shared)       : {b.acquire('gps0', 'gpsd', mode=SHARED, reason='position').reason}")
+        print(f"  fox-hunt -> gps0 (shared)   : {b.acquire('gps0', 'fox-hunt', mode=SHARED, reason='read fix').reason}")
+        g = b.acquire("wlan1", "angryoxide", priority=9, reason="preferred scalpel")
+        print(f"  angryoxide -> wlan1 (pri9)  : {g.reason}")
+        snap = b.snapshot()
+        print(f"\n  {snap['note']}")
+        for r in snap["resources"]:
+            who = ", ".join(f"{h['owner']}({h['mode']})" for h in r["holders"]) or "free"
+            print(f"    {r['resource']:7} [{r['type']:4}] {who}")
+        return 0
+    return 2
+
+
+def cmd_scenario(args) -> int:
+    """Scenario library — runnable playbooks that chain capabilities toward an
+    outcome. `list`/`show` are tutorials + the capability map; `check` cross-refs
+    the manifest to tell you if a scenario is runnable on THIS box right now."""
+    from .core import scenarios as S
+    cmd = args.scenario_cmd
+    if cmd == "list":
+        print("scenarios — playbooks that tie the toolkit together:")
+        for sc in S.list_scenarios():
+            print(f"  {sc.name:22} [{sc.posture:6}] {sc.goal}")
+        return 0
+    sc = S.get(args.name)
+    if sc is None:
+        print(f"no such scenario: {args.name}  (try `redux scenario list`)")
+        return 2
+    if cmd == "show":
+        print(f"{sc.name} — {sc.goal}")
+        print(f"  posture: {sc.posture}  |  teaches: {sc.teaches}")
+        for i, st in enumerate(sc.steps, 1):
+            print(f"  {i}. {st.title}   [{st.capability}]")
+            print(f"       $ {st.command}")
+            print(f"         {st.why}")
+        return 0
+    if cmd == "check":
+        rep = S.validate(sc)
+        print(f"{sc.name} — {rep['note']}  ({rep['ready']} ready / {rep['blocked']} blocked)")
+        for r in rep["steps"]:
+            print(f"  [{r['state']:13}] {r['step']}  ({r['capability']}) — {r['reason']}")
+        return 0
+    return 2
+
+
+def cmd_scrub(args) -> int:
+    """Secure-wipe / panic-scrub of the device's OWN collected data — never a
+    target's. `status` shows your on-disk exposure; `plan` is a dry-run of what a
+    mode would wipe vs keep; `run` executes (requires --apply). scrub keeps the
+    brain (experience/wordlists/graph); panic burns it all but leaves the box
+    bootable. DRY-RUN by default."""
+    from .core.scrub import SecureWipe
+    sw = SecureWipe(root=getattr(args, "root", None) or "/captures")
+    mode = "panic" if getattr(args, "panic", False) else "scrub"
+    cmd = args.scrub_cmd
+    try:
+        if cmd == "status":
+            exp = sw.exposure()
+            print(f"on-disk exposure — {exp['note']}")
+            for tier, v in sorted(exp["by_tier"].items()):
+                print(f"  {tier:17} {v['items']} item(s)  {v['bytes']} bytes")
+            return 0
+        if cmd == "plan":
+            plan = sw.plan(mode)
+            w = [i for i in plan["wipe"] if i.exists]
+            print(f"scrub plan [{mode.upper()}] — would wipe {len(w)} item(s), keep the rest:")
+            for i in w:
+                print(f"  WIPE  [{i.tier:16}] {i.path}  ({i.size} B) — {i.reason}")
+            for i in plan["keep"]:
+                if i.exists:
+                    print(f"  keep  [{i.tier:16}] {i.path}")
+            print(f"  ({'panic burns the brain too; ' if mode == 'panic' else 'brain preserved; '}"
+                  "run `redux scrub run" + (" --panic" if mode == 'panic' else "") + " --apply` to execute)")
+            return 0
+        if cmd == "run":
+            res = sw.execute(mode, apply=getattr(args, "apply", False),
+                             overwrite=not getattr(args, "no_overwrite", False))
+            if not res["applied"]:
+                print(f"scrub [{mode.upper()}] DRY RUN — would wipe {len(res['would_wipe'])} item(s); "
+                      f"pass --apply to execute")
+                for i in res["would_wipe"]:
+                    print(f"  WIPE [{i['tier']}] {i['path']}")
+                return 0
+            print(f"scrub [{mode.upper()}] — wiped {res['wiped']} item(s); kept {len(res['kept'])}")
+            for r in res["results"]:
+                if not r["ok"]:
+                    print(f"  ! {r['path']}: {r['result']}")
+            print(f"  note: {res['flash_caveat']}")
+            return 0
+    except ValueError as e:
+        print(str(e))
+        return 2
+    return 2
+
+
+def cmd_airwave(args) -> int:
+    """Airwave DVR — scrub back through RF history. An append-only timeline of
+    what was on the air, so you can rewind and ask 'what was here at 3:42pm?'.
+    Reads the device DVR (JSONL) or a --demo timeline."""
+    from .radio.airwave_dvr import AirwaveDVR, AirwaveEvent
+    dvr = AirwaveDVR(path=(None if getattr(args, "demo", False) else (args.dvr or "/captures/live/airwave.jsonl")))
+    if getattr(args, "demo", False):
+        base = 1000.0
+        dvr.record_many([
+            AirwaveEvent(base + 0, "beacon", "aa:00:00:00:00:01", "HomeNet", 6, -45),
+            AirwaveEvent(base + 2, "beacon", "aa:00:00:00:00:01", "HomeNet", 6, -46),
+            AirwaveEvent(base + 5, "pmkid", "aa:00:00:00:00:01", "HomeNet", 6, -47),
+            AirwaveEvent(base + 61, "deauth", "bb:00:00:00:00:02", "", 11, -60),
+            AirwaveEvent(base + 63, "eapol", "bb:00:00:00:00:02", "Guest", 11, -61),
+            AirwaveEvent(base + 130, "beacon", "cc:00:00:00:00:03", "FarAP", 149, -72),
+        ])
+        print("redux airwave — SYNTHETIC RF timeline (no radio)")
+    else:
+        n = dvr.load()
+        print(f"redux airwave — {n} event(s) from {dvr.path}")
+    cmd = args.airwave_cmd
+    if cmd == "summary":
+        s = dvr.summary()
+        print(f"  {s['note']}  |  {s['unique_aps']} AP(s); kinds: {s['kinds'] or 'none'}")
+        return 0
+    if cmd == "timeline":
+        rows = dvr.timeline(bucket_seconds=args.bucket)
+        if not rows:
+            print("  (empty)")
+            return 0
+        lo = rows[0]["t"]
+        for r in rows:
+            off = int(r["t"] - lo)
+            bar = "#" * min(40, r["count"])
+            print(f"  t+{off // 60:02d}:{off % 60:02d}  {bar} {r['count']} ({r['top_kind']}, {r['aps']} AP)")
+        return 0
+    if cmd == "scrub":
+        snap = dvr.scrub(args.at, radius=args.radius)
+        print(f"  @ t={args.at} (+/-{args.radius}s): {snap['events']} event(s), "
+              f"{len(snap['aps'])} AP(s), bands {snap['bands']}, kinds {snap['kinds']}")
+        for b in snap["aps"]:
+            print(f"    AP {b}")
+        return 0
+    if cmd == "track":
+        hist = dvr.track(args.bssid)
+        print(f"  {args.bssid}: seen {len(hist)} time(s)")
+        for e in hist[:40]:
+            print(f"    t={e.ts} {e.kind} ch{e.channel} {e.ssid or ''}")
+        return 0
+    return 2
+
+
+def cmd_responder(args) -> int:
+    """Responder-style hash harvesting on the joined LAN — the move the kill-chain
+    JOIN phase sets up. Poison LLMNR/NBT-NS/mDNS so Windows hosts authenticate to
+    us, harvest NetNTLMv1/v2, and drop the hashes into the crack queue. A firing
+    path: FIELD needs the LAN armed + --authorized; LAB runs unleashed; --analyze
+    (passive, no poisoning) is always allowed."""
+    from .netrecon.responder import ResponderHarvest, to_crack_lines
+    rh = ResponderHarvest(args.iface, seconds=getattr(args, "seconds", 60),
+                          analyze_only=getattr(args, "analyze", False))
+    if args.responder_cmd == "plan":
+        print("responder plan — " + ("ANALYZE-only (passive, no poisoning)" if rh.analyze_only
+                                     else "poisons LLMNR / NBT-NS / mDNS on the joined LAN"))
+        print("  " + " ".join(rh.plan()))
+        print("  harvest  : NetNTLMv1 → hashcat -m 5500   |   NetNTLMv2 → hashcat -m 5600")
+        print("  correlate: JOIN (#1) puts us on the LAN → responder → hashes → crack queue")
+        print("  posture  : FIELD needs the LAN armed + --authorized; LAB unleashed; -A always ok")
+        return 0
+    scope = None if getattr(args, "lab", False) else Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)
+    hashes, reason = rh.harvest(scope=scope, authorized=getattr(args, "authorized", False),
+                                lab=getattr(args, "lab", False))
+    print(f"responder {args.iface} — {reason}")
+    if not hashes:
+        return 0
+    grouped = to_crack_lines(hashes)
+    out_dir = getattr(args, "out_dir", None) or "/captures/loot/netntlm"
+    os.makedirs(out_dir, exist_ok=True)
+    for mode, lines in sorted(grouped.items()):
+        path = os.path.join(out_dir, f"netntlm-{mode}.txt")
+        with open(path, "a") as fh:
+            fh.write("\n".join(lines) + "\n")
+        print(f"  {len(lines)} hash(es) -> {path}   (crack: hashcat -m {mode} {path} <wordlist>)")
+    for h in hashes:
+        print(f"    [{h.kind}] {h.username}@{h.domain or '.'}")
+    return 0
+
+
+def cmd_pmkid(args) -> int:
+    """Passive PMKID sweep — ZERO-TRANSMIT loot. Harvest the PMKIDs APs volunteer
+    on their own (no deauth, no association — nothing sent), then correlate them
+    against the beacon inventory, the crackability pre-flight, the central Scope
+    and the already-captured list, and rank the new loot. The quietest loot path
+    there is: a WIDS has nothing to detect. `plan` explains the posture; `sweep`
+    runs over the engine's real .22000 output (--from-22000) or synthetic (--demo)."""
+    from .crack.passive_pmkid import PassivePmkidSweep, parse_22000_pmkid
+    cmd = args.pmkid_cmd
+    scope = None
+    if getattr(args, "scoped", False):
+        scope = Scope.load(getattr(args, "scope_file", None) or _DEFAULT_SCOPE_PATH)
+    retired = set()
+    try:
+        from .crack.captured import retired_bssids
+        retired = retired_bssids()
+    except Exception:
+        retired = set()
+
+    if cmd == "plan":
+        print("passive PMKID sweep — ZERO-TRANSMIT loot")
+        print("  posture  : listen only; no deauth, no association request, nothing sent")
+        print("  harvest  : PMKIDs an AP volunteers in EAPOL M1 whenever any client joins")
+        print("  correlate: + beacon inventory (SSID/ch) + crackability + scope + captured-list + wordlist forge")
+        print(f"  scope    : {'device scope' if scope is not None else 'LAB unscoped — every AP in earshot is fair game'}")
+        print(f"  skip     : {len(retired)} already-captured / ignored AP(s)")
+        print("  footprint: silent — nothing leaves the antenna, so a blue team has nothing to flag")
+        print("  run      : redux pmkid sweep --from-22000 /captures/<file>.22000   (real engine output)")
+        print("             redux pmkid sweep --demo                                 (synthetic, no radio)")
+        return 0
+
+    sweep = PassivePmkidSweep(scope=scope, retired=retired)
+    if getattr(args, "demo", False):
+        from .detect.frames import Frame, FrameType
+        demo = [
+            Frame(type=FrameType.PMKID, ts=1.0, bssid="aa:bb:cc:00:11:22",
+                  ssid="Linksys00112", channel=6, security="wpa2-psk", rssi=-48),
+            Frame(type=FrameType.PMKID, ts=2.0, bssid="de:ad:be:ef:00:01",
+                  ssid="NETGEAR-Guest", channel=11, security="wpa2-psk", rssi=-67),
+        ]
+        sweep.feed_many(demo)
+        print("redux pmkid sweep — SYNTHETIC PMKID sightings (no radio)")
+    elif getattr(args, "from_22000", None):
+        if not os.path.exists(args.from_22000):
+            print(f"  no such file: {args.from_22000}")
+            return 2
+        with open(args.from_22000, "r", errors="replace") as fh:
+            frames = parse_22000_pmkid(fh.read())
+        sweep.feed_many(frames)
+        print(f"redux pmkid sweep — {len(frames)} PMKID(s) parsed from {args.from_22000}")
+    else:
+        print("nothing to sweep: pass --from-22000 <file> (real engine output) or --demo (synthetic)")
+        print("  (continuous live monitor-mode PMKID harvest runs under the capture daemon)")
+        return 2
+
+    summ = sweep.summary()
+    sweep.save_state()        # surface the harvest to the UIs (TFT/web/phone) via live-state
+    if getattr(args, "json", False):
+        print(json.dumps({"summary": summ, "hits": [h.to_dict() for h in sweep.hits()]}, indent=2))
+        return 0
+    print(f"  {summ['note']}  [{summ['footprint']}]")
+    print(f"  {summ['aps_leaking_pmkid']} leaking PMKID | {summ['crackable']} crackable | "
+          f"{summ['in_scope']} in-scope | {summ['already_captured']} already owned | {summ['new_loot']} NEW")
+    for h in sweep.hits():
+        flag = ("NEW  " if h.new_loot else "OWNED" if h.already_captured
+                else "----- " if h.in_scope else "SCOPE")
+        ch = f"ch{h.channel}" if h.channel is not None else "ch?"
+        rssi = f"{h.rssi}dBm" if h.rssi is not None else ""
+        print(f"    [{flag}] {h.bssid}  {ch:5} {rssi:7} {(h.ssid or '<hidden>'):22} {h.reason}")
+    return 0
+
+
 def cmd_loot(args) -> int:
     """Recovered-credential vault + scope-gated network pivot. The vault is
     owner-only on-device storage, auth-log-linked (never the secret). `pivot`
@@ -2911,12 +3834,16 @@ def cmd_loot(args) -> int:
         return 0
     if cmd == "list":
         ents = vault.entries()
+        # Your device, your loot from authorized targets: secrets show in FULL by
+        # default — nothing hidden or held back. --mask is opt-in, for when you
+        # want to share a screenshot. (--reveal is accepted but a no-op now.)
+        mask = getattr(args, "mask", False)
         if args.json:
             rows = []
             for e in ents:
                 d = e.to_dict()
-                if not args.reveal:
-                    red = f"[redacted — {len(e.secret)} chars]"
+                if mask:
+                    red = f"[masked — {len(e.secret)} chars]"
                     d["secret"] = red
                     if "psk" in d:
                         d["psk"] = red
@@ -2927,17 +3854,24 @@ def cmd_loot(args) -> int:
             print(f"loot vault is empty ({vault.path})")
             return 0
         for e in ents:
-            sec = e.secret if args.reveal else f"[redacted — {len(e.secret)} chars]"
+            sec = f"[masked — {len(e.secret)} chars]" if mask else e.secret
             print(f"  {e.kind:12} {(e.target or e.ssid or '-'):22} {e.service or '-':6} "
                   f"{e.username or '-':10} {sec}  [{e.source}]")
-        if not args.reveal:
-            print("  (secrets redacted; pass --reveal to show)")
+        if mask:
+            print("  (secrets masked; omit --mask to show them in full)")
         return 0
     if cmd == "pivot":
         from .core.scope import Scope
         scope = Scope.load(args.scope_file or _DEFAULT_SCOPE_PATH)
         usernames = args.user or ["admin", "root"]
         passwords = list(args.pw or []) + vault.psk_list()
+        if getattr(args, "defaults", False):
+            from .netrecon.default_creds import creds_for, users_and_passwords
+            du, dp = users_and_passwords(creds_for(category=getattr(args, "device_category", "") or ""))
+            usernames = list(dict.fromkeys(usernames + du))
+            passwords = list(dict.fromkeys(passwords + dp))
+            print(f"  folding in {len(du)}+ device default creds"
+                  + (f" for category '{args.device_category}'" if getattr(args, "device_category", "") else ""))
         res = pivot(scope, authorized=args.authorized, subnet=args.subnet,
                     usernames=usernames, passwords=passwords, vault=vault)
         if not res.executed:
@@ -2948,6 +3882,156 @@ def cmd_loot(args) -> int:
         print(f"PIVOT [{res.mode.upper()}] — {res.reason}; {res.vault_added} new credential(s) vaulted")
         for n in res.notes:
             print(f"  {n}")
+        return 0
+    if cmd == "triage":
+        from .loot import triage as _triage
+        results = _triage(args.files)
+        if args.json:
+            print(json.dumps(results, indent=2))
+            return 0
+        for path, r in results.items():
+            flag = " ⚑ FLAGGED" if r.get("flagged") else ""
+            print(f"\n{path}{flag}")
+            for tool, info in r.get("tools", {}).items():
+                if not info.get("available"):
+                    print(f"  {tool:9} — {info.get('reason', 'unavailable')}")
+                elif tool == "strings":
+                    n = info.get("secret_count", 0)
+                    print(f"  {tool:9} — {n} secret-looking string(s)" +
+                          (f": {', '.join(info['secret_hits'][:3])}…" if n else ""))
+                elif tool == "steghide":
+                    print(f"  {tool:9} — {'possible hidden data' if info.get('maybe_embedded') else 'nothing obvious'}")
+                else:
+                    first = (info.get("metadata") or info.get("signatures") or "").splitlines()
+                    print(f"  {tool:9} — {first[0] if first else 'no output'}")
+        return 0
+    if cmd == "files":
+        # Scope-gated SMB file-loot: with a recovered credential, pull the
+        # interesting files off a host straight into forensic triage. A firing
+        # path — the host must be armed (or LAB), same gate as pivot.
+        from .core.scope import Scope
+        from .loot.files import SmbLooter
+        scope = Scope.load(args.scope_file or _DEFAULT_SCOPE_PATH)
+        ok, reason = scope.authorize(ip=args.host)
+        if not ok:
+            print(f"file-loot — NOT fired: {reason}")
+            return 0
+        print(f"file-loot {args.host} — {reason}")
+        looter = SmbLooter(max_files=args.max_files)
+        pulled, notes = looter.loot_host(args.host, args.user, args.pw, dest=args.dest)
+        for n in notes:
+            print(f"  {n}")
+        if not pulled:
+            print("  no files pulled")
+            return 0
+        print(f"  pulled {len(pulled)} file(s) into {args.dest}")
+        for p in pulled:
+            print(f"    {p}")
+        if args.triage:
+            from .loot import triage as _triage
+            results = _triage(pulled)
+            flagged = [p for p, r in results.items() if r.get("flagged")]
+            print(f"  triaged {len(results)} file(s)" +
+                  (f", {len(flagged)} FLAGGED" if flagged else ""))
+            for p in flagged:
+                print(f"    ⚑ {p}")
+        # Always scan pulled files for TYPED secrets — the payoff of file-loot.
+        from .loot.secrets import scan_files as _scan_secrets
+        sec = _scan_secrets(pulled)
+        if sec["summary"]["total"]:
+            print(f"  secrets: {sec['summary']['note']}")
+            for f in sec["findings"][:12]:
+                print(f"    [{f['confidence']:6}] {f['rule']:22} {f['value']}  ({f['source']})")
+        return 0
+    if cmd == "defaults":
+        from .netrecon.default_creds import creds_for
+        pairs = creds_for(category=getattr(args, "category", "") or "",
+                          vendor=getattr(args, "vendor", "") or "",
+                          include_common=not getattr(args, "no_common", False))
+        who = args.category or args.vendor or "any device"
+        print(f"default creds to try for {who} ({len(pairs)} pair(s), most-likely first):")
+        for u, p in pairs:
+            print(f"  {u or '(blank)'} : {p or '(blank)'}")
+        print("  → feed into a run with: redux loot pivot --defaults"
+              + (f" --device-category {args.category}" if args.category else ""))
+        return 0
+    if cmd == "report":
+        from .loot.rollup import rollup
+        r = rollup(vault_entries=vault.entries())
+        if getattr(args, "json", False):
+            print(json.dumps(r, indent=2))
+            return 0
+        print(f"loot rollup — {r['note']}")
+        c = r["credentials"]
+        print(f"  credentials : {c['total']} ({c['service']} service)  {c['by_kind'] or ''}")
+        print(f"  files       : {r['files']['count']}")
+        print(f"  NetNTLM     : {r['netntlm_hashes']}")
+        print(f"  secrets     : {r['secrets']['total']} ({r['secrets'].get('by_confidence', {})})")
+        for s in r["top_secrets"]:
+            print(f"    [{s['confidence']:6}] {s['rule']:22} {s['value']}   {s['source']}")
+        return 0
+    if cmd == "secrets":
+        from .loot.secrets import scan_files as _scan_secrets
+        sec = _scan_secrets(args.files, redact=getattr(args, "redact", False))
+        if args.json:
+            print(json.dumps(sec, indent=2))
+            return 0
+        print(f"typed secrets — {sec['summary']['note']}"
+              + ("  (redacted)" if getattr(args, "redact", False) else ""))
+        for f in sec["findings"]:
+            print(f"  [{f['confidence']:6}] {f['rule']:22} {f['value']}   line {f['line']}  {f['source']}")
+        return 0
+    if cmd == "reuse":
+        # Credential-reuse graph: one recovered password's blast radius across the
+        # discovered hosts. --demo shows the graph; live sprays vault creds across a
+        # scanned subnet (scope-gated; FIELD needs --authorized, LAB unleashed).
+        from .netrecon.credreuse import CredReuse, creds_from_vault, Target, CredPair
+        from .core.scope import Scope
+        if getattr(args, "demo", False):
+            engine = CredReuse()
+            creds = [CredPair("root", "toor", origin="10.0.0.5"),
+                     CredPair("svc", "Spring2026!")]
+            targets = [Target("10.0.0.6", 445, "smb"), Target("10.0.0.7", 22, "ssh"),
+                       Target("10.0.0.8", 3306, "sql")]
+            def tester(h, p, s, u, sec):
+                return (u == "root" and h in ("10.0.0.6", "10.0.0.7")) or (u == "svc" and h == "10.0.0.8")
+            results = engine.spray(creds, targets, tester=tester, lab=True)
+            print("redux loot reuse — SYNTHETIC reuse graph (no network)")
+        else:
+            creds = creds_from_vault(vault.entries())
+            if not creds:
+                print("no service credentials in the vault to reuse (crack/recover some first)")
+                return 0
+            scope = None if getattr(args, "lab", False) else Scope.load(args.scope_file or _DEFAULT_SCOPE_PATH)
+            engine = CredReuse(scope=scope)
+            from .netrecon.pipeline import recon_subnet, try_credentials
+            targets = []
+            try:
+                sr = recon_subnet(scope, args.subnet, authorized=getattr(args, "authorized", False)) if args.subnet else None
+                for h in (getattr(sr, "hosts", None) or ()):
+                    for p in getattr(h, "ports", ()) or ():
+                        targets.append(Target(h.ip, p.number, p.service or p.proto or ""))
+            except Exception as error:
+                print(f"  scan unavailable: {type(error).__name__}")
+                return 3
+            if not targets:
+                print("  no hosts/services discovered to spray (need an in-scope --subnet with live hosts)")
+                return 0
+            def tester(host, port, service, user, secret):
+                cr = try_credentials(host, port, service, [user], [secret], scope=scope)
+                return getattr(cr, "found", None) is not None
+            results = engine.spray(creds, targets, tester=tester,
+                                   authorized=getattr(args, "authorized", False), lab=getattr(args, "lab", False))
+        g = engine.graph(results)
+        print(f"  {g['note']}")
+        print(f"  {g['credentials_that_reuse']} credential(s) reuse · {g['hosts_unlocked']} host(s) unlocked")
+        mv, me = g.get("most_valuable_credential"), g.get("most_exposed_host")
+        if mv:
+            print(f"  most valuable cred: {mv['credential']} → unlocks {', '.join(mv['unlocks'])}")
+        if me:
+            print(f"  most exposed host : {me['host']} ({me['credentials']} credential(s) open it)")
+        for host, users in sorted(g["by_host"].items()):
+            print(f"    {host}: {', '.join(users)}")
         return 0
     return 2
 
@@ -3242,8 +4326,45 @@ def cmd_forge(args) -> int:
             pnl_seeds = [r["ssid"] for r in ProbeHarvester(path=args.pnl).ssids() if r.get("ssid")]
         except Exception:
             pnl_seeds = []
-    f = forge(args.ssid or "", tokens=args.token or [], pnl=pnl_seeds,
-              bssid=args.bssid, min_len=args.min_len, max_words=args.max)
+    # Environment-grown mode (#91): mine seeds from everything the box observed —
+    # the PNLs above, the SSIDs the passive-PMKID sweep logged, and the strings in
+    # any looted files — then grow the wordlist from THIS place. A+B+C → one list.
+    if getattr(args, "environment", False):
+        from .crack.environment import EnvironmentHarvester
+        harv = EnvironmentHarvester()
+        harv.add_pnl(pnl_seeds)
+        for tok in (args.token or []):
+            harv.add_ssid(tok)
+        grown = 0
+        # SSIDs the zero-transmit PMKID sweep already harvested (live-state file)
+        try:
+            from .crack.passive_pmkid import load_state as _pmkid_state
+            for h in _pmkid_state().get("hits", []):
+                if h.get("ssid"):
+                    harv.add_ssid(h["ssid"]); grown += 1
+                if h.get("bssid"):
+                    harv.add_vendor(h["bssid"])
+        except Exception:
+            pass
+        # strings/metadata/filenames from looted files (triage #2 over the loot dir)
+        if getattr(args, "loot_dir", None):
+            try:
+                import os as _os
+                from .loot.triage import triage as _triage
+                files = []
+                for root, _d, names in _os.walk(args.loot_dir):
+                    files.extend(_os.path.join(root, n) for n in names)
+                if files:
+                    harv.learn_triage(_triage(files)); grown += len(files)
+            except Exception:
+                pass
+        f = harv.grow(args.ssid or "", bssid=args.bssid,
+                      min_len=args.min_len, max_words=args.max)
+        summ = harv.summary()
+        print(f"ENVIRONMENT-GROWN — {summ['note']}  (sources: {summ['by_source'] or 'none'})")
+    else:
+        f = forge(args.ssid or "", tokens=args.token or [], pnl=pnl_seeds,
+                  bssid=args.bssid, min_len=args.min_len, max_words=args.max)
     if args.out:
         try:
             with open(args.out, "w", encoding="utf-8") as fh:
@@ -3477,6 +4598,25 @@ def _resolve_attack(value):
     return None
 
 
+def _resolve_wordlist_or_seed(wordlist_dir, *, name=None):
+    """Resolve the wordlist for a crack; if the store is empty (e.g. the live
+    daemon hasn't run yet on a fresh box), seed the baked starter on the spot so a
+    crack is never blocked for lack of a wordlist, then resolve again. Returns
+    (path, reason) exactly like resolve_wordlist."""
+    from .crack.wordlists import resolve_wordlist, WordlistStore
+    path, reason = resolve_wordlist(wordlist_dir, name=name)
+    if path is None and name is None:
+        try:
+            if not WordlistStore(wordlist_dir).list():
+                from pathlib import Path as _P
+                from .core.provision import provision as _provision
+                _provision(str(_P(wordlist_dir).parent))
+                path, reason = resolve_wordlist(wordlist_dir, name=name)
+        except Exception:
+            pass
+    return path, reason
+
+
 def cmd_crack(args) -> int:
     """Guided, any-hash cracking front-end (not just Wi-Fi): browse hash types,
     identify a sample, plan the exact hashcat command, and run it (gated by
@@ -3536,8 +4676,7 @@ def cmd_crack(args) -> int:
             return 3
         wl_path = getattr(args, "wordlist_path", None)
         if wl_path is None:
-            from .crack.wordlists import resolve_wordlist
-            wl_path, wl_reason = resolve_wordlist(args.wordlist_dir, name=getattr(args, "wordlist", None))
+            wl_path, wl_reason = _resolve_wordlist_or_seed(args.wordlist_dir, name=getattr(args, "wordlist", None))
             if wl_path is None:
                 print(f"no wordlist: {wl_reason}")
                 return 3
@@ -3581,8 +4720,7 @@ def cmd_crack(args) -> int:
     # resolve a wordlist from the store (by name, or the persisted pick) unless a direct path was given
     wl_path = getattr(args, "wordlist_path", None)
     if wl_path is None and (atk in (None, 0, 1, 6, 7)):
-        from .crack.wordlists import resolve_wordlist
-        wl_path, wl_reason = resolve_wordlist(args.wordlist_dir, name=getattr(args, "wordlist", None))
+        wl_path, wl_reason = _resolve_wordlist_or_seed(args.wordlist_dir, name=getattr(args, "wordlist", None))
         if wl_path is None and cmd == "plan":
             print(f"note: {wl_reason}")
     outfile = getattr(args, "outfile", None)
@@ -4194,6 +5332,7 @@ def build_parser() -> argparse.ArgumentParser:
     mesub.add_parser("demo", help="3-node swarm: propagate an arm + reject a forged delta")
     mesub.add_parser("swarm", help="coordinated capture: place the chain across nodes, "
                                    "each re-gates locally before it fires")
+    mesub.add_parser("correlate", help="swarm time-correlation: corroborate events + track movement across nodes")
     mk = mesub.add_parser("key", help="swarm-key lifecycle: gen/rotate/show/export/import (sealed)")
     mksub = mk.add_subparsers(dest="key_cmd", required=True)
 
@@ -4319,6 +5458,9 @@ def build_parser() -> argparse.ArgumentParser:
     dx.add_argument("--top", type=int, default=10, help="how many rarest/departed to show")
     dx.add_argument("--identities", action="store_true",
                     help="show device identities (re-identified across MAC randomization)")
+    dx.add_argument("--dna", action="store_true",
+                    help="behavioral re-id: link MACs by probing behavior (timing/rates/IE), not just PNL/IE equality")
+    dx.add_argument("--demo", action="store_true", help="with --dna: synthetic traces (no radio)")
     dx.set_defaults(func=cmd_dex)
 
     tb = sub.add_parser("toolbox", help="curated catalog of useful tools + the exact command to add each")
@@ -4344,8 +5486,12 @@ def build_parser() -> argparse.ArgumentParser:
     caps_ = capsub.add_parser("show", help="full detail + what it needs + how to use one capability")
     caps_.add_argument("id")
     caps_.add_argument("--json", action="store_true")
-    capc = capsub.add_parser("completion", help="evidence-based completion picture (no subjective %)")
+    capc = capsub.add_parser("completion", help="evidence-based completion picture (no subjective percentage)")
     capc.add_argument("--json", action="store_true")
+    capq = capsub.add_parser("qualified",
+                             help="readiness spine: one truth (manifest + hardware-present + benchpass)")
+    capq.add_argument("--ledger", default=None, help="benchpass ledger JSON to fold in hardware attestation")
+    capq.add_argument("--json", action="store_true")
     cap.set_defaults(func=cmd_capabilities)
     sim = sub.add_parser("simulate",
                          help="boot the whole live stack with no Pi (fake engine replaying a scenario)")
@@ -4358,6 +5504,40 @@ def build_parser() -> argparse.ArgumentParser:
                      help="tick a few times, print the status snapshot JSON, and exit")
     sim.add_argument("--ticks", type=int, default=14, help="with --once: how many tick steps to run")
     sim.set_defaults(func=cmd_simulate)
+
+    hw = sub.add_parser("hardware", aliases=["hw"],
+                        help="what's plugged in and what capability each device unlocks")
+    hw.add_argument("--json", action="store_true", help="machine-readable output")
+    hw.set_defaults(func=cmd_hardware)
+
+    sh = sub.add_parser("shadow", help="blue-shadow — what a defender sees from each action (+ quieter paths)")
+    sh.add_argument("action", nargs="?", default=None, help="one action to detail (else list all)")
+    sh.add_argument("--json", action="store_true", help="machine-readable output")
+    sh.set_defaults(func=cmd_shadow)
+
+    st = sub.add_parser("stealth", help="OPSEC for Augur's own device (MAC randomization, …)")
+    stsub = st.add_subparsers(dest="stealth_cmd", required=True)
+    stm = stsub.add_parser("mac", help="randomize a radio's MAC so the box doesn't present a stable fingerprint")
+    stm.add_argument("iface", help="interface to randomize (e.g. wlan0)")
+    stm.add_argument("--mode", choices=["vendor", "laa"], default="vendor",
+                     help="vendor = plausible real OUI (blend in, default); laa = locally-administered random")
+    stm.add_argument("--apply", action="store_true", help="actually change it on this device (needs root)")
+    stq = stsub.add_parser("quiet", help="Quiet/Ghost mode — go dark (LAB): passive-first + frame budget + MAC rotate")
+    stq.add_argument("quiet_cmd", choices=["on", "off", "status"], nargs="?", default="status")
+    stq.add_argument("--budget", type=int, default=None, help="max frames to emit while quiet (0 = fully passive)")
+    stq.add_argument("--file", default=None, help="stealth config path (default: the device stealth state)")
+    stp = stsub.add_parser("pace", help="low-and-slow planner — spread N actions under a footprint cap (jittered)")
+    stp.add_argument("--count", type=int, default=5, help="how many actions to schedule")
+    stp.add_argument("--kind", default="deauth", help="action kind (deauth/assoc/probe/eapol/pmkid…)")
+    stp.add_argument("--window", type=float, default=300.0, help="sliding window seconds (default 300)")
+    stp.add_argument("--cap", type=int, default=14, help="footprint-weight ceiling per window (default 14 = quiet)")
+    stp.add_argument("--min-gap", type=float, default=8.0, help="floor spacing between actions (seconds)")
+    stp.add_argument("--jitter", type=float, default=6.0, help="random extra spacing so cadence isn't a pattern")
+    stp.add_argument("--seed", type=int, default=0, help="jitter seed (reproducible schedules)")
+    stp.add_argument("--quiet", action="store_true", help="also honour the saved Quiet-mode gate")
+    stp.add_argument("--confirm", action="store_true", help="treat over-budget transmits as confirmed")
+    stp.add_argument("--file", default=None, help="stealth config path (with --quiet)")
+    st.set_defaults(func=cmd_stealth)
 
     nb = sub.add_parser("notebook", help="lab session journal — log activity + render a report")
     nb.add_argument("--path", default="/captures/live/notebook.jsonl", help="notebook path")
@@ -4618,6 +5798,10 @@ def build_parser() -> argparse.ArgumentParser:
     fg.add_argument("--out", default=None, help="write the candidate wordlist to this file")
     fg.add_argument("--min-len", type=int, default=8, help="minimum length (WPA2-PSK is 8+; default 8)")
     fg.add_argument("--max", type=int, default=2000, help="cap the candidate count (default 2000)")
+    fg.add_argument("--environment", action="store_true",
+                    help="grow seeds from everything the box observed (PNLs + passive-PMKID SSIDs + looted-file strings)")
+    fg.add_argument("--loot-dir", default=None,
+                    help="with --environment: triage looted files here and mine their strings/metadata")
     fg.add_argument("--json", action="store_true", help="machine-readable output")
     fg.set_defaults(func=cmd_forge)
     ex = sub.add_parser("explain", help="purple-team: how a technique is detected and defended")
@@ -4665,6 +5849,136 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--authlog", default=None, help="auth-log path (default: the device auth log)")
     nr.add_argument("--json", action="store_true", help="machine-readable output")
     nr.set_defaults(func=cmd_narrate)
+    en = sub.add_parser("engagement", help="case file — tie Scope+authlog+loot+notebook+report into one durable object")
+    en.add_argument("--dir", default=None, help="engagements dir (default: /captures/engagements)")
+    ensub = en.add_subparsers(dest="engagement_cmd", required=True)
+    eno = ensub.add_parser("open", help="open a case (snapshots your authorization)")
+    eno.add_argument("name", help="engagement name")
+    eno.add_argument("--operator", default="operator", help="who is running it")
+    eno.add_argument("--authorization", default=None, help="what authorizes it (SOW/contract/lab/CTF)")
+    eno.add_argument("--force", action="store_true", help="open even if another is active")
+    ensub.add_parser("status", help="show the active engagement")
+    ensub.add_parser("list", help="list all engagements")
+    ens = ensub.add_parser("show", help="full summary of one engagement")
+    ens.add_argument("id")
+    enc = ensub.add_parser("close", help="close the case: pull authlog/loot/notebook, freeze the report")
+    enc.add_argument("id", nargs="?", default=None, help="engagement id (default: the active one)")
+    enc.add_argument("--report-out", default=None, help="write the frozen report as Markdown here")
+    en.set_defaults(func=cmd_engagement)
+    ar = sub.add_parser("arsenal", help="one-place index of everything the box can do + the command to run it")
+    ar.add_argument("--search", default=None, help="filter by a term (command / title / group)")
+    ar.set_defaults(func=cmd_arsenal)
+    pv = sub.add_parser("provision", help="first-boot setup — create /captures skeleton + seed a starter wordlist (crack-ready)")
+    pv.add_argument("--root", default=None, help="captures root (default: /captures)")
+    pv.set_defaults(func=cmd_provision)
+    tg = sub.add_parser("targets", help="target-value radar — rank APs by how worth attacking each is")
+    tg.add_argument("--demo", action="store_true", help="synthetic radar (no radio)")
+    tg.set_defaults(func=cmd_targets)
+    ds = sub.add_parser("dossier", help="everything known about one AP in a single view (+ recommended move)")
+    ds.add_argument("bssid", nargs="?", default="", help="target BSSID")
+    ds.add_argument("--demo", action="store_true", help="synthetic target (no radio)")
+    ds.add_argument("--json", action="store_true", help="machine-readable output")
+    ds.set_defaults(func=cmd_dossier)
+    dv = sub.add_parser("discover", help="LAN service discovery → labeled inventory (what each host IS + its surface)")
+    dv.add_argument("--demo", action="store_true", help="synthetic LAN (no network)")
+    dv.add_argument("--authorized", action="store_true", help="FIELD: actually query (LAN must be armed)")
+    dv.add_argument("--lab", action="store_true", help="LAB: run unleashed")
+    dv.add_argument("--scope-file", default=None, help="scope store (FIELD gate)")
+    dv.add_argument("--json", action="store_true", help="machine-readable output")
+    dv.set_defaults(func=cmd_discover)
+    gt = sub.add_parser("gatt", help="BLE GATT looting — enumerate + read a BLE device's GATT (device-info, battery, vendor services)")
+    gt.add_argument("mac", nargs="?", default="", help="target BLE MAC")
+    gt.add_argument("--demo", action="store_true", help="synthetic BLE device (no radio)")
+    gt.add_argument("--authorized", action="store_true", help="FIELD: actually connect (target must be armed)")
+    gt.add_argument("--lab", action="store_true", help="LAB: run unleashed")
+    gt.add_argument("--scope-file", default=None, help="scope store (FIELD gate)")
+    gt.add_argument("--write-surface", action="store_true", help="map the writable characteristics (control points)")
+    gt.add_argument("--write", default=None, help="POWER-TIER: write to this characteristic UUID (actuates the device)")
+    gt.add_argument("--value", default=None, help="hex value to write (with --write)")
+    gt.add_argument("--confirm", action="store_true", help="required per-action confirm for a --write (even in LAB)")
+    gt.add_argument("--json", action="store_true", help="machine-readable output")
+    gt.set_defaults(func=cmd_gatt)
+    idf = sub.add_parser("identify", help="what IS this device (stove/Roomba/Alexa/phone...) + what you can do with/to it")
+    idf.add_argument("--mac", default=None, help="device MAC (→ OUI vendor)")
+    idf.add_argument("--hostname", default=None, help="DHCP/mDNS/NetBIOS hostname")
+    idf.add_argument("--ble-name", default=None, help="BLE local name")
+    idf.add_argument("--ble-company", default=None, help="BLE company id (hex, e.g. 004c)")
+    idf.add_argument("--ble-service", action="append", help="BLE service UUID (repeatable)")
+    idf.add_argument("--mdns", action="append", help="mDNS service type (repeatable, e.g. _googlecast._tcp)")
+    idf.add_argument("--ssdp", default=None, help="UPnP/SSDP server or device-type string")
+    idf.add_argument("--demo", action="store_true", help="synthetic device (no radio)")
+    idf.add_argument("--json", action="store_true", help="machine-readable output")
+    idf.set_defaults(func=cmd_identify)
+    ph = sub.add_parser("phone", help="phone UI over Bluetooth PAN — tether a phone (no Wi-Fi/cable) and serve the dashboard")
+    ph.add_argument("--adapter", default="hci0", help="Bluetooth adapter")
+    ph.add_argument("--iface", default="pan0", help="PAN interface")
+    ph.add_argument("--ip", default="172.20.10.1", help="the Pi's address on the PAN")
+    ph.add_argument("--port", type=int, default=8080, help="dashboard port")
+    phsub = ph.add_subparsers(dest="phone_cmd", required=True)
+    phsub.add_parser("plan", help="show the bring-up commands + the URL to browse")
+    phu = phsub.add_parser("up", help="bring the PAN up (DRY-RUN unless --apply; needs a BT adapter)")
+    phu.add_argument("--apply", action="store_true", help="actually run the bring-up")
+    phu.add_argument("--assume-adapter", action="store_true", help="skip the adapter-present check")
+    phsub.add_parser("url", help="print the dashboard URL the tethered phone hits")
+    ph.set_defaults(func=cmd_phone)
+    lz = sub.add_parser("leases", help="resource ownership broker — who holds which radio (arbitration for swarm/multi-engine)")
+    lzsub = lz.add_subparsers(dest="leases_cmd", required=True)
+    lzsub.add_parser("demo", help="show lease arbitration (preemption, shared GPS, multi-band coexist)")
+    lz.set_defaults(func=cmd_leases)
+    scn = sub.add_parser("scenario", help="runnable playbooks that chain capabilities (tutorial + manifest readiness check)")
+    scnsub = scn.add_subparsers(dest="scenario_cmd", required=True)
+    scnsub.add_parser("list", help="list the scenarios")
+    scns = scnsub.add_parser("show", help="show a scenario's steps + exact commands")
+    scns.add_argument("name", help="scenario name (see `scenario list`)")
+    scnc = scnsub.add_parser("check", help="is this scenario runnable on THIS box right now?")
+    scnc.add_argument("name", help="scenario name")
+    scn.set_defaults(func=cmd_scenario)
+    sc = sub.add_parser("scrub", help="secure-wipe the device's OWN data (scrub keeps the brain; panic burns it all)")
+    sc.add_argument("--root", default=None, help="captures root (default: /captures)")
+    sc.add_argument("--panic", action="store_true", help="full burn: wipe brain + geo + target list too (keeps the box bootable)")
+    scsub = sc.add_subparsers(dest="scrub_cmd", required=True)
+    scsub.add_parser("status", help="show on-disk sensitive-data exposure")
+    scsub.add_parser("plan", help="dry-run: what this mode would wipe vs keep")
+    scr = scsub.add_parser("run", help="execute the scrub (DRY-RUN unless --apply)")
+    scr.add_argument("--apply", action="store_true", help="actually wipe (otherwise dry-run)")
+    scr.add_argument("--no-overwrite", action="store_true", help="unlink without the best-effort overwrite pass")
+    sc.set_defaults(func=cmd_scrub)
+    aw = sub.add_parser("airwave", help="Airwave DVR — scrub back through RF history (timeline/scrub/track)")
+    aw.add_argument("--dvr", default=None, help="DVR JSONL file (default: the device airwave log)")
+    aw.add_argument("--demo", action="store_true", help="synthetic RF timeline (no radio)")
+    awsub = aw.add_subparsers(dest="airwave_cmd", required=True)
+    awsub.add_parser("summary", help="overview of recorded airtime")
+    awt = awsub.add_parser("timeline", help="activity histogram over time (the scrub bar)")
+    awt.add_argument("--bucket", type=float, default=60.0, help="bucket size in seconds")
+    aws = awsub.add_parser("scrub", help="snapshot the air at an instant")
+    aws.add_argument("--at", type=float, required=True, help="timestamp to scrub to")
+    aws.add_argument("--radius", type=float, default=5.0, help="+/- seconds around --at")
+    awk = awsub.add_parser("track", help="every time one BSSID appeared")
+    awk.add_argument("bssid", help="BSSID to follow")
+    aw.set_defaults(func=cmd_airwave)
+    rp = sub.add_parser("responder", help="harvest NetNTLM hashes on the joined LAN (LLMNR/NBT-NS/mDNS poisoning) → crack queue")
+    rp.add_argument("iface", help="LAN interface Augur joined (e.g. wlan0)")
+    rpsub = rp.add_subparsers(dest="responder_cmd", required=True)
+    rpp = rpsub.add_parser("plan", help="show the exact command + posture (no run)")
+    rpp.add_argument("--analyze", action="store_true", help="passive: watch, don't answer")
+    rph = rpsub.add_parser("harvest", help="run bounded + parse captured hashes into the crack queue")
+    rph.add_argument("--seconds", type=int, default=60, help="how long to run (time-boxed; default 60)")
+    rph.add_argument("--analyze", action="store_true", help="passive: watch, don't answer (always allowed)")
+    rph.add_argument("--authorized", action="store_true", help="FIELD: actually poison (LAN must be armed in scope)")
+    rph.add_argument("--lab", action="store_true", help="LAB: run unleashed on your own network")
+    rph.add_argument("--scope-file", default=None, help="scope store (FIELD gate)")
+    rph.add_argument("--out-dir", default="/captures/loot/netntlm", help="where to drop harvested hash files")
+    rp.set_defaults(func=cmd_responder)
+    pk = sub.add_parser("pmkid", help="passive PMKID sweep — zero-transmit loot (harvest PMKIDs APs leak, correlate to scope/loot/forge)")
+    pksub = pk.add_subparsers(dest="pmkid_cmd", required=True)
+    pksub.add_parser("plan", help="explain the zero-transmit posture + what it correlates")
+    pks = pksub.add_parser("sweep", help="harvest + rank PMKID loot from real .22000 output or synthetic frames")
+    pks.add_argument("--from-22000", default=None, help="hashcat-22000 file the capture engine wrote")
+    pks.add_argument("--demo", action="store_true", help="synthetic PMKID sightings (no radio)")
+    pks.add_argument("--scoped", action="store_true", help="gate by the device scope (default: LAB unscoped)")
+    pks.add_argument("--scope-file", default=None, help="scope store (with --scoped)")
+    pks.add_argument("--json", action="store_true", help="machine-readable output")
+    pk.set_defaults(func=cmd_pmkid)
     lo = sub.add_parser("loot", help="recovered-credential vault + scope-gated network pivot")
     lo.add_argument("--vault", default=None, help="vault file (default: the device loot vault)")
     losub = lo.add_subparsers(dest="loot_cmd", required=True)
@@ -4673,8 +5987,9 @@ def build_parser() -> argparse.ArgumentParser:
     la.add_argument("--bssid", default=None, help="AP BSSID the PSK belongs to")
     la.add_argument("--ssid", default=None, help="network name")
     la.add_argument("--source", default="manual", help="where it came from (crack/manual/…)")
-    ll = losub.add_parser("list", help="list vaulted credentials (secrets redacted by default)")
-    ll.add_argument("--reveal", action="store_true", help="show the actual secrets")
+    ll = losub.add_parser("list", help="list vaulted credentials (full cleartext; --mask to hide)")
+    ll.add_argument("--mask", action="store_true", help="mask the secrets for a shareable screenshot (default shows them in full)")
+    ll.add_argument("--reveal", action="store_true", help=argparse.SUPPRESS)  # deprecated: full is the default now
     ll.add_argument("--json", action="store_true", help="machine-readable output")
     lp = losub.add_parser("pivot", help="recon + credential-reuse into a subnet (FIELD: plan unless --authorized; LAB: runs)")
     lp.add_argument("--subnet", default=None, help="CIDR to pivot into (else the armed CIDRs in scope)")
@@ -4682,6 +5997,35 @@ def build_parser() -> argparse.ArgumentParser:
     lp.add_argument("--pw", action="append", help="extra password to try (vaulted PSKs are included automatically)")
     lp.add_argument("--authorized", action="store_true", help="FIELD only: actually fire (targets must be armed in scope)")
     lp.add_argument("--scope-file", default=None, help="scope store (default: the device scope)")
+    lp.add_argument("--defaults", action="store_true", help="fold in well-known device default creds")
+    lp.add_argument("--device-category", default=None, help="with --defaults: focus on a category (router/camera/printer/...)")
+    ld = losub.add_parser("defaults", help="well-known default creds for a device type (feeds `loot pivot --defaults`)")
+    ld.add_argument("--category", default=None, help="device category (router/camera/printer/iot/...)")
+    ld.add_argument("--vendor", default=None, help="vendor (tp-link/hikvision/ubiquiti/...)")
+    ld.add_argument("--no-common", action="store_true", help="only the device-specific set, not the generic common one")
+    lr = losub.add_parser("reuse", help="credential-reuse graph: one password's blast radius across discovered hosts")
+    lr.add_argument("--subnet", default=None, help="CIDR to scan + spray vault creds across")
+    lr.add_argument("--demo", action="store_true", help="synthetic reuse graph (no network)")
+    lr.add_argument("--authorized", action="store_true", help="FIELD: actually spray (hosts must be armed)")
+    lr.add_argument("--lab", action="store_true", help="LAB: run unleashed")
+    lr.add_argument("--scope-file", default=None, help="scope store")
+    lt = losub.add_parser("triage", help="forensic triage of pulled files (exiftool/binwalk/steghide/secrets)")
+    lt.add_argument("files", nargs="+", help="files to triage")
+    lt.add_argument("--json", action="store_true", help="machine-readable output")
+    lse = losub.add_parser("secrets", help="typed secrets scan over files (AWS/GitHub/keys/JWT/DB-URI/passwords); full cleartext")
+    lse.add_argument("files", nargs="+", help="files to scan")
+    lse.add_argument("--redact", action="store_true", help="mask the values (for a shareable report; default shows them in full)")
+    lse.add_argument("--json", action="store_true", help="machine-readable output")
+    lrp = losub.add_parser("report", help="loot rollup — one view across creds/files/NetNTLM/secrets")
+    lrp.add_argument("--json", action="store_true", help="machine-readable output")
+    lf = losub.add_parser("files", help="scope-gated SMB file-loot: pull interesting files off a host with a recovered credential")
+    lf.add_argument("host", help="target host (IP or name); must be armed in scope")
+    lf.add_argument("--user", required=True, help="username for the recovered credential")
+    lf.add_argument("--pw", required=True, help="password for the recovered credential")
+    lf.add_argument("--dest", default="/captures/loot/files", help="where to drop pulled files")
+    lf.add_argument("--max-files", type=int, default=25, help="cap on files pulled (default: 25)")
+    lf.add_argument("--triage", action="store_true", help="run forensic triage on the pulled files")
+    lf.add_argument("--scope-file", default=None, help="scope store (default: the device scope)")
     lo.set_defaults(func=cmd_loot)
     return p
 

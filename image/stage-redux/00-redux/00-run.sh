@@ -35,6 +35,18 @@ cat > "$ROOTFS_DIR/usr/local/bin/redux-display-diag" <<'REDUX_DISPLAY_DIAG_LAUNC
 PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.display.acceptance "$@"
 REDUX_DISPLAY_DIAG_LAUNCHER
 chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-display-diag"
+# redux-touch-calibrate: the offline five-point calibration fitter. It is a
+# console_script in pyproject but was not previously installed to the image, so
+# the touch deck could never be calibrated on-device. Wire it in.
+cat > "$ROOTFS_DIR/usr/local/bin/redux-touch-calibrate" <<'REDUX_TOUCH_CALIBRATE_LAUNCHER'
+#!/bin/sh
+PYTHONPATH=/opt/redux exec /usr/bin/python3 -m redux.display.calibration_wizard "$@"
+REDUX_TOUCH_CALIBRATE_LAUNCHER
+chmod 0755 "$ROOTFS_DIR/usr/local/bin/redux-touch-calibrate"
+# redux-deck-enable: one-command touch-deck setup (detect panel -> capture five
+# corner taps -> write calibration -> enable the deck in fbui.env -> restart),
+# replacing the manual diag/calibrate/edit/restart sequence.
+install -m 0755 files/redux-deck-enable "$ROOTFS_DIR/usr/local/bin/redux-deck-enable"
 # Headless first-boot mount, service, and image evidence: operator invoked only.
 cat > "$ROOTFS_DIR/usr/local/bin/redux-boot-check" <<'REDUX_BOOT_CHECK_LAUNCHER'
 #!/bin/sh
@@ -143,7 +155,7 @@ hydra medusa ncrack crunch cewl hashid sqlmap nikto whatweb dirb wfuzz bluez \
 bluez-tools rtl-sdr rtl-433 multimon-ng hackrf gpsd gpsd-clients binwalk foremost \
 libimage-exiftool-perl steghide python3-scapy python3-impacket python3-pip htop \
 btop iftop iotop nload tmux screen jq vim tree ncdu rsync usbutils pciutils \
-i2c-tools net-tools"
+i2c-tools net-tools smbclient responder dnsmasq avahi-utils"
 if ! apt-get install -y --no-install-recommends $REDUX_TOOLSET; then
     echo "redux toolset: batch install hit an unavailable package; retrying per-package"
     for _pkg in $REDUX_TOOLSET; do

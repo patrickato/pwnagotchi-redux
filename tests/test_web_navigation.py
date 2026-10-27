@@ -31,7 +31,7 @@ def test_every_touch_navigation_page_has_real_content():
     page = render_page()
     parser = WorkspaceParser()
     parser.feed(page)
-    expected = ["overview", "radio", "captures", "doctor", "system"]
+    expected = ["overview", "ops", "radio", "captures", "doctor", "system"]
     assert [tab["data-view"] for tab in parser.buttons] == expected
     assert len(parser.panels) >= len(expected)
     assert {panel["data-page"] for panel in parser.panels} == set(expected)

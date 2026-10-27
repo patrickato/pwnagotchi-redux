@@ -824,6 +824,32 @@ class Augur:
         if self.sentinel() is not None:
             status["sentinel"] = self.sentinel_status()
         status["capture_engine"] = self.capture_plan().get("selected_engine")
+        # Surface the capability option-space + readiness so every UI (TFT/web/phone)
+        # can show the full picture of what the box can do and how ready each is —
+        # the "nothing useful is hidden" view. Cheap + fail-safe.
+        try:
+            from .manifest import completion as _cap_completion
+            status["capabilities"] = _cap_completion()
+        except Exception:
+            pass
+        # Stealth posture (Quiet/Ghost mode) + live footprint, so every UI shows
+        # at a glance whether the box is going dark and how detectable it is.
+        try:
+            import os as _os
+            from .stealth import QuietConfig, status as _stealth_status
+            _sp = _os.environ.get("REDUX_STEALTH") or "/captures/live/stealth.json"
+            status["stealth"] = _stealth_status(QuietConfig.load(_sp))
+        except Exception:
+            pass
+        # Passive PMKID loot — the zero-transmit harvest summary, so every UI can
+        # show how much crackable loot the box pulled without ever transmitting.
+        try:
+            from ..crack.passive_pmkid import load_state as _pmkid_state
+            _pl = _pmkid_state()
+            if _pl.get("summary"):
+                status["passive_loot"] = _pl["summary"]
+        except Exception:
+            pass
         if processing_report is None:
             from ..crack.ingest import read_summary
             processing_report = read_summary()

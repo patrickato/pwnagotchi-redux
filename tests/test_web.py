@@ -34,6 +34,23 @@ def test_status_payload_has_fields():
     assert "narration" in p and "recommendation" in p
 
 
+def test_operations_tab_surfaces_capabilities_stealth_and_engagement():
+    # the Operations dashboard reads these keys; they must be in the payload so the
+    # panels have real data (capabilities + stealth come from Augur.status()).
+    bc = Augur([ONBOARD, ALFA], intent=Intent.HUNT)
+    p = status_payload(bc)
+    assert "capabilities" in p and "by_state" in p["capabilities"]
+    assert "stealth" in p and "footprint" in p["stealth"]
+    assert "engagement" in p             # None when no case is open, but present
+
+
+def test_operations_panels_render_in_page():
+    page = render_page()
+    for panel in ("opsengagement", "opsstealth", "opsloot", "opscaps"):
+        assert f'id="{panel}"' in page
+    assert 'data-view="ops"' in page and "function renderOps(" in page
+
+
 def test_status_payload_includes_own_position_honestly():
     # no position provider → position is None, never a fabricated coordinate
     bc = Augur([ONBOARD], intent=Intent.RECON)
@@ -61,6 +78,35 @@ def test_status_payload_lists_access_points_from_cache():
 def test_page_has_access_points_panel():
     html = render_page()
     assert "renderAPs" in html and "aptbl" in html and "access_points" in html
+
+
+def test_status_payload_surfaces_recovered_loot_open_text(tmp_path, monkeypatch):
+    # The dashboard shows recovered creds OPEN-TEXT (operator's own authorized loot,
+    # token-gated surface) — nothing masked, same as `redux loot list`.
+    from redux.loot.vault import LootVault, LootEntry
+    vp = tmp_path / "loot" / "vault.json"
+    vp.parent.mkdir(parents=True)
+    (vp.parent / "netntlm").mkdir()
+    (vp.parent / "netntlm" / "grab.ntlm").write_text("user::DOM:...\n")
+    monkeypatch.setenv("REDUX_LOOT", str(vp))
+    v = LootVault(str(vp))
+    v.add(LootEntry(kind="wifi-psk", target="aa:bb:cc:dd:ee:ff", secret="Summ3r2024!",
+                    ssid="HomeNet", source="crack"))
+    v.add(LootEntry(kind="service-cred", target="10.0.0.5", secret="admin123",
+                    service="smb", username="admin", source="pivot"))
+    bc = Augur([ONBOARD], intent=Intent.HUNT)
+    loot = status_payload(bc)["loot"]
+    assert loot["count"] == 2 and loot["netntlm"] == 1
+    secrets = {c.get("secret") for c in loot["credentials"]}
+    assert "Summ3r2024!" in secrets and "admin123" in secrets   # full cleartext
+    assert all("*" not in (c.get("secret") or "") for c in loot["credentials"])
+
+
+def test_page_has_recovered_creds_panel():
+    html = render_page()
+    assert 'id="opscreds"' in html and 'id="credcount"' in html
+    # renderOps builds cred rows via textContent (XSS-safe) + tap-to-copy
+    assert "opscreds" in html and "navigator.clipboard" in html
 
 
 def test_doctor_health_panel_uses_real_status_not_demo_values():

@@ -62,7 +62,7 @@ def test_calibrated_tap_redraws_selected_page_without_opening_radio(tmp_path, mo
                    "--touch-device", "/dev/input/event4",
                    "--calibration-file", str(path),
                    "--confirm-touch-calibration"])
-    assert pages == ["overview", "trends"]
+    assert pages == ["overview", "radios"]
     assert closed == [123]
 
 

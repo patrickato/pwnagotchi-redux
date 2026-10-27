@@ -31,19 +31,22 @@ class Phase(str, Enum):
     RECON = "recon"
     CAPTURE = "capture"
     CRACK = "crack"
+    JOIN = "join"
     PIVOT_SCAN = "pivot_scan"
     PIVOT_CRED = "pivot_cred"
     LOOT = "loot"
 
 
-# the offensive chain per target (recon precedes the whole run)
-CHAIN: Tuple[Phase, ...] = (Phase.CAPTURE, Phase.CRACK, Phase.PIVOT_SCAN,
+# the offensive chain per target (recon precedes the whole run). JOIN is the link
+# that turns a cracked key into LAN access, so the pivot phases have a subnet.
+CHAIN: Tuple[Phase, ...] = (Phase.CAPTURE, Phase.CRACK, Phase.JOIN, Phase.PIVOT_SCAN,
                             Phase.PIVOT_CRED, Phase.LOOT)
 
 # phase -> (frameworks/report action key, capability id needed or None)
 _PHASE_META: Dict[Phase, Tuple[str, Optional[str]]] = {
     Phase.CAPTURE: ("handshake_capture", "capture.handshake"),
     Phase.CRACK: ("offline_crack", None),
+    Phase.JOIN: ("network_join", "radio.wifi.uplink"),
     Phase.PIVOT_SCAN: ("net_scan", None),
     Phase.PIVOT_CRED: ("cred_test", None),
     Phase.LOOT: ("loot", None),

@@ -29,6 +29,7 @@ class NavigationGestures:
     rotation: int = 0
     swipe_pixels: int = 60
     tap_slop_pixels: int = 18
+    deck: bool = False          # control-deck mode: a tap reports its point, not a page
     pressed: bool = False
     desynced: bool = False
     awaiting_release: bool = False
@@ -109,6 +110,10 @@ class NavigationGestures:
             return ("scroll", 1 if dy < 0 else -1)
         if self.maximum_motion > self.tap_slop_pixels:
             return None
+        # Control-deck mode: the whole screen is the deck, so a tap reports its
+        # calibrated (x, y) for the deck to hit-test — not a page/mode/footer action.
+        if self.deck:
+            return ("tap", (int(sx), int(sy)))
         # A tap in the header strip is the mode switch (confirmed by a second tap
         # in the UI loop). Checked before the content zones; it never overlaps the
         # detail (y>=157) or tab (y>=276) regions.

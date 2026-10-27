@@ -62,13 +62,52 @@ def status_payload(augur, *, processing_report=None) -> Dict:
     # APs this device has actually recorded). Read-only situational awareness.
     try:
         from ..geo.latest_n import latest_n
+        from ..geo import oui as _oui
         aps = latest_n(augur.store, 16, kind="wifi")
-        data["access_points"] = [
-            {"bssid": s.mac, "ssid": s.ssid, "channel": s.channel, "rssi": s.rssi, "ts": s.ts}
-            for s in aps
-        ]
+        rows = []
+        for s in aps:
+            device = ""
+            try:
+                from ..intel.device_id import DeviceSignals, identify
+                vendor = _oui.lookup_oui(s.mac) or ""
+                g = identify(DeviceSignals(mac=s.mac, vendor=vendor))
+                if g.category != "unknown":
+                    device = f"{g.product} [{g.category}]"
+                elif vendor:
+                    device = vendor
+            except Exception:
+                device = ""
+            rows.append({"bssid": s.mac, "ssid": s.ssid, "channel": s.channel,
+                         "rssi": s.rssi, "ts": s.ts, "device": device})
+        data["access_points"] = rows
     except Exception:
         data["access_points"] = []
+    # the active engagement case file, if one is open (cheap single-file read) —
+    # so the dashboard shows which op is running + its authorization at a glance.
+    try:
+        from ..core.engagement import EngagementStore
+        _es = EngagementStore()
+        _act = _es.active()
+        data["engagement"] = _es.summary(_act.id) if _act else None
+    except Exception:
+        data["engagement"] = None
+    # recovered loot — the creds this box has cracked/pivoted, shown OPEN-TEXT (your
+    # loot off authorized targets; the dashboard is already token-gated). Cheap: one
+    # JSON read + a dir count. Same vault `redux loot list` prints, nothing held back.
+    try:
+        import os as _os
+        from ..loot.vault import LootVault, default_loot_path
+        _vp = default_loot_path()
+        creds = [e.to_dict() for e in LootVault(_vp).entries()]
+        creds.sort(key=lambda d: d.get("ts") or 0, reverse=True)   # newest first
+        netntlm = 0
+        _nn = _os.path.join(_os.path.dirname(_vp), "netntlm")
+        if _os.path.isdir(_nn):
+            netntlm = sum(1 for f in _os.listdir(_nn)
+                          if f.endswith((".txt", ".ntlm", ".hash", ".hashes")))
+        data["loot"] = {"credentials": creds, "count": len(creds), "netntlm": netntlm}
+    except Exception:
+        data["loot"] = {"credentials": [], "count": 0, "netntlm": 0}
     return data
 
 
@@ -88,6 +127,20 @@ button{font:12px var(--mono);background:#18222d;color:var(--fg);border:1px solid
 border-radius:7px;padding:5px 10px;min-height:42px;cursor:pointer;touch-action:manipulation}button.on{border-color:var(--acc);color:var(--acc)}
 main{max-width:900px;margin:0 auto;padding:16px;display:grid;gap:13px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.arsenal{display:grid;gap:10px;margin-top:8px}
+.arsenal .agn{color:var(--acc);font-size:11px;letter-spacing:.6px;margin-bottom:3px}
+.arsenal .ae{display:flex;flex-wrap:wrap;gap:8px;padding:2px 0;border-top:1px solid var(--line)}
+.arsenal .ae code{color:var(--wifi);white-space:nowrap}
+.arsenal .ae span{color:var(--mut);flex:1 1 180px}
+.loot{display:grid;gap:7px;margin-top:8px}
+.loot .lr{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line)}
+.loot .lr:first-child{border-top:0}
+.loot .lk{color:var(--ble);font-size:10px;text-transform:uppercase;letter-spacing:.5px;flex:0 0 auto}
+.loot .lt{color:var(--mut);font-size:12px;flex:1 1 140px;min-width:0;overflow-wrap:anywhere}
+.loot .lu{color:var(--dim);font-size:12px}
+.loot .ls{color:var(--acc);font-weight:600;background:#0c1a18;border:1px solid #1c3a34;border-radius:5px;padding:1px 7px;overflow-wrap:anywhere;cursor:pointer}
+.loot .lsrc{color:var(--dim);font-size:10px}
+.loot .nn{color:var(--warn);font-size:11px;margin-top:4px}
 .row{display:flex;flex-wrap:wrap;gap:12px}.kv{flex:1 1 120px}
 .k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
 .v{font-size:17px;margin-top:2px}.creature{font-size:19px;color:var(--acc)}
@@ -255,6 +308,7 @@ body[data-skin="plain"] .hero::before{display:none}
 </header>
 <nav id="viewnav" class="view-nav" aria-label="Redux workspace pages">
  <button type="button" data-view="overview" aria-pressed="true">Overview</button>
+ <button type="button" data-view="ops" aria-pressed="false">Operations</button>
  <button type="button" data-view="radio" aria-pressed="false">Radio</button>
  <button type="button" data-view="captures" aria-pressed="false">Captures</button>
  <button type="button" data-view="doctor" aria-pressed="false">Doctor</button>
@@ -265,6 +319,26 @@ body[data-skin="plain"] .hero::before{display:none}
  <section class="card" data-page="system" hidden aria-label="System evidence">
   <h2>System evidence</h2><p class="mut">Sensor, visual and heartbeat timestamps are independent. Unknown coverage requires evidence.</p>
   <div id="systemevidence" aria-live="polite">Evidence unavailable</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Engagement">
+  <div class="k">engagement · active case</div><div id="opsengagement" class="v">no active engagement</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Stealth posture">
+  <div class="k">stealth · emissions footprint (real-time)</div><div id="opsstealth" aria-live="polite">stealth status unavailable</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Passive loot">
+  <div class="k">passive loot · zero-transmit PMKID harvest</div><div id="opsloot" aria-live="polite">no passive sweep recorded</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Recovered credentials">
+  <div class="k">recovered loot · credentials in the clear <span id="credcount" class="badge"></span></div>
+  <div id="opscreds" class="loot" aria-live="polite">no credentials recovered yet</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Capability readiness">
+  <div class="k">capabilities · readiness (what the box can do, how ready)</div><div id="opscaps" aria-live="polite">capability map unavailable</div>
+ </section>
+ <section class="card" data-page="ops" hidden aria-label="Arsenal">
+  <div class="k">arsenal · everything you can run (redux &lt;command&gt;)</div>
+  <div id="opsarsenal" class="arsenal"><!--ARSENAL--></div>
  </section>
  <div class="card hero" data-page="overview" aria-label="Live Augur persona">
   <div class="hero-top"><span class="hero-overline">AUGUR / LIVE OBSERVATIONS</span>
@@ -730,11 +804,59 @@ function renderSystem(d){
   item.children[1].textContent='Source: '+row.source+' · Measured: '+(row.measured_at??'unavailable');
  });
 }
+function renderOps(d){
+ // engagement — the active case file + its authorization
+ var eng=d.engagement, ee=document.getElementById('opsengagement');
+ if(ee){ ee.textContent = eng ? (eng.name+' ['+eng.status+'] · auth: '+(eng.authorization||'—')
+   +' · armed at open: '+(eng.armed_at_open??0)) : 'no active engagement'; }
+ // stealth footprint — the real-time detectability meter
+ var st=d.stealth, se=document.getElementById('opsstealth');
+ if(se){ if(st&&st.footprint){ var fp=st.footprint;
+   se.textContent='quiet '+(st.quiet?'ON':'off')+' · footprint '+fp.label.toUpperCase()
+    +' ('+fp.score+'/100) · budget '+(st.frame_budget??0)+' · MAC rotate '+(st.randomize_mac?'on':'off');
+  } else { se.textContent='stealth status unavailable'; } }
+ // passive loot — zero-transmit PMKID harvest summary
+ var pl=d.passive_loot, le=document.getElementById('opsloot');
+ if(le){ le.textContent = pl ? (pl.new_loot+' NEW crackable · '+pl.aps_leaking_pmkid+' leaking · '
+   +pl.already_captured+' owned · '+(pl.footprint||'silent')+' ('+(pl.transmit||'zero transmit')+')')
+   : 'no passive sweep recorded'; }
+ // capability readiness — what the box can do + how ready
+ var cap=d.capabilities, ce=document.getElementById('opscaps');
+ if(ce){ if(cap&&cap.by_state){ var b=cap.by_state;
+   ce.textContent=(b.ready||0)+' ready · '+(b['needs-hardware']||0)+' need hardware · '
+    +(b['tool-missing']||0)+' need a tool · '+(b.planned||0)+' planned'
+    +(cap.summary?(' — '+cap.summary):'');
+  } else { ce.textContent='capability map unavailable'; } }
+ // recovered credentials — OPEN-TEXT (your authorized loot). Built from DOM nodes
+ // with textContent so a hostile SSID/secret can't inject markup; tap a secret to copy.
+ var loot=d.loot||{}, lc=loot.credentials||[], ce2=document.getElementById('opscreds');
+ var cbadge=document.getElementById('credcount');
+ if(cbadge){ cbadge.textContent = loot.count ? (loot.count+' cred'+(loot.count==1?'':'s')) : ''; }
+ if(ce2){ ce2.textContent='';
+  if(!lc.length){ ce2.textContent='no credentials recovered yet'; }
+  else { lc.forEach(function(c){
+    var row=document.createElement('div'); row.className='lr';
+    function add(cls,txt){ if(txt==null||txt===''){return;} var s=document.createElement('span'); s.className=cls; s.textContent=txt; row.appendChild(s); }
+    add('lk', c.kind||'cred');
+    add('lt', c.ssid||c.target||c.service||'—');
+    if(c.username){ add('lu', c.username+' @'); }
+    var sec=document.createElement('span'); sec.className='ls'; sec.textContent=(c.secret||c.psk||''); sec.title='tap to copy';
+    sec.onclick=function(){ try{navigator.clipboard.writeText(sec.textContent);}catch(e){} };
+    row.appendChild(sec);
+    add('lsrc', c.source?('['+c.source+']'):'');
+    ce2.appendChild(row);
+   });
+   if(loot.netntlm){ var nn=document.createElement('div'); nn.className='nn';
+     nn.textContent='+ '+loot.netntlm+' NetNTLM hash file(s) in loot/netntlm → crack queue'; ce2.appendChild(nn); }
+  }
+ }
+}
 function paint(d){
  renderSystem(d);
  renderDoctor(d.doctor||null);
  renderPipeline(d);
  renderRuntimePanels(d);
+ renderOps(d);
  var fe=document.getElementById('face'),nf=d.face||'‹·_·›';
  var base='face'+(d.face_state==='ruffle'?' crit':'')+(d.face_state==='blind'?' blinded':'');
  if(fe.textContent!==nf){fe.textContent=nf;fe.className=base;void fe.offsetWidth;fe.className=base+' pop';}
@@ -796,7 +918,8 @@ function renderAPs(aps){var el=document.getElementById('aptbl'),note=document.ge
  ['CH','BSSID','SIG','SSID'].forEach(function(h){var d=document.createElement('div');d.className='h';d.textContent=h;el.appendChild(d)});
  function cell(t,cls){var d=document.createElement('div');if(cls)d.className=cls;d.textContent=t;el.appendChild(d)}
  aps.forEach(function(a){cell(a.channel!=null?String(a.channel):'-','c');cell(a.bssid||'—');
-  cell(a.rssi!=null?(a.rssi+''):'—','c');cell(a.ssid||'<hidden>')});
+  cell(a.rssi!=null?(a.rssi+''):'—','c');
+  cell((a.ssid||'<hidden>')+(a.device?('  ·  '+a.device):''))});
  note.textContent=aps.length+' AP'+(aps.length>1?'s':'')+' · strongest first · real sightings only';
 }
 function renderMap(pts,pos){const NS='http://www.w3.org/2000/svg',svg=document.getElementById('map'),rng=document.getElementById('maprange');
@@ -831,7 +954,21 @@ document.addEventListener('visibilitychange',function(){if(!document.hidden)tick
 
 
 def render_page() -> str:
-    return PAGE
+    # Inject the arsenal (static — the full toolkit + the command for each) once at
+    # page build, so it doesn't ride every status refresh.
+    import html as _h
+    try:
+        from ..core import arsenal
+        parts = []
+        for name, entries in arsenal.groups().items():
+            parts.append('<div class="ag"><div class="agn">' + _h.escape(name) + '</div>')
+            for e in entries:
+                parts.append('<div class="ae"><code>redux ' + _h.escape(e.command) + '</code>'
+                             '<span>' + _h.escape(e.title) + '</span></div>')
+            parts.append('</div>')
+        return PAGE.replace("<!--ARSENAL-->", "".join(parts))
+    except Exception:
+        return PAGE
 
 
 # A tiny, self-contained unlock page shown when a token is required and absent.

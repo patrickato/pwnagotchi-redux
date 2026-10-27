@@ -26,10 +26,12 @@ from .pipeline import (
     try_credentials,
     autorun,
 )
+from .join import WifiJoiner, JoinResult
 
 __all__ = [
     "Port", "Host", "Credential", "ScanResult", "CredResult",
     "Scanner", "CredTester", "ReplayScanner", "ReplayCredTester",
     "NmapScanner", "HydraCredTester", "LootBook", "ReconRefused",
     "recon_subnet", "try_credentials", "autorun",
+    "WifiJoiner", "JoinResult",
 ]

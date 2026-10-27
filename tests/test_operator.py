@@ -20,8 +20,9 @@ def _scope():
     return s
 
 
-def _op(offense=True, engine=True):
-    return Operator(_scope(), offense_enabled=offense, caps={"capture.handshake": engine})
+def _op(offense=True, engine=True, uplink=True):
+    return Operator(_scope(), offense_enabled=offense,
+                    caps={"capture.handshake": engine, "radio.wifi.uplink": uplink})
 
 
 # --- plan gating ------------------------------------------------------------- #
@@ -68,16 +69,16 @@ def _execs(fail_on=None):
                 return False, f"{name} FAILED on {t}"
             return True, f"{name} ok on {t}"
         return run
-    return {Phase.CAPTURE: mk("capture"), Phase.CRACK: mk("crack"),
+    return {Phase.CAPTURE: mk("capture"), Phase.CRACK: mk("crack"), Phase.JOIN: mk("join"),
             Phase.PIVOT_SCAN: mk("scan"), Phase.PIVOT_CRED: mk("cred"), Phase.LOOT: mk("loot")}
 
 
 def test_run_executes_full_chain_on_armed_target():
     out = _op().run([ARMED], _execs(), recon=lambda: (True, "seen"))
     executed = [s for s in out["steps"] if s["executed"]]
-    # recon + 5 chain phases
-    assert len(executed) == 6
-    assert out["summary"]["executed_steps"] == 6
+    # recon + 6 chain phases (capture, crack, join, pivot_scan, pivot_cred, loot)
+    assert len(executed) == 7
+    assert out["summary"]["executed_steps"] == 7
 
 
 def test_run_stops_chain_on_a_failed_step():

@@ -511,6 +511,13 @@ class LiveRuntime:
         self.config.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.config.capture_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.config.active_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # First-boot provisioning: make the rest of the /captures skeleton and seed a
+        # starter wordlist so capture->crack works on day one. Idempotent, fail-safe.
+        try:
+            from .provision import provision as _provision
+            _provision(str(self.config.state_dir.parent))
+        except Exception:
+            pass
         if any(p.is_symlink() for p in (self.config.state_dir,
                                         self.config.capture_dir, self.config.active_dir)):
             raise ValueError("live directories may not be symlinks")

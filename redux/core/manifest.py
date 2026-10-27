@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Tuple
 
-CATEGORIES = ("wifi", "net", "sdr", "rf", "bt", "gps", "power", "sense", "mesh", "blue", "storage")
+CATEGORIES = ("wifi", "net", "sdr", "rf", "bt", "gps", "power", "sense", "mesh", "blue", "stealth", "storage")
 
 
 class Readiness(str, Enum):
@@ -102,7 +102,22 @@ FEATURES: Tuple[Feature, ...] = (
     Feature("wifi.crack", "WPA / hash cracking",
             "convert captures and crack them (hashcat engine, aircrack alt).",
             "wifi", implemented=True, binaries=("hashcat", "hcxpcapngtool"),
-            toolbox="hashcat", guidance="crack", related=("wifi.capture", "net.recon")),
+            toolbox="hashcat", guidance="crack", related=("wifi.capture", "wifi.pmkid", "net.recon")),
+    Feature("loot.secrets", "Typed secrets scanner",
+            "classify credentials in looted files — AWS/GitHub/Slack/Stripe keys, "
+            "Google API keys, private keys, JWTs, DB URIs, password assignments.",
+            "net", implemented=True,
+            note="pure (regex over text, verified with fixtures); shows values in full "
+                 "cleartext by default (your authorized loot) — masking is opt-in",
+            related=("net.recon", "wifi.crack")),
+    Feature("wifi.pmkid", "Passive PMKID sweep",
+            "zero-transmit loot: harvest PMKIDs APs volunteer, correlate to scope + "
+            "captured-list + crackability + forge, rank the new loot.",
+            "wifi", implemented=True, needs_hardware="a monitor-mode Wi-Fi radio",
+            guidance="crack",
+            note="live harvest needs a monitor radio; offline correlation of a .22000 "
+                 "the engine already wrote needs no hardware (redux pmkid sweep --from-22000)",
+            related=("wifi.capture", "wifi.crack")),
     Feature("wifi.wps", "WPS / Pixie-Dust",
             "wash scan → reaver/bully + pixiewps against an armed WPS AP.",
             "wifi", implemented=True, needs_hardware="a monitor/injection Wi-Fi radio",
@@ -111,11 +126,41 @@ FEATURES: Tuple[Feature, ...] = (
             "harvest preferred-network lists; advertise only to in-scope clients.",
             "wifi", implemented=True, needs_hardware="a monitor/injection Wi-Fi radio",
             guidance="karma"),
+    Feature("rf.dvr", "Airwave DVR",
+            "append-only RF timeline — scrub back to any moment, snapshot the air, "
+            "replay a window, track one BSSID's presence over time.",
+            "wifi", implemented=True,
+            note="the engine is pure (verified with no radio); it records whatever the "
+                 "tap/engine/sweep feeds it and persists on /captures",
+            related=("wifi.pmkid", "wifi.dna")),
     Feature("net.recon", "Network kill-chain",
             "scan → scope-gated cred-test → loot over an authorized network.",
             "net", implemented=True, binaries=("nmap", "hydra"),
             toolbox="nmap", guidance="netrecon",
-            note="real nmap + hydra runners; needs access to a network in Scope"),
+            note="real nmap + hydra runners; needs access to a network in Scope",
+            related=("net.responder", "wifi.crack")),
+    Feature("net.default_creds", "Device default-credential pack",
+            "well-known factory default creds keyed by device type (router/camera/"
+            "printer/...) — identify/discover names a device, this feeds its defaults "
+            "into the scope-gated pivot.",
+            "net", implemented=True,
+            note="a published default-cred dictionary (like a wordlist); firing + "
+                 "gating are the pivot's. Pure lookup.",
+            related=("net.device_id", "net.recon", "net.credreuse")),
+    Feature("net.credreuse", "Credential-reuse graph",
+            "spray recovered credentials across discovered hosts and map the blast "
+            "radius — which password unlocks what, which host is most exposed.",
+            "net", implemented=True,
+            note="the planner + graph are pure (verified with no network); the live "
+                 "spray reuses netrecon's scope-gated primitives",
+            related=("net.recon", "net.responder")),
+    Feature("net.responder", "NetNTLM hash harvest",
+            "on the joined LAN, poison LLMNR/NBT-NS/mDNS to harvest NetNTLMv1/v2 "
+            "hashes → the crack queue (hashcat -m 5500/5600).",
+            "net", implemented=True, binaries=("responder",), toolbox="responder",
+            note="firing path: FIELD needs the LAN armed + authorization, LAB unleashed; "
+                 "the parser is pure (verified with no tool); analyze-only mode is passive",
+            related=("net.recon", "wifi.crack")),
     Feature("sdr.rx", "SDR receive / decode",
             "spectrum/waterfall + ISM/ADS-B/POCSAG decoders from an RTL-SDR.",
             "sdr", implemented=True, needs_hardware="an RTL-SDR dongle",
@@ -152,6 +197,12 @@ FEATURES: Tuple[Feature, ...] = (
             "the REDUXCAP /captures partition that survives the ephemeral root.",
             "storage", implemented=True, cap="storage.persist",
             note="captures/jobs/results live here; the root filesystem is overlay-ephemeral"),
+    Feature("storage.provision", "First-boot provisioning",
+            "create the /captures skeleton and seed a starter WPA wordlist so "
+            "capture→crack works out of the box; idempotent, runs on boot.",
+            "storage", implemented=True,
+            note="the baked starter wordlist ships in the package (redux/data); "
+                 "bigger lists come from environment-grow, NAS pull, `redux wordlist add`"),
     Feature("sense.csi", "CSI motion sensing",
             "use nexmon CSI as a presence/motion sensor (the radio as a sensor).",
             "sense", implemented=True, needs_hardware="nexmon CSI firmware on the onboard radio",
@@ -163,19 +214,110 @@ FEATURES: Tuple[Feature, ...] = (
             guidance="mesh",
             note="message signing + scope-sync logic are real; a real LoRa transport "
                  "(Meshtastic) is not wired yet — it currently runs over loopback"),
+    Feature("mesh.correlate", "Swarm time-correlation",
+            "fuse nodes in TIME: corroborate an event across nodes, track an entity "
+            "moving node→node, merge a swarm-wide timeline (clock-skew corrected).",
+            "mesh", implemented=True,
+            note="engine is pure (verified with no radio); pairs with the spatial "
+                 "collector-grid fusion and rides whatever transport the fleet uses",
+            related=("mesh.swarm", "wifi.dna", "rf.dvr")),
     Feature("blue.detect", "Wireless detectors (blue)",
             "the always-on detector suite — deauth floods, rogue APs, karma, etc.",
             "blue", implemented=True, needs_hardware="a Wi-Fi radio in monitor mode",
             note="core; findings stay tied to real observations"),
+    Feature("bt.gatt", "BLE GATT loot + control",
+            "connect to a BLE device, enumerate its GATT tree, decode UUIDs, read the "
+            "device-info, flag vendor services and the WRITABLE control points — and "
+            "(power-tier) write to a characteristic to actuate it.",
+            "bt", implemented=True, needs_hardware="a Bluetooth adapter",
+            toolbox="bluez", power_tier=True,
+            note="read/enumerate is scope-gated; WRITING actuates the device and is "
+                 "power-tier — per-action confirm required even in LAB. KB + parsing "
+                 "pure; live connect/write need a BT adapter",
+            related=("blue.tracker", "net.device_id")),
+    Feature("bt.pan", "Phone UI over Bluetooth PAN",
+            "tether a phone over Bluetooth (no Wi-Fi/cable) and serve the responsive "
+            "dashboard — the Operations view in your pocket.",
+            "bt", implemented=True, needs_hardware="a Bluetooth adapter",
+            note="the responsive web dashboard IS the phone UI; this is the PAN bring-up. "
+                 "plan/readiness/URL are pure (verified with no radio); live bring-up needs the adapter",
+            related=("ble.scan",)),
     Feature("blue.tracker", "Unwanted-tracker check",
             "is a BLE tracker following me? — the personal-safety sweep.",
             "blue", implemented=True, needs_hardware="a Bluetooth adapter",
             guidance="tracker"),
+    Feature("wifi.downgrade", "WPA3 downgrade classifier",
+            "spot WPA2/WPA3 (and OWE) transition-mode APs — a 'WPA3' network with a "
+            "crackable WPA2-PSK path still hiding behind it.",
+            "wifi", implemented=True, related=("wifi.crack", "wifi.dossier")),
+    Feature("wifi.dossier", "Target dossier",
+            "everything the box knows about one AP in a single view — identity, "
+            "security + downgrade path, value, sightings, location, recommended move.",
+            "wifi", implemented=True,
+            note="pure (composes crackability, downgrade, radar, OUI, sightings)",
+            related=("wifi.target_radar", "wifi.downgrade", "wifi.dna")),
+    Feature("wifi.target_radar", "Target-value radar",
+            "rank APs by how worth attacking each is — crackability, a free PMKID, "
+            "signal, clients, WPS — minus what's already owned; juiciest first.",
+            "wifi", implemented=True,
+            note="pure (composes crackability + captured-list + PMKID state); feeds "
+                 "capture planning and autopilot priority",
+            related=("wifi.pmkid", "wifi.capture", "wifi.crack")),
+    Feature("net.discovery", "LAN service discovery + inventory",
+            "gather mDNS/DNS-SD + SSDP/UPnP announcements on the joined LAN, identify "
+            "every host, and map the subnet — what each thing IS and its surface.",
+            "net", implemented=True, binaries=("avahi-browse",), toolbox="avahi",
+            note="parsers + labeling are pure (verified with fixtures); live query is "
+                 "active + scope-gated and needs network access",
+            related=("net.device_id", "net.recon", "wifi.dossier")),
+    Feature("net.device_id", "Device identification",
+            "name what a device IS from its signals (OUI vendor, hostname, BLE "
+            "name/company, mDNS) — Roomba, Echo, Chromecast, phone, camera, printer "
+            "— and list what you can do with/to it for that category.",
+            "net", implemented=True,
+            note="pure/knowledge-base driven (verified with fixtures); fuses OUI + "
+                 "BLE + mDNS + hostname signals the box already collects",
+            related=("wifi.dna", "wifi.dossier", "blue.tracker")),
+    Feature("wifi.dna", "Device DNA (behavioral re-id)",
+            "link a device across MAC rotation by HOW it probes (timing cadence, "
+            "supported-rate set, channels, IE template) — works even with no PNL.",
+            "wifi", implemented=True, needs_hardware="a monitor-mode Wi-Fi radio",
+            note="similarity-based re-id that extends the exact-match fingerprint; "
+                 "the engine is pure (verified with no radio), live traces need the tap",
+            related=("blue.tracker",)),
     Feature("eap.enterprise", "Enterprise EAP assessment",
             "hostapd-mana/-wpe enterprise client-behavior assessment.",
             "wifi", implemented=False, needs_hardware="a monitor/injection Wi-Fi radio",
             note="PLANNED — a plan builder exists, but it is not yet a validated hostapd "
                  "integration (no AP is actually launched/qualified)"),
+    Feature("stealth.quiet", "Quiet/Ghost mode",
+            "one-toggle stealth posture: passive-first capture, frame budget, "
+            "per-action confirm, MAC rotation — never loosens a gate, only tightens.",
+            "stealth", implemented=True, guidance="crack",
+            note="software posture; the MAC-rotate part needs a Wi-Fi radio",
+            related=("stealth.footprint", "stealth.lowslow", "stealth.mac", "wifi.pmkid")),
+    Feature("stealth.footprint", "Footprint / noise meter",
+            "live 0–100 detectability score from emitted frames (silent→loud).",
+            "stealth", implemented=True,
+            related=("stealth.quiet", "stealth.lowslow")),
+    Feature("stealth.lowslow", "Low-and-slow scheduler",
+            "pace offensive emissions under a footprint cap with jittered spacing "
+            "so neither the volume nor the cadence is a signature.",
+            "stealth", implemented=True, guidance="crack",
+            related=("stealth.quiet", "stealth.footprint")),
+    Feature("stealth.mac", "Own-radio MAC randomization",
+            "rotate the device's own MAC (vendor-plausible or LAA) so it leaves no "
+            "stable fingerprint.",
+            "stealth", implemented=True, needs_hardware="a Wi-Fi radio",
+            related=("stealth.quiet",)),
+    Feature("stealth.scrub", "Secure-wipe / panic-scrub",
+            "wipe the device's OWN sensitive loot/captures/creds on demand — scrub "
+            "keeps the brain (experience/wordlists/graph), panic burns it all but "
+            "leaves the box bootable. Dry-run by default; own-device only.",
+            "stealth", implemented=True,
+            note="best-effort overwrite+unlink; honest that FDE is the real guarantee on flash. "
+                 "Never target anti-forensics — refuses any root outside the captures tree",
+            related=("stealth.quiet",)),
 )
 
 _BY_ID: Dict[str, Feature] = {f.id: f for f in FEATURES}

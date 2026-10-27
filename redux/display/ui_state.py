@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 import time
 
-PAGES = ('overview', 'captures', 'doctor', 'radios', 'trends', 'system',
+PAGES = ('overview', 'ops', 'captures', 'doctor', 'radios', 'trends', 'system',
          'signals', 'power', 'menu')
 
 

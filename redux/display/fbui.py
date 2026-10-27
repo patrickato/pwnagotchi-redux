@@ -432,7 +432,7 @@ _MENU_GROUPS = (
 
 # Friendly dock labels for the footer (cosmetic only; navigation uses the page keys).
 _DOCK_LABELS = {
-    "overview": "HOME", "captures": "CACHE", "doctor": "HEALTH", "radios": "RADIO",
+    "overview": "HOME", "ops": "OPS", "captures": "CACHE", "doctor": "HEALTH", "radios": "RADIO",
     "trends": "TREND", "system": "SYS", "signals": "AIR", "power": "MODE", "menu": "MENU",
 }
 
@@ -525,6 +525,36 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
         metric(20, "PREPARED", compact_count(capture["ready"]))
         metric(180, "FAILED", compact_count(capture["errors"]))
         metric(350, "HASH ROWS", compact_count(capture["hash_records"]))
+    elif page == "ops":
+        # Real-time operations: what the box is doing + how detectable it is now.
+        rpt = report if isinstance(report, dict) else {}
+        st = rpt.get("stealth") or {}
+        fp = st.get("footprint") or {}
+        pl = rpt.get("passive_loot") or {}
+        eng = rpt.get("engagement") or None
+        caps = (rpt.get("capabilities") or {}).get("by_state") or {}
+        metric(20, "FOOTPRINT", str(fp.get("label") or "--").upper())
+        metric(180, "PMKID NEW", value(pl.get("new_loot")))
+        metric(352, "READY", value(caps.get("ready")))
+        quiet = "ON" if st.get("quiet") else "off"
+        mac = "on" if st.get("randomize_mac") else "off"
+        score = fp.get("score")
+        text_line((20, 228),
+                  "STEALTH  quiet " + quiet + " / score " + (str(score) if score is not None else "--")
+                  + " / budget " + str(st.get("frame_budget", 0)) + " / MAC " + mac,
+                  font=_font(10), fill=TEAL if st.get("quiet") else SUBTLE)
+        if pl:
+            loot = ("LOOT  " + str(pl.get("new_loot", 0)) + " new / " + str(pl.get("aps_leaking_pmkid", 0))
+                    + " leaking / " + str(pl.get("footprint", "silent")))
+        else:
+            loot = "LOOT  no passive sweep recorded"
+        text_line((20, 246), loot, font=_font(10), fill=SUBTLE)
+        if eng:
+            case = ("CASE  " + str(eng.get("name", "?")) + " [" + str(eng.get("status", "?")) + "] / "
+                    + str(eng.get("authorization", "")))
+        else:
+            case = "CASE  no active engagement"
+        text_line((20, 264), case, font=_font(10), fill=AMBER if eng else SUBTLE)
     elif page == "system":
         system = evidence
         rows = system["rows"]
@@ -611,16 +641,22 @@ def render(report, *, page="overview", now=None, doctor_offset=0, trends=None,
                 label += " +" + str(len(extras) - 4)
             text_line((20, 296), label[:60], font=_font(8), fill=SUBTLE)
     elif page == "menu":
-        text_line((20, 149), "MENU / everything Augur can do", font=_font(12, bold=True), fill=INK)
-        # two-column grid of capability groups; a static map, cheap to draw
+        text_line((20, 143), "MENU / everything Augur can do  (redux <cmd>)", font=_font(11, bold=True), fill=INK)
+        # two-column grid of capability groups, derived from the arsenal so it is
+        # always current with the real toolkit (never a stale hand-kept list).
+        try:
+            from redux.core.arsenal import menu_groups as _menu_groups
+            rows = _menu_groups(max_groups=8)
+        except Exception:
+            rows = list(_MENU_GROUPS)
         col_x = (20, 246)
-        for index, (name, line1, line2) in enumerate(_MENU_GROUPS):
+        for index, (name, line1, line2) in enumerate(rows):
             cx = col_x[index % 2]
-            cy = 166 + (index // 2) * 42
-            draw.rectangle((cx, cy, cx + 214, cy + 38), outline=(36, 57, 69), width=1)
-            text_line((cx + 8, cy + 2), name, font=_font(11, bold=True), fill=TEAL)
-            text_line((cx + 8, cy + 15), line1, font=_font(9), fill=SUBTLE)
-            text_line((cx + 8, cy + 26), line2, font=_font(9), fill=SUBTLE)
+            cy = 157 + (index // 2) * 31
+            draw.rectangle((cx, cy, cx + 214, cy + 27), outline=(36, 57, 69), width=1)
+            text_line((cx + 8, cy + 1), name, font=_font(10, bold=True), fill=TEAL)
+            text_line((cx + 8, cy + 13), fit_text(draw, line1 + "  " + line2, _font(8), 200),
+                      font=_font(8), fill=SUBTLE)
     elif page == "power":
         from redux.core import power_tier as _pt
         m = (mode or "field").lower()
@@ -869,6 +905,9 @@ def main(argv=None):
                         help="invert swipe direction for rotated touch controllers")
     parser.add_argument("--swipe-threshold", type=int, default=300,
                         help="minimum raw axis movement for one swipe")
+    parser.add_argument("--deck", action="store_true",
+                        help="interactive control-deck UI (tap to operate) instead of "
+                             "the read-only status pages; requires --calibration-file")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="read-only hardware/API checks")
     mode.add_argument("--once", action="store_true", help="paint one measured frame")
@@ -955,6 +994,17 @@ def main(argv=None):
     mode_arm_until = 0.0          # header-tap mode switch: armed by the first tap
     signals_panel = None          # Signal Dex snapshot for the signals page
     signals_panel_at = 0.0        # last sample time (refreshed slowly, only when viewed)
+    # Control-deck mode (opt-in, --deck): the interactive touch UI. Built once;
+    # the status-page path is untouched when it's off.
+    deck_controller = None
+    if args.deck:
+        from .deck_runtime import DeckController, make_subprocess_runner, build_deck_state
+        from .deck_model import Deck
+        from ..core import arsenal as _arsenal
+        deck_controller = DeckController(Deck(_arsenal.groups(), build_deck_state()),
+                                         runner=make_subprocess_runner())
+        if tracker is not None:
+            tracker.deck = True
     try:
         while running:
             if reconnect is not None and touch_fd is None:
@@ -977,7 +1027,9 @@ def main(argv=None):
             # Only genuine, independently updated live status counters advance
             # the bounded in-memory chart; the UI never synthesizes activity.
             history.ingest(report, now=sampled_at)
-            if page == "doctor":
+            if deck_controller is not None:
+                image = deck_controller.frame()
+            elif page == "doctor":
                 current_doctor = status_view(report, now=sampled_at)
                 if current_doctor["stale"]:
                     doctor_offset = 0
@@ -1050,6 +1102,12 @@ def main(argv=None):
                     actions, fragment = consume_gestures(fragment, tracker)
                     if actions:
                         action, value = actions[-1]
+                        if deck_controller is not None:
+                            # deck mode: a tap carries its (x, y); feed the deck and
+                            # redraw. Swipes/other status actions are ignored here.
+                            if action == "tap":
+                                deck_controller.on_tap(value[0], value[1])
+                            break
                         if action == "detail" and page == "system":
                             system_detail = system_offset + value if system_detail is None else None
                         elif action == "scroll":

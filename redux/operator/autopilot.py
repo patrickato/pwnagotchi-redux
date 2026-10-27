@@ -71,7 +71,8 @@ def autopilot(scope, *, target_source: Callable[[], Sequence[str]],
     if not ok:
         return AutopilotReport(ran=False, mode=mode, reason=why)
 
-    op = Operator(scope, offense_enabled=True, caps={"capture.handshake": True})
+    op = Operator(scope, offense_enabled=True,
+                  caps={"capture.handshake": True, "radio.wifi.uplink": True})
     cycles: List[AutopilotCycle] = []
     for _ in range(max(1, int(max_cycles))):
         targets = list(target_source() or [])
